@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { supabase } from "./lib/supabase";
 
 const nichos = [
   { id: "evento", icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
@@ -25,15 +26,42 @@ export default function Home() {
   const [nome, setNome] = useState("");
   const [tel, setTel] = useState("");
   const [email, setEmail] = useState("");
+  const [descricao, setDescricao] = useState("");
   const [protocolo] = useState(() => Math.floor(Math.random() * 90000) + 10000);
   const [showPopup, setShowPopup] = useState(false);
   const [fornTel, setFornTel] = useState("");
   const [fornSent, setFornSent] = useState(false);
+  const [enviando, setEnviando] = useState(false);
 
   const ufs = ["AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT","PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"];
 
-  function handleFornSubmit() {
+  async function enviarPedido() {
+    setEnviando(true);
+    try {
+      await supabase.from("pedidos").insert({
+        tipo,
+        quantidade: tipo !== "ajuste" ? qty : null,
+        prazo,
+        estado,
+        nome,
+        whatsapp: tel,
+        email,
+        descricao,
+      });
+    } catch (e) {
+      console.error(e);
+    }
+    setEnviando(false);
+    setStep(3);
+  }
+
+  async function handleFornSubmit() {
     if (fornTel.length < 10) return;
+    try {
+      await supabase.from("leads_fornecedores").insert({ whatsapp: fornTel });
+    } catch (e) {
+      console.error(e);
+    }
     setFornSent(true);
   }
 
@@ -46,7 +74,6 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-white font-sans">
 
-      {/* POPUP FORNECEDOR */}
       {showPopup && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4" onClick={(e) => { if (e.target === e.currentTarget) closePopup(); }}>
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
@@ -56,18 +83,10 @@ export default function Home() {
                   <h3 className="text-gray-900 font-medium text-base">Cadastro de fornecedor</h3>
                   <button onClick={closePopup} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
                 </div>
-                <p className="text-gray-400 text-sm leading-relaxed mb-5">
-                  Deixa seu WhatsApp com DDD e nossa equipe entra em contato para te guiar no cadastro. É rápido e gratuito!
-                </p>
+                <p className="text-gray-400 text-sm leading-relaxed mb-5">Deixa seu WhatsApp com DDD e nossa equipe entra em contato para te guiar no cadastro. É rápido e gratuito!</p>
                 <div className="mb-4">
                   <label className="text-xs text-gray-400 mb-1 block">WhatsApp com DDD</label>
-                  <input
-                    type="tel"
-                    value={fornTel}
-                    onChange={e => setFornTel(e.target.value)}
-                    placeholder="(71) 99999-9999"
-                    className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]"
-                  />
+                  <input type="tel" value={fornTel} onChange={e => setFornTel(e.target.value)} placeholder="(71) 99999-9999" className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
                 </div>
                 <button onClick={handleFornSubmit} disabled={fornTel.length < 10} className="w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-30 text-white font-medium py-3 rounded-xl text-sm transition-colors">
                   Quero me cadastrar
@@ -80,7 +99,7 @@ export default function Home() {
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
                 <h3 className="text-gray-900 font-medium mb-2">Recebemos seu contato!</h3>
-                <p className="text-gray-400 text-sm leading-relaxed mb-4">Nossa equipe vai entrar em contato pelo WhatsApp <strong className="text-gray-600">{fornTel}</strong> em breve para finalizar seu cadastro.</p>
+                <p className="text-gray-400 text-sm leading-relaxed mb-4">Nossa equipe vai entrar em contato pelo WhatsApp <strong className="text-gray-600">{fornTel}</strong> em breve.</p>
                 <button onClick={closePopup} className="text-sm text-[#1D9E75] font-medium">Fechar</button>
               </div>
             )}
@@ -88,7 +107,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* NAVBAR */}
       <nav className="bg-[#111] px-6 py-4 flex items-center justify-between sticky top-0 z-40">
         <div className="flex items-center gap-3">
           <svg width="32" height="32" viewBox="0 0 60 60" fill="none">
@@ -101,28 +119,18 @@ export default function Home() {
           <span className="text-white font-medium tracking-widest text-lg">CONFECCIONE</span>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => setShowPopup(true)} className="text-white text-sm border border-white/20 px-4 py-2 rounded-full hover:bg-white/10 transition-colors hidden md:block">
-            Sou fornecedor
-          </button>
+          <button onClick={() => setShowPopup(true)} className="text-white text-sm border border-white/20 px-4 py-2 rounded-full hover:bg-white/10 transition-colors hidden md:block">Sou fornecedor</button>
           <span className="bg-[#1D9E75] text-white text-xs font-medium px-3 py-1 rounded-full">Suporte humano</span>
           <span className="text-white text-sm font-medium">0800 000 0000</span>
         </div>
       </nav>
 
-      {/* HERO */}
       <section className="bg-[#111] px-6 py-16 text-center">
-        <h1 className="text-white text-3xl md:text-4xl font-medium leading-tight mb-4">
-          Conectamos você às melhores<br />confecções e costureiras do Brasil
-        </h1>
-        <p className="text-gray-400 text-base max-w-xl mx-auto mb-8 leading-relaxed">
-          Faça seu pedido em minutos. Receba orçamentos de fornecedores verificados. Produza com confiança.
-        </p>
-        <button onClick={() => document.getElementById("pedido")?.scrollIntoView({ behavior: "smooth" })} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white font-medium px-8 py-4 rounded-xl text-base transition-colors">
-          Fazer meu pedido agora
-        </button>
+        <h1 className="text-white text-3xl md:text-4xl font-medium leading-tight mb-4">Conectamos você às melhores<br />confecções e costureiras do Brasil</h1>
+        <p className="text-gray-400 text-base max-w-xl mx-auto mb-8 leading-relaxed">Faça seu pedido em minutos. Receba orçamentos de fornecedores verificados. Produza com confiança.</p>
+        <button onClick={() => document.getElementById("pedido")?.scrollIntoView({ behavior: "smooth" })} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white font-medium px-8 py-4 rounded-xl text-base transition-colors">Fazer meu pedido agora</button>
       </section>
 
-      {/* TRUST BAR */}
       <div className="bg-[#1a1a1a] px-6 py-3 flex flex-wrap items-center justify-center gap-6">
         {["Fornecedores verificados", "Pagamento seguro", "Suporte 0800 gratuito", "Todo o Brasil"].map((item) => (
           <div key={item} className="flex items-center gap-2">
@@ -132,7 +140,6 @@ export default function Home() {
         ))}
       </div>
 
-      {/* NICHOS */}
       <section className="px-6 py-10 max-w-4xl mx-auto">
         <p className="text-gray-400 text-sm mb-4">Explore por tipo de pedido:</p>
         <div className="flex flex-wrap gap-2">
@@ -142,12 +149,8 @@ export default function Home() {
         </div>
       </section>
 
-      {/* FLUXO DE PEDIDO */}
       <section id="pedido" className="px-6 pb-16 max-w-2xl mx-auto">
-        <h2 className="text-gray-900 text-xl font-medium mb-1">
-          Faça seu pedido{" "}
-          <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">3 passos simples</span>
-        </h2>
+        <h2 className="text-gray-900 text-xl font-medium mb-1">Faça seu pedido <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">3 passos simples</span></h2>
         <p className="text-gray-400 text-sm mb-6">Preencha as informações abaixo e receba orçamentos em até 24h.</p>
 
         <div className="flex items-center mb-8">
@@ -176,7 +179,7 @@ export default function Home() {
                 ))}
               </div>
               <div className="flex justify-end">
-                <button disabled={!tipo} onClick={() => setStep(1)} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium disabled:opacity-30 hover:opacity-85 transition-opacity">Continuar →</button>
+                <button disabled={!tipo} onClick={() => setStep(1)} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium disabled:opacity-30 hover:opacity-85">Continuar →</button>
               </div>
             </>
           )}
@@ -216,7 +219,7 @@ export default function Home() {
               </div>
               <div className="mb-6">
                 <label className="text-xs text-gray-400 mb-1 block">Descreva seu pedido (opcional)</label>
-                <textarea rows={3} placeholder="Ex: camisa polo tamanhos P, M, G, com logo bordado..." className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:border-[#1D9E75]" />
+                <textarea rows={3} value={descricao} onChange={e => setDescricao(e.target.value)} placeholder="Ex: camisa polo tamanhos P, M, G, com logo bordado..." className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:border-[#1D9E75]" />
               </div>
               <div className="flex justify-between">
                 <button onClick={() => setStep(0)} className="border border-gray-200 text-gray-400 px-5 py-3 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
@@ -254,7 +257,9 @@ export default function Home() {
               </div>
               <div className="flex justify-between">
                 <button onClick={() => setStep(1)} className="border border-gray-200 text-gray-400 px-5 py-3 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
-                <button onClick={() => setStep(3)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-6 py-3 rounded-xl text-sm font-medium transition-colors">Enviar pedido →</button>
+                <button onClick={enviarPedido} disabled={enviando} className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white px-6 py-3 rounded-xl text-sm font-medium transition-colors">
+                  {enviando ? "Enviando..." : "Enviar pedido →"}
+                </button>
               </div>
             </>
           )}
@@ -285,25 +290,15 @@ export default function Home() {
         </div>
       </section>
 
-      {/* SEÇÃO FORNECEDORES */}
       <section className="bg-[#111] px-6 py-16">
         <div className="max-w-4xl mx-auto">
           <div className="grid md:grid-cols-2 gap-12 items-center">
             <div>
               <span className="bg-[#1D9E75]/20 text-[#1D9E75] text-xs font-medium px-3 py-1 rounded-full">Para fornecedores</span>
-              <h2 className="text-white text-2xl md:text-3xl font-medium mt-4 mb-4 leading-tight">
-                Você é confeccionista ou costureira?
-              </h2>
-              <p className="text-gray-400 text-sm leading-relaxed mb-6">
-                Cadastre seu negócio no Confeccione e receba pedidos de clientes em todo o Brasil. Sem mensalidade para começar — você só paga quando fechar negócio.
-              </p>
+              <h2 className="text-white text-2xl md:text-3xl font-medium mt-4 mb-4 leading-tight">Você é confeccionista ou costureira?</h2>
+              <p className="text-gray-400 text-sm leading-relaxed mb-6">Cadastre seu negócio no Confeccione e receba pedidos de clientes em todo o Brasil. Sem mensalidade para começar.</p>
               <div className="space-y-3 mb-8">
-                {[
-                  "Receba pedidos direto no seu WhatsApp",
-                  "Defina seus próprios preços e prazos",
-                  "Clientes verificados e pagamento garantido",
-                  "Cadastro gratuito e sem burocracia",
-                ].map((item) => (
+                {["Receba pedidos direto no seu WhatsApp","Defina seus próprios preços e prazos","Clientes verificados e pagamento garantido","Cadastro gratuito e sem burocracia"].map((item) => (
                   <div key={item} className="flex items-center gap-3">
                     <div className="w-5 h-5 rounded-full bg-[#1D9E75]/20 flex items-center justify-center flex-shrink-0">
                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#1D9E75" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -312,18 +307,10 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-              <button onClick={() => setShowPopup(true)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white font-medium px-8 py-4 rounded-xl text-base transition-colors">
-                Quero me cadastrar
-              </button>
+              <button onClick={() => setShowPopup(true)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white font-medium px-8 py-4 rounded-xl text-base transition-colors">Quero me cadastrar</button>
             </div>
-
             <div className="grid grid-cols-2 gap-4">
-              {[
-                { icon: "✂️", title: "Costureiras", desc: "Ajustes, reparos e peças únicas" },
-                { icon: "🏭", title: "Confecções", desc: "Produção em escala e fardamentos" },
-                { icon: "🧵", title: "Facções", desc: "Terceirização de costura" },
-                { icon: "👗", title: "Ateliês", desc: "Alta costura e nichos especiais" },
-              ].map((item) => (
+              {[{icon:"✂️",title:"Costureiras",desc:"Ajustes, reparos e peças únicas"},{icon:"🏭",title:"Confecções",desc:"Produção em escala e fardamentos"},{icon:"🧵",title:"Facções",desc:"Terceirização de costura"},{icon:"👗",title:"Ateliês",desc:"Alta costura e nichos especiais"}].map((item) => (
                 <div key={item.title} className="bg-white/5 border border-white/10 rounded-2xl p-4 hover:bg-white/10 transition-colors">
                   <span className="text-2xl mb-3 block">{item.icon}</span>
                   <p className="text-white text-sm font-medium mb-1">{item.title}</p>
@@ -335,7 +322,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* FOOTER */}
       <footer className="bg-[#0a0a0a] px-6 py-8">
         <div className="max-w-4xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
