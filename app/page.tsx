@@ -6,6 +6,7 @@ const nichos = [
   { id: "private", icon: "✂️", title: "Private Label", sub: "Marca própria e coleções" },
   { id: "peca", icon: "🧵", title: "Peça Única", sub: "Personalizada ou presente" },
   { id: "farda", icon: "🏢", title: "Fardamento", sub: "Uniformes corporativos" },
+  { id: "esporte", icon: "⚽", title: "Padrão Esportivo", sub: "Pelada, vôlei, futebol com nome nas costas" },
   { id: "ajuste", icon: "📐", title: "Ajuste / Conserto", sub: "Ajustes e reparos em geral" },
 ];
 
