@@ -140,16 +140,7 @@ export default function Home() {
         ))}
       </div>
 
-      <section className="px-6 py-10 max-w-4xl mx-auto">
-        <p className="text-gray-400 text-sm mb-4">Explore por tipo de pedido:</p>
-        <div className="flex flex-wrap gap-2">
-          {["Todos", ...nichos.map(n => n.title)].map((label) => (
-            <span key={label} className="text-sm px-4 py-2 rounded-full border border-gray-200 text-gray-500 hover:bg-[#111] hover:text-white hover:border-[#111] cursor-pointer transition-all">{label}</span>
-          ))}
-        </div>
-      </section>
-
-      <section id="pedido" className="px-6 pb-16 max-w-2xl mx-auto">
+      <section id="pedido" className="px-6 pt-12 pb-16 max-w-2xl mx-auto">
         <h2 className="text-gray-900 text-xl font-medium mb-1">Faça seu pedido <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">3 passos simples</span></h2>
         <p className="text-gray-400 text-sm mb-6">Preencha as informações abaixo e receba orçamentos em até 24h.</p>
 
