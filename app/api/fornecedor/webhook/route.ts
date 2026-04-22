@@ -33,20 +33,13 @@ async function enviarMensagem(telefone: string, mensagem: string) {
 export async function POST(req: Request) {
   const body = await req.json()
 
-  // Ignora mensagens enviadas pelo bot
+  // Só processa mensagens recebidas de texto
+  if (body.type !== 'ReceivedCallback') return NextResponse.json({ ok: true })
   if (body.fromMe) return NextResponse.json({ ok: true })
+  if (!body.text?.message) return NextResponse.json({ ok: true })
 
-  // Z-API pode enviar o número em diferentes campos
-  const telefone = (body.phone || body.from || '')?.replace(/\D/g, '')
-
-  // Z-API pode enviar o texto em diferentes formatos
-  const texto = (
-    body.text?.message ||
-    body.message?.text ||
-    body.body ||
-    body.text ||
-    ''
-  )?.trim()
+  const telefone = body.phone?.replace(/\D/g, '')
+  const texto = body.text.message.trim()
 
   if (!telefone || !texto) return NextResponse.json({ ok: true })
 
