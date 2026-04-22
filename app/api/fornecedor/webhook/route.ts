@@ -23,25 +23,32 @@ async function enviarMensagem(telefone: string, mensagem: string) {
         body: JSON.stringify({ phone: telefone, message: mensagem }),
       }
     )
-    console.log('Z-API webhook status:', res.status)
     const data = await res.json()
-    console.log('Z-API webhook response:', JSON.stringify(data))
+    console.log('Z-API response:', JSON.stringify(data))
   } catch (err) {
-    console.error('Z-API webhook error:', err)
+    console.error('Z-API error:', err)
   }
 }
 
 export async function POST(req: Request) {
   const body = await req.json()
-  console.log('WEBHOOK BODY:', JSON.stringify(body))
 
-  const telefone = body.phone?.replace(/\D/g, '')
-  const texto    = body.text?.message?.trim()
+  // Ignora mensagens enviadas pelo bot
+  if (body.fromMe) return NextResponse.json({ ok: true })
 
-  console.log('telefone:', telefone, '| texto:', texto, '| fromMe:', body.fromMe)
+  // Z-API pode enviar o número em diferentes campos
+  const telefone = (body.phone || body.from || '')?.replace(/\D/g, '')
+
+  // Z-API pode enviar o texto em diferentes formatos
+  const texto = (
+    body.text?.message ||
+    body.message?.text ||
+    body.body ||
+    body.text ||
+    ''
+  )?.trim()
 
   if (!telefone || !texto) return NextResponse.json({ ok: true })
-  if (body.fromMe) return NextResponse.json({ ok: true })
 
   const { data: lead } = await supabase
     .from('leads_fornecedores')
@@ -52,7 +59,6 @@ export async function POST(req: Request) {
   if (!lead) return NextResponse.json({ ok: true })
 
   const etapa = lead.etapa_bot ?? 0
-  console.log('etapa atual:', etapa)
 
   if (etapa === 0) {
     await supabase
