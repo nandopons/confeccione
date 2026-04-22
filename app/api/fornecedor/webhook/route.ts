@@ -6,94 +6,57 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const ZAPI_INSTANCE     = process.env.ZAPI_INSTANCE_ID!
-const ZAPI_TOKEN        = process.env.ZAPI_TOKEN!
+const ZAPI_INSTANCE    = process.env.ZAPI_INSTANCE_ID!
+const ZAPI_TOKEN       = process.env.ZAPI_TOKEN!
 const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN!
 
 async function enviarMensagem(telefone: string, mensagem: string) {
-  await fetch(
-    `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Client-Token': ZAPI_CLIENT_TOKEN,
-      },
-      body: JSON.stringify({ phone: telefone, message: mensagem }),
-    }
-  )
+  try {
+    const res = await fetch(
+      `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Client-Token': ZAPI_CLIENT_TOKEN,
+        },
+        body: JSON.stringify({ phone: telefone, message: mensagem }),
+      }
+    )
+    const data = await res.json()
+    console.log('Z-API response:', JSON.stringify(data))
+  } catch (err) {
+    console.error('Z-API error:', err)
+  }
 }
 
 export async function POST(req: Request) {
-  const body = await req.json()
+  const { whatsapp } = await req.json()
+  const numero = whatsapp.replace(/\D/g, '')
 
-  const telefone = body.phone?.replace(/\D/g, '')
-  const texto    = body.text?.message?.trim()
-
-  if (!telefone || !texto) return NextResponse.json({ ok: true })
-  if (body.fromMe) return NextResponse.json({ ok: true })
-
-  const { data: lead } = await supabase
+  const { data: existente } = await supabase
     .from('leads_fornecedores')
-    .select('*')
-    .eq('whatsapp', telefone)
+    .select('id')
+    .eq('whatsapp', numero)
     .maybeSingle()
 
-  if (!lead) return NextResponse.json({ ok: true })
+  if (!existente) {
+    const { error } = await supabase
+      .from('leads_fornecedores')
+      .insert({ whatsapp: numero, status: 'aguardando_contato', etapa_bot: 0 })
 
-  const etapa = lead.etapa_bot ?? 0
-
-  if (etapa === 0) {
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  } else {
     await supabase
       .from('leads_fornecedores')
-      .update({ cidade: texto, etapa_bot: 1 })
-      .eq('whatsapp', telefone)
-
-    await enviarMensagem(
-      telefone,
-      `Anotado! ✅\n\n👕 *Que tipo de produto você confecciona?*\n\nExemplos: camisetas, uniformes, moda praia, bermudas, vestidos, fardamentos...`
-    )
-
-  } else if (etapa === 1) {
-    await supabase
-      .from('leads_fornecedores')
-      .update({ tipos_produto: [texto], etapa_bot: 2 })
-      .eq('whatsapp', telefone)
-
-    await enviarMensagem(
-      telefone,
-      `Ótimo! 📋\n\n*Você tem CNPJ?*\n\nResponde com *sim* ou *não*.`
-    )
-
-  } else if (etapa === 2) {
-    const temCnpj = texto.toLowerCase().includes('sim')
-
-    await supabase
-      .from('leads_fornecedores')
-      .update({ tem_cnpj: temCnpj, etapa_bot: 3 })
-      .eq('whatsapp', telefone)
-
-    await enviarMensagem(
-      telefone,
-      `Perfeito! 📧\n\n*Qual é o seu e-mail?*`
-    )
-
-  } else if (etapa === 3) {
-    await supabase
-      .from('leads_fornecedores')
-      .update({
-        email: texto,
-        status: 'ativo',
-        etapa_bot: 4,
-        atualizado_em: new Date().toISOString(),
-      })
-      .eq('whatsapp', telefone)
-
-    await enviarMensagem(
-      telefone,
-      `Tudo certo! 🎉\n\nSeu cadastro está completo no *Confeccione*.\n\nEm breve você vai começar a receber pedidos de clientes na sua região. Qualquer dúvida é só chamar! 🚀`
-    )
+      .update({ etapa_bot: 0, status: 'aguardando_contato' })
+      .eq('whatsapp', numero)
   }
+
+  await enviarMensagem(
+    numero,
+    `Olá! 👋 Sou do *Confeccione*, a plataforma que conecta confeccionistas a clientes em todo o Brasil.\n\nVocê se cadastrou como fornecedor — ótimo! 🎉\n\nVou te fazer 4 perguntinhas rápidas para completar seu perfil.\n\n📍 *Em qual cidade você está localizado?*`
+  )
 
   return NextResponse.json({ ok: true })
 }
