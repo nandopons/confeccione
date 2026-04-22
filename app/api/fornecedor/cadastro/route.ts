@@ -6,19 +6,28 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const ZAPI_INSTANCE = process.env.ZAPI_INSTANCE_ID!
-const ZAPI_TOKEN    = process.env.ZAPI_TOKEN!
+const ZAPI_INSTANCE     = process.env.ZAPI_INSTANCE_ID!
+const ZAPI_TOKEN        = process.env.ZAPI_TOKEN!
+const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN!
 
 async function enviarMensagem(telefone: string, mensagem: string) {
   try {
+    console.log('INSTANCE:', ZAPI_INSTANCE)
+    console.log('TOKEN:', ZAPI_TOKEN)
+    console.log('CLIENT_TOKEN:', ZAPI_CLIENT_TOKEN ? 'presente' : 'AUSENTE')
+
     const res = await fetch(
       `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Client-Token': ZAPI_CLIENT_TOKEN,
+        },
         body: JSON.stringify({ phone: telefone, message: mensagem }),
       }
     )
+    console.log('Z-API status:', res.status)
     const data = await res.json()
     console.log('Z-API response:', JSON.stringify(data))
   } catch (err) {
