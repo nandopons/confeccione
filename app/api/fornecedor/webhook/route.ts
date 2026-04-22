@@ -33,8 +33,6 @@ async function enviarMensagem(telefone: string, mensagem: string) {
 export async function POST(req: Request) {
   const body = await req.json()
 
-  // Só processa mensagens recebidas de texto
-  if (body.type !== 'ReceivedCallback') return NextResponse.json({ ok: true })
   if (body.fromMe) return NextResponse.json({ ok: true })
   if (!body.text?.message) return NextResponse.json({ ok: true })
 
@@ -72,7 +70,7 @@ export async function POST(req: Request) {
 
     await enviarMensagem(
       telefone,
-      `Ótimo! 📋\n\n*Você tem CNPJ?*\n\nResponde com *sim* ou *não*.`
+      `Ótimo! 📋\n\n*Você tem CNPJ?*\n\nRespondes com *sim* ou *não*.`
     )
 
   } else if (etapa === 2) {
