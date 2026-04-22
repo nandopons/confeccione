@@ -33,12 +33,7 @@ async function enviarMensagem(telefone: string, mensagem: string) {
 export async function POST(req: Request) {
   const body = await req.json()
 
-  // Salva body para debug
-  const bodyStr = JSON.stringify(body).substring(0, 500)
-  await supabase
-    .from('leads_fornecedores')
-    .update({ email: bodyStr })
-    .eq('whatsapp', '5581982659521')
+  await supabase.from('webhook_debug').insert({ body })
 
   if (body.fromMe) return NextResponse.json({ ok: true })
   if (!body.text?.message) return NextResponse.json({ ok: true })
