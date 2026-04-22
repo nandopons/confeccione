@@ -33,9 +33,12 @@ async function enviarMensagem(telefone: string, mensagem: string) {
 
 export async function POST(req: Request) {
   const body = await req.json()
+  console.log('WEBHOOK BODY:', JSON.stringify(body))
 
   const telefone = body.phone?.replace(/\D/g, '')
   const texto    = body.text?.message?.trim()
+
+  console.log('telefone:', telefone, '| texto:', texto, '| fromMe:', body.fromMe)
 
   if (!telefone || !texto) return NextResponse.json({ ok: true })
   if (body.fromMe) return NextResponse.json({ ok: true })
@@ -49,6 +52,7 @@ export async function POST(req: Request) {
   if (!lead) return NextResponse.json({ ok: true })
 
   const etapa = lead.etapa_bot ?? 0
+  console.log('etapa atual:', etapa)
 
   if (etapa === 0) {
     await supabase
