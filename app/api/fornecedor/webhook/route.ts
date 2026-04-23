@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { normalizarWhatsApp } from '@/app/lib/phone'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
   if (body.fromMe) return NextResponse.json({ ok: true })
   if (!body.text?.message) return NextResponse.json({ ok: true })
 
-  const telefone = body.phone?.replace(/\D/g, '')
+  const telefone = body.phone ? normalizarWhatsApp(body.phone) : undefined
   const texto = body.text.message.trim()
 
   if (!telefone || !texto) return NextResponse.json({ ok: true })

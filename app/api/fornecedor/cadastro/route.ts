@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { normalizarWhatsApp } from '@/app/lib/phone'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,7 +38,7 @@ async function enviarMensagem(telefone: string, mensagem: string) {
 
 export async function POST(req: Request) {
   const { whatsapp } = await req.json()
-  const numero = whatsapp.replace(/\D/g, '')
+  const numero = normalizarWhatsApp(whatsapp)
 
   const { data: existente } = await supabase
     .from('leads_fornecedores')
