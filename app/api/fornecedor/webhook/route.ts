@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { normalizarWhatsApp } from '@/app/lib/phone'
+import { variantesWhatsApp } from '@/app/lib/phone'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -39,15 +39,18 @@ export async function POST(req: Request) {
   if (body.fromMe) return NextResponse.json({ ok: true })
   if (!body.text?.message) return NextResponse.json({ ok: true })
 
-  const telefone = body.phone ? normalizarWhatsApp(body.phone) : undefined
+  const variantes = body.phone ? variantesWhatsApp(body.phone) : undefined
   const texto = body.text.message.trim()
 
-  if (!telefone || !texto) return NextResponse.json({ ok: true })
+  if (!variantes || !texto) return NextResponse.json({ ok: true })
+
+  // variantes[0] é sempre a forma canônica com 13 dígitos (com o 9)
+  const canonico = variantes[0]
 
   const { data: lead } = await supabase
     .from('leads_fornecedores')
     .select('*')
-    .eq('whatsapp', telefone)
+    .in('whatsapp', variantes)
     .maybeSingle()
 
   if (!lead) return NextResponse.json({ ok: true })
@@ -58,10 +61,10 @@ export async function POST(req: Request) {
     await supabase
       .from('leads_fornecedores')
       .update({ cidade: texto, etapa_bot: 1 })
-      .eq('whatsapp', telefone)
+      .eq('whatsapp', canonico)
 
     await enviarMensagem(
-      telefone,
+      canonico,
       `Anotado! ✅\n\n👕 *Que tipo de produto você confecciona?*\n\nExemplos: camisetas, uniformes, moda praia, bermudas, vestidos, fardamentos...`
     )
 
@@ -69,10 +72,10 @@ export async function POST(req: Request) {
     await supabase
       .from('leads_fornecedores')
       .update({ tipos_produto: [texto], etapa_bot: 2 })
-      .eq('whatsapp', telefone)
+      .eq('whatsapp', canonico)
 
     await enviarMensagem(
-      telefone,
+      canonico,
       `Ótimo! 📋\n\n*Você tem CNPJ?*\n\nResponde com *sim* ou *não*.`
     )
 
@@ -82,10 +85,10 @@ export async function POST(req: Request) {
     await supabase
       .from('leads_fornecedores')
       .update({ tem_cnpj: temCnpj, etapa_bot: 3 })
-      .eq('whatsapp', telefone)
+      .eq('whatsapp', canonico)
 
     await enviarMensagem(
-      telefone,
+      canonico,
       `Perfeito! 📧\n\n*Qual é o seu e-mail?*`
     )
 
@@ -98,10 +101,10 @@ export async function POST(req: Request) {
         etapa_bot: 4,
         atualizado_em: new Date().toISOString(),
       })
-      .eq('whatsapp', telefone)
+      .eq('whatsapp', canonico)
 
     await enviarMensagem(
-      telefone,
+      canonico,
       `Tudo certo! 🎉\n\nSeu cadastro está completo no *Confeccione*.\n\nEm breve você vai começar a receber pedidos de clientes na sua região. Qualquer dúvida é só chamar! 🚀`
     )
   }
