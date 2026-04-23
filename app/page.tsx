@@ -58,11 +58,19 @@ export default function Home() {
   async function handleFornSubmit() {
     if (fornTel.length < 10) return;
     try {
-      await supabase.from("leads_fornecedores").insert({ whatsapp: fornTel });
+      const res = await fetch('/api/fornecedor/cadastro', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ whatsapp: fornTel }),
+      });
+      if (!res.ok) {
+        console.error('Erro ao cadastrar fornecedor:', await res.text());
+        return;
+      }
+      setFornSent(true);
     } catch (e) {
       console.error(e);
     }
-    setFornSent(true);
   }
 
   function closePopup() {
