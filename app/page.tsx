@@ -141,9 +141,9 @@ export default function Home() {
                 <div className="mb-5">
                   <label className="text-xs text-gray-400 mb-2 block">Quantidade de peças</label>
                   <div className="flex items-center gap-3">
-                    <button onClick={() => setQty(Math.max(1, qty - 5))} className="w-9 h-9 border border-gray-200 rounded-lg text-lg flex items-center justify-center hover:bg-gray-50">−</button>
-                    <span className="text-xl font-medium text-gray-900 min-w-[40px] text-center">{qty}</span>
-                    <button onClick={() => setQty(qty + 5)} className="w-9 h-9 border border-gray-200 rounded-lg text-lg flex items-center justify-center hover:bg-gray-50">+</button>
+                    <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-9 h-9 border border-gray-200 rounded-lg text-lg flex items-center justify-center hover:bg-gray-50">−</button>
+                    <input type="number" min={1} step={1} value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="w-14 h-9 border border-gray-200 rounded-lg text-center text-sm font-medium text-gray-900 focus:outline-none focus:border-[#1D9E75]" />
+                    <button onClick={() => setQty(qty + 1)} className="w-9 h-9 border border-gray-200 rounded-lg text-lg flex items-center justify-center hover:bg-gray-50">+</button>
                     <span className="text-sm text-gray-400">peças</span>
                   </div>
                 </div>
@@ -221,7 +221,6 @@ export default function Home() {
               <h3 className="text-gray-900 text-lg font-medium mb-2">Pedido enviado!</h3>
               <p className="text-gray-400 text-sm max-w-xs mx-auto mb-5 leading-relaxed">Os fornecedores ideais para o seu pedido já estão sendo notificados. Você receberá orçamentos em até <strong>24 horas</strong> pelo WhatsApp.</p>
               <div className="bg-[#E1F5EE] text-[#0F6E56] font-medium text-sm px-6 py-3 rounded-xl inline-block mb-4">Número do pedido: #CF-{protocolo}</div>
-              <p className="text-gray-400 text-xs">Dúvidas? Ligue grátis: <strong>0800 000 0000</strong></p>
             </div>
           )}
         </div>

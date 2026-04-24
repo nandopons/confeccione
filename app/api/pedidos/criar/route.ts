@@ -35,9 +35,11 @@ export async function POST(req: Request) {
   }
 
   if (estaEmHorarioComercial()) {
-    criarEDispararOferta(data.id).catch(err =>
+    try {
+      await criarEDispararOferta(data.id)
+    } catch (err) {
       console.error('criarEDispararOferta error:', err)
-    )
+    }
   } else {
     await supabase
       .from('pedidos')
