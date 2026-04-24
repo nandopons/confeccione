@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { normalizarWhatsApp } from '@/app/lib/phone'
 import { enviarMensagem } from '@/app/lib/zapi'
+import { emailBoasVindasFornecedor } from '@/app/lib/email'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -65,9 +66,11 @@ export async function POST(req: Request) {
     `Olá ${nome}! 🎉\n\nSeu cadastro no *Confeccione* foi confirmado.\n\nEm breve você vai receber pedidos de clientes que batem com o perfil da sua produção. Quando um pedido chegar, basta responder se quer ou não atender.\n\nQualquer dúvida é só chamar aqui mesmo! 🚀`
   )
 
-  // TODO: enviar email de boas-vindas via Resend
-  // Aguardando verificação do domínio no Resend antes de implementar.
-  // async function enviarEmail(email: string, nome: string) { ... }
+  if (email) {
+    emailBoasVindasFornecedor({ email, nome }).catch(err =>
+      console.error('email boas-vindas falhou:', err)
+    )
+  }
 
   return NextResponse.json({ ok: true })
 }
