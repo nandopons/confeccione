@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { estaEmHorarioComercial, proximoHorarioValido } from '@/app/lib/horario'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
+import { emailConfirmacaoCliente } from '@/app/lib/email'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -47,5 +48,16 @@ export async function POST(req: Request) {
       .eq('id', data.id)
   }
 
+  if (email) {
+    emailConfirmacaoCliente({
+      email,
+      nomeCliente: nome,
+      protocolo: data.id,
+      tipo,
+      quantidade: tipo !== 'ajuste' ? quantidade : null,
+      estado,
+      prazo,
+    }).catch(err => console.error('email confirmação falhou:', err))
+  }
   return NextResponse.json({ ok: true, protocolo: data.id, status: 'buscando_fornecedor' })
 }
