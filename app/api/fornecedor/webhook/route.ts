@@ -38,7 +38,7 @@ export async function POST(req: Request) {
     .eq('fornecedor_id', fornecedor.id)
     .eq('status', 'enviada')
     .gt('expira_em', new Date().toISOString())
-    .order('created_at', { ascending: false })
+    .order('enviada_em', { ascending: false })
     .limit(1)
     .maybeSingle()
 
