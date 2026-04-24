@@ -4,7 +4,7 @@
 // assim dá pra rodar local sem quebrar o fluxo de pedidos/cadastros.
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails'
-const FROM = 'Confeccione <contato@send.confeccione.com.br>'
+const FROM = 'Confeccione <contato@confeccione.com.br>'
 const REPLY_TO = 'contato@confeccione.com.br'
 const SITE_URL = 'https://confeccione.com.br'
 
