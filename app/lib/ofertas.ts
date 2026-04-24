@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { buscarFornecedorCompativel, Pedido } from './matching'
 import { enviarMensagem } from './zapi'
+import { emailOfertaFornecedor } from './email'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -84,4 +85,16 @@ export async function criarEDispararOferta(pedidoId: string): Promise<void> {
     '\n\nQuer atender esse cliente? Responde SIM ou NAO nas próximas 4h. Se não responder vamos oferecer pra outro fornecedor.'
 
   await enviarMensagem(fornecedor.whatsapp, mensagem)
+
+  if (fornecedor.email) {
+    emailOfertaFornecedor({
+      email: fornecedor.email,
+      nomeFornecedor: fornecedor.nome,
+      tipo,
+      quantidade: pedido.quantidade,
+      estado: pedido.estado,
+      prazo,
+      descricao: pedido.descricao,
+    }).catch(err => console.error('email oferta falhou:', err))
+  }
 }
