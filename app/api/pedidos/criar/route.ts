@@ -51,15 +51,19 @@ export async function POST(req: Request) {
 
   console.log('[pedido criar] tentando enviar email?', !!email, 'valor:', email)
   if (email) {
-    emailConfirmacaoCliente({
-      email,
-      nomeCliente: nome,
-      protocolo: data.id,
-      tipo,
-      quantidade: tipo !== 'ajuste' ? quantidade : null,
-      estado,
-      prazo,
-    }).catch(err => console.error('email confirmação falhou:', err))
+    try {
+      await emailConfirmacaoCliente({
+        email,
+        nomeCliente: nome,
+        protocolo: data.id,
+        tipo,
+        quantidade: tipo !== 'ajuste' ? quantidade : null,
+        estado,
+        prazo,
+      })
+    } catch (err) {
+      console.error('email confirmação falhou:', err)
+    }
   }
   return NextResponse.json({ ok: true, protocolo: data.id, status: 'buscando_fornecedor' })
 }
