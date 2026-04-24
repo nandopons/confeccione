@@ -1,113 +1,18 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { variantesWhatsApp } from '@/app/lib/phone'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const ZAPI_INSTANCE     = process.env.ZAPI_INSTANCE_ID!
-const ZAPI_TOKEN        = process.env.ZAPI_TOKEN!
-const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN!
-
-async function enviarMensagem(telefone: string, mensagem: string) {
-  try {
-    const res = await fetch(
-      `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Client-Token': ZAPI_CLIENT_TOKEN,
-        },
-        body: JSON.stringify({ phone: telefone, message: mensagem }),
-      }
-    )
-    const data = await res.json()
-    console.log('Z-API response:', JSON.stringify(data))
-  } catch (err) {
-    console.error('Z-API error:', err)
-  }
-}
-
 export async function POST(req: Request) {
   const body = await req.json()
 
   await supabase.from('webhook_debug').insert({ body })
 
-  if (body.fromMe) return NextResponse.json({ ok: true })
-  if (!body.text?.message) return NextResponse.json({ ok: true })
-
-  const variantes = body.phone ? variantesWhatsApp(body.phone) : undefined
-  const texto = body.text.message.trim()
-
-  if (!variantes || !texto) return NextResponse.json({ ok: true })
-
-  // variantes[0] é sempre a forma canônica com 13 dígitos (com o 9)
-  const canonico = variantes[0]
-
-  const { data: lead } = await supabase
-    .from('leads_fornecedores')
-    .select('*')
-    .in('whatsapp', variantes)
-    .maybeSingle()
-
-  if (!lead) return NextResponse.json({ ok: true })
-
-  const etapa = lead.etapa_bot ?? 0
-
-  if (etapa === 0) {
-    await supabase
-      .from('leads_fornecedores')
-      .update({ cidade: texto, etapa_bot: 1 })
-      .eq('whatsapp', canonico)
-
-    await enviarMensagem(
-      canonico,
-      `Anotado! ✅\n\n👕 *Que tipo de produto você confecciona?*\n\nExemplos: camisetas, uniformes, moda praia, bermudas, vestidos, fardamentos...`
-    )
-
-  } else if (etapa === 1) {
-    await supabase
-      .from('leads_fornecedores')
-      .update({ tipos_produto: [texto], etapa_bot: 2 })
-      .eq('whatsapp', canonico)
-
-    await enviarMensagem(
-      canonico,
-      `Ótimo! 📋\n\n*Você tem CNPJ?*\n\nResponde com *sim* ou *não*.`
-    )
-
-  } else if (etapa === 2) {
-    const temCnpj = texto.toLowerCase().includes('sim')
-
-    await supabase
-      .from('leads_fornecedores')
-      .update({ tem_cnpj: temCnpj, etapa_bot: 3 })
-      .eq('whatsapp', canonico)
-
-    await enviarMensagem(
-      canonico,
-      `Perfeito! 📧\n\n*Qual é o seu e-mail?*`
-    )
-
-  } else if (etapa === 3) {
-    await supabase
-      .from('leads_fornecedores')
-      .update({
-        email: texto,
-        status: 'ativo',
-        etapa_bot: 4,
-        atualizado_em: new Date().toISOString(),
-      })
-      .eq('whatsapp', canonico)
-
-    await enviarMensagem(
-      canonico,
-      `Tudo certo! 🎉\n\nSeu cadastro está completo no *Confeccione*.\n\nEm breve você vai começar a receber pedidos de clientes na sua região. Qualquer dúvida é só chamar! 🚀`
-    )
-  }
+  // Lógica de onboarding por etapas removida — cadastro agora acontece no site.
+  // TODO: implementar lógica de ofertas (notificar fornecedor quando um pedido compatível chegar).
 
   return NextResponse.json({ ok: true })
 }

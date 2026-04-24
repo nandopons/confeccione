@@ -1,44 +1,45 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { normalizarWhatsApp } from '@/app/lib/phone'
+import { enviarMensagem } from '@/app/lib/zapi'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const ZAPI_INSTANCE     = process.env.ZAPI_INSTANCE_ID!
-const ZAPI_TOKEN        = process.env.ZAPI_TOKEN!
-const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN!
-
-async function enviarMensagem(telefone: string, mensagem: string) {
-  try {
-    console.log('INSTANCE:', ZAPI_INSTANCE)
-    console.log('TOKEN:', ZAPI_TOKEN)
-    console.log('CLIENT_TOKEN:', ZAPI_CLIENT_TOKEN ? 'presente' : 'AUSENTE')
-
-    const res = await fetch(
-      `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Client-Token': ZAPI_CLIENT_TOKEN,
-        },
-        body: JSON.stringify({ phone: telefone, message: mensagem }),
-      }
-    )
-    console.log('Z-API status:', res.status)
-    const data = await res.json()
-    console.log('Z-API response:', JSON.stringify(data))
-  } catch (err) {
-    console.error('Z-API error:', err)
-  }
-}
-
 export async function POST(req: Request) {
-  const { whatsapp } = await req.json()
+  const {
+    nome,
+    whatsapp,
+    email,
+    tipos_produto,
+    descricao_livre,
+    capacidade_min,
+    capacidade_max,
+    emite_nf,
+    estado,
+    cidade,
+    raio_atendimento,
+  } = await req.json()
+
   const numero = normalizarWhatsApp(whatsapp)
+
+  const payload = {
+    nome,
+    whatsapp: numero,
+    email,
+    tipos_produto,
+    descricao_livre: descricao_livre || null,
+    capacidade_min,
+    capacidade_max: capacidade_max ?? null,
+    emite_nf,
+    estado,
+    cidade: cidade || null,
+    raio_atendimento,
+    status: 'ativo',
+    etapa_bot: null,
+  }
 
   const { data: existente } = await supabase
     .from('leads_fornecedores')
@@ -46,23 +47,27 @@ export async function POST(req: Request) {
     .eq('whatsapp', numero)
     .maybeSingle()
 
-  if (!existente) {
+  if (existente) {
     const { error } = await supabase
       .from('leads_fornecedores')
-      .insert({ whatsapp: numero, status: 'aguardando_contato', etapa_bot: 0 })
-
+      .update(payload)
+      .eq('whatsapp', numero)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   } else {
-    await supabase
+    const { error } = await supabase
       .from('leads_fornecedores')
-      .update({ etapa_bot: 0, status: 'aguardando_contato' })
-      .eq('whatsapp', numero)
+      .insert(payload)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
   await enviarMensagem(
     numero,
-    `Olá! 👋 Sou do *Confeccione*, a plataforma que conecta confeccionistas a clientes em todo o Brasil.\n\nVocê se cadastrou como fornecedor — ótimo! 🎉\n\nVou te fazer 4 perguntinhas rápidas para completar seu perfil.\n\n📍 *Em qual cidade você está localizado?*`
+    `Olá ${nome}! 🎉\n\nSeu cadastro no *Confeccione* foi confirmado.\n\nEm breve você vai receber pedidos de clientes que batem com o perfil da sua produção. Quando um pedido chegar, basta responder se quer ou não atender.\n\nQualquer dúvida é só chamar aqui mesmo! 🚀`
   )
+
+  // TODO: enviar email de boas-vindas via Resend
+  // Aguardando verificação do domínio no Resend antes de implementar.
+  // async function enviarEmail(email: string, nome: string) { ... }
 
   return NextResponse.json({ ok: true })
 }
