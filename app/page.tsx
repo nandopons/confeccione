@@ -1,15 +1,14 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { supabase } from "./lib/supabase";
 
 const nichos = [
-  { id: "evento", icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
-  { id: "private", icon: "✂️", title: "Private Label", sub: "Marca própria e coleções" },
-  { id: "peca", icon: "🧵", title: "Peça Única", sub: "Personalizada ou presente" },
-  { id: "farda", icon: "🏢", title: "Fardamento", sub: "Uniformes corporativos" },
-  { id: "esporte", icon: "⚽", title: "Padrão Esportivo", sub: "Pelada, vôlei, futebol com nome nas costas" },
-  { id: "ajuste", icon: "📐", title: "Ajuste / Conserto", sub: "Ajustes e reparos em geral" },
+  { id: "interclasse",      icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
+  { id: "private_label",    icon: "✂️", title: "Private Label",        sub: "Marca própria e coleções" },
+  { id: "peca_unica",       icon: "🧵", title: "Peça Única",           sub: "Personalizada ou presente" },
+  { id: "fardamento",       icon: "🏢", title: "Fardamento",           sub: "Uniformes corporativos" },
+  { id: "padrao_esportivo", icon: "⚽", title: "Padrão Esportivo",     sub: "Pelada, vôlei, futebol com nome nas costas" },
+  { id: "ajuste",           icon: "📐", title: "Ajuste / Conserto",    sub: "Ajustes e reparos em geral" },
 ];
 
 const prazos: Record<string, string> = {
@@ -36,15 +35,19 @@ export default function Home() {
   async function enviarPedido() {
     setEnviando(true);
     try {
-      await supabase.from("pedidos").insert({
-        tipo,
-        quantidade: tipo !== "ajuste" ? qty : null,
-        prazo,
-        estado,
-        nome,
-        whatsapp: tel,
-        email,
-        descricao,
+      await fetch("/api/pedidos/criar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tipo,
+          quantidade: tipo !== "ajuste" ? qty : null,
+          prazo,
+          estado,
+          nome,
+          whatsapp: tel,
+          email,
+          descricao,
+        }),
       });
     } catch (e) {
       console.error(e);
