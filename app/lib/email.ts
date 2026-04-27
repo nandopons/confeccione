@@ -304,3 +304,70 @@ ${SITE_URL}`
 
   await enviarEmail({ to: params.email, subject, html, text })
 }
+
+export async function emailContatoFornecedor(params: {
+  email: string
+  nomeCliente: string
+  tipo: string
+  nomeFornecedor: string
+  whatsappFornecedor: string
+  cidadeFornecedor: string | null
+  estadoFornecedor: string
+}): Promise<void> {
+  const nomeClienteEsc = escapeHtml(params.nomeCliente)
+  const tipoEsc = escapeHtml(params.tipo)
+  const nomeFornEsc = escapeHtml(params.nomeFornecedor)
+  const whatsFornEsc = escapeHtml(params.whatsappFornecedor)
+  const localFornEsc = escapeHtml(
+    params.cidadeFornecedor
+      ? `${params.cidadeFornecedor} / ${params.estadoFornecedor}`
+      : params.estadoFornecedor
+  )
+
+  // Link wa.me — remove tudo que não é dígito
+  const whatsLink = params.whatsappFornecedor.replace(/\D/g, '')
+
+  const subject = `Encontramos um fornecedor pro seu pedido!`
+  const preheader = `${params.nomeFornecedor} aceitou seu pedido de ${params.tipo}.`
+
+  const html = layout(
+    `
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">Boa notícia, ${nomeClienteEsc}! 🎉</h1>
+    <p style="margin:0 0 20px;color:#666;">Encontramos um fornecedor pro seu pedido de <strong>${tipoEsc}</strong>.</p>
+    <div style="background:#ecfdf5;padding:18px;margin:20px 0;border-radius:6px;border-left:3px solid #10b981;">
+      <div style="color:#047857;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-bottom:8px;">Fornecedor</div>
+      <div style="color:#111827;font-size:18px;font-weight:700;margin-bottom:6px;">${nomeFornEsc}</div>
+      <div style="color:#374151;font-size:14px;margin-bottom:4px;">📱 ${whatsFornEsc}</div>
+      <div style="color:#6b7280;font-size:14px;">📍 ${localFornEsc}</div>
+    </div>
+    <p style="margin:0 0 16px;color:#374151;line-height:1.6;">Ele vai te chamar nas próximas horas. Se preferir, você também pode entrar em contato direto:</p>
+    <div style="text-align:center;margin:24px 0;">
+      <a href="https://wa.me/${whatsLink}" style="display:inline-block;background:#25d366;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:600;font-size:15px;">Falar no WhatsApp</a>
+    </div>
+    <div style="background:#fffbeb;border-left:3px solid #f59e0b;padding:14px 18px;margin:24px 0;border-radius:6px;">
+      <div style="color:#1f2937;font-size:14px;line-height:1.6;">
+        <strong>Daqui a 24h vamos te chamar no WhatsApp</strong> pra saber se deu certo. Se não rolou, a gente busca outro fornecedor pra você.
+      </div>
+    </div>
+    `,
+    preheader
+  )
+
+  const text = `Boa notícia, ${params.nomeCliente}!
+
+Encontramos um fornecedor pro seu pedido de ${params.tipo}.
+
+Fornecedor: ${params.nomeFornecedor}
+WhatsApp: ${params.whatsappFornecedor}
+Localização: ${params.cidadeFornecedor ? `${params.cidadeFornecedor} / ` : ''}${params.estadoFornecedor}
+
+Ele vai te chamar nas próximas horas. Se preferir, você também pode entrar em contato direto:
+https://wa.me/${whatsLink}
+
+Daqui a 24h vamos te chamar no WhatsApp pra saber se deu certo. Se não rolou, a gente busca outro fornecedor pra você.
+
+Confeccione
+${SITE_URL}`
+
+  await enviarEmail({ to: params.email, subject, html, text })
+}
