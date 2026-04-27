@@ -87,14 +87,18 @@ export async function criarEDispararOferta(pedidoId: string): Promise<void> {
   await enviarMensagem(fornecedor.whatsapp, mensagem)
 
   if (fornecedor.email) {
-    emailOfertaFornecedor({
-      email: fornecedor.email,
-      nomeFornecedor: fornecedor.nome,
-      tipo,
-      quantidade: pedido.quantidade,
-      estado: pedido.estado,
-      prazo,
-      descricao: pedido.descricao,
-    }).catch(err => console.error('email oferta falhou:', err))
+    try {
+      await emailOfertaFornecedor({
+        email: fornecedor.email,
+        nomeFornecedor: fornecedor.nome,
+        tipo,
+        quantidade: pedido.quantidade,
+        estado: pedido.estado,
+        prazo,
+        descricao: pedido.descricao,
+      })
+    } catch (err) {
+      console.error('email oferta falhou:', err)
+    }
   }
 }

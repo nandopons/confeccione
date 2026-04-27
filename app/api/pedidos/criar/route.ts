@@ -11,7 +11,6 @@ const supabase = createClient(
 
 export async function POST(req: Request) {
   const { tipo, quantidade, prazo, estado, nome, whatsapp, email, descricao } = await req.json()
-  console.log('[pedido criar] payload recebido:', { tipo, quantidade, prazo, estado, nome, whatsapp, email, emailType: typeof email, descricao })
 
   const { data, error } = await supabase
     .from('pedidos')
@@ -49,7 +48,6 @@ export async function POST(req: Request) {
       .eq('id', data.id)
   }
 
-  console.log('[pedido criar] tentando enviar email?', !!email, 'valor:', email)
   if (email) {
     try {
       await emailConfirmacaoCliente({

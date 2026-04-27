@@ -67,9 +67,11 @@ export async function POST(req: Request) {
   )
 
   if (email) {
-    emailBoasVindasFornecedor({ email, nome }).catch(err =>
+    try {
+      await emailBoasVindasFornecedor({ email, nome })
+    } catch (err) {
       console.error('email boas-vindas falhou:', err)
-    )
+    }
   }
 
   return NextResponse.json({ ok: true })
