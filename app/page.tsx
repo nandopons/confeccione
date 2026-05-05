@@ -140,9 +140,9 @@ export default function Home() {
                 <div className="mb-5">
                   <label className="text-xs text-gray-400 mb-2 block">Quantidade de peças</label>
                   <div className="flex items-center gap-3">
-                    <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-9 h-9 border border-gray-200 rounded-lg text-lg flex items-center justify-center hover:bg-gray-50">−</button>
+                    <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-9 h-9 border border-gray-400 text-gray-700 rounded-lg text-lg flex items-center justify-center hover:bg-gray-100">−</button>
                     <input type="number" min={1} step={1} value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="w-14 h-9 border border-gray-200 rounded-lg text-center text-sm font-medium text-gray-900 focus:outline-none focus:border-[#1D9E75]" />
-                    <button onClick={() => setQty(qty + 1)} className="w-9 h-9 border border-gray-200 rounded-lg text-lg flex items-center justify-center hover:bg-gray-50">+</button>
+                    <button onClick={() => setQty(qty + 1)} className="w-9 h-9 border border-gray-400 text-gray-700 rounded-lg text-lg flex items-center justify-center hover:bg-gray-100">+</button>
                     <span className="text-sm text-gray-400">peças</span>
                   </div>
                 </div>
