@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import PageHeader from "@/app/components/PageHeader";
+import SiteHeader from "@/app/components/SiteHeader";
 import { getAllPosts } from "@/app/lib/blog";
 
 export const metadata: Metadata = {
@@ -37,7 +37,7 @@ export default async function SaibaMaisIndex() {
 
   return (
     <main className="min-h-screen bg-white font-sans">
-      <PageHeader />
+      <SiteHeader />
 
       <section className="px-6 pt-10 pb-16 max-w-3xl mx-auto">
         <h1 className="text-gray-900 text-2xl md:text-3xl font-medium mb-2">Saiba mais</h1>

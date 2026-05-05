@@ -8,7 +8,7 @@ export default function SiteHeader() {
 
   return (
     <nav className="bg-[#111] px-4 md:px-6 py-4 flex items-center justify-between sticky top-0 z-40">
-      <div className="flex items-center gap-2 md:gap-3">
+      <Link href="/" className="flex items-center gap-2 md:gap-3">
         <svg width="32" height="32" viewBox="0 0 60 60" fill="none">
           <path d="M30 6 A24 24 0 0 1 54 30" stroke="white" strokeWidth="10" strokeLinecap="round"/>
           <path d="M54 30 A24 24 0 0 1 30 54" stroke="white" strokeWidth="10" strokeLinecap="round" opacity="0.5"/>
@@ -17,7 +17,7 @@ export default function SiteHeader() {
           <circle cx="30" cy="30" r="5" fill="white"/>
         </svg>
         <span className="text-white font-medium tracking-widest text-base md:text-lg">CONFECCIONE</span>
-      </div>
+      </Link>
 
       <div className="hidden md:flex items-center gap-2 md:gap-3">
         <Link href="/fornecedor/cadastro" className="whitespace-nowrap text-white text-xs md:text-sm border border-white/20 px-2 md:px-4 py-2 rounded-full hover:bg-white/10 transition-colors">
@@ -27,9 +27,9 @@ export default function SiteHeader() {
         <Link href="/saiba-mais" className="whitespace-nowrap text-white text-xs md:text-sm border border-white/20 px-2 md:px-4 py-2 rounded-full hover:bg-white/10 transition-colors">
           Saiba mais
         </Link>
-        <a href="#pedido" className="whitespace-nowrap text-white text-xs md:text-sm font-medium bg-[#1D9E75] hover:bg-[#0F6E56] px-2 md:px-4 py-2 rounded-full transition-colors">
+        <Link href="/#pedido" className="whitespace-nowrap text-white text-xs md:text-sm font-medium bg-[#1D9E75] hover:bg-[#0F6E56] px-2 md:px-4 py-2 rounded-full transition-colors">
           Fazer meu pedido
-        </a>
+        </Link>
       </div>
 
       <button
@@ -73,13 +73,13 @@ export default function SiteHeader() {
           >
             Saiba mais
           </Link>
-          <a
-            href="#pedido"
+          <Link
+            href="/#pedido"
             onClick={close}
             className="text-white text-sm font-medium bg-[#1D9E75] hover:bg-[#0F6E56] px-4 py-3 rounded-xl transition-colors"
           >
             Fazer meu pedido
-          </a>
+          </Link>
         </div>
       )}
     </nav>

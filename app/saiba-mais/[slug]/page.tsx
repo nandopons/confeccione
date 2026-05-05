@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import PageHeader from "@/app/components/PageHeader";
+import SiteHeader from "@/app/components/SiteHeader";
 import { getAllSlugs, getPostBySlug } from "@/app/lib/blog";
 
 const SITE_URL = "https://www.confeccione.com.br";
@@ -96,7 +96,7 @@ export default async function BlogPostPage({ params }: PageProps) {
 
   return (
     <main className="min-h-screen bg-white font-sans">
-      <PageHeader />
+      <SiteHeader />
 
       <script
         type="application/ld+json"

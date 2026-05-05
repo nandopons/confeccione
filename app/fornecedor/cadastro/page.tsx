@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import PageHeader from "@/app/components/PageHeader";
+import SiteHeader from "@/app/components/SiteHeader";
 
 const tiposProduto = [
   { id: "interclasse",     icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
@@ -66,13 +66,13 @@ export default function CadastroFornecedor() {
 
   return (
     <main className="min-h-screen bg-white font-sans">
-      <PageHeader />
+      <SiteHeader />
 
       <section className="px-6 pt-10 pb-16 max-w-2xl mx-auto">
-        <h2 className="text-gray-900 text-xl font-medium mb-1">
-          Cadastro de fornecedor{" "}
+        <div className="flex flex-col items-start gap-2 md:flex-row md:items-center md:gap-3 mb-1">
+          <h2 className="text-gray-900 text-xl font-medium">Cadastro de fornecedor</h2>
           <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">3 passos simples</span>
-        </h2>
+        </div>
         <p className="text-gray-400 text-sm mb-6">Gratuito e sem burocracia. Comece a receber pedidos hoje.</p>
 
         {step < 3 && (

@@ -96,7 +96,10 @@ export default function Home() {
       </div>
 
       <section id="pedido" className="px-6 pt-12 pb-16 max-w-2xl mx-auto scroll-mt-20">
-        <h2 className="text-gray-900 text-xl font-medium mb-1">Faça seu pedido <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">3 passos simples</span></h2>
+        <div className="flex flex-col items-start gap-2 md:flex-row md:items-center md:gap-3 mb-1">
+          <h2 className="text-gray-900 text-xl font-medium">Faça seu pedido</h2>
+          <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">3 passos simples</span>
+        </div>
         <p className="text-gray-400 text-sm mb-6">Preencha as informações abaixo e receba orçamentos em até 24h.</p>
 
         <div className="flex items-center mb-8">
