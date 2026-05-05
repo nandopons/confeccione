@@ -6,19 +6,19 @@ import PageHeader from "@/app/components/PageHeader";
 import { getAllPosts } from "@/app/lib/blog";
 
 export const metadata: Metadata = {
-  title: "Blog | Confeccione",
+  title: "Saiba mais | Confeccione",
   description:
     "Artigos sobre confecção sob demanda, criação de marcas, tecidos e processos de fabricação.",
   alternates: {
-    canonical: "https://www.confeccione.com.br/blog",
+    canonical: "https://www.confeccione.com.br/saiba-mais",
   },
   openGraph: {
     type: "website",
     siteName: "Confeccione",
-    title: "Blog | Confeccione",
+    title: "Saiba mais | Confeccione",
     description:
       "Artigos sobre confecção sob demanda, criação de marcas, tecidos e processos de fabricação.",
-    url: "https://www.confeccione.com.br/blog",
+    url: "https://www.confeccione.com.br/saiba-mais",
     locale: "pt_BR",
   },
 };
@@ -32,7 +32,7 @@ function formatarData(iso: string): string {
   }
 }
 
-export default async function BlogIndex() {
+export default async function SaibaMaisIndex() {
   const posts = await getAllPosts();
 
   return (
@@ -40,7 +40,7 @@ export default async function BlogIndex() {
       <PageHeader />
 
       <section className="px-6 pt-10 pb-16 max-w-3xl mx-auto">
-        <h1 className="text-gray-900 text-2xl md:text-3xl font-medium mb-2">Blog</h1>
+        <h1 className="text-gray-900 text-2xl md:text-3xl font-medium mb-2">Saiba mais</h1>
         <p className="text-gray-500 text-sm md:text-base mb-10">
           Conteúdo sobre confecção, marca própria e mercado de moda.
         </p>
@@ -54,7 +54,7 @@ export default async function BlogIndex() {
             {posts.map((post) => (
               <li key={post.slug}>
                 <Link
-                  href={`/blog/${post.slug}`}
+                  href={`/saiba-mais/${post.slug}`}
                   className="block border border-gray-200 rounded-2xl p-6 hover:border-[#1D9E75] transition-colors"
                 >
                   <div className="flex items-center gap-2 mb-3">

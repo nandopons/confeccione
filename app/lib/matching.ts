@@ -24,8 +24,7 @@ export type Fornecedor = {
   whatsapp: string
   email: string | null
   tipos_produto: string[]
-  capacidade_min: number
-  capacidade_max: number | null
+  pedido_minimo: number
   estado: string
   raio_atendimento: string
   status: string
@@ -58,9 +57,7 @@ export async function buscarFornecedorCompativel(pedido: Pedido): Promise<Fornec
   }
 
   if (pedido.quantidade !== null) {
-    q = q
-      .lte('capacidade_min', pedido.quantidade)
-      .or(`capacidade_max.is.null,capacidade_max.gte.${pedido.quantidade}`)
+    q = q.lte('pedido_minimo', pedido.quantidade)
   }
 
   const { data, error } = await q

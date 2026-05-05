@@ -1,13 +1,13 @@
 ---
-title: "Bem-vindo ao blog do Confeccione"
-description: "Este é um artigo de exemplo pra validar o setup do blog. Em breve, conteúdo real."
+title: "Bem-vindo à seção Saiba mais do Confeccione"
+description: "Este é um artigo de exemplo pra validar o setup da seção. Em breve, conteúdo real."
 date: "2026-05-05"
 author: "Confeccione"
 category: "Geral"
-keywords: ["confeccione", "blog", "exemplo"]
+keywords: ["confeccione", "saiba mais", "exemplo"]
 ---
 
-# Bem-vindo ao blog do Confeccione
+# Bem-vindo à seção Saiba mais do Confeccione
 
 Em breve, artigos sobre criação de marcas, tecidos, processos de confecção e muito mais.
 

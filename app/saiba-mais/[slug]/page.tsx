@@ -22,7 +22,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const post = await getPostBySlug(slug);
   if (!post) return {};
 
-  const url = `${SITE_URL}/blog/${slug}`;
+  const url = `${SITE_URL}/saiba-mais/${slug}`;
   const ogImage = post.metadata.image
     ? post.metadata.image.startsWith("http")
       ? post.metadata.image
@@ -42,7 +42,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
       description: post.metadata.description,
       url,
       locale: "pt_BR",
-      publishedTime: post.metadata.date,
+      publishedTime: `${post.metadata.date}T00:00:00-03:00`,
       authors: [post.metadata.author],
       ...(ogImage ? { images: [{ url: ogImage }] } : {}),
     },
@@ -70,7 +70,7 @@ export default async function BlogPostPage({ params }: PageProps) {
   if (!post) notFound();
 
   const { metadata: meta, contentHtml } = post;
-  const url = `${SITE_URL}/blog/${slug}`;
+  const url = `${SITE_URL}/saiba-mais/${slug}`;
   const ogImage = meta.image
     ? meta.image.startsWith("http")
       ? meta.image
@@ -82,8 +82,8 @@ export default async function BlogPostPage({ params }: PageProps) {
     "@type": "Article",
     headline: meta.title,
     description: meta.description,
-    datePublished: meta.date,
-    author: { "@type": "Organization", name: meta.author },
+    datePublished: `${meta.date}T00:00:00-03:00`,
+    author: { "@type": "Organization", name: meta.author, url: SITE_URL },
     publisher: {
       "@type": "Organization",
       name: "Confeccione",
@@ -111,7 +111,7 @@ export default async function BlogPostPage({ params }: PageProps) {
             </li>
             <li aria-hidden="true">›</li>
             <li>
-              <Link href="/blog" className="hover:text-[#0F6E56]">Blog</Link>
+              <Link href="/saiba-mais" className="hover:text-[#0F6E56]">Saiba mais</Link>
             </li>
             <li aria-hidden="true">›</li>
             <li className="text-gray-600">{meta.category}</li>

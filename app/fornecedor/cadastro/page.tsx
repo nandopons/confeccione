@@ -14,15 +14,6 @@ const tiposProduto = [
 
 const ufs = ["AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT","PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"];
 
-type CapacidadeOpcao = "" | "ate10" | "10a50" | "50a500" | "500mais";
-
-const capacidadeOpcoes: { value: CapacidadeOpcao; label: string; min: number; max: number | null }[] = [
-  { value: "ate10",   label: "Até 10 peças",      min: 1,   max: 10  },
-  { value: "10a50",   label: "10 a 50 peças",     min: 10,  max: 50  },
-  { value: "50a500",  label: "50 a 500 peças",    min: 50,  max: 500 },
-  { value: "500mais", label: "Mais de 500 peças", min: 500, max: null },
-];
-
 export default function CadastroFornecedor() {
   const [step, setStep]               = useState(0);
   const [nome, setNome]               = useState("");
@@ -30,7 +21,7 @@ export default function CadastroFornecedor() {
   const [email, setEmail]             = useState("");
   const [tiposSel, setTiposSel]       = useState<string[]>([]);
   const [descricao, setDescricao]     = useState("");
-  const [capacidade, setCapacidade]   = useState<CapacidadeOpcao>("");
+  const [pedidoMinimo, setPedidoMinimo] = useState<number>(1);
   const [emiteNf, setEmiteNf]         = useState<"sim" | "nao" | "">("");
   const [estado, setEstado]           = useState("");
   const [cidade, setCidade]           = useState("");
@@ -44,12 +35,11 @@ export default function CadastroFornecedor() {
   }
 
   const step1Valid = nome.trim().length > 0 && whatsapp.replace(/\D/g, "").length >= 10 && email.includes("@");
-  const step2Valid = tiposSel.length > 0 && capacidade !== "" && emiteNf !== "";
+  const step2Valid = tiposSel.length > 0 && pedidoMinimo >= 1 && emiteNf !== "";
   const step3Valid = estado !== "" && raio !== "";
 
   async function enviar() {
     setEnviando(true);
-    const cap = capacidadeOpcoes.find(o => o.value === capacidade)!;
     try {
       await fetch("/api/fornecedor/cadastro", {
         method: "POST",
@@ -60,8 +50,7 @@ export default function CadastroFornecedor() {
           email,
           tipos_produto: tiposSel,
           descricao_livre: descricao,
-          capacidade_min: cap.min,
-          capacidade_max: cap.max,
+          pedido_minimo: pedidoMinimo,
           emite_nf: emiteNf === "sim",
           estado,
           cidade,
@@ -149,14 +138,34 @@ export default function CadastroFornecedor() {
               </div>
 
               <div className="mb-5">
-                <label className="text-xs text-gray-400 mb-2 block">Capacidade de produção por pedido <span className="text-red-400">*</span></label>
-                <div className="space-y-2">
-                  {capacidadeOpcoes.map((op) => (
-                    <label key={op.value} className={`flex items-center gap-3 border-2 rounded-xl px-4 py-3 cursor-pointer transition-all ${capacidade === op.value ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 hover:border-gray-300"}`}>
-                      <input type="radio" name="capacidade" value={op.value} checked={capacidade === op.value} onChange={() => setCapacidade(op.value)} className="accent-[#1D9E75]" />
-                      <span className="text-sm text-gray-800">{op.label}</span>
-                    </label>
-                  ))}
+                <label className="text-sm font-medium text-gray-900 mb-1 block">Qual seu pedido mínimo? <span className="text-red-400">*</span></label>
+                <p className="text-xs text-gray-500 mb-3">Quantidade mínima de peças que você aceita produzir por pedido.</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPedidoMinimo(Math.max(1, pedidoMinimo - 1))}
+                    className="w-9 h-9 bg-[#F5F5F7] text-gray-700 rounded-full text-lg font-light flex items-center justify-center hover:bg-[#EBEBED] active:bg-[#E0E0E3] transition-colors"
+                    aria-label="Diminuir"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={pedidoMinimo}
+                    onChange={e => setPedidoMinimo(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-14 h-9 bg-[#F5F5F7] rounded-lg text-center text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPedidoMinimo(pedidoMinimo + 1)}
+                    className="w-9 h-9 bg-[#F5F5F7] text-gray-700 rounded-full text-lg font-light flex items-center justify-center hover:bg-[#EBEBED] active:bg-[#E0E0E3] transition-colors"
+                    aria-label="Aumentar"
+                  >
+                    +
+                  </button>
+                  <span className="text-sm text-gray-500 ml-2">peças</span>
                 </div>
               </div>
 
