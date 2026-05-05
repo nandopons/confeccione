@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 const nichos = [
@@ -29,8 +29,26 @@ export default function Home() {
   const [descricao, setDescricao] = useState("");
   const [protocolo] = useState(() => Math.floor(Math.random() * 90000) + 10000);
   const [enviando, setEnviando] = useState(false);
+  const leadEnviado = useRef(false);
 
   const ufs = ["AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT","PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"];
+
+  useEffect(() => {
+    if (step !== 3) return;
+    if (leadEnviado.current) return;
+    if (typeof window === "undefined") return;
+    leadEnviado.current = true;
+    window.dataLayer = window.dataLayer || [];
+    window.dataLayer.push({
+      event: "generate_lead",
+      pedido_id: `CF-${protocolo}`,
+      pedido_tipo: tipo,
+      quantidade: tipo !== "ajuste" ? qty : null,
+      estado,
+      value: 1,
+      currency: "BRL",
+    });
+  }, [step, protocolo, tipo, qty, estado]);
 
   async function enviarPedido() {
     setEnviando(true);
