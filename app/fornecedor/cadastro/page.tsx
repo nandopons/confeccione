@@ -22,7 +22,6 @@ export default function CadastroFornecedor() {
   const [tiposSel, setTiposSel]       = useState<string[]>([]);
   const [descricao, setDescricao]     = useState("");
   const [pedidoMinimo, setPedidoMinimo] = useState<number>(1);
-  const [emiteNf, setEmiteNf]         = useState<"sim" | "nao" | "">("");
   const [estado, setEstado]           = useState("");
   const [cidade, setCidade]           = useState("");
   const [raio, setRaio]               = useState("");
@@ -35,7 +34,7 @@ export default function CadastroFornecedor() {
   }
 
   const step1Valid = nome.trim().length > 0 && whatsapp.replace(/\D/g, "").length >= 10 && email.includes("@");
-  const step2Valid = tiposSel.length > 0 && pedidoMinimo >= 1 && emiteNf !== "";
+  const step2Valid = tiposSel.length > 0 && pedidoMinimo >= 1;
   const step3Valid = estado !== "" && raio !== "";
 
   async function enviar() {
@@ -51,7 +50,6 @@ export default function CadastroFornecedor() {
           tipos_produto: tiposSel,
           descricao_livre: descricao,
           pedido_minimo: pedidoMinimo,
-          emite_nf: emiteNf === "sim",
           estado,
           cidade,
           raio_atendimento: raio,
@@ -166,20 +164,6 @@ export default function CadastroFornecedor() {
                     +
                   </button>
                   <span className="text-sm text-gray-500 ml-2">peças</span>
-                </div>
-              </div>
-
-              <div className="mb-6">
-                <label className="text-xs text-gray-400 mb-2 block">Emite nota fiscal? <span className="text-red-400">*</span></label>
-                <div className="flex gap-3">
-                  <label className={`flex items-center gap-2 border-2 rounded-xl px-5 py-3 cursor-pointer transition-all ${emiteNf === "sim" ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 hover:border-gray-300"}`}>
-                    <input type="radio" name="emite_nf" value="sim" checked={emiteNf === "sim"} onChange={() => setEmiteNf("sim")} className="accent-[#1D9E75]" />
-                    <span className="text-sm text-gray-800">Sim</span>
-                  </label>
-                  <label className={`flex items-center gap-2 border-2 rounded-xl px-5 py-3 cursor-pointer transition-all ${emiteNf === "nao" ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 hover:border-gray-300"}`}>
-                    <input type="radio" name="emite_nf" value="nao" checked={emiteNf === "nao"} onChange={() => setEmiteNf("nao")} className="accent-[#1D9E75]" />
-                    <span className="text-sm text-gray-800">Não</span>
-                  </label>
                 </div>
               </div>
 
