@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { buscarFornecedorCompativel, Pedido } from './matching'
-import { enviarMensagem } from './zapi'
-import { emailOfertaFornecedor } from './email'
+import { enviarMensagem, whatsappAdminSemFornecedor } from './zapi'
+import { emailOfertaFornecedor, emailAdminSemFornecedor } from './email'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -38,7 +38,42 @@ export async function criarEDispararOferta(pedidoId: string): Promise<void> {
   if (pedido.status !== 'buscando_fornecedor') return
 
   const fornecedor = await buscarFornecedorCompativel(pedido as Pedido)
-  if (!fornecedor) return
+  if (!fornecedor) {
+    const { count } = await supabase
+      .from('ofertas')
+      .select('*', { count: 'exact', head: true })
+      .eq('pedido_id', pedidoId)
+
+    const tipoFmt = tipoLabel[pedido.tipo] ?? pedido.tipo
+
+    console.warn('[ofertas] sem fornecedor disponível', {
+      pedidoId,
+      tipo: pedido.tipo,
+      estado: pedido.estado,
+      tentativas: count ?? 0,
+    })
+
+    await Promise.allSettled([
+      whatsappAdminSemFornecedor({
+        pedidoId,
+        nomeCliente: pedido.nome,
+        tipo: tipoFmt,
+        quantidade: pedido.quantidade,
+        estado: pedido.estado,
+        totalTentativas: count ?? 0,
+      }),
+      emailAdminSemFornecedor({
+        pedidoId,
+        nomeCliente: pedido.nome,
+        tipo: tipoFmt,
+        quantidade: pedido.quantidade,
+        estado: pedido.estado,
+        totalTentativas: count ?? 0,
+      }),
+    ])
+
+    return
+  }
 
   const { count } = await supabase
     .from('ofertas')

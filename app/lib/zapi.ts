@@ -21,3 +21,42 @@ export async function enviarMensagem(telefone: string, mensagem: string) {
     console.error('Z-API error:', err)
   }
 }
+
+export async function whatsappAdminSemFornecedor(params: {
+  pedidoId: string
+  nomeCliente: string
+  tipo: string
+  quantidade: number | null
+  estado: string
+  totalTentativas: number
+}): Promise<void> {
+  const adminWhatsapp = process.env.ADMIN_WHATSAPP
+
+  if (!adminWhatsapp) {
+    console.warn('[zapi] ADMIN_WHATSAPP ausente — alerta admin não enviado:', { pedidoId: params.pedidoId })
+    return
+  }
+
+  const supabaseLink = `https://supabase.com/dashboard/project/oumfvryxxxfgflvpqeow/editor/pedidos?filter=id%3Aeq%3A${encodeURIComponent(params.pedidoId)}`
+
+  const linhaQtd =
+    params.quantidade !== null && params.quantidade !== undefined
+      ? `\nQtd: ${params.quantidade} peças`
+      : ''
+
+  const mensagem =
+    `⚠️ *Confeccione — pedido sem fornecedor*\n\n` +
+    `Cliente: ${params.nomeCliente}\n` +
+    `Tipo: ${params.tipo}` +
+    linhaQtd +
+    `\nEstado: ${params.estado}\n` +
+    `Tentativas feitas: ${params.totalTentativas}\n\n` +
+    `Pedido: ${params.pedidoId}\n` +
+    supabaseLink
+
+  try {
+    await enviarMensagem(adminWhatsapp, mensagem)
+  } catch (err) {
+    console.error('[zapi] whatsappAdminSemFornecedor falhou:', err)
+  }
+}

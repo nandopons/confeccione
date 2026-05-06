@@ -305,6 +305,70 @@ ${SITE_URL}`
   await enviarEmail({ to: params.email, subject, html, text })
 }
 
+// ─── Email 5: Alerta admin — pedido sem fornecedor ─────────────
+
+export async function emailAdminSemFornecedor(params: {
+  pedidoId: string
+  nomeCliente: string
+  tipo: string
+  quantidade: number | null
+  estado: string
+  totalTentativas: number
+}): Promise<void> {
+  const adminEmail = process.env.ADMIN_EMAIL
+
+  if (!adminEmail) {
+    console.warn('[email] ADMIN_EMAIL ausente — alerta admin não enviado:', { pedidoId: params.pedidoId })
+    return
+  }
+
+  const nomeEsc = escapeHtml(params.nomeCliente)
+  const tipoEsc = escapeHtml(params.tipo)
+  const estadoEsc = escapeHtml(params.estado)
+  const pedidoIdEsc = escapeHtml(params.pedidoId)
+  const supabaseLink = `https://supabase.com/dashboard/project/oumfvryxxxfgflvpqeow/editor/pedidos?filter=id%3Aeq%3A${encodeURIComponent(params.pedidoId)}`
+
+  const subject = `⚠️ Pedido sem fornecedor disponível — ${params.tipo} em ${params.estado}`
+  const preheader = `${params.nomeCliente} fez um pedido de ${params.tipo} em ${params.estado} e não há fornecedor compatível.`
+
+  const qtdLinha =
+    params.quantidade !== null && params.quantidade !== undefined
+      ? `<tr><td style="padding:6px 0;color:#666;width:120px;">Quantidade</td><td style="padding:6px 0;color:#111827;font-weight:500;">${params.quantidade} peças</td></tr>`
+      : ''
+
+  const html = layout(
+    `
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#991b1b;">⚠️ Pedido sem fornecedor</h1>
+    <p style="margin:0 0 20px;color:#374151;">Um pedido foi criado/reprocessado e não encontrou fornecedor compatível na base.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #eeeeee;border-bottom:1px solid #eeeeee;margin:8px 0;">
+      <tr><td style="padding:6px 0;color:#666;width:120px;">Cliente</td><td style="padding:6px 0;color:#111827;font-weight:500;">${nomeEsc}</td></tr>
+      <tr><td style="padding:6px 0;color:#666;">Tipo</td><td style="padding:6px 0;color:#111827;font-weight:500;">${tipoEsc}</td></tr>
+      ${qtdLinha}
+      <tr><td style="padding:6px 0;color:#666;">Estado</td><td style="padding:6px 0;color:#111827;font-weight:500;">${estadoEsc}</td></tr>
+      <tr><td style="padding:6px 0;color:#666;">Tentativas</td><td style="padding:6px 0;color:#111827;font-weight:500;">${params.totalTentativas}</td></tr>
+      <tr><td style="padding:6px 0;color:#666;">Pedido ID</td><td style="padding:6px 0;color:#111827;font-family:'SF Mono',Monaco,monospace;font-size:13px;">${pedidoIdEsc}</td></tr>
+    </table>
+    <div style="margin:24px 0;">
+      <a href="${supabaseLink}" style="display:inline-block;background:#1f2937;color:#ffffff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:500;font-size:14px;">Abrir no Supabase Studio</a>
+    </div>
+    `,
+    preheader
+  )
+
+  const text = `Pedido sem fornecedor disponível.
+
+Cliente: ${params.nomeCliente}
+Tipo: ${params.tipo}${params.quantidade !== null && params.quantidade !== undefined ? `\nQuantidade: ${params.quantidade} peças` : ''}
+Estado: ${params.estado}
+Tentativas: ${params.totalTentativas}
+Pedido ID: ${params.pedidoId}
+
+Abrir no Supabase Studio:
+${supabaseLink}`
+
+  await enviarEmail({ to: adminEmail, subject, html, text })
+}
+
 export async function emailContatoFornecedor(params: {
   email: string
   nomeCliente: string
