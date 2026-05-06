@@ -7,8 +7,6 @@ author: "Confeccione"
 keywords: ["criar marca de roupas", "como abrir marca de roupas", "marca própria de roupas", "começar marca de moda", "passo a passo marca de roupas", "criar marca de moda"]
 ---
 
-# Como criar uma marca de roupas: o que realmente importa nos primeiros passos
-
 A maioria dos guias sobre como criar uma marca de roupas é escrita por gente que nunca esteve no chão de uma confecção. O resultado é sempre o mesmo: dicas genéricas, listas de "10 passos pro sucesso" e nenhuma informação prática sobre como uma peça realmente sai do papel e chega no cliente.
 
 A Confeccione nasceu dentro da indústria têxtil. Acompanhamos diariamente o processo produtivo completo — da modelagem ao acabamento final — e conversamos com centenas de empreendedores que estão começando. Este guia é a versão que gostaríamos de ter lido antes de cometer os erros que vimos repetidos por anos.
