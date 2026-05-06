@@ -11,9 +11,9 @@ const supabase = createClient(
 const tipoLabel: Record<string, string> = {
   interclasse: 'Interclasse/Evento',
   private_label: 'Private Label',
-  peca_unica: 'Peca Unica',
+  fitness: 'Fitness',
   fardamento: 'Fardamento',
-  padrao_esportivo: 'Padrao Esportivo',
+  padrao_esportivo: 'Padrão Esportivo',
   ajuste: 'Ajuste/Conserto',
 }
 

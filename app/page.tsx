@@ -6,7 +6,7 @@ import SiteHeader from "@/app/components/SiteHeader";
 const nichos = [
   { id: "interclasse",      icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
   { id: "private_label",    icon: "✂️", title: "Private Label",        sub: "Marca própria e coleções" },
-  { id: "peca_unica",       icon: "🧵", title: "Peça Única",           sub: "Personalizada ou presente" },
+  { id: "fitness",          icon: "💪", title: "Fitness",              sub: "Roupas para academia, corrida, yoga e modalidades esportivas" },
   { id: "fardamento",       icon: "🏢", title: "Fardamento",           sub: "Uniformes corporativos" },
   { id: "padrao_esportivo", icon: "⚽", title: "Padrão Esportivo",     sub: "Pelada, vôlei, futebol com nome nas costas" },
   { id: "ajuste",           icon: "📐", title: "Ajuste / Conserto",    sub: "Ajustes e reparos em geral" },
