@@ -1,15 +1,23 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
 
-const tiposProduto = [
-  { id: "interclasse",     icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
-  { id: "private_label",   icon: "✂️", title: "Private Label",        sub: "Marca própria e coleções" },
-  { id: "fitness",         icon: "💪", title: "Fitness",              sub: "Roupas para academia, corrida, yoga e modalidades esportivas" },
-  { id: "fardamento",      icon: "🏢", title: "Fardamento",           sub: "Uniformes corporativos" },
-  { id: "padrao_esportivo",icon: "⚽", title: "Padrão Esportivo",     sub: "Pelada, vôlei, futebol com nome nas costas" },
-  { id: "ajuste",          icon: "📐", title: "Ajuste / Conserto",    sub: "Ajustes e reparos em geral" },
+const tiposProdutoPrincipais = [
+  { id: "interclasse",   icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
+  { id: "private_label", icon: "✂️", title: "Private Label",        sub: "Marca própria e coleções" },
+  { id: "fitness",       icon: "💪", title: "Fitness",              sub: "Academia, corrida, yoga" },
+  { id: "moda_praia",    icon: "🏖️", title: "Moda Praia",           sub: "Biquínis, sungas, saídas de praia" },
+  { id: "moda_intima",   icon: "🩱", title: "Moda Íntima",          sub: "Lingerie, pijamas, sleepwear" },
+];
+
+const tiposProdutoExtras = [
+  { id: "padrao_esportivo", icon: "⚽", title: "Padrão Esportivo",     sub: "Futebol, vôlei, com nome nas costas" },
+  { id: "fardamento",       icon: "🏢", title: "Fardamento",           sub: "Uniformes corporativos" },
+  { id: "inverno",          icon: "🧥", title: "Inverno",              sub: "Casacos, jaquetas, moletons" },
+  { id: "roupas_uv",        icon: "☀️", title: "Roupas UV",            sub: "Proteção solar, esportes ao ar livre" },
+  { id: "bones",            icon: "🧢", title: "Bonés",                sub: "Bonés bordados, customizados" },
+  { id: "bolsas",           icon: "👜", title: "Bolsas e Acessórios",  sub: "Mochilas, ecobags, acessórios" },
 ];
 
 const ufs = ["AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT","PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"];
@@ -26,12 +34,19 @@ export default function CadastroFornecedor() {
   const [cidade, setCidade]           = useState("");
   const [raio, setRaio]               = useState("");
   const [enviando, setEnviando]       = useState(false);
+  const [showExtras, setShowExtras]   = useState(false);
 
   function toggleTipo(id: string) {
     setTiposSel(prev =>
       prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]
     );
   }
+
+  useEffect(() => {
+    if (tiposSel.some(id => tiposProdutoExtras.some(t => t.id === id))) {
+      setShowExtras(true);
+    }
+  }, [tiposSel]);
 
   const step1Valid = nome.trim().length > 0 && whatsapp.replace(/\D/g, "").length >= 10 && email.includes("@");
   const step2Valid = tiposSel.length > 0 && pedidoMinimo >= 1;
@@ -119,14 +134,44 @@ export default function CadastroFornecedor() {
 
               <div className="mb-5">
                 <label className="text-xs text-gray-400 mb-2 block">Tipos de produto que você confecciona <span className="text-red-400">*</span></label>
-                <div className="grid grid-cols-2 gap-3">
-                  {tiposProduto.map((t) => (
-                    <button key={t.id} type="button" onClick={() => toggleTipo(t.id)} className={`text-left border-2 rounded-xl p-4 transition-all ${tiposSel.includes(t.id) ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 hover:border-[#1D9E75]"}`}>
-                      <span className="text-2xl mb-2 block">{t.icon}</span>
-                      <div className="text-sm font-medium text-gray-900">{t.title}</div>
-                      <div className="text-xs text-gray-400 mt-1">{t.sub}</div>
-                    </button>
-                  ))}
+                <div className="overflow-hidden">
+                  <div className={`flex transition-transform duration-300 ease-out ${showExtras ? "-translate-x-full" : "translate-x-0"}`}>
+                    <div className="flex-shrink-0 w-full">
+                      <div className="grid grid-cols-2 gap-3">
+                        {tiposProdutoPrincipais.map((t) => (
+                          <button key={t.id} type="button" onClick={() => toggleTipo(t.id)} className={`text-left border-2 rounded-xl p-4 transition-all ${tiposSel.includes(t.id) ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 hover:border-[#1D9E75]"}`}>
+                            <span className="text-2xl mb-2 block">{t.icon}</span>
+                            <div className="text-sm font-medium text-gray-900">{t.title}</div>
+                            <div className="text-xs text-gray-400 mt-1">{t.sub}</div>
+                          </button>
+                        ))}
+                        <button type="button" onClick={() => setShowExtras(true)} className="text-left border-2 border-gray-200 hover:border-[#1D9E75] rounded-xl p-4 transition-all">
+                          <span className="text-2xl mb-2 block">➕</span>
+                          <div className="flex items-center justify-between gap-2">
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">Outros</div>
+                              <div className="text-xs text-gray-400 mt-1">Mais categorias</div>
+                            </div>
+                            <span className="text-gray-400 text-lg shrink-0">›</span>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex-shrink-0 w-full">
+                      <button type="button" onClick={() => setShowExtras(false)} className="text-xs text-gray-500 hover:text-gray-800 mb-3 inline-flex items-center gap-1">
+                        ← Voltar
+                      </button>
+                      <div className="grid grid-cols-2 gap-3">
+                        {tiposProdutoExtras.map((t) => (
+                          <button key={t.id} type="button" onClick={() => toggleTipo(t.id)} className={`text-left border-2 rounded-xl p-4 transition-all ${tiposSel.includes(t.id) ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 hover:border-[#1D9E75]"}`}>
+                            <span className="text-2xl mb-2 block">{t.icon}</span>
+                            <div className="text-sm font-medium text-gray-900">{t.title}</div>
+                            <div className="text-xs text-gray-400 mt-1">{t.sub}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 

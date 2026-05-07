@@ -14,9 +14,14 @@ const tipoLabel: Record<string, string> = {
   interclasse: 'Interclasse/Evento',
   private_label: 'Private Label',
   fitness: 'Fitness',
-  fardamento: 'Fardamento',
+  moda_praia: 'Moda Praia',
+  moda_intima: 'Moda Íntima',
   padrao_esportivo: 'Padrão Esportivo',
-  ajuste: 'Ajuste/Conserto',
+  fardamento: 'Fardamento',
+  inverno: 'Inverno',
+  roupas_uv: 'Roupas UV',
+  bones: 'Bonés',
+  bolsas: 'Bolsas e Acessórios',
 }
 
 export async function POST(req: Request) {

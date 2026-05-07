@@ -3,14 +3,24 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
 
-const nichos = [
-  { id: "interclasse",      icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
-  { id: "private_label",    icon: "✂️", title: "Private Label",        sub: "Marca própria e coleções" },
-  { id: "fitness",          icon: "💪", title: "Fitness",              sub: "Roupas para academia, corrida, yoga e modalidades esportivas" },
-  { id: "fardamento",       icon: "🏢", title: "Fardamento",           sub: "Uniformes corporativos" },
-  { id: "padrao_esportivo", icon: "⚽", title: "Padrão Esportivo",     sub: "Pelada, vôlei, futebol com nome nas costas" },
-  { id: "ajuste",           icon: "📐", title: "Ajuste / Conserto",    sub: "Ajustes e reparos em geral" },
+const nichosPrincipais = [
+  { id: "interclasse",   icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
+  { id: "private_label", icon: "✂️", title: "Private Label",        sub: "Marca própria e coleções" },
+  { id: "fitness",       icon: "💪", title: "Fitness",              sub: "Academia, corrida, yoga" },
+  { id: "moda_praia",    icon: "🏖️", title: "Moda Praia",           sub: "Biquínis, sungas, saídas de praia" },
+  { id: "moda_intima",   icon: "🩱", title: "Moda Íntima",          sub: "Lingerie, pijamas, sleepwear" },
 ];
+
+const nichosExtras = [
+  { id: "padrao_esportivo", icon: "⚽", title: "Padrão Esportivo",     sub: "Futebol, vôlei, com nome nas costas" },
+  { id: "fardamento",       icon: "🏢", title: "Fardamento",           sub: "Uniformes corporativos" },
+  { id: "inverno",          icon: "🧥", title: "Inverno",              sub: "Casacos, jaquetas, moletons" },
+  { id: "roupas_uv",        icon: "☀️", title: "Roupas UV",            sub: "Proteção solar, esportes ao ar livre" },
+  { id: "bones",            icon: "🧢", title: "Bonés",                sub: "Bonés bordados, customizados" },
+  { id: "bolsas",           icon: "👜", title: "Bolsas e Acessórios",  sub: "Mochilas, ecobags, acessórios" },
+];
+
+const nichosTodos = [...nichosPrincipais, ...nichosExtras];
 
 const prazos: Record<string, string> = {
   urgente: "Urgente (até 7 dias)",
@@ -30,9 +40,16 @@ export default function Home() {
   const [descricao, setDescricao] = useState("");
   const [protocolo] = useState(() => Math.floor(Math.random() * 90000) + 10000);
   const [enviando, setEnviando] = useState(false);
+  const [showExtras, setShowExtras] = useState(false);
   const leadEnviado = useRef(false);
 
   const ufs = ["AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT","PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"];
+
+  useEffect(() => {
+    if (tipo && nichosExtras.some(n => n.id === tipo)) {
+      setShowExtras(true);
+    }
+  }, [tipo]);
 
   useEffect(() => {
     if (step !== 3) return;
@@ -44,7 +61,7 @@ export default function Home() {
       event: "generate_lead",
       pedido_id: `CF-${protocolo}`,
       pedido_tipo: tipo,
-      quantidade: tipo !== "ajuste" ? qty : null,
+      quantidade: qty,
       estado,
       value: 1,
       currency: "BRL",
@@ -59,7 +76,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tipo,
-          quantidade: tipo !== "ajuste" ? qty : null,
+          quantidade: qty,
           prazo,
           estado,
           nome,
@@ -118,16 +135,48 @@ export default function Home() {
             <>
               <p className="text-gray-900 font-medium mb-1">O que você precisa produzir?</p>
               <p className="text-gray-400 text-sm mb-5">Escolha o tipo de pedido mais próximo da sua necessidade.</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 mb-6">
-                {nichos.map((n) => (
-                  <button key={n.id} onClick={() => setTipo(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 hover:border-[#1D9E75]"}`}>
-                    <span className="text-2xl shrink-0 sm:mb-2">{n.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-900 leading-tight">{n.title}</div>
-                      <div className="text-xs text-gray-400 mt-0.5 leading-snug">{n.sub}</div>
+              <div className="overflow-hidden mb-6">
+                <div className={`flex transition-transform duration-300 ease-out ${showExtras ? "-translate-x-full" : "translate-x-0"}`}>
+                  <div className="flex-shrink-0 w-full">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                      {nichosPrincipais.map((n) => (
+                        <button key={n.id} onClick={() => setTipo(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 hover:border-[#1D9E75]"}`}>
+                          <span className="text-2xl shrink-0 sm:mb-2">{n.icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-gray-900 leading-tight">{n.title}</div>
+                            <div className="text-xs text-gray-400 mt-0.5 leading-snug">{n.sub}</div>
+                          </div>
+                        </button>
+                      ))}
+                      <button type="button" onClick={() => setShowExtras(true)} className="text-left border-2 border-gray-200 hover:border-[#1D9E75] rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all">
+                        <span className="text-2xl shrink-0 sm:mb-2">➕</span>
+                        <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-medium text-gray-900 leading-tight">Outros</div>
+                            <div className="text-xs text-gray-400 mt-0.5 leading-snug">Mais categorias</div>
+                          </div>
+                          <span className="text-gray-400 text-lg shrink-0">›</span>
+                        </div>
+                      </button>
                     </div>
-                  </button>
-                ))}
+                  </div>
+                  <div className="flex-shrink-0 w-full">
+                    <button type="button" onClick={() => setShowExtras(false)} className="text-xs text-gray-500 hover:text-gray-800 mb-3 inline-flex items-center gap-1">
+                      ← Voltar
+                    </button>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                      {nichosExtras.map((n) => (
+                        <button key={n.id} onClick={() => setTipo(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 hover:border-[#1D9E75]"}`}>
+                          <span className="text-2xl shrink-0 sm:mb-2">{n.icon}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-gray-900 leading-tight">{n.title}</div>
+                            <div className="text-xs text-gray-400 mt-0.5 leading-snug">{n.sub}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
               </div>
               <div className="flex justify-end">
                 <button disabled={!tipo} onClick={() => setStep(1)} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium disabled:opacity-30 hover:opacity-85">Continuar →</button>
@@ -138,18 +187,16 @@ export default function Home() {
           {step === 1 && (
             <>
               <p className="text-gray-900 font-medium mb-1">Detalhes do pedido</p>
-              <p className="text-gray-400 text-sm mb-5">{tipo === "ajuste" ? "Descreva o que precisa ajustar ou consertar." : "Quanto você precisa produzir e qual o prazo?"}</p>
-              {tipo !== "ajuste" && (
-                <div className="mb-5">
-                  <label className="text-xs text-gray-400 mb-2 block">Quantidade de peças</label>
-                  <div className="flex items-center gap-3">
-                    <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-9 h-9 border border-gray-400 text-gray-700 rounded-lg text-lg flex items-center justify-center hover:bg-gray-100">−</button>
-                    <input type="number" min={1} step={1} value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="w-14 h-9 border border-gray-200 rounded-lg text-center text-sm font-medium text-gray-900 focus:outline-none focus:border-[#1D9E75]" />
-                    <button onClick={() => setQty(qty + 1)} className="w-9 h-9 border border-gray-400 text-gray-700 rounded-lg text-lg flex items-center justify-center hover:bg-gray-100">+</button>
-                    <span className="text-sm text-gray-400">peças</span>
-                  </div>
+              <p className="text-gray-400 text-sm mb-5">Quanto você precisa produzir e qual o prazo?</p>
+              <div className="mb-5">
+                <label className="text-xs text-gray-400 mb-2 block">Quantidade de peças</label>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-9 h-9 border border-gray-400 text-gray-700 rounded-lg text-lg flex items-center justify-center hover:bg-gray-100">−</button>
+                  <input type="number" min={1} step={1} value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="w-14 h-9 border border-gray-200 rounded-lg text-center text-sm font-medium text-gray-900 focus:outline-none focus:border-[#1D9E75]" />
+                  <button onClick={() => setQty(qty + 1)} className="w-9 h-9 border border-gray-400 text-gray-700 rounded-lg text-lg flex items-center justify-center hover:bg-gray-100">+</button>
+                  <span className="text-sm text-gray-400">peças</span>
                 </div>
-              )}
+              </div>
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">Prazo desejado</label>
@@ -200,8 +247,8 @@ export default function Home() {
               <div className="bg-gray-50 rounded-xl p-4 mb-6 text-sm">
                 <p className="text-xs text-gray-400 font-medium mb-3">Resumo do pedido</p>
                 <div className="space-y-2">
-                  <div className="flex justify-between text-gray-600"><span>Tipo</span><span>{nichos.find(n => n.id === tipo)?.title}</span></div>
-                  {tipo !== "ajuste" && <div className="flex justify-between text-gray-600"><span>Quantidade</span><span>{qty} peças</span></div>}
+                  <div className="flex justify-between text-gray-600"><span>Tipo</span><span>{nichosTodos.find(n => n.id === tipo)?.title}</span></div>
+                  <div className="flex justify-between text-gray-600"><span>Quantidade</span><span>{qty} peças</span></div>
                   {prazo && <div className="flex justify-between text-gray-600"><span>Prazo</span><span>{prazos[prazo]}</span></div>}
                   {estado && <div className="flex justify-between text-gray-600"><span>Estado</span><span>{estado}</span></div>}
                 </div>

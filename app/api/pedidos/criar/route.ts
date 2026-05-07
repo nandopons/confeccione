@@ -16,7 +16,7 @@ export async function POST(req: Request) {
     .from('pedidos')
     .insert({
       tipo,
-      quantidade: tipo !== 'ajuste' ? quantidade : null,
+      quantidade,
       prazo,
       estado,
       nome,
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
         nomeCliente: nome,
         protocolo: data.id,
         tipo,
-        quantidade: tipo !== 'ajuste' ? quantidade : null,
+        quantidade,
         estado,
         prazo,
       })
