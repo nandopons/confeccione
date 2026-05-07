@@ -60,3 +60,36 @@ export async function whatsappAdminSemFornecedor(params: {
     console.error('[zapi] whatsappAdminSemFornecedor falhou:', err)
   }
 }
+
+export async function whatsappAdminFornecedorExpirou(params: {
+  fornecedorId: string
+  nomeFornecedor: string
+  whatsappFornecedor: string
+  pedidoId: string
+  nomeCliente: string
+  tipo: string
+}): Promise<void> {
+  const adminWhatsapp = process.env.ADMIN_WHATSAPP
+
+  if (!adminWhatsapp) {
+    console.warn('[zapi] ADMIN_WHATSAPP ausente — alerta expiração não enviado:', { fornecedorId: params.fornecedorId })
+    return
+  }
+
+  const fornecedorLink = `https://supabase.com/dashboard/project/oumfvryxxxfgflvpqeow/editor/leads_fornecedores?filter=id%3Aeq%3A${encodeURIComponent(params.fornecedorId)}`
+
+  const mensagem =
+    `⏰ *Confeccione — fornecedor não respondeu em 4h*\n\n` +
+    `Fornecedor: ${params.nomeFornecedor}\n` +
+    `WhatsApp: ${params.whatsappFornecedor}\n\n` +
+    `Pedido: ${params.tipo} de ${params.nomeCliente}\n` +
+    `Pedido ID: ${params.pedidoId}\n\n` +
+    `Sistema vai oferecer pra outro fornecedor automaticamente.\n\n` +
+    fornecedorLink
+
+  try {
+    await enviarMensagem(adminWhatsapp, mensagem)
+  } catch (err) {
+    console.error('[zapi] whatsappAdminFornecedorExpirou falhou:', err)
+  }
+}

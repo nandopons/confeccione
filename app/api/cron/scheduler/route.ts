@@ -2,7 +2,8 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { estaEmHorarioComercial } from '@/app/lib/horario'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
-import { enviarMensagem } from '@/app/lib/zapi'
+import { enviarMensagem, whatsappAdminFornecedorExpirou } from '@/app/lib/zapi'
+import { emailAdminFornecedorExpirou } from '@/app/lib/email'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,6 +25,7 @@ export async function GET(req: Request) {
   const resumo = {
     ofertas_expiradas: 0,
     ofertas_reenviadas: 0,
+    notificacoes_expiracao: 0,
     pedidos_buscar_apos: 0,
     followups_24h_enviados: 0,
     followups_48h_enviados: 0,
@@ -49,7 +51,7 @@ export async function GET(req: Request) {
   // ===========================================================
   const { data: expiradas, error: errExpiradas } = await supabase
     .from('ofertas')
-    .select('id, pedido_id')
+    .select('id, pedido_id, fornecedor_id')
     .eq('status', 'enviada')
     .lt('expira_em', agoraISO)
 
@@ -68,6 +70,48 @@ export async function GET(req: Request) {
       }
 
       resumo.ofertas_expiradas += 1
+
+      // Notifica admin sobre fornecedor que deixou expirar.
+      // Falha aqui não bloqueia o reenvio nem é considerado erro fatal.
+      try {
+        const [{ data: fornecedor }, { data: pedido }] = await Promise.all([
+          supabase
+            .from('leads_fornecedores')
+            .select('id, nome, whatsapp')
+            .eq('id', oferta.fornecedor_id)
+            .single(),
+          supabase
+            .from('pedidos')
+            .select('id, nome, tipo')
+            .eq('id', oferta.pedido_id)
+            .single(),
+        ])
+
+        if (fornecedor && pedido) {
+          await Promise.allSettled([
+            whatsappAdminFornecedorExpirou({
+              fornecedorId: fornecedor.id,
+              nomeFornecedor: fornecedor.nome,
+              whatsappFornecedor: fornecedor.whatsapp,
+              pedidoId: pedido.id,
+              nomeCliente: pedido.nome,
+              tipo: pedido.tipo,
+            }),
+            emailAdminFornecedorExpirou({
+              fornecedorId: fornecedor.id,
+              nomeFornecedor: fornecedor.nome,
+              whatsappFornecedor: fornecedor.whatsapp,
+              pedidoId: pedido.id,
+              nomeCliente: pedido.nome,
+              tipo: pedido.tipo,
+            }),
+          ])
+          resumo.notificacoes_expiracao += 1
+        }
+      } catch (err) {
+        // Não interrompe o reenvio se a notificação falhar
+        console.error('[scheduler] notificação expiração falhou:', err)
+      }
 
       try {
         await criarEDispararOferta(oferta.pedido_id)

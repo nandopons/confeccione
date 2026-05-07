@@ -32,15 +32,29 @@ export type Fornecedor = {
 }
 
 export async function buscarFornecedorCompativel(pedido: Pedido): Promise<Fornecedor | null> {
+  // Bloqueio 1: fornecedores que já tiveram oferta neste pedido
+  // (recusada, expirada ou enviada anteriormente — não pode reincidir)
   const { data: ofertasExistentes } = await supabase
     .from('ofertas')
     .select('fornecedor_id')
     .eq('pedido_id', pedido.id)
-    .in('status', ['enviada', 'aceita', 'recusada'])
+    .in('status', ['enviada', 'aceita', 'recusada', 'expirada'])
 
-  const excluidos: string[] = (ofertasExistentes ?? []).map(
-    (o: { fornecedor_id: string }) => o.fornecedor_id
-  )
+  // Bloqueio 2: fornecedores com oferta ATIVA (status='enviada') em QUALQUER pedido
+  // (1 oferta por vez por fornecedor — só recebe nova depois de responder/expirar)
+  const { data: ofertasAtivas } = await supabase
+    .from('ofertas')
+    .select('fornecedor_id')
+    .eq('status', 'enviada')
+
+  const excluidosSet = new Set<string>()
+  for (const o of ofertasExistentes ?? []) {
+    excluidosSet.add((o as { fornecedor_id: string }).fornecedor_id)
+  }
+  for (const o of ofertasAtivas ?? []) {
+    excluidosSet.add((o as { fornecedor_id: string }).fornecedor_id)
+  }
+  const excluidos: string[] = Array.from(excluidosSet)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let q: any = supabase

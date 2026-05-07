@@ -369,6 +369,70 @@ ${supabaseLink}`
   await enviarEmail({ to: adminEmail, subject, html, text })
 }
 
+// ─── Email 6: Alerta admin — fornecedor não respondeu em 4h ────
+
+export async function emailAdminFornecedorExpirou(params: {
+  fornecedorId: string
+  nomeFornecedor: string
+  whatsappFornecedor: string
+  pedidoId: string
+  nomeCliente: string
+  tipo: string
+}): Promise<void> {
+  const adminEmail = process.env.ADMIN_EMAIL
+
+  if (!adminEmail) {
+    console.warn('[email] ADMIN_EMAIL ausente — alerta expiração não enviado:', { fornecedorId: params.fornecedorId })
+    return
+  }
+
+  const nomeFornEsc = escapeHtml(params.nomeFornecedor)
+  const whatsFornEsc = escapeHtml(params.whatsappFornecedor)
+  const fornecedorIdEsc = escapeHtml(params.fornecedorId)
+  const nomeClienteEsc = escapeHtml(params.nomeCliente)
+  const tipoEsc = escapeHtml(params.tipo)
+  const pedidoIdEsc = escapeHtml(params.pedidoId)
+  const fornecedorLink = `https://supabase.com/dashboard/project/oumfvryxxxfgflvpqeow/editor/leads_fornecedores?filter=id%3Aeq%3A${encodeURIComponent(params.fornecedorId)}`
+
+  const subject = `⏰ Fornecedor expirou sem responder — ${params.nomeFornecedor}`
+  const preheader = `${params.nomeFornecedor} não respondeu o pedido em 4h. Sistema vai oferecer pra outro.`
+
+  const html = layout(
+    `
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#92400e;">⏰ Fornecedor não respondeu em 4h</h1>
+    <p style="margin:0 0 20px;color:#374151;">Um fornecedor recebeu uma oferta e deixou expirar sem responder. O sistema já vai oferecer pra outro fornecedor automaticamente.</p>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #eeeeee;border-bottom:1px solid #eeeeee;margin:8px 0;">
+      <tr><td style="padding:6px 0;color:#666;width:140px;">Fornecedor</td><td style="padding:6px 0;color:#111827;font-weight:500;">${nomeFornEsc}</td></tr>
+      <tr><td style="padding:6px 0;color:#666;">WhatsApp</td><td style="padding:6px 0;color:#111827;font-weight:500;">${whatsFornEsc}</td></tr>
+      <tr><td style="padding:6px 0;color:#666;">Fornecedor ID</td><td style="padding:6px 0;color:#111827;font-family:'SF Mono',Monaco,monospace;font-size:13px;">${fornecedorIdEsc}</td></tr>
+      <tr><td style="padding:6px 0;color:#666;">Pedido (cliente)</td><td style="padding:6px 0;color:#111827;font-weight:500;">${tipoEsc} — ${nomeClienteEsc}</td></tr>
+      <tr><td style="padding:6px 0;color:#666;">Pedido ID</td><td style="padding:6px 0;color:#111827;font-family:'SF Mono',Monaco,monospace;font-size:13px;">${pedidoIdEsc}</td></tr>
+    </table>
+    <div style="margin:24px 0;">
+      <a href="${fornecedorLink}" style="display:inline-block;background:#1f2937;color:#ffffff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:500;font-size:14px;">Abrir fornecedor no Supabase</a>
+    </div>
+    <p style="margin:16px 0 0;color:#666;font-size:13px;line-height:1.5;">Se este fornecedor estiver acumulando muitas expirações, considere ajustar o status dele ou entrar em contato manualmente.</p>
+    `,
+    preheader
+  )
+
+  const text = `Fornecedor não respondeu em 4h.
+
+Fornecedor: ${params.nomeFornecedor}
+WhatsApp: ${params.whatsappFornecedor}
+Fornecedor ID: ${params.fornecedorId}
+
+Pedido: ${params.tipo} — ${params.nomeCliente}
+Pedido ID: ${params.pedidoId}
+
+Sistema vai oferecer pra outro fornecedor automaticamente.
+
+Abrir fornecedor no Supabase:
+${fornecedorLink}`
+
+  await enviarEmail({ to: adminEmail, subject, html, text })
+}
+
 export async function emailContatoFornecedor(params: {
   email: string
   nomeCliente: string
