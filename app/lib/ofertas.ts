@@ -1,7 +1,15 @@
 import { createClient } from '@supabase/supabase-js'
-import { buscarFornecedorCompativel, Pedido } from './matching'
+import { buscarFornecedorCompativel, type Pedido, type Fornecedor } from './matching'
 import { enviarMensagem, whatsappAdminSemFornecedor } from './zapi'
 import { emailOfertaFornecedor, emailAdminSemFornecedor } from './email'
+import {
+  PLANOS_CONFIG,
+  PACOTES_LEADS_EXTRAS,
+  JANELA_SEM_CREDITO_MS,
+  planoEfetivo,
+  podeReceberGatilhoUpgrade,
+  registrarGatilhoUpgrade,
+} from './planos'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -28,6 +36,8 @@ const prazoLabel: Record<string, string> = {
   sempressa: 'Sem pressa (21+ dias)',
 }
 
+const HORAS_4_MS = 4 * 60 * 60 * 1000
+
 export async function criarEDispararOferta(pedidoId: string): Promise<void> {
   const { data: pedido, error: pedidoErr } = await supabase
     .from('pedidos')
@@ -42,62 +52,61 @@ export async function criarEDispararOferta(pedidoId: string): Promise<void> {
 
   if (pedido.status !== 'buscando_fornecedor') return
 
-  const fornecedor = await buscarFornecedorCompativel(pedido as Pedido)
-  if (!fornecedor) {
-    const { count } = await supabase
-      .from('ofertas')
-      .select('*', { count: 'exact', head: true })
-      .eq('pedido_id', pedidoId)
+  const resultado = await buscarFornecedorCompativel(pedido as Pedido)
 
-    const tipoFmt = tipoLabel[pedido.tipo] ?? pedido.tipo
-
-    console.warn('[ofertas] sem fornecedor disponível', {
-      pedidoId,
-      tipo: pedido.tipo,
-      estado: pedido.estado,
-      tentativas: count ?? 0,
-    })
-
-    await Promise.allSettled([
-      whatsappAdminSemFornecedor({
-        pedidoId,
-        nomeCliente: pedido.nome,
-        tipo: tipoFmt,
-        quantidade: pedido.quantidade,
-        estado: pedido.estado,
-        totalTentativas: count ?? 0,
-      }),
-      emailAdminSemFornecedor({
-        pedidoId,
-        nomeCliente: pedido.nome,
-        tipo: tipoFmt,
-        quantidade: pedido.quantidade,
-        estado: pedido.estado,
-        totalTentativas: count ?? 0,
-      }),
-    ])
-
-    return
+  // Caso 1: sem fornecedor disponível (nem com nem sem crédito)
+  if (!resultado) {
+    return await notificarAdminSemFornecedor(pedidoId, pedido)
   }
 
+  // Caso 2: fornecedor com crédito → oferta normal
+  if (resultado.tem_credito) {
+    return await dispararOfertaNormal(pedido as Pedido, resultado.fornecedor)
+  }
+
+  // Caso 3: fornecedor sem crédito → oferta com gatilho de upgrade
+  // Mas respeita anti-spam (máximo 1 gatilho por dia)
+  const podeGatilho = await podeReceberGatilhoUpgrade(resultado.fornecedor.id)
+  if (!podeGatilho) {
+    // Tenta achar OUTRO sem crédito que ainda não recebeu gatilho hoje.
+    // Por simplicidade, se o primeiro candidato sem crédito não pode receber
+    // por causa do anti-spam, marca como sem fornecedor disponível desta rodada.
+    // O cron tentará de novo no próximo ciclo (pedido fica em buscando_fornecedor).
+    console.log(
+      `[ofertas] fornecedor ${resultado.fornecedor.id} no anti-spam, pulando rodada`
+    )
+    return await notificarAdminSemFornecedor(pedidoId, pedido)
+  }
+
+  return await dispararOfertaSemCredito(pedido as Pedido, resultado.fornecedor)
+}
+
+// ============================================================
+// OFERTA NORMAL (fornecedor tem crédito)
+// ============================================================
+async function dispararOfertaNormal(
+  pedido: Pedido,
+  fornecedor: Fornecedor
+): Promise<void> {
   const { count } = await supabase
     .from('ofertas')
     .select('*', { count: 'exact', head: true })
-    .eq('pedido_id', pedidoId)
+    .eq('pedido_id', pedido.id)
 
   const tentativa = (count ?? 0) + 1
-  const expiraEm = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()
+  const expiraEm = new Date(Date.now() + HORAS_4_MS).toISOString()
 
   const { error: ofertaErr } = await supabase.from('ofertas').insert({
-    pedido_id: pedidoId,
+    pedido_id: pedido.id,
     fornecedor_id: fornecedor.id,
     status: 'enviada',
+    tipo_oferta: 'normal',
     tentativa_numero: tentativa,
     expira_em: expiraEm,
   })
 
   if (ofertaErr) {
-    console.error('criarEDispararOferta: erro ao inserir oferta', ofertaErr)
+    console.error('dispararOfertaNormal: erro ao inserir oferta', ofertaErr)
     return
   }
 
@@ -141,4 +150,134 @@ export async function criarEDispararOferta(pedidoId: string): Promise<void> {
       console.error('email oferta falhou:', err)
     }
   }
+}
+
+// ============================================================
+// OFERTA SEM CRÉDITO (gatilho de upgrade)
+// ============================================================
+async function dispararOfertaSemCredito(
+  pedido: Pedido,
+  fornecedor: Fornecedor
+): Promise<void> {
+  const { count } = await supabase
+    .from('ofertas')
+    .select('*', { count: 'exact', head: true })
+    .eq('pedido_id', pedido.id)
+
+  const tentativa = (count ?? 0) + 1
+  const expiraEm = new Date(Date.now() + JANELA_SEM_CREDITO_MS).toISOString()
+
+  // Insere oferta com tipo_oferta='sem_credito' e janela de 3h
+  const { data: ofertaInserida, error: ofertaErr } = await supabase
+    .from('ofertas')
+    .insert({
+      pedido_id: pedido.id,
+      fornecedor_id: fornecedor.id,
+      status: 'enviada',
+      tipo_oferta: 'sem_credito',
+      tentativa_numero: tentativa,
+      expira_em: expiraEm,
+    })
+    .select('id')
+    .single()
+
+  if (ofertaErr || !ofertaInserida) {
+    console.error('dispararOfertaSemCredito: erro ao inserir oferta', ofertaErr)
+    return
+  }
+
+  // Registra anti-spam (1 gatilho/dia)
+  await registrarGatilhoUpgrade({
+    fornecedorId: fornecedor.id,
+    pedidoId: pedido.id,
+    ofertaId: ofertaInserida.id,
+  })
+
+  // Monta mensagem com resumo do lead + opções de upgrade
+  const tipo = tipoLabel[pedido.tipo] ?? pedido.tipo
+  const prazo = prazoLabel[pedido.prazo] ?? pedido.prazo
+  const planoAtual = planoEfetivo({
+    plano: fornecedor.plano,
+    plano_expira_em: fornecedor.plano_expira_em,
+  })
+  const config = PLANOS_CONFIG[planoAtual]
+
+  let mensagem = `Olá ${fornecedor.nome}! 🔔\n\nTenho um pedido que bate com seu perfil:\n\nTipo: ${tipo}`
+
+  if (pedido.quantidade !== null && pedido.quantidade !== undefined) {
+    mensagem += `\nQuantidade: ${pedido.quantidade} peças`
+  }
+
+  mensagem += `\nEstado: ${pedido.estado}\nPrazo: ${prazo}`
+
+  if (pedido.descricao && String(pedido.descricao).trim().length > 0) {
+    mensagem += `\nDetalhes: ${String(pedido.descricao).trim()}`
+  }
+
+  mensagem += `\n\n⚠️ Você atingiu o limite de ${config.leads_inclusos} leads do plano *${config.nome}* este mês.\n\nPra receber este lead, você pode:`
+
+  // Pacotes de leads extras (preço varia conforme plano)
+  PACOTES_LEADS_EXTRAS.forEach((pacote, i) => {
+    const preco = pacote.quantidade * config.preco_lead_extra
+    mensagem += `\n*${i + 1}* — Pacote de ${pacote.quantidade} leads por R$ ${preco}`
+  })
+
+  // Opção de upgrade pro próximo plano (se não for Enterprise)
+  const planos: Array<'free' | 'starter' | 'pro' | 'enterprise'> = [
+    'free',
+    'starter',
+    'pro',
+    'enterprise',
+  ]
+  const idxAtual = planos.indexOf(planoAtual)
+  if (idxAtual < planos.length - 1) {
+    const proximoPlano = planos[idxAtual + 1]
+    const cfgProximo = PLANOS_CONFIG[proximoPlano]
+    mensagem += `\n*4* — Upgrade pro plano *${cfgProximo.nome}* (R$ ${cfgProximo.preco_mes}/mês, ${cfgProximo.leads_inclusos} leads)`
+  }
+
+  mensagem += `\n*5* — Não tenho interesse neste lead\n\n⏰ Você tem 3 horas pra responder. Se não responder, ofereço pra outro fornecedor.`
+
+  await enviarMensagem(fornecedor.whatsapp, mensagem)
+}
+
+// ============================================================
+// SEM FORNECEDOR DISPONÍVEL — notifica admin
+// ============================================================
+async function notificarAdminSemFornecedor(
+  pedidoId: string,
+  pedido: { tipo: string; estado: string; quantidade: number | null; nome: string }
+): Promise<void> {
+  const { count } = await supabase
+    .from('ofertas')
+    .select('*', { count: 'exact', head: true })
+    .eq('pedido_id', pedidoId)
+
+  const tipoFmt = tipoLabel[pedido.tipo] ?? pedido.tipo
+
+  console.warn('[ofertas] sem fornecedor disponível', {
+    pedidoId,
+    tipo: pedido.tipo,
+    estado: pedido.estado,
+    tentativas: count ?? 0,
+  })
+
+  await Promise.allSettled([
+    whatsappAdminSemFornecedor({
+      pedidoId,
+      nomeCliente: pedido.nome,
+      tipo: tipoFmt,
+      quantidade: pedido.quantidade,
+      estado: pedido.estado,
+      totalTentativas: count ?? 0,
+    }),
+    emailAdminSemFornecedor({
+      pedidoId,
+      nomeCliente: pedido.nome,
+      tipo: tipoFmt,
+      quantidade: pedido.quantidade,
+      estado: pedido.estado,
+      totalTentativas: count ?? 0,
+    }),
+  ])
 }

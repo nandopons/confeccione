@@ -30,6 +30,7 @@ export async function GET(req: Request) {
     followups_24h_enviados: 0,
     followups_48h_enviados: 0,
     pedidos_expirados_sem_resposta: 0,
+    trials_expirados: 0,
     erros: [] as string[],
   }
 
@@ -47,11 +48,11 @@ export async function GET(req: Request) {
   const agoraISO = agora.toISOString()
 
   // ===========================================================
-  // TAREFA 1: ofertas expiradas (4h sem resposta do fornecedor)
+  // TAREFA 1: ofertas expiradas (4h normal / 3h sem crédito)
   // ===========================================================
   const { data: expiradas, error: errExpiradas } = await supabase
     .from('ofertas')
-    .select('id, pedido_id, fornecedor_id')
+    .select('id, pedido_id, fornecedor_id, tipo_oferta')
     .eq('status', 'enviada')
     .lt('expira_em', agoraISO)
 
@@ -59,9 +60,15 @@ export async function GET(req: Request) {
     resumo.erros.push(`buscar expiradas: ${errExpiradas.message}`)
   } else if (expiradas && expiradas.length > 0) {
     for (const oferta of expiradas) {
+      // Status diferente conforme o tipo da oferta:
+      // - tipo='normal'      → status='expirada'              (definitivo)
+      // - tipo='sem_credito' → status='expirada_sem_credito'  (re-ofertável se ganhar crédito)
+      const novoStatus =
+        oferta.tipo_oferta === 'sem_credito' ? 'expirada_sem_credito' : 'expirada'
+
       const { error: errUpdate } = await supabase
         .from('ofertas')
-        .update({ status: 'expirada' })
+        .update({ status: novoStatus })
         .eq('id', oferta.id)
 
       if (errUpdate) {
@@ -71,46 +78,49 @@ export async function GET(req: Request) {
 
       resumo.ofertas_expiradas += 1
 
-      // Notifica admin sobre fornecedor que deixou expirar.
-      // Falha aqui não bloqueia o reenvio nem é considerado erro fatal.
-      try {
-        const [{ data: fornecedor }, { data: pedido }] = await Promise.all([
-          supabase
-            .from('leads_fornecedores')
-            .select('id, nome, whatsapp')
-            .eq('id', oferta.fornecedor_id)
-            .single(),
-          supabase
-            .from('pedidos')
-            .select('id, nome, tipo')
-            .eq('id', oferta.pedido_id)
-            .single(),
-        ])
-
-        if (fornecedor && pedido) {
-          await Promise.allSettled([
-            whatsappAdminFornecedorExpirou({
-              fornecedorId: fornecedor.id,
-              nomeFornecedor: fornecedor.nome,
-              whatsappFornecedor: fornecedor.whatsapp,
-              pedidoId: pedido.id,
-              nomeCliente: pedido.nome,
-              tipo: pedido.tipo,
-            }),
-            emailAdminFornecedorExpirou({
-              fornecedorId: fornecedor.id,
-              nomeFornecedor: fornecedor.nome,
-              whatsappFornecedor: fornecedor.whatsapp,
-              pedidoId: pedido.id,
-              nomeCliente: pedido.nome,
-              tipo: pedido.tipo,
-            }),
+      // Notifica admin SOMENTE em ofertas normais expiradas.
+      // Ofertas sem_credito que expiram não geram alerta (esperado: fornecedor
+      // não decidiu comprar, segue o jogo).
+      if (oferta.tipo_oferta === 'normal') {
+        try {
+          const [{ data: fornecedor }, { data: pedido }] = await Promise.all([
+            supabase
+              .from('leads_fornecedores')
+              .select('id, nome, whatsapp')
+              .eq('id', oferta.fornecedor_id)
+              .single(),
+            supabase
+              .from('pedidos')
+              .select('id, nome, tipo')
+              .eq('id', oferta.pedido_id)
+              .single(),
           ])
-          resumo.notificacoes_expiracao += 1
+
+          if (fornecedor && pedido) {
+            await Promise.allSettled([
+              whatsappAdminFornecedorExpirou({
+                fornecedorId: fornecedor.id,
+                nomeFornecedor: fornecedor.nome,
+                whatsappFornecedor: fornecedor.whatsapp,
+                pedidoId: pedido.id,
+                nomeCliente: pedido.nome,
+                tipo: pedido.tipo,
+              }),
+              emailAdminFornecedorExpirou({
+                fornecedorId: fornecedor.id,
+                nomeFornecedor: fornecedor.nome,
+                whatsappFornecedor: fornecedor.whatsapp,
+                pedidoId: pedido.id,
+                nomeCliente: pedido.nome,
+                tipo: pedido.tipo,
+              }),
+            ])
+            resumo.notificacoes_expiracao += 1
+          }
+        } catch (err) {
+          // Não interrompe o reenvio se a notificação falhar
+          console.error('[scheduler] notificação expiração falhou:', err)
         }
-      } catch (err) {
-        // Não interrompe o reenvio se a notificação falhar
-        console.error('[scheduler] notificação expiração falhou:', err)
       }
 
       try {
@@ -295,6 +305,51 @@ export async function GET(req: Request) {
       }
 
       resumo.pedidos_expirados_sem_resposta += 1
+    }
+  }
+
+  // ===========================================================
+  // TAREFA 5: expirar trial Pro (vira free automaticamente)
+  // ===========================================================
+  // Fornecedores que ainda estão como 'pro' mas com plano_expira_em
+  // no passado → vira 'free'. Notificação por WhatsApp.
+  const { data: trialsExpirando, error: errTrials } = await supabase
+    .from('leads_fornecedores')
+    .select('id, nome, whatsapp, plano')
+    .eq('status', 'ativo')
+    .neq('plano', 'free')
+    .not('plano_expira_em', 'is', null)
+    .lt('plano_expira_em', agoraISO)
+
+  if (errTrials) {
+    resumo.erros.push(`buscar trials: ${errTrials.message}`)
+  } else if (trialsExpirando && trialsExpirando.length > 0) {
+    for (const f of trialsExpirando) {
+      const { error: errUpdate } = await supabase
+        .from('leads_fornecedores')
+        .update({
+          plano: 'free',
+          plano_ativado_em: new Date().toISOString(),
+          plano_expira_em: null,
+        })
+        .eq('id', f.id)
+
+      if (errUpdate) {
+        resumo.erros.push(`expirar trial ${f.id}: ${errUpdate.message}`)
+        continue
+      }
+
+      resumo.trials_expirados += 1
+
+      // Notifica fornecedor que o trial acabou
+      try {
+        await enviarMensagem(
+          f.whatsapp,
+          `Olá ${f.nome}! 👋\n\nSeu trial de 90 dias do plano *Pro* terminou. A partir de hoje você está no plano *Free* (3 leads por mês).\n\nQuer continuar recebendo mais leads? Responda aqui que te conto sobre os planos pagos.`
+        )
+      } catch (err) {
+        console.error('[scheduler] notificar trial expirado falhou:', err)
+      }
     }
   }
 

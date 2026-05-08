@@ -4,6 +4,11 @@ import { variantesWhatsApp } from '@/app/lib/phone'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { emailContatoFornecedor } from '@/app/lib/email'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
+import {
+  PLANOS_CONFIG,
+  contarOfertasMesAtual,
+  planoEfetivo,
+} from '@/app/lib/planos'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -90,7 +95,7 @@ async function tratarRespostaFornecedor(
   // Busca oferta enviada ainda não expirada (mais recente)
   const { data: oferta } = await supabase
     .from('ofertas')
-    .select('id, pedido_id')
+    .select('id, pedido_id, tipo_oferta')
     .eq('fornecedor_id', fornecedor.id)
     .eq('status', 'enviada')
     .gt('expira_em', new Date().toISOString())
@@ -102,6 +107,16 @@ async function tratarRespostaFornecedor(
     return NextResponse.json({ ok: true })
   }
 
+  // ============================================================
+  // ROTA: oferta SEM CRÉDITO (gatilho de upgrade — opções 1-5)
+  // ============================================================
+  if (oferta.tipo_oferta === 'sem_credito') {
+    return await tratarRespostaSemCredito(fornecedor, oferta, texto)
+  }
+
+  // ============================================================
+  // ROTA: oferta NORMAL (SIM / NAO)
+  // ============================================================
   if (texto.includes('sim')) {
     await supabase
       .from('ofertas')
@@ -121,10 +136,11 @@ async function tratarRespostaFornecedor(
       .update({ status: 'aguardando_contato', fornecedor_aceito_id: fornecedor.id })
       .eq('id', oferta.pedido_id)
 
-    // Envia dados do cliente pro fornecedor
+    // Envia dados do cliente pro fornecedor + resumo de leads do mês
+    const resumoCota = await montarResumoCotaMes(fornecedor.id)
     await enviarMensagem(
       fornecedor.whatsapp,
-      `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${pedido.whatsapp}\nE-mail: ${pedido.email}\n\nEntre em contato direto pra combinar detalhes. Boa venda!`
+      `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${pedido.whatsapp}\nE-mail: ${pedido.email}\n\nEntre em contato direto pra combinar detalhes. Boa venda!\n\n${resumoCota}`
     )
 
     // ============================================================
@@ -193,6 +209,100 @@ async function tratarRespostaFornecedor(
 }
 
 // ============================================================
+// Tratamento de resposta do FORNECEDOR a oferta SEM CRÉDITO
+// (1/2/3 = pacotes, 4 = upgrade, 5 = não tenho interesse)
+// ============================================================
+async function tratarRespostaSemCredito(
+  fornecedor: { id: string; nome: string; whatsapp: string },
+  oferta: { id: string; pedido_id: string },
+  texto: string
+): Promise<NextResponse> {
+  const opcao = texto.trim()
+
+  // Opção 5: não tenho interesse → recusa final
+  if (opcao === '5' || texto.includes('não tenho') || texto.includes('nao tenho')) {
+    await supabase
+      .from('ofertas')
+      .update({ status: 'recusada_sem_credito' })
+      .eq('id', oferta.id)
+
+    await enviarMensagem(
+      fornecedor.whatsapp,
+      'Ok, sem problema! Vou oferecer pra outro fornecedor.'
+    )
+
+    try {
+      await criarEDispararOferta(oferta.pedido_id)
+    } catch (err) {
+      console.error('reenvio após recusa sem crédito falhou:', err)
+    }
+
+    return NextResponse.json({ ok: true })
+  }
+
+  // Opções 1-4: interesse em comprar pacote ou upgrade
+  // Por enquanto: NÃO processa pagamento (Stripe vem depois).
+  // Sistema marca a intenção e notifica o admin pra processar manual.
+  if (['1', '2', '3', '4'].includes(opcao)) {
+    await enviarMensagem(
+      fornecedor.whatsapp,
+      `Perfeito, ${fornecedor.nome}! 🎯\n\nRecebi sua escolha (opção ${opcao}). Em poucos minutos um membro da nossa equipe vai te chamar pra finalizar o pagamento e liberar este lead pra você.\n\n⏰ Lembrete: este lead fica reservado pra você por 3 horas. Se passar desse prazo sem fechamento, vou ofertar pra outro fornecedor.`
+    )
+
+    // Notifica admin pra processar manualmente
+    const { ADMIN_WHATSAPP } = process.env
+    if (ADMIN_WHATSAPP) {
+      try {
+        await enviarMensagem(
+          ADMIN_WHATSAPP,
+          `🔔 Fornecedor *${fornecedor.nome}* (${fornecedor.whatsapp}) escolheu opção *${opcao}* na oferta sem crédito.\n\nPedido: ${oferta.pedido_id}\nOferta: ${oferta.id}\n\nProcesse o pagamento e libere o lead.`
+        )
+      } catch (err) {
+        console.error('aviso admin sem crédito falhou:', err)
+      }
+    }
+
+    return NextResponse.json({ ok: true })
+  }
+
+  // Resposta inválida
+  await enviarMensagem(
+    fornecedor.whatsapp,
+    'Não entendi sua resposta. Responde com o número da opção (1, 2, 3, 4 ou 5).'
+  )
+
+  return NextResponse.json({ ok: true })
+}
+
+// ============================================================
+// Helper: monta resumo da cota mensal pra incluir após aceite
+// ============================================================
+async function montarResumoCotaMes(fornecedorId: string): Promise<string> {
+  const { data: f } = await supabase
+    .from('leads_fornecedores')
+    .select('plano, plano_expira_em, creditos_extras')
+    .eq('id', fornecedorId)
+    .single()
+
+  if (!f) return ''
+
+  const planoAtual = planoEfetivo({
+    plano: f.plano,
+    plano_expira_em: f.plano_expira_em,
+  })
+  const config = PLANOS_CONFIG[planoAtual]
+  const usados = await contarOfertasMesAtual(fornecedorId)
+
+  let resumo = `📊 Você usou ${usados} de ${config.leads_inclusos} leads do plano *${config.nome}* este mês.`
+
+  if (f.creditos_extras > 0) {
+    resumo += `\n💎 Créditos extras disponíveis: ${f.creditos_extras}`
+  }
+
+  return resumo
+}
+
+// ============================================================
 // Tratamento de resposta do CLIENTE ao follow-up (1 / 2 / 3)
 // ============================================================
 type PedidoFollowup = { id: string; nome: string; whatsapp: string; status: string }
@@ -206,35 +316,22 @@ async function tratarRespostaCliente(
   },
   texto: string
 ): Promise<NextResponse> {
-  // Supabase pode retornar pedidos como array ou objeto dependendo do shape
-  const pedido = Array.isArray(followup.pedidos) ? followup.pedidos[0] : followup.pedidos
+  // Supabase com !inner pode retornar array ou objeto dependendo da versão
+  const pedido = Array.isArray(followup.pedidos)
+    ? followup.pedidos[0]
+    : followup.pedidos
+
   if (!pedido) return NextResponse.json({ ok: true })
 
-  // Detecta opção: 1, 2 ou 3 (com tolerância pra variações)
-  let opcao: '1' | '2' | '3' | null = null
-  if (texto === '1' || texto.includes('deu certo') || texto.includes('fechei')) {
-    opcao = '1'
-  } else if (texto === '2' || texto.includes('aguardando') || texto.includes('conversando')) {
-    opcao = '2'
-  } else if (texto === '3' || texto.includes('não deu') || texto.includes('nao deu') || texto.includes('outro fornecedor')) {
-    opcao = '3'
-  }
-
-  if (!opcao) {
-    await enviarMensagem(
-      pedido.whatsapp,
-      'Não entendi. Responde com 1, 2 ou 3:\n\n1 - DEU CERTO\n2 - AINDA AGUARDANDO\n3 - NÃO DEU CERTO, quero outro fornecedor'
-    )
-    return NextResponse.json({ ok: true })
-  }
-
-  // Marca o follow-up como respondido
-  await supabase
-    .from('followups')
-    .update({ respondido_em: new Date().toISOString(), resposta: opcao })
-    .eq('id', followup.id)
+  const opcao = texto.trim()
 
   if (opcao === '1') {
+    // DEU CERTO
+    await supabase
+      .from('followups')
+      .update({ respondido_em: new Date().toISOString(), resposta: '1' })
+      .eq('id', followup.id)
+
     await supabase
       .from('pedidos')
       .update({ status: 'concluido' })
@@ -242,9 +339,15 @@ async function tratarRespostaCliente(
 
     await enviarMensagem(
       pedido.whatsapp,
-      `Que ótimo, ${pedido.nome}! 🎉 Fico feliz que deu certo. Sempre que precisar de outra confecção, é só chamar a gente!`
+      `Que ótimo, ${pedido.nome}! 🎉 Fico feliz que deu certo. Qualquer pedido novo no futuro, é só voltar aqui!`
     )
   } else if (opcao === '2') {
+    // AINDA AGUARDANDO
+    await supabase
+      .from('followups')
+      .update({ respondido_em: new Date().toISOString(), resposta: '2' })
+      .eq('id', followup.id)
+
     await supabase
       .from('pedidos')
       .update({ status: 'em_negociacao' })
@@ -252,11 +355,15 @@ async function tratarRespostaCliente(
 
     await enviarMensagem(
       pedido.whatsapp,
-      `Beleza, ${pedido.nome}! Vou te chamar de novo daqui a 24h pra ver como ficou. Se acontecer alguma coisa antes, é só me avisar.`
+      `Beleza, ${pedido.nome}! Vou esperar mais um pouco e te chamo de novo daqui a 24h pra ver se rolou.`
     )
   } else if (opcao === '3') {
-    // Reabre pedido pro cron buscar próximo fornecedor compatível.
-    // O matching já exclui fornecedores que receberam oferta antes.
+    // NÃO DEU CERTO — quer outro fornecedor
+    await supabase
+      .from('followups')
+      .update({ respondido_em: new Date().toISOString(), resposta: '3' })
+      .eq('id', followup.id)
+
     await supabase
       .from('pedidos')
       .update({ status: 'buscando_fornecedor', fornecedor_aceito_id: null })
@@ -264,14 +371,20 @@ async function tratarRespostaCliente(
 
     await enviarMensagem(
       pedido.whatsapp,
-      `Entendi, ${pedido.nome}. Já vou buscar outro fornecedor pra você. Em pouco tempo te chamo de novo!`
+      `Sem problema, ${pedido.nome}! Vou buscar outro fornecedor pra você. Em breve te aviso aqui!`
     )
 
+    // Dispara busca de novo fornecedor
     try {
       await criarEDispararOferta(pedido.id)
     } catch (err) {
-      console.error('reenvio após cliente recusar fornecedor falhou:', err)
+      console.error('rebusca após recusa cliente falhou:', err)
     }
+  } else {
+    await enviarMensagem(
+      pedido.whatsapp,
+      'Não entendi! Responde com 1 (deu certo), 2 (ainda aguardando) ou 3 (quero outro fornecedor).'
+    )
   }
 
   return NextResponse.json({ ok: true })
