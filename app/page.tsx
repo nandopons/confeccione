@@ -22,6 +22,22 @@ const nichosExtras = [
 
 const nichosTodos = [...nichosPrincipais, ...nichosExtras];
 
+// Quantidade mínima ideal por categoria — usada pra dar dica ao cliente no formulário.
+// Não é restrição: cliente pode pedir abaixo, mas vai ter menos fornecedores compatíveis.
+const quantidadesMinimas: Record<string, number> = {
+  interclasse:      20,
+  private_label:    20,
+  fitness:          20,
+  moda_praia:       20,
+  moda_intima:      20,
+  padrao_esportivo: 20,
+  fardamento:       20,
+  inverno:          20,
+  roupas_uv:        20,
+  bones:            20,
+  bolsas:           20,
+};
+
 const prazos: Record<string, string> = {
   urgente: "Urgente (até 7 dias)",
   normal: "Normal (8 a 21 dias)",
@@ -196,6 +212,23 @@ export default function Home() {
                   <button onClick={() => setQty(qty + 1)} className="w-9 h-9 border border-gray-400 text-gray-700 rounded-lg text-lg flex items-center justify-center hover:bg-gray-100">+</button>
                   <span className="text-sm text-gray-400">peças</span>
                 </div>
+                {tipo && quantidadesMinimas[tipo] !== undefined && (() => {
+                  const minimo = quantidadesMinimas[tipo];
+                  const nicho = nichosTodos.find(n => n.id === tipo);
+                  const nome = nicho?.title ?? tipo;
+                  const atingiu = qty >= minimo;
+                  const classes = atingiu
+                    ? "bg-green-50 border-l-2 border-green-500 text-green-800"
+                    : "bg-blue-50 border-l-2 border-blue-400 text-blue-800";
+                  const mensagem = atingiu
+                    ? `✓ Quantidade ideal para ${nome} — você terá mais opções de fornecedor.`
+                    : `Para ${nome}, ${minimo} peças é o ideal para ter mais opções de fornecedor e melhores preços.`;
+                  return (
+                    <div className={`mt-3 px-3 py-2 rounded-md text-xs leading-relaxed ${classes}`}>
+                      {mensagem}
+                    </div>
+                  );
+                })()}
               </div>
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
