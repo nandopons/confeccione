@@ -336,6 +336,11 @@ export default function Home() {
                 ))}
               </div>
               <Link href="/fornecedor/cadastro" className="inline-block bg-[#1D9E75] hover:bg-[#0F6E56] text-white font-medium px-8 py-4 rounded-xl text-base transition-colors">Quero me cadastrar</Link>
+              <div className="mt-3 text-sm">
+                <Link href="/fornecedor/entrar" className="text-gray-400 hover:text-white transition-colors">
+                  Já sou fornecedor, entrar →
+                </Link>
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               {[{icon:"✂️",title:"Costureiras",desc:"Ajustes, reparos e peças únicas"},{icon:"🏭",title:"Confecções",desc:"Produção em escala e fardamentos"},{icon:"🧵",title:"Facções",desc:"Terceirização de costura"},{icon:"👗",title:"Ateliês",desc:"Alta costura e nichos especiais"}].map((item) => (
@@ -366,6 +371,8 @@ export default function Home() {
             <a href="mailto:contato@confeccione.com.br" className="hover:text-gray-400 transition-colors">contato@confeccione.com.br</a>
             {" · "}
             <a href="https://wa.me/5581995782077" target="_blank" rel="noopener noreferrer" className="hover:text-gray-400 transition-colors">(81) 99578-2077</a>
+            {" · "}
+            <Link href="/fornecedor/entrar" className="hover:text-gray-400 transition-colors">Área do fornecedor</Link>
           </p>
           <p className="text-gray-600 text-xs">© 2026 Confeccione · CNPJ 49.307.439/0001-50</p>
         </div>
