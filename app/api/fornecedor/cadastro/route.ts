@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { normalizarWhatsApp } from '@/app/lib/phone'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { emailBoasVindasFornecedor } from '@/app/lib/email'
+import { validarCpfCnpj, apenasDigitos } from '@/app/lib/cpf-cnpj'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -20,9 +21,22 @@ export async function POST(req: Request) {
     estado,
     cidade,
     raio_atendimento,
+    cpf_cnpj,
   } = await req.json()
 
   const numero = normalizarWhatsApp(whatsapp)
+
+  // Validação do CPF/CNPJ — obrigatório a partir desta migração.
+  // Fornecedores existentes pré-migração podem ter cpf_cnpj = NULL no banco
+  // (via edição de cadastro sem campo novo), mas TODO novo cadastro precisa.
+  const cpfCnpjLimpo = apenasDigitos(cpf_cnpj || '')
+  const validacao = validarCpfCnpj(cpfCnpjLimpo)
+  if (!validacao.valido) {
+    return NextResponse.json(
+      { error: validacao.erro ?? 'CPF/CNPJ inválido' },
+      { status: 400 }
+    )
+  }
 
   // Trial Pro de 90 dias para fornecedores NOVOS.
   // Existentes mantêm o plano que já têm (não reseta com novo cadastro/edição).
@@ -41,6 +55,7 @@ export async function POST(req: Request) {
     estado,
     cidade: cidade || null,
     raio_atendimento,
+    cpf_cnpj: cpfCnpjLimpo,
     status: 'ativo',
     etapa_bot: null,
   }

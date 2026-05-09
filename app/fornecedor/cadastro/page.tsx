@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
+import { formatarCpfCnpj, validarCpfCnpj, apenasDigitos } from "@/app/lib/cpf-cnpj";
 
 const tiposProdutoPrincipais = [
   { id: "interclasse",   icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
@@ -33,6 +34,8 @@ export default function CadastroFornecedor() {
   const [estado, setEstado]           = useState("");
   const [cidade, setCidade]           = useState("");
   const [raio, setRaio]               = useState("");
+  const [cpfCnpj, setCpfCnpj]         = useState("");
+  const [cpfCnpjErro, setCpfCnpjErro] = useState<string | null>(null);
   const [enviando, setEnviando]       = useState(false);
   const [showExtras, setShowExtras]   = useState(false);
 
@@ -40,6 +43,21 @@ export default function CadastroFornecedor() {
     setTiposSel(prev =>
       prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]
     );
+  }
+
+  function handleCpfCnpjChange(valor: string) {
+    setCpfCnpj(formatarCpfCnpj(valor));
+    setCpfCnpjErro(null);
+  }
+
+  function validarCpfCnpjOnBlur() {
+    const digitos = apenasDigitos(cpfCnpj);
+    if (digitos.length === 0) {
+      setCpfCnpjErro(null);
+      return;
+    }
+    const r = validarCpfCnpj(cpfCnpj);
+    setCpfCnpjErro(r.valido ? null : (r.erro ?? "Documento inválido"));
   }
 
   useEffect(() => {
@@ -50,7 +68,10 @@ export default function CadastroFornecedor() {
 
   const step1Valid = nome.trim().length > 0 && whatsapp.replace(/\D/g, "").length >= 10 && email.includes("@");
   const step2Valid = tiposSel.length > 0 && pedidoMinimo >= 1;
-  const step3Valid = estado !== "" && raio !== "";
+  const step3Valid =
+    estado !== "" &&
+    raio !== "" &&
+    validarCpfCnpj(cpfCnpj).valido;
 
   async function enviar() {
     setEnviando(true);
@@ -68,6 +89,7 @@ export default function CadastroFornecedor() {
           estado,
           cidade,
           raio_atendimento: raio,
+          cpf_cnpj: apenasDigitos(cpfCnpj),
         }),
       });
     } catch (e) {
@@ -252,6 +274,32 @@ export default function CadastroFornecedor() {
                     </label>
                   ))}
                 </div>
+              </div>
+
+              <div className="mb-6">
+                <label className="text-xs text-gray-400 mb-1 block">
+                  CPF ou CNPJ <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={cpfCnpj}
+                  onChange={(e) => handleCpfCnpjChange(e.target.value)}
+                  onBlur={validarCpfCnpjOnBlur}
+                  placeholder="000.000.000-00 ou 00.000.000/0000-00"
+                  maxLength={18}
+                  className={`w-full border rounded-xl px-3 py-3 text-sm text-gray-800 focus:outline-none ${
+                    cpfCnpjErro
+                      ? "border-red-300 focus:border-red-400"
+                      : "border-gray-200 focus:border-[#1D9E75]"
+                  }`}
+                />
+                {cpfCnpjErro && (
+                  <p className="text-xs text-red-500 mt-1">{cpfCnpjErro}</p>
+                )}
+                <p className="text-xs text-gray-400 mt-1">
+                  Necessário para emissão de cobrança quando você quiser planos pagos. Não é exibido publicamente.
+                </p>
               </div>
 
               <div className="flex justify-between">
