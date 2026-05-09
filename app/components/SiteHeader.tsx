@@ -1,10 +1,46 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import SouFornecedorModal from "./SouFornecedorModal";
+
+type StatusSessao = "desconhecido" | "logado" | "nao-logado";
 
 export default function SiteHeader() {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
+  const [statusSessao, setStatusSessao] = useState<StatusSessao>("desconhecido");
+  const [modalAberto, setModalAberto] = useState(false);
+
+  // Checa sessão no mount via endpoint público (retorna só { logado })
+  useEffect(() => {
+    let cancelado = false;
+    fetch("/api/fornecedor/sessao", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelado) return;
+        setStatusSessao(data?.logado ? "logado" : "nao-logado");
+      })
+      .catch(() => {
+        if (cancelado) return;
+        setStatusSessao("nao-logado");
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, []);
+
+  function handleSouFornecedor() {
+    // Fecha drawer mobile (no-op em desktop)
+    setOpen(false);
+    if (statusSessao === "logado") {
+      router.push("/fornecedor/painel");
+      return;
+    }
+    // 'nao-logado' ou 'desconhecido' (loading inicial) → abre modal
+    setModalAberto(true);
+  }
 
   return (
     <nav className="bg-[#111] px-4 md:px-6 py-4 flex items-center justify-between sticky top-0 z-40">
@@ -20,10 +56,20 @@ export default function SiteHeader() {
       </Link>
 
       <div className="hidden md:flex items-center gap-2 md:gap-3">
-        <Link href="/fornecedor/cadastro" className="whitespace-nowrap text-white text-xs md:text-sm border border-white/20 px-2 md:px-4 py-2 rounded-full hover:bg-white/10 transition-colors">
-          <span className="hidden md:inline">Sou fornecedor</span>
-          <span className="md:hidden">Fornecedor</span>
-        </Link>
+        <button
+          type="button"
+          onClick={handleSouFornecedor}
+          className="whitespace-nowrap text-white text-xs md:text-sm border border-white/20 px-2 md:px-4 py-2 rounded-full hover:bg-white/10 transition-colors"
+        >
+          {statusSessao === "logado" ? (
+            "Painel"
+          ) : (
+            <>
+              <span className="hidden md:inline">Sou fornecedor</span>
+              <span className="md:hidden">Fornecedor</span>
+            </>
+          )}
+        </button>
         <Link href="/saiba-mais" className="whitespace-nowrap text-white text-xs md:text-sm border border-white/20 px-2 md:px-4 py-2 rounded-full hover:bg-white/10 transition-colors">
           Saiba mais
         </Link>
@@ -59,13 +105,13 @@ export default function SiteHeader() {
           id="site-header-mobile-menu"
           className="md:hidden absolute top-full left-0 right-0 bg-[#111] border-t border-white/10 flex flex-col p-4 gap-2"
         >
-          <Link
-            href="/fornecedor/cadastro"
-            onClick={close}
-            className="text-white text-sm border border-white/20 px-4 py-3 rounded-xl hover:bg-white/10 transition-colors"
+          <button
+            type="button"
+            onClick={handleSouFornecedor}
+            className="text-left text-white text-sm border border-white/20 px-4 py-3 rounded-xl hover:bg-white/10 transition-colors"
           >
-            Sou fornecedor
-          </Link>
+            {statusSessao === "logado" ? "Painel" : "Sou fornecedor"}
+          </button>
           <Link
             href="/saiba-mais"
             onClick={close}
@@ -81,6 +127,10 @@ export default function SiteHeader() {
             Fazer meu pedido
           </Link>
         </div>
+      )}
+
+      {modalAberto && (
+        <SouFornecedorModal onClose={() => setModalAberto(false)} />
       )}
     </nav>
   );
