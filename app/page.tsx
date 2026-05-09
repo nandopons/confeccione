@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
+import { WHATSAPP_SUPORTE, linkWhatsAppSuporte } from "@/app/lib/contatos";
 
 const nichosPrincipais = [
   { id: "interclasse",   icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
@@ -313,7 +314,7 @@ export default function Home() {
           </div>
           <div>
             <p className="text-sm text-gray-900 font-medium">Precisa de ajuda?</p>
-            <p className="text-xs text-gray-400 leading-relaxed">Nosso time atende pelo WhatsApp{" "}<a href="https://wa.me/5581995782077?text=Ol%C3%A1%21%20Estou%20com%20uma%20d%C3%BAvida%20no%20pedido" target="_blank" rel="noopener noreferrer" className="font-medium text-[#0F6E56] hover:underline">(81) 99578-2077</a>. Chame a qualquer momento que a gente te guia pelo processo.</p>
+            <p className="text-xs text-gray-400 leading-relaxed">Nosso time atende pelo WhatsApp{" "}<a href={linkWhatsAppSuporte("Olá! Estou com uma dúvida no pedido")} target="_blank" rel="noopener noreferrer" className="font-medium text-[#0F6E56] hover:underline">(81) 99578-2077</a>. Chame a qualquer momento que a gente te guia pelo processo.</p>
           </div>
         </div>
       </section>
@@ -370,7 +371,7 @@ export default function Home() {
           <p className="text-gray-600 text-xs">
             <a href="mailto:contato@confeccione.com.br" className="hover:text-gray-400 transition-colors">contato@confeccione.com.br</a>
             {" · "}
-            <a href="https://wa.me/5581995782077" target="_blank" rel="noopener noreferrer" className="hover:text-gray-400 transition-colors">(81) 99578-2077</a>
+            <a href={`https://wa.me/${WHATSAPP_SUPORTE}`} target="_blank" rel="noopener noreferrer" className="hover:text-gray-400 transition-colors">(81) 99578-2077</a>
             {" · "}
             <Link href="/fornecedor/entrar" className="hover:text-gray-400 transition-colors">Área do fornecedor</Link>
           </p>

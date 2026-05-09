@@ -1,20 +1,86 @@
 // app/fornecedor/painel/plano/page.tsx
-// Placeholder — implementação completa virá no sub-commit 4c.
+// ============================================================================
+// Página de gestão de plano do fornecedor (server component).
+// - Card do plano atual (cota + trial)
+// - Tabela comparativa dos 4 planos
+// - Pacotes de leads extras com preço calculado pelo plano efetivo
+//   (botões de compra desabilitados — checkout no 4c.2)
+// ============================================================================
+
+import { exigirFornecedorAtual } from "@/app/lib/auth-server";
+import { calcularCotaInfo } from "@/app/lib/cota";
+import { PLANOS_CONFIG, PACOTES_LEADS_EXTRAS } from "@/app/lib/planos";
+import CardPlanoAtual from "./CardPlanoAtual";
+import TabelaPlanos from "./TabelaPlanos";
 
 export const dynamic = "force-dynamic";
 
-export default function PlanoPlaceholder() {
+export default async function PaginaPlano() {
+  const fornecedor = await exigirFornecedorAtual();
+  const cota = await calcularCotaInfo(fornecedor.id);
+
+  if (!cota) {
+    return (
+      <section className="px-5 md:px-8 pt-8 pb-12 max-w-4xl mx-auto">
+        <div className="bg-white border border-gray-200 rounded-2xl p-6 text-center">
+          <p className="text-gray-500 text-sm">Não foi possível carregar seu plano.</p>
+        </div>
+      </section>
+    );
+  }
+
+  // Preço por lead extra varia pelo plano efetivo do fornecedor
+  const precoPorLead = PLANOS_CONFIG[cota.plano].preco_lead_extra;
+
   return (
     <section className="px-5 md:px-8 pt-8 pb-12 max-w-4xl mx-auto">
-      <h1 className="text-gray-900 text-2xl font-medium mb-1">Plano</h1>
-      <p className="text-gray-500 text-sm mb-8">Esta página está em construção.</p>
-      <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center">
-        <div className="text-4xl mb-3">🚧</div>
-        <div className="text-gray-900 font-medium mb-1">Em breve</div>
+      <div className="mb-6">
+        <h1 className="text-gray-900 text-2xl font-medium mb-1">Plano</h1>
         <p className="text-gray-500 text-sm">
-          A página de gestão de plano (com pacotes de leads, upgrade e histórico
-          de pagamentos) está sendo construída.
+          Gerencie seu plano e veja seus leads usados este mês.
         </p>
+      </div>
+
+      <CardPlanoAtual cota={cota} />
+
+      <TabelaPlanos planoAtual={cota.plano} />
+
+      {/* Pacotes de leads extras */}
+      <div className="mt-10">
+        <h2 className="text-gray-900 text-lg font-medium mb-1">Leads extras</h2>
+        <p className="text-gray-500 text-sm">
+          Leads extras comprados não expiram. Use quando estourar a cota mensal.
+        </p>
+        <p className="text-gray-400 text-xs mb-4 mt-1">
+          Preços do seu plano <span className="text-gray-700 font-medium">{cota.planoNome}</span>
+          {" · "}R$ {precoPorLead.toFixed(2).replace(".", ",")}/lead
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {PACOTES_LEADS_EXTRAS.map((pacote, i) => {
+            const precoTotal = pacote.quantidade * precoPorLead;
+            return (
+              <div
+                key={i}
+                className="bg-white border border-gray-200 rounded-2xl p-5 flex flex-col"
+              >
+                <div className="text-gray-900 text-2xl font-medium mb-1">
+                  {pacote.quantidade} leads
+                </div>
+                <div className="text-gray-500 text-sm mb-4">
+                  R$ {precoTotal.toFixed(2).replace(".", ",")}
+                </div>
+                <button
+                  disabled
+                  className="w-full py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-400 cursor-not-allowed"
+                  title="Em breve"
+                >
+                  Em breve
+                </button>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </section>
   );
