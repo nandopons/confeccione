@@ -88,9 +88,12 @@ export function planoEfetivo(fornecedor: {
 }
 
 /**
- * Conta ofertas NORMAIS (não-sem-credito) que um fornecedor recebeu
- * no mês corrente. Conta TODOS os status (enviada, aceita, recusada, expirada)
- * — decisão tomada com Fernando.
+ * Conta ofertas NORMAIS (não-sem-credito) que o fornecedor ACEITOU
+ * no mês corrente. Apenas status='aceita' consome cota — leads recebidos
+ * mas recusados/expirados não contam (decisão revisada em 2026-05-09).
+ *
+ * Razão: contar só o que o fornecedor de fato converteu evita injustiça
+ * com quem recebe ofertas mas não tem fit pra elas.
  */
 export async function contarOfertasMesAtual(fornecedorId: string): Promise<number> {
   const inicioMes = new Date()
@@ -102,6 +105,7 @@ export async function contarOfertasMesAtual(fornecedorId: string): Promise<numbe
     .select('*', { count: 'exact', head: true })
     .eq('fornecedor_id', fornecedorId)
     .eq('tipo_oferta', 'normal')
+    .eq('status', 'aceita')
     .gte('enviada_em', inicioMes.toISOString())
 
   return count ?? 0
