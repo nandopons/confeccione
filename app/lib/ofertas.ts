@@ -16,7 +16,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const tipoLabel: Record<string, string> = {
+export const tipoLabel: Record<string, string> = {
   interclasse: 'Interclasse/Evento',
   private_label: 'Private Label',
   fitness: 'Fitness',
@@ -30,7 +30,7 @@ const tipoLabel: Record<string, string> = {
   bolsas: 'Bolsas e Acessórios',
 }
 
-const prazoLabel: Record<string, string> = {
+export const prazoLabel: Record<string, string> = {
   urgente: 'Urgente (até 7 dias)',
   normal: 'Normal (8 a 21 dias)',
   sempressa: 'Sem pressa (21+ dias)',
