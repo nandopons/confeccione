@@ -8,7 +8,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { validarOtp } from '@/app/lib/otp'
-import { criarSessao, COOKIE_NAME, SESSAO_DURACAO_DIAS } from '@/app/lib/sessoes'
+import { criarSessao, COOKIE_NAME, SESSAO_DURACAO_DIAS, getCookieDomain } from '@/app/lib/sessoes'
 import { normalizarWhatsApp } from '@/app/lib/phone'
 
 const supabase = createClient(
@@ -114,6 +114,7 @@ export async function POST(req: Request) {
     sameSite: 'lax',
     path: '/',
     maxAge: SESSAO_DURACAO_DIAS * 24 * 60 * 60,
+    domain: getCookieDomain(),
   })
 
   return NextResponse.json({ ok: true })

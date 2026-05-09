@@ -136,3 +136,16 @@ export async function invalidarTodasSessoesFornecedor(
     .delete()
     .eq('fornecedor_id', fornecedorId)
 }
+
+/**
+ * Retorna o `domain` correto pro cookie de sessão.
+ *
+ * - Em produção (Vercel com env COOKIE_DOMAIN=.confeccione.com.br):
+ *   o cookie vale pra apex e qualquer subdomínio.
+ * - Em dev local, deploys preview *.vercel.app, ou se a env var não estiver
+ *   setada: undefined → cookie é host-only (comportamento padrão do browser).
+ */
+export function getCookieDomain(): string | undefined {
+  const dom = process.env.COOKIE_DOMAIN
+  return dom && dom.length > 0 ? dom : undefined
+}

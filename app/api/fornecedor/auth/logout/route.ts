@@ -5,7 +5,7 @@
 
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { invalidarSessao, COOKIE_NAME } from '@/app/lib/sessoes'
+import { invalidarSessao, COOKIE_NAME, getCookieDomain } from '@/app/lib/sessoes'
 
 export async function POST() {
   const cookieStore = await cookies()
@@ -27,6 +27,7 @@ export async function POST() {
     sameSite: 'lax',
     path: '/',
     maxAge: 0,
+    domain: getCookieDomain(),
   })
 
   return NextResponse.json({ ok: true })

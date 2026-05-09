@@ -6,7 +6,7 @@
 const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 const FROM = 'Confeccione <contato@confeccione.com.br>'
 const REPLY_TO = 'contato@confeccione.com.br'
-const SITE_URL = 'https://confeccione.com.br'
+const SITE_URL = 'https://www.confeccione.com.br'
 
 type SendParams = {
   to: string
