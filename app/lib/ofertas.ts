@@ -10,31 +10,17 @@ import {
   podeReceberGatilhoUpgrade,
   registrarGatilhoUpgrade,
 } from './planos'
+import { tipoLabel, prazoLabel } from './ofertas-labels'
+
+// Re-export pra preservar imports server existentes (api routes etc).
+// Client components devem importar direto de './ofertas-labels' pra não
+// arrastar este arquivo (que cria Supabase client) pro bundle do browser.
+export { tipoLabel, prazoLabel }
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
-
-export const tipoLabel: Record<string, string> = {
-  interclasse: 'Interclasse/Evento',
-  private_label: 'Private Label',
-  fitness: 'Fitness',
-  moda_praia: 'Moda Praia',
-  moda_intima: 'Moda Íntima',
-  padrao_esportivo: 'Padrão Esportivo',
-  fardamento: 'Fardamento',
-  inverno: 'Inverno',
-  roupas_uv: 'Roupas UV',
-  bones: 'Bonés',
-  bolsas: 'Bolsas e Acessórios',
-}
-
-export const prazoLabel: Record<string, string> = {
-  urgente: 'Urgente (até 7 dias)',
-  normal: 'Normal (8 a 21 dias)',
-  sempressa: 'Sem pressa (21+ dias)',
-}
 
 const HORAS_4_MS = 4 * 60 * 60 * 1000
 

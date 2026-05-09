@@ -11,7 +11,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { OfertaPainel } from '@/app/lib/ofertas-painel'
-import { tipoLabel, prazoLabel } from '@/app/lib/ofertas'
+import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 import ModalAceitar from './ModalAceitar'
 
 type Props = {

@@ -7,7 +7,7 @@
 // ============================================================================
 
 import type { OfertaPainel } from '@/app/lib/ofertas-painel'
-import { tipoLabel, prazoLabel } from '@/app/lib/ofertas'
+import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 
 type Props = {
   oferta: OfertaPainel
