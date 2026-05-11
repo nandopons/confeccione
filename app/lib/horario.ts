@@ -20,6 +20,7 @@ function brasilParts() {
     mes: parseInt(g('month')) - 1,
     dia: parseInt(g('day')),
     hora: parseInt(g('hour')),
+    minuto: parseInt(g('minute')),
     diaSemana: wdMap[g('weekday')] ?? 0,
   }
 }
@@ -27,6 +28,21 @@ function brasilParts() {
 export function estaEmHorarioComercial(): boolean {
   const { diaSemana, hora } = brasilParts()
   return diaSemana >= 1 && diaSemana <= 5 && hora >= 8 && hora < 22
+}
+
+/**
+ * Retorna true se a hora atual em BRT está dentro de uma das janelas de retry
+ * passivo: 08:00-08:14 ou 15:00-15:14, em dia útil.
+ *
+ * Usado pela TAREFA 6 do scheduler pra reativar pedidos em buscando_fornecedor
+ * que estão parados. Como o cron principal roda a cada 15 minutos, exatamente
+ * uma execução por dia cai dentro de cada janela.
+ */
+export function estaEmJanelaRetryPassivo(): boolean {
+  const { diaSemana, hora, minuto } = brasilParts()
+  if (diaSemana < 1 || diaSemana > 5) return false
+  if (minuto >= 15) return false
+  return hora === 8 || hora === 15
 }
 
 export function proximoHorarioValido(): Date {

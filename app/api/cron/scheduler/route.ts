@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { estaEmHorarioComercial } from '@/app/lib/horario'
+import { estaEmHorarioComercial, estaEmJanelaRetryPassivo } from '@/app/lib/horario'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
 import { enviarMensagem, whatsappAdminFornecedorExpirou } from '@/app/lib/zapi'
 import { emailAdminFornecedorExpirou } from '@/app/lib/email'
@@ -31,6 +31,8 @@ export async function GET(req: Request) {
     followups_48h_enviados: 0,
     pedidos_expirados_sem_resposta: 0,
     trials_expirados: 0,
+    pedidos_retry_passivo: 0,
+    pedidos_retry_pulado: false,
     erros: [] as string[],
   }
 
@@ -351,6 +353,67 @@ export async function GET(req: Request) {
         console.error('[scheduler] notificar trial expirado falhou:', err)
       }
     }
+  }
+
+  // ===========================================================
+  // TAREFA 6: retry passivo de pedidos sem fornecedor
+  // ===========================================================
+  // Reativa pedidos em buscando_fornecedor que não receberam oferta nas
+  // últimas 6h, marcando buscar_apos = NOW(). A TAREFA 2 do próximo ciclo
+  // (15 min depois) processa em seguida.
+  //
+  // Executa só nas janelas 08:00-08:14 e 15:00-15:14 BRT (dia útil), pra
+  // pegar fornecedores recém-cadastrados sem ação manual nem flooding.
+  if (estaEmJanelaRetryPassivo()) {
+    try {
+      const seisHorasAtras = new Date(agora.getTime() - 6 * 60 * 60 * 1000).toISOString()
+
+      const { data: ofertasRecentes, error: errOfertas } = await supabase
+        .from('ofertas')
+        .select('pedido_id')
+        .gte('criado_em', seisHorasAtras)
+
+      if (errOfertas) {
+        resumo.erros.push(`retry passivo (ofertas recentes): ${errOfertas.message}`)
+      } else {
+        const pedidosComOfertaRecente = new Set(
+          (ofertasRecentes ?? []).map((o) => (o as { pedido_id: string }).pedido_id)
+        )
+
+        const { data: candidatos, error: errCandidatos } = await supabase
+          .from('pedidos')
+          .select('id')
+          .eq('status', 'buscando_fornecedor')
+          .is('buscar_apos', null)
+
+        if (errCandidatos) {
+          resumo.erros.push(`retry passivo (candidatos): ${errCandidatos.message}`)
+        } else {
+          const pedidosParaReativar = (candidatos ?? [])
+            .map((p) => (p as { id: string }).id)
+            .filter((id) => !pedidosComOfertaRecente.has(id))
+
+          if (pedidosParaReativar.length > 0) {
+            const { error: errUpdate } = await supabase
+              .from('pedidos')
+              .update({ buscar_apos: agoraISO })
+              .in('id', pedidosParaReativar)
+
+            if (errUpdate) {
+              resumo.erros.push(`retry passivo (update): ${errUpdate.message}`)
+            } else {
+              resumo.pedidos_retry_passivo = pedidosParaReativar.length
+            }
+          }
+        }
+      }
+    } catch (err) {
+      resumo.erros.push(
+        `retry passivo (exception): ${err instanceof Error ? err.message : String(err)}`
+      )
+    }
+  } else {
+    resumo.pedidos_retry_pulado = true
   }
 
   return NextResponse.json({
