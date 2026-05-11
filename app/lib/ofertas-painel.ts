@@ -76,7 +76,7 @@ export async function buscarOfertasFornecedor(
       status,
       tipo_oferta,
       expira_em,
-      criado_em,
+      enviada_em,
       pedido_id,
       pedidos!inner (
         tipo,
@@ -103,17 +103,17 @@ export async function buscarOfertasFornecedor(
     query = query
       .eq('status', 'enviada')
       .gt('expira_em', agora)
-      .order('criado_em', { ascending: false })
+      .order('enviada_em', { ascending: false })
   } else if (categoria === 'aceitas') {
     query = query
       .eq('status', 'aceita')
-      .order('criado_em', { ascending: false })
+      .order('enviada_em', { ascending: false })
   } else {
     // histórico: recusadas + expiradas dos últimos 90 dias
     query = query
       .in('status', ['recusada', 'expirada', 'recusada_sem_credito'])
-      .gte('criado_em', noventaDiasAtras)
-      .order('criado_em', { ascending: false })
+      .gte('enviada_em', noventaDiasAtras)
+      .order('enviada_em', { ascending: false })
   }
 
   const { data, error } = await query
@@ -139,7 +139,7 @@ export async function buscarOfertasFornecedor(
       status: row.status,
       tipo_oferta: row.tipo_oferta,
       expira_em: row.expira_em,
-      criado_em: row.criado_em,
+      criado_em: row.enviada_em,
       pedido_id: row.pedido_id,
       pedido_tipo: pedido?.tipo ?? '',
       pedido_quantidade: pedido?.quantidade ?? null,
