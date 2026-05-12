@@ -86,6 +86,28 @@ export default function Home() {
     });
   }, [step, protocolo, tipo, qty, estado]);
 
+  function avancarParaDetalhes() {
+    setErroEnvio(null);
+    if (!tipo || tipo.trim() === '') {
+      setErroEnvio('Escolha uma categoria pra continuar');
+      return;
+    }
+    setStep(1);
+  }
+
+  function avancarParaContatos() {
+    setErroEnvio(null);
+    const faltando: string[] = [];
+    if (!qty || qty <= 0) faltando.push('quantidade');
+    if (!prazo || prazo.trim() === '') faltando.push('prazo');
+    if (!estado || estado.trim() === '') faltando.push('estado');
+    if (faltando.length > 0) {
+      setErroEnvio(`Preencha: ${faltando.join(', ')}`);
+      return;
+    }
+    setStep(2);
+  }
+
   async function enviarPedido() {
     setErroEnvio(null);
 
@@ -226,8 +248,13 @@ export default function Home() {
                 </div>
               </div>
               <div className="flex justify-end">
-                <button disabled={!tipo} onClick={() => setStep(1)} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium disabled:opacity-30 hover:opacity-85">Continuar →</button>
+                <button onClick={avancarParaDetalhes} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium hover:opacity-85">Continuar →</button>
               </div>
+              {erroEnvio && (
+                <div className="mt-3 text-red-600 text-sm text-right">
+                  {erroEnvio}
+                </div>
+              )}
             </>
           )}
 
@@ -285,8 +312,13 @@ export default function Home() {
               </div>
               <div className="flex justify-between">
                 <button onClick={() => setStep(0)} className="border border-gray-200 text-gray-400 px-5 py-3 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
-                <button onClick={() => setStep(2)} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium hover:opacity-85">Continuar →</button>
+                <button onClick={avancarParaContatos} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium hover:opacity-85">Continuar →</button>
               </div>
+              {erroEnvio && (
+                <div className="mt-3 text-red-600 text-sm text-right">
+                  {erroEnvio}
+                </div>
+              )}
             </>
           )}
 
