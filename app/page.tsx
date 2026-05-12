@@ -57,6 +57,7 @@ export default function Home() {
   const [descricao, setDescricao] = useState("");
   const [protocolo] = useState(() => Math.floor(Math.random() * 90000) + 10000);
   const [enviando, setEnviando] = useState(false);
+  const [erroEnvio, setErroEnvio] = useState<string | null>(null);
   const [showExtras, setShowExtras] = useState(false);
   const leadEnviado = useRef(false);
 
@@ -86,9 +87,30 @@ export default function Home() {
   }, [step, protocolo, tipo, qty, estado]);
 
   async function enviarPedido() {
+    setErroEnvio(null);
+
+    const campos: { campo: string; valor: unknown; label: string }[] = [
+      { campo: 'tipo', valor: tipo, label: 'tipo de peça' },
+      { campo: 'qty', valor: qty, label: 'quantidade' },
+      { campo: 'prazo', valor: prazo, label: 'prazo' },
+      { campo: 'estado', valor: estado, label: 'estado' },
+      { campo: 'nome', valor: nome, label: 'nome' },
+      { campo: 'tel', valor: tel, label: 'WhatsApp' },
+      { campo: 'email', valor: email, label: 'e-mail' },
+    ];
+    const faltando = campos.filter(c =>
+      c.valor === undefined || c.valor === null ||
+      (typeof c.valor === 'string' && c.valor.trim() === '') ||
+      (typeof c.valor === 'number' && c.valor <= 0)
+    );
+    if (faltando.length > 0) {
+      setErroEnvio(`Preencha: ${faltando.map(f => f.label).join(', ')}`);
+      return;
+    }
+
     setEnviando(true);
     try {
-      await fetch("/api/pedidos/criar", {
+      const res = await fetch("/api/pedidos/criar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -102,11 +124,19 @@ export default function Home() {
           descricao,
         }),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ error: 'Erro desconhecido' }));
+        setErroEnvio(body.error || 'Erro ao enviar pedido. Tente novamente.');
+        setEnviando(false);
+        return;
+      }
+      setEnviando(false);
+      setStep(3);
     } catch (e) {
       console.error(e);
+      setErroEnvio('Erro de conexão. Verifique sua internet e tente de novo.');
+      setEnviando(false);
     }
-    setEnviando(false);
-    setStep(3);
   }
 
   return (
@@ -293,6 +323,11 @@ export default function Home() {
                   {enviando ? "Enviando..." : "Enviar pedido →"}
                 </button>
               </div>
+              {erroEnvio && (
+                <div className="mt-3 text-red-600 text-sm text-right">
+                  {erroEnvio}
+                </div>
+              )}
             </>
           )}
 

@@ -49,3 +49,18 @@ export function variantesWhatsApp(input: string): string[] {
 
   return [digits]
 }
+
+/**
+ * Valida se o input é um número de WhatsApp brasileiro válido (celular).
+ *
+ * Regras:
+ * - Após normalizar pra E.164 BR (55+DDD+9+8díg), deve ter exatamente 13 dígitos
+ * - O dígito após DDD precisa ser '9' (celular brasileiro com 9 obrigatório)
+ *
+ * Não valida se o número existe de fato; só formato.
+ */
+export function validarWhatsApp(input: string): boolean {
+  if (!input || typeof input !== 'string') return false
+  const digits = normalizarWhatsApp(input)
+  return digits.length === 13 && digits[4] === '9'
+}
