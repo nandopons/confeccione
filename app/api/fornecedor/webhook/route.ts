@@ -120,7 +120,7 @@ async function tratarRespostaFornecedor(
   if (texto.includes('sim')) {
     await supabase
       .from('ofertas')
-      .update({ status: 'aceita' })
+      .update({ status: 'aceita', respondida_em: new Date().toISOString() })
       .eq('id', oferta.id)
 
     const { data: pedido } = await supabase
@@ -184,7 +184,7 @@ async function tratarRespostaFornecedor(
   } else if (texto.includes('não') || texto.includes('nao')) {
     await supabase
       .from('ofertas')
-      .update({ status: 'recusada' })
+      .update({ status: 'recusada', respondida_em: new Date().toISOString() })
       .eq('id', oferta.id)
 
     await enviarMensagem(
@@ -223,7 +223,7 @@ async function tratarRespostaSemCredito(
   if (opcao === '5' || texto.includes('não tenho') || texto.includes('nao tenho')) {
     await supabase
       .from('ofertas')
-      .update({ status: 'recusada_sem_credito' })
+      .update({ status: 'recusada_sem_credito', respondida_em: new Date().toISOString() })
       .eq('id', oferta.id)
 
     await enviarMensagem(

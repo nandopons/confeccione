@@ -116,7 +116,7 @@ export async function POST(
   // 5. UPDATE oferta → aceita
   const { error: updateOfertaErr } = await supabase
     .from('ofertas')
-    .update({ status: 'aceita' })
+    .update({ status: 'aceita', respondida_em: new Date().toISOString() })
     .eq('id', oferta.id)
 
   if (updateOfertaErr) {

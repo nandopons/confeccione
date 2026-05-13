@@ -83,7 +83,7 @@ export async function POST(
   // 4. UPDATE oferta → recusada
   const { error: updateErr } = await supabase
     .from('ofertas')
-    .update({ status: 'recusada' })
+    .update({ status: 'recusada', respondida_em: new Date().toISOString() })
     .eq('id', oferta.id)
 
   if (updateErr) {

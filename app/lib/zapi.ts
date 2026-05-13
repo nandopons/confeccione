@@ -2,7 +2,7 @@ const ZAPI_INSTANCE     = process.env.ZAPI_INSTANCE_ID!
 const ZAPI_TOKEN        = process.env.ZAPI_TOKEN!
 const ZAPI_CLIENT_TOKEN = process.env.ZAPI_CLIENT_TOKEN!
 
-export async function enviarMensagem(telefone: string, mensagem: string) {
+export async function enviarMensagem(telefone: string, mensagem: string): Promise<boolean> {
   try {
     const res = await fetch(
       `https://api.z-api.io/instances/${ZAPI_INSTANCE}/token/${ZAPI_TOKEN}/send-text`,
@@ -15,10 +15,24 @@ export async function enviarMensagem(telefone: string, mensagem: string) {
         body: JSON.stringify({ phone: telefone, message: mensagem }),
       }
     )
-    const data = await res.json()
-    console.log('Z-API response:', JSON.stringify(data))
+    const data = await res.json().catch(() => null)
+
+    if (!res.ok) {
+      console.error('[zapi] enviarMensagem HTTP falhou', { telefone, status: res.status, data })
+      return false
+    }
+
+    // Z-API responde 200 com { error: '...' } em erro semântico (número inválido, etc)
+    if (data && typeof data === 'object' && 'error' in data && data.error) {
+      console.error('[zapi] enviarMensagem erro Z-API', { telefone, error: data.error })
+      return false
+    }
+
+    console.log('[zapi] enviarMensagem OK', { telefone, response: data })
+    return true
   } catch (err) {
-    console.error('Z-API error:', err)
+    console.error('[zapi] enviarMensagem exception', { telefone, err })
+    return false
   }
 }
 

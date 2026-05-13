@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { estaEmHorarioComercial, proximoHorarioValido } from '@/app/lib/horario'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
 import { emailConfirmacaoCliente } from '@/app/lib/email'
-import { validarWhatsApp } from '@/app/lib/phone'
+import { normalizarWhatsApp, validarWhatsApp } from '@/app/lib/phone'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -58,7 +58,7 @@ export async function POST(req: Request) {
       prazo,
       estado,
       nome,
-      whatsapp,
+      whatsapp: normalizarWhatsApp(whatsapp),
       email,
       descricao: descricao || null,
       status: 'buscando_fornecedor',
