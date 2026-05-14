@@ -22,6 +22,7 @@ import { enviarMensagem } from '@/app/lib/zapi'
 import { emailContatoFornecedor } from '@/app/lib/email'
 import { tipoLabel } from '@/app/lib/ofertas'
 import { contarOfertasMesAtual, planoEfetivo, PLANOS_CONFIG } from '@/app/lib/planos'
+import { linkWhatsApp } from '@/app/lib/phone'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -144,18 +145,19 @@ export async function POST(
   }
 
   // 7. Notifica fornecedor (WhatsApp) — best effort
+  const tipo = tipoLabel[pedido.tipo] ?? pedido.tipo
+
   try {
     const resumoCota = await montarResumoCotaMes(fornecedor.id)
     await enviarMensagem(
       fornecedorCompleto.whatsapp,
-      `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${pedido.whatsapp}\nE-mail: ${pedido.email}\n\nEntre em contato direto pra combinar detalhes. Boa venda!\n\n${resumoCota}`
+      `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${pedido.whatsapp}\nE-mail: ${pedido.email}\n\n👉 Falar com o cliente: ${linkWhatsApp(pedido.whatsapp)}\n\nEntre em contato direto pra combinar detalhes. Boa venda!\n\n${resumoCota}`
     )
   } catch (err) {
     console.error('aceitar: aviso fornecedor whatsapp falhou:', err)
   }
 
   // 8. Notifica cliente (WhatsApp) — best effort
-  const tipo = tipoLabel[pedido.tipo] ?? pedido.tipo
   const localFornec = fornecedorCompleto.cidade
     ? `${fornecedorCompleto.cidade}/${fornecedorCompleto.estado}`
     : fornecedorCompleto.estado
@@ -166,6 +168,7 @@ export async function POST(
     `*${fornecedorCompleto.nome}*\n` +
     `📱 ${fornecedorCompleto.whatsapp}\n` +
     `📍 ${localFornec}\n\n` +
+    `👉 Falar com o fornecedor: ${linkWhatsApp(fornecedorCompleto.whatsapp)}\n\n` +
     `Ele vai te chamar nas próximas horas. Se preferir, você pode entrar em contato direto.\n\n` +
     `Daqui a 24h te chamo aqui pra saber se deu certo!`
 

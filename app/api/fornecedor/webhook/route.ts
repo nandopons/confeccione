@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { variantesWhatsApp } from '@/app/lib/phone'
+import { variantesWhatsApp, linkWhatsApp } from '@/app/lib/phone'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { emailContatoFornecedor } from '@/app/lib/email'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
@@ -138,15 +138,16 @@ async function tratarRespostaFornecedor(
 
     // Envia dados do cliente pro fornecedor + resumo de leads do mês
     const resumoCota = await montarResumoCotaMes(fornecedor.id)
+    const tipo = tipoLabel[pedido.tipo] ?? pedido.tipo
+
     await enviarMensagem(
       fornecedor.whatsapp,
-      `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${pedido.whatsapp}\nE-mail: ${pedido.email}\n\nEntre em contato direto pra combinar detalhes. Boa venda!\n\n${resumoCota}`
+      `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${pedido.whatsapp}\nE-mail: ${pedido.email}\n\n👉 Falar com o cliente: ${linkWhatsApp(pedido.whatsapp)}\n\nEntre em contato direto pra combinar detalhes. Boa venda!\n\n${resumoCota}`
     )
 
     // ============================================================
     // 3a — Aviso imediato ao cliente (WhatsApp + Email)
     // ============================================================
-    const tipo = tipoLabel[pedido.tipo] ?? pedido.tipo
     const localFornec = fornecedor.cidade
       ? `${fornecedor.cidade}/${fornecedor.estado}`
       : fornecedor.estado
@@ -157,6 +158,7 @@ async function tratarRespostaFornecedor(
       `*${fornecedor.nome}*\n` +
       `📱 ${fornecedor.whatsapp}\n` +
       `📍 ${localFornec}\n\n` +
+      `👉 Falar com o fornecedor: ${linkWhatsApp(fornecedor.whatsapp)}\n\n` +
       `Ele vai te chamar nas próximas horas. Se preferir, você pode entrar em contato direto.\n\n` +
       `Daqui a 24h te chamo aqui pra saber se deu certo!`
 

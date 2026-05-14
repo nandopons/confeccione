@@ -64,3 +64,14 @@ export function validarWhatsApp(input: string): boolean {
   const digits = normalizarWhatsApp(input)
   return digits.length === 13 && digits[4] === '9'
 }
+
+/**
+ * Gera link wa.me com texto opcional pré-preenchido.
+ * O número é normalizado pra formato E.164 BR sem '+' (proteção pra entradas legadas
+ * que possam estar sem DDI). WhatsApp renderiza o link como clicável nas mensagens.
+ */
+export function linkWhatsApp(numero: string, mensagem?: string): string {
+  const n = normalizarWhatsApp(numero)
+  const base = `https://wa.me/${n}`
+  return mensagem ? `${base}?text=${encodeURIComponent(mensagem)}` : base
+}
