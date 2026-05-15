@@ -16,6 +16,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Confeccione | Encontre fornecedores de confecção",
   description: "Encontre confecções para fabricar suas peças. Orçamento rápido pelo WhatsApp.",
+  verification: {
+    other: {
+      "p:domain_verify": "d43c634ff3dd0e303a70944d1854ebf3",
+    },
+  },
 };
 
 export default function RootLayout({
