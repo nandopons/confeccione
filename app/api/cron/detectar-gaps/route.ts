@@ -14,8 +14,9 @@
 // na doc Vercel (vercel-ts.md, cron-jobs/quickstart).
 // ============================================================================
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { detectarOrfaos } from '@/app/lib/orfaos'
+import { supabaseAdmin } from '@/app/lib/supabase-server'
 
 export async function GET(req: NextRequest) {
   // ─────────────────────────────────────────────────────────────
@@ -65,6 +66,11 @@ export async function GET(req: NextRequest) {
     console.log(
       `[cron/detectar-gaps] ${detectados.length} órfãos detectados em ${duracaoMs}ms`
     )
+    registrarExecucao({
+      ok: true,
+      duracaoMs,
+      detectados: detectados.length,
+    })
     return NextResponse.json({
       ok: true,
       detectados: detectados.length,
@@ -75,9 +81,53 @@ export async function GET(req: NextRequest) {
     const duracaoMs = Date.now() - inicio
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[cron/detectar-gaps] erro:', err)
+    registrarExecucao({
+      ok: false,
+      duracaoMs,
+      detectados: 0,
+      mensagemErro: msg,
+    })
     return NextResponse.json(
       { ok: false, erro: msg, duracao_ms: duracaoMs },
       { status: 500 }
     )
   }
+}
+
+// ============================================================================
+// Helper interno — observabilidade
+// ============================================================================
+
+/** Registra uma linha em cron_execucoes em background via after().
+ *  Failure-soft: INSERT que falhar só vira log; não bloqueia nem altera a
+ *  resposta do cron. Chamada apenas dentro do handler GET acima, depois de
+ *  passar a auth (= "execução efetiva", ver migrations/2026-05-16-cron-execucoes.sql). */
+function registrarExecucao(params: {
+  ok: boolean
+  duracaoMs: number
+  detectados: number
+  mensagemErro?: string
+}) {
+  after(async () => {
+    try {
+      const { error } = await supabaseAdmin.from('cron_execucoes').insert({
+        nome_cron: 'detectar-gaps',
+        duracao_ms: params.duracaoMs,
+        ok: params.ok,
+        detectados: params.detectados,
+        mensagem_erro: params.mensagemErro ?? null,
+      })
+      if (error) {
+        console.error(
+          '[cron/detectar-gaps] INSERT cron_execucoes falhou:',
+          error
+        )
+      }
+    } catch (err) {
+      console.error(
+        '[cron/detectar-gaps] INSERT cron_execucoes exception:',
+        err
+      )
+    }
+  })
 }
