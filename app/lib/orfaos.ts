@@ -133,17 +133,23 @@ export function calcularPrioridade(pedido: PedidoCandidato): number {
  *  garante 1 órfão ativo por pedido no banco — esta função pré-filtra
  *  pra evitar erros de inserção. */
 export async function detectarOrfaos(): Promise<OrfaoDetectado[]> {
+  const agora = Date.now()
   const limiteIdade = new Date(
-    Date.now() - IDADE_MIN_ORFAO_HORAS * 3600 * 1000
+    agora - IDADE_MIN_ORFAO_HORAS * 3600 * 1000
   ).toISOString()
+  const nowIso = new Date(agora).toISOString()
 
-  // 1. Buscar candidatos: idade>4h + status detectável + sem fornecedor aceito
+  // 1. Buscar candidatos: idade>4h + status detectável + sem fornecedor aceito.
+  //    Respeita buscar_apos: pedidos criados fora do expediente têm
+  //    buscar_apos no futuro até o scheduler disparar a 1ª oferta — não
+  //    são órfãos antes disso (ver app/api/pedidos/criar/route.ts:76-87).
   const { data: candidatosRaw, error: candErr } = await supabaseAdmin
     .from('pedidos')
     .select('id, tipo, quantidade, estado, criado_em')
     .lt('criado_em', limiteIdade)
     .in('status', STATUS_PEDIDO_DETECTAVEL as string[])
     .is('fornecedor_aceito_id', null)
+    .or(`buscar_apos.is.null,buscar_apos.lte.${nowIso}`)
 
   if (candErr) {
     throw new Error(`detectarOrfaos: erro ao buscar candidatos: ${candErr.message}`)
