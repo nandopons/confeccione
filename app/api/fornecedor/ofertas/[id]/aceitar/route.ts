@@ -144,6 +144,23 @@ export async function POST(
     return NextResponse.json({ erro: 'Erro ao processar' }, { status: 500 })
   }
 
+  // Cleanup órfão: se este pedido estava registrado como órfão ativo,
+  // marca como resolvido. Failure-soft: aceite é porta de monetização,
+  // NUNCA pode falhar só porque cleanup de órfão falhou.
+  try {
+    const { error: orfErr } = await supabase
+      .from('pedidos_orfaos')
+      .update({ status_orfao: 'resolvido' })
+      .eq('pedido_id', pedido.id)
+      .in('status_orfao', ['aberto', 'em_captacao'])
+
+    if (orfErr) {
+      console.error('aceitar: cleanup órfão falhou (não-bloqueante):', orfErr)
+    }
+  } catch (err) {
+    console.error('aceitar: cleanup órfão exception (não-bloqueante):', err)
+  }
+
   // 7. Notifica fornecedor (WhatsApp) — best effort
   const tipo = tipoLabel[pedido.tipo] ?? pedido.tipo
 
