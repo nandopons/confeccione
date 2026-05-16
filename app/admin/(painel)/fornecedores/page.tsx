@@ -154,7 +154,10 @@ async function carregarFornecedores(
     return []
   }
 
-  return (data ?? []) as LinhaFornecedor[]
+  // Cast via unknown porque o builder reatribuído condicionalmente faz o TS
+  // inferir um tipo de retorno mais amplo (incluindo o GenericStringError do
+  // supabase-js que não overlap com LinhaFornecedor).
+  return (data ?? []) as unknown as LinhaFornecedor[]
 }
 
 // ============================================================================
