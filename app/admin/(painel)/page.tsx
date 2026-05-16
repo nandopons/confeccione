@@ -18,6 +18,7 @@ import {
   type SemaforoMetricas,
   type SemaforoStatus,
 } from '@/app/lib/admin-saude'
+import { BotaoDispararCron } from './BotaoDispararCron'
 
 export default async function AdminDashboardPage() {
   if (!(await eAdminLogado())) {
@@ -195,7 +196,11 @@ export default async function AdminDashboardPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      <Semaforo status={status} mensagem={mensagem} />
+      <Semaforo
+        status={status}
+        mensagem={mensagem}
+        acao={<BotaoDispararCron />}
+      />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {cards.map((c) => (
@@ -224,9 +229,11 @@ export default async function AdminDashboardPage() {
 function Semaforo({
   status,
   mensagem,
+  acao,
 }: {
   status: SemaforoStatus
   mensagem: string
+  acao?: React.ReactNode
 }) {
   const config: Record<
     SemaforoStatus,
@@ -240,11 +247,16 @@ function Semaforo({
 
   return (
     <div className={`${bg} ${text} px-5 py-4 rounded-lg mb-6`}>
-      <div className="flex items-baseline gap-2 mb-1">
-        <span className="text-xl">{emoji}</span>
-        <h2 className="text-lg font-semibold">{titulo}</h2>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-2 mb-1">
+            <span className="text-xl">{emoji}</span>
+            <h2 className="text-lg font-semibold">{titulo}</h2>
+          </div>
+          <p className="text-sm">{mensagem}</p>
+        </div>
+        {acao && <div className="flex-shrink-0">{acao}</div>}
       </div>
-      <p className="text-sm">{mensagem}</p>
     </div>
   )
 }
