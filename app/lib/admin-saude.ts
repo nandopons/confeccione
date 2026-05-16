@@ -72,6 +72,26 @@ export function formatarDuracaoRelativa(
   return `há ${dias} ${dias === 1 ? 'dia' : 'dias'}`
 }
 
+/** Formata duração no FUTURO: "em 14h", "em 2 dias", "agora".
+ *  Espelha formatarDuracaoRelativa mas mostra o sentido oposto (esperado).
+ *  agoraMs injetado pra determinismo. */
+export function formatarDuracaoFutura(
+  msTimestamp: number,
+  agoraMs: number
+): string {
+  const diffMs = Math.max(0, msTimestamp - agoraMs)
+  const minutos = Math.floor(diffMs / 60_000)
+
+  if (minutos < 1) return 'agora'
+  if (minutos < 60) return `em ${minutos} min`
+
+  const horas = Math.floor(minutos / 60)
+  if (horas < 24) return `em ${horas}h`
+
+  const dias = Math.floor(horas / 24)
+  return `em ${dias} ${dias === 1 ? 'dia' : 'dias'}`
+}
+
 /** Formata duração em horas pra string legível: "<1h", "5h", "8d 4h".
  *  Sem Date.now() interno — recebe horas já calculadas pelo caller.
  *  Casos:
