@@ -18,9 +18,10 @@ import {
   type VwPedidoOrfaoAdmin,
 } from '@/app/lib/orfaos'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
-import { linkWhatsApp } from '@/app/lib/phone'
+import { formatarIdadeHoras } from '@/app/lib/admin-saude'
 import { AcoesOrfao } from './AcoesOrfao'
 import { BotaoDetectar } from './BotaoDetectar'
+import { ColunaContato } from '../ColunaContato'
 
 type FiltroStatus = StatusOrfao | 'todos'
 
@@ -171,27 +172,10 @@ function Linha({ o }: { o: VwPedidoOrfaoAdmin }) {
         </div>
       </td>
       <td className="px-3 py-2.5">
-        <div className="text-gray-900">{o.nome}</div>
-        <div className="flex items-center gap-2 mt-0.5">
-          {/* Número como texto selecionável (não link) — evita abrir
-              conversa por click acidental ao navegar a lista. */}
-          <span className="text-xs text-gray-600 select-text">
-            {o.whatsapp}
-          </span>
-          <a
-            href={linkWhatsApp(o.whatsapp)}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={`Abrir WhatsApp · ${o.nome}`}
-            aria-label={`Abrir WhatsApp ${o.nome}`}
-            className="text-xs px-1.5 py-0.5 bg-green-50 hover:bg-green-100 rounded text-green-700 leading-none"
-          >
-            💬
-          </a>
-        </div>
+        <ColunaContato nome={o.nome} whatsapp={o.whatsapp} />
       </td>
       <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">
-        {formatarIdade(o.idade_horas)}
+        {formatarIdadeHoras(o.idade_horas)}
       </td>
       <td className="px-3 py-2.5 whitespace-nowrap">
         <BadgeStatus status={o.status_orfao} />
@@ -247,10 +231,3 @@ function BadgeStatus({ status }: { status: StatusOrfao }) {
   )
 }
 
-function formatarIdade(horas: number): string {
-  if (horas < 1) return '< 1h'
-  if (horas < 24) return `${Math.floor(horas)}h`
-  const dias = Math.floor(horas / 24)
-  const restoHoras = Math.floor(horas % 24)
-  return restoHoras > 0 ? `${dias}d ${restoHoras}h` : `${dias}d`
-}

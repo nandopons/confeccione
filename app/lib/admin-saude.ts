@@ -72,6 +72,23 @@ export function formatarDuracaoRelativa(
   return `há ${dias} ${dias === 1 ? 'dia' : 'dias'}`
 }
 
+/** Formata duração em horas pra string legível: "<1h", "5h", "8d 4h".
+ *  Sem Date.now() interno — recebe horas já calculadas pelo caller.
+ *  Casos:
+ *    horas < 1       → '< 1h'
+ *    horas < 24      → 'Xh' (truncado)
+ *    horas % 24 == 0 → 'Nd'
+ *    else            → 'Nd Hh'
+ *
+ *  Usado em tabelas admin pra coluna "Idade" (pedido, oferta, etc). */
+export function formatarIdadeHoras(horas: number): string {
+  if (horas < 1) return '< 1h'
+  if (horas < 24) return `${Math.floor(horas)}h`
+  const dias = Math.floor(horas / 24)
+  const restoHoras = Math.floor(horas % 24)
+  return restoHoras > 0 ? `${dias}d ${restoHoras}h` : `${dias}d`
+}
+
 /** Frase complementar abaixo do título do semáforo.
  *  ultimaExecucaoMs nullable: null = cron_execucoes vazia. */
 export function mensagemSemaforo(
