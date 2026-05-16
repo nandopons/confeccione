@@ -28,9 +28,11 @@ import { STATUS_FORNECEDOR_ATIVO, fornecedorAtendePedido } from './matching'
 /** Idade mínima do pedido pra ser considerado órfão (horas). */
 const IDADE_MIN_ORFAO_HORAS = 4
 
-/** Status de pedido que ainda permitem detecção como órfão.
- *  em_negociacao e estados fechados ficam fora — o fluxo está avançando. */
-const STATUS_PEDIDO_DETECTAVEL: readonly string[] = [
+/** Status de pedido considerados elegíveis pra detecção e classificação
+ *  operacional. em_negociacao e estados fechados ficam fora — o fluxo está
+ *  avançando. Compartilhado entre detectarOrfaos() e o dashboard /admin
+ *  (queries de contagem) — fonte única de verdade. */
+export const STATUS_PEDIDO_DETECTAVEL: readonly string[] = [
   'aguardando_contato',
   'buscando_fornecedor',
 ]
