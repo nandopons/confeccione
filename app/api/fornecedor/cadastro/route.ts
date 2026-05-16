@@ -1,9 +1,10 @@
 import { createClient } from '@supabase/supabase-js'
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
 import { normalizarWhatsApp } from '@/app/lib/phone'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { emailBoasVindasFornecedor } from '@/app/lib/email'
 import { validarCpfCnpj, apenasDigitos } from '@/app/lib/cpf-cnpj'
+import { matchingRetroativo } from '@/app/lib/orfaos'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -66,8 +67,11 @@ export async function POST(req: Request) {
     .eq('whatsapp', numero)
     .maybeSingle()
 
+  let fornecedorId: string
+
   if (existente) {
     // Edição de cadastro: NÃO mexe em plano/trial pra não resetar
+    fornecedorId = (existente as { id: string }).id
     const { error } = await supabase
       .from('leads_fornecedores')
       .update(payload)
@@ -75,7 +79,7 @@ export async function POST(req: Request) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   } else {
     // Novo cadastro: aplica trial Pro de 90 dias
-    const { error } = await supabase
+    const { data: novo, error } = await supabase
       .from('leads_fornecedores')
       .insert({
         ...payload,
@@ -84,8 +88,39 @@ export async function POST(req: Request) {
         plano_expira_em: planoExpiraEm,
         creditos_extras: 0,
       })
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      .select('id')
+      .single()
+    if (error || !novo) {
+      return NextResponse.json(
+        { error: error?.message ?? 'Erro ao inserir' },
+        { status: 500 }
+      )
+    }
+    fornecedorId = (novo as { id: string }).id
   }
+
+  // Sprint 1 — matching retroativo de pedidos órfãos.
+  // Roda em background via after() pra não bloquear a resposta do cadastro
+  // (matchingRetroativo varre órfãos abertos, dispara criarEDispararOferta
+  // pros compatíveis — pode levar segundos). Cobre INSERT (novo fornecedor)
+  // E UPDATE (edição que mudou tipo/raio/estado/status — pode passar a
+  // atender órfãos diferentes). Idempotência da função protege contra
+  // disparos redundantes. Failure-soft: erro só logga, não afeta o cadastro.
+  after(async () => {
+    try {
+      const resultado = await matchingRetroativo(fornecedorId)
+      console.log(
+        `[cadastro-callback] fornecedor=${fornecedorId} ` +
+          `ofertasDisparadas=${resultado.ofertasDisparadas} ` +
+          `orfaosComOfertaAtiva=${resultado.orfaosComOfertaAtiva.length}`
+      )
+    } catch (err) {
+      console.error(
+        `[cadastro-callback] matchingRetroativo falhou pra ${fornecedorId}:`,
+        err
+      )
+    }
+  })
 
   await enviarMensagem(
     numero,
