@@ -1,39 +1,81 @@
 // middleware.ts
 // ============================================================================
-// Protege rotas /fornecedor/painel/* — exige cookie de sessão.
+// Proteção de rotas no Edge Runtime — duas barreiras independentes:
 //
-// IMPORTANTE: este middleware roda no Edge Runtime, que não suporta operações
-// de banco (Supabase) nem node:crypto plenamente. Por isso, fazemos apenas a
-// checagem MÍNIMA aqui (cookie existe?) e deixamos a validação real (token vs
-// banco, expira_em, fornecedor existe) pra dentro das páginas/APIs do painel.
+//   1. /fornecedor/painel/*  → exige cookie de sessão do fornecedor.
+//      Validação real (token vs banco) acontece em pages/APIs via
+//      validarSessao() de app/lib/sessoes.ts.
 //
-// Em outras palavras: este middleware é uma BARREIRA RÁPIDA. Não é a única
-// linha de defesa. As páginas do painel devem chamar validarSessao() pra
-// verificar de verdade.
+//   2. /admin/*  e  /api/admin/*  → exige cookie de sessão admin.
+//      Validação real (cookie === ADMIN_SESSION_TOKEN) acontece em
+//      pages/routes via ehTokenAdminValido() de app/lib/admin-auth.ts.
+//      /admin/login e /api/admin/login são públicas (senão loop).
+//
+// IMPORTANTE: este arquivo roda no Edge Runtime — Supabase, node:crypto
+// e process.env de runtime são limitados. Aqui fazemos só BARREIRA RÁPIDA
+// (cookie existe + length plausível). Defesa em profundidade vive nas
+// pages/routes.
+//
+// Nota: Next 16 deprecou o nome 'middleware' em favor de 'proxy'. A
+// migração é dívida pós-Sprint 1. Backwards-compat mantida (build
+// classifica este arquivo como "Proxy (Middleware)").
 // ============================================================================
 
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-const COOKIE_NAME = 'confeccione_session'
+const COOKIE_FORNECEDOR = 'confeccione_session'
+const COOKIE_ADMIN = 'confeccione_admin_session'
 
 export function middleware(req: NextRequest) {
-  const token = req.cookies.get(COOKIE_NAME)?.value
+  const path = req.nextUrl.pathname
 
-  // Se não tem cookie, redireciona pro login
-  if (!token || token.length < 20) {
-    const url = req.nextUrl.clone()
-    url.pathname = '/fornecedor/entrar'
-    // Preserva pra onde ele queria ir, pra redirecionar de volta após login
-    url.searchParams.set('proximo', req.nextUrl.pathname)
-    return NextResponse.redirect(url)
+  // ============================================================
+  // ADMIN — /admin/* e /api/admin/*
+  // ============================================================
+  if (path.startsWith('/admin') || path.startsWith('/api/admin')) {
+    // Login pages são públicas (senão loop infinito de redirect).
+    if (path === '/admin/login' || path === '/api/admin/login') {
+      return NextResponse.next()
+    }
+
+    const token = req.cookies.get(COOKIE_ADMIN)?.value
+
+    if (!token || token.length < 32) {
+      // APIs respondem JSON 401; pages redirecionam pro login.
+      if (path.startsWith('/api/admin')) {
+        return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 })
+      }
+      const url = req.nextUrl.clone()
+      url.pathname = '/admin/login'
+      url.searchParams.set('proximo', path)
+      return NextResponse.redirect(url)
+    }
+    return NextResponse.next()
   }
 
-  // Cookie existe — deixa a página/API validar contra o banco
+  // ============================================================
+  // FORNECEDOR — /fornecedor/painel/* (lógica preservada)
+  // ============================================================
+  if (path.startsWith('/fornecedor/painel')) {
+    const token = req.cookies.get(COOKIE_FORNECEDOR)?.value
+
+    if (!token || token.length < 20) {
+      const url = req.nextUrl.clone()
+      url.pathname = '/fornecedor/entrar'
+      url.searchParams.set('proximo', path)
+      return NextResponse.redirect(url)
+    }
+    return NextResponse.next()
+  }
+
   return NextResponse.next()
 }
 
-// Aplica middleware só em /fornecedor/painel/*
 export const config = {
-  matcher: ['/fornecedor/painel/:path*'],
+  matcher: [
+    '/fornecedor/painel/:path*',
+    '/admin/:path*',
+    '/api/admin/:path*',
+  ],
 }
