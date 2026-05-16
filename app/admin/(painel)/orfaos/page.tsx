@@ -51,58 +51,50 @@ export default async function AdminOrfaosPage({
   const orfaos = await listarOrfaos({ status: statusFiltro })
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">
-              Pedidos órfãos
-            </h1>
-            <p className="text-sm text-gray-500">
-              Confeccione · admin
-            </p>
-          </div>
-          <BotaoDetectar />
-        </div>
-      </header>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      {/* Barra de ferramentas local — título da seção + ação específica.
+          Header global (Confeccione · admin) + Nav ficam no layout. */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-gray-900">
+          Pedidos órfãos
+        </h2>
+        <BotaoDetectar />
+      </div>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Tabs de filtro */}
-        <nav className="flex gap-2 mb-4 flex-wrap">
-          {STATUS_QS.map((s) => {
-            const ativo = statusFiltro === s.valor
-            return (
-              <a
-                key={s.valor}
-                href={`/admin/orfaos?status=${s.valor}`}
-                className={
-                  'text-sm px-3 py-1.5 rounded-md font-medium ' +
-                  (ativo
-                    ? 'bg-gray-900 text-white'
-                    : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100')
-                }
-              >
-                {s.label}
-              </a>
-            )
-          })}
-        </nav>
+      {/* Tabs de filtro */}
+      <nav className="flex gap-2 mb-4 flex-wrap">
+        {STATUS_QS.map((s) => {
+          const ativo = statusFiltro === s.valor
+          return (
+            <a
+              key={s.valor}
+              href={`/admin/orfaos?status=${s.valor}`}
+              className={
+                'text-sm px-3 py-1.5 rounded-md font-medium ' +
+                (ativo
+                  ? 'bg-gray-900 text-white'
+                  : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100')
+              }
+            >
+              {s.label}
+            </a>
+          )
+        })}
+      </nav>
 
-        {/* Tabela ou empty state */}
-        {orfaos.length === 0 ? (
-          <EmptyState filtro={statusFiltro} />
-        ) : (
-          <Tabela orfaos={orfaos} />
-        )}
+      {/* Tabela ou empty state */}
+      {orfaos.length === 0 ? (
+        <EmptyState filtro={statusFiltro} />
+      ) : (
+        <Tabela orfaos={orfaos} />
+      )}
 
-        {/* Contagem total */}
-        {orfaos.length > 0 && (
-          <p className="mt-4 text-xs text-gray-500">
-            {orfaos.length} {orfaos.length === 1 ? 'órfão' : 'órfãos'} no filtro atual
-          </p>
-        )}
-      </main>
+      {/* Contagem total */}
+      {orfaos.length > 0 && (
+        <p className="mt-4 text-xs text-gray-500">
+          {orfaos.length} {orfaos.length === 1 ? 'órfão' : 'órfãos'} no filtro atual
+        </p>
+      )}
     </div>
   )
 }
