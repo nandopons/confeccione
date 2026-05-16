@@ -40,6 +40,49 @@ export type ResultadoMatching = {
   tem_credito: boolean
 }
 
+// ============================================================================
+// REGRA DE COMPATIBILIDADE (fonte única)
+// ============================================================================
+
+/** Status de fornecedor que aceita ofertas. Outros valores ('pausado')
+ *  significam fornecedor existe mas não quer receber leads agora. */
+export const STATUS_FORNECEDOR_ATIVO = 'ativo' as const
+
+/** Regra pura: o fornecedor atende este pedido? Sem I/O, sem queries.
+ *
+ *  Fonte única conceitual da regra de compatibilidade. A query SQL em
+ *  buscarFornecedorCompativel espelha esta lógica pra eficiência.
+ *  Ao alterar a regra aqui, alterar lá também (e vice-versa).
+ *
+ *  NÃO considera exclusões dinâmicas (ofertas em andamento, gatilhos
+ *  expirados, crédito) — essas são responsabilidade da função de busca. */
+export function fornecedorAtendePedido(
+  fornecedor: Pick<
+    Fornecedor,
+    'status' | 'tipos_produto' | 'pedido_minimo' | 'raio_atendimento' | 'estado'
+  >,
+  pedido: Pick<Pedido, 'tipo' | 'quantidade' | 'estado'>
+): boolean {
+  if (fornecedor.status !== STATUS_FORNECEDOR_ATIVO) return false
+
+  // Espelha .contains() / @> em SQL. Defensivo contra null caso o schema mude.
+  if (!fornecedor.tipos_produto?.includes(pedido.tipo)) return false
+
+  // pedido_minimo só vale se quantidade foi informada.
+  if (pedido.quantidade !== null && pedido.quantidade < fornecedor.pedido_minimo) {
+    return false
+  }
+
+  // Raio: 'nacional' aceita qualquer estado; 'estado' e 'regiao' exigem
+  // mesmo estado (valores reais no schema, ver app/fornecedor/cadastro).
+  const cobreEstado =
+    fornecedor.raio_atendimento === 'nacional' ||
+    fornecedor.estado === pedido.estado
+  if (!cobreEstado) return false
+
+  return true
+}
+
 /**
  * Busca o melhor fornecedor compatível para um pedido, respeitando:
  *
@@ -99,7 +142,7 @@ export async function buscarFornecedorCompativel(
   let q: any = supabase
     .from('leads_fornecedores')
     .select('*')
-    .eq('status', 'ativo')
+    .eq('status', STATUS_FORNECEDOR_ATIVO)
     .contains('tipos_produto', [pedido.tipo])
     .or(
       `raio_atendimento.eq.nacional,and(raio_atendimento.in.(estado,regiao),estado.eq.${pedido.estado})`
