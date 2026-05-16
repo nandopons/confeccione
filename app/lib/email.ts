@@ -184,7 +184,7 @@ export async function emailOfertaFornecedor(params: {
       : ''
 
   const descBloco = descEsc
-    ? `<div style="background:#fafafa;border:1px solid #eeeeee;padding:14px 16px;margin-top:16px;border-radius:6px;font-size:14px;color:#1f2937;"><strong style="color:#666;display:block;margin-bottom:4px;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">Detalhes do cliente</strong>${descEsc}</div>`
+    ? `<div style="background:#fafafa;border:1px solid #eeeeee;padding:14px 16px;margin-top:16px;border-radius:6px;font-size:14px;color:#1f2937;"><strong style="color:#666;display:block;margin-bottom:4px;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">Detalhes do pedido</strong>${descEsc}</div>`
     : ''
 
   const html = layout(
