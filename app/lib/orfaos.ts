@@ -49,6 +49,21 @@ const STATUS_ORFAO_ATIVO: readonly string[] = ['aberto', 'em_captacao']
 
 export type StatusOrfao = 'aberto' | 'em_captacao' | 'resolvido' | 'descartado'
 
+/** Transições permitidas entre status de órfão. Fonte única — usada pelo
+ *  route handler antes do UPDATE pra detectar conflito (admin com 2 abas,
+ *  uma já mudou status, outra clica botão em estado desatualizado). */
+export const TRANSICOES_PERMITIDAS: Record<StatusOrfao, readonly StatusOrfao[]> = {
+  aberto:      ['em_captacao', 'resolvido', 'descartado'],
+  em_captacao: ['resolvido', 'descartado', 'aberto'],
+  resolvido:   ['aberto', 'descartado'],
+  descartado:  ['aberto'],
+}
+
+/** Função pura: 'de → para' é uma transição válida? */
+export function podeTransicionarOrfao(de: StatusOrfao, para: StatusOrfao): boolean {
+  return TRANSICOES_PERMITIDAS[de]?.includes(para) ?? false
+}
+
 /** Linha da view vw_pedidos_orfaos_admin (admin-only, contém contato cliente). */
 export type VwPedidoOrfaoAdmin = {
   orfao_id: string
