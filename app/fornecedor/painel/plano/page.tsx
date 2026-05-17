@@ -105,7 +105,7 @@ export default async function PaginaPlano() {
       <div className="mt-10">
         <h2 className="text-gray-900 text-lg font-medium mb-1">Pedidos extras</h2>
         <p className="text-gray-500 text-sm">
-          Pedidos extras comprados ficam disponíveis até serem consumidos. Use quando estourar a cota mensal.
+          Pedidos extras comprados ficam disponíveis por 3 meses ou até serem consumidos. Use quando estourar a cota mensal.
         </p>
         <p className="text-gray-400 text-xs mb-4 mt-1">
           Preços do seu plano <span className="text-gray-700 font-medium">{cota.planoNome}</span>
