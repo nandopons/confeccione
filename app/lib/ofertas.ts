@@ -47,7 +47,8 @@ export async function criarEDispararOferta(pedidoId: string): Promise<void> {
 
   // Caso 2: fornecedor com crédito → oferta normal
   if (resultado.tem_credito) {
-    return await dispararOfertaNormal(pedido as Pedido, resultado.fornecedor)
+    await dispararOfertaNormal(pedido as Pedido, resultado.fornecedor)
+    return
   }
 
   // Caso 3: fornecedor sem crédito → oferta com gatilho de upgrade
@@ -73,7 +74,7 @@ export async function criarEDispararOferta(pedidoId: string): Promise<void> {
 async function dispararOfertaNormal(
   pedido: Pedido,
   fornecedor: Fornecedor
-): Promise<void> {
+): Promise<string | null> {
   const { count } = await supabase
     .from('ofertas')
     .select('*', { count: 'exact', head: true })
@@ -82,18 +83,22 @@ async function dispararOfertaNormal(
   const tentativa = (count ?? 0) + 1
   const expiraEm = new Date(Date.now() + HORAS_4_MS).toISOString()
 
-  const { error: ofertaErr } = await supabase.from('ofertas').insert({
-    pedido_id: pedido.id,
-    fornecedor_id: fornecedor.id,
-    status: 'enviada',
-    tipo_oferta: 'normal',
-    tentativa_numero: tentativa,
-    expira_em: expiraEm,
-  })
+  const { data: inserida, error: ofertaErr } = await supabase
+    .from('ofertas')
+    .insert({
+      pedido_id: pedido.id,
+      fornecedor_id: fornecedor.id,
+      status: 'enviada',
+      tipo_oferta: 'normal',
+      tentativa_numero: tentativa,
+      expira_em: expiraEm,
+    })
+    .select('id')
+    .single()
 
-  if (ofertaErr) {
+  if (ofertaErr || !inserida) {
     console.error('dispararOfertaNormal: erro ao inserir oferta', ofertaErr)
-    return
+    return null
   }
 
   await supabase
@@ -136,6 +141,8 @@ async function dispararOfertaNormal(
       console.error('email oferta falhou:', err)
     }
   }
+
+  return (inserida as { id: string }).id
 }
 
 // ============================================================
@@ -266,4 +273,59 @@ async function notificarAdminSemFornecedor(
       totalTentativas: count ?? 0,
     }),
   ])
+}
+
+// ============================================================
+// DISPARO PRA FORNECEDOR ESPECÍFICO (sem passar por matching)
+// ============================================================
+
+/** Dispara oferta normal pra um fornecedor ESPECÍFICO. Usado pelo B3
+ *  (processamento de fila de reenvios) quando o admin já decidiu qual
+ *  fornecedor deve receber. Reusa dispararOfertaNormal internamente.
+ *
+ *  Defensivo: valida que pedido ainda está "buscando" e sem fornecedor
+ *  aceito. Se algo mudou entre o agendamento e o disparo (ex: pedido
+ *  foi aceito por outro fornecedor), NÃO dispara — retorna erro. */
+export async function dispararOfertaParaFornecedor(
+  pedidoId: string,
+  fornecedorId: string
+): Promise<
+  | { ok: true; ofertaId: string }
+  | { ok: false; erro: string }
+> {
+  const { data: pedido } = await supabase
+    .from('pedidos')
+    .select('*')
+    .eq('id', pedidoId)
+    .single()
+  if (!pedido) return { ok: false, erro: 'pedido não encontrado' }
+
+  if (
+    pedido.status !== 'aguardando_contato' &&
+    pedido.status !== 'buscando_fornecedor'
+  ) {
+    return {
+      ok: false,
+      erro: `pedido em status ${pedido.status}, não disparável`,
+    }
+  }
+  if (pedido.fornecedor_aceito_id) {
+    return { ok: false, erro: 'pedido já tem fornecedor aceito' }
+  }
+
+  const { data: fornecedor } = await supabase
+    .from('leads_fornecedores')
+    .select('*')
+    .eq('id', fornecedorId)
+    .single()
+  if (!fornecedor) return { ok: false, erro: 'fornecedor não encontrado' }
+
+  const ofertaId = await dispararOfertaNormal(
+    pedido as Pedido,
+    fornecedor as Fornecedor
+  )
+  if (!ofertaId) {
+    return { ok: false, erro: 'falha ao inserir oferta' }
+  }
+  return { ok: true, ofertaId }
 }

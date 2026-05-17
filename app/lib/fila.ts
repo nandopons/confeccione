@@ -15,6 +15,8 @@
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
+import { temCreditoDisponivel, type Plano } from './planos'
+import { dispararOfertaParaFornecedor } from './ofertas'
 
 export type Agendada = {
   id: string
@@ -194,4 +196,75 @@ export async function vincularOferta(params: {
   }
 
   return { ok: true }
+}
+
+/** Acorda a fila de reenvios pra um fornecedor (B3 — composição dos 4 passos).
+ *
+ *  Fluxo:
+ *    1. Checa crédito do fornecedor (sem crédito → return early; agendada
+ *       continua pendente — fila persistente)
+ *    2. Trava próxima agendada via lockProximaAgendada (atomic check-and-set)
+ *    3. Dispara oferta real via dispararOfertaParaFornecedor
+ *    4. Vincula oferta criada à agendada (fecha ciclo)
+ *
+ *  Failure-soft: cada passo trata seu erro e loga. Caller deve envolver
+ *  em try/catch também (defesa em profundidade — esta função NÃO deve
+ *  quebrar o fluxo de aceite/recusa que a chamou).
+ *
+ *  Único disparo por chamada (FIFO). Coerente com "best-effort single
+ *  dispatch" do lockProximaAgendada. */
+export async function processarProximaAgendadaSeHouver(
+  fornecedorId: string
+): Promise<void> {
+  if (!fornecedorId) return
+
+  // 1. Checa crédito ANTES de travar
+  const { data: forn } = await supabaseAdmin
+    .from('leads_fornecedores')
+    .select('id, plano, plano_expira_em, creditos_extras')
+    .eq('id', fornecedorId)
+    .maybeSingle()
+
+  if (!forn) {
+    console.error('[fila/processar] fornecedor não encontrado:', fornecedorId)
+    return
+  }
+
+  const credito = await temCreditoDisponivel(
+    forn as {
+      id: string
+      plano: Plano
+      plano_expira_em: string | null
+      creditos_extras: number
+    }
+  )
+  if (!credito.tem_credito) {
+    // Não consome agendamento — deixa pendente pra próxima vez
+    return
+  }
+
+  // 2. Trava próxima agendada (atomic)
+  const agendada = await lockProximaAgendada(fornecedorId)
+  if (!agendada) return
+
+  // 3. Dispara oferta real
+  const resultado = await dispararOfertaParaFornecedor(
+    agendada.pedido_id,
+    agendada.fornecedor_id
+  )
+  if (!resultado.ok) {
+    // Agendada já travada (processada_em != null) mas oferta_id NULL.
+    // Sinal detectável via query "agendadas processadas sem oferta_id".
+    console.error(
+      `[fila/processar] disparo falhou pra agendada ${agendada.id}:`,
+      resultado.erro
+    )
+    return
+  }
+
+  // 4. Vincula oferta criada (fecha ciclo)
+  await vincularOferta({
+    agendadaId: agendada.id,
+    ofertaId: resultado.ofertaId,
+  })
 }

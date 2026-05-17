@@ -4,6 +4,7 @@ import { variantesWhatsApp, linkWhatsApp } from '@/app/lib/phone'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { emailContatoFornecedor } from '@/app/lib/email'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
+import { processarProximaAgendadaSeHouver } from '@/app/lib/fila'
 import {
   PLANOS_CONFIG,
   contarOfertasMesAtual,
@@ -183,6 +184,13 @@ async function tratarRespostaFornecedor(
         console.error('aviso cliente email falhou:', err)
       }
     }
+
+    // Acorda fila de reenvios do fornecedor (B3). Failure-soft.
+    try {
+      await processarProximaAgendadaSeHouver(fornecedor.id)
+    } catch (err) {
+      console.error('[webhook/sim] processar fila falhou:', err)
+    }
   } else if (texto.includes('não') || texto.includes('nao')) {
     await supabase
       .from('ofertas')
@@ -199,6 +207,13 @@ async function tratarRespostaFornecedor(
       await criarEDispararOferta(oferta.pedido_id)
     } catch (err) {
       console.error('reenvio após recusa falhou:', err)
+    }
+
+    // Acorda fila de reenvios do fornecedor que recusou (B3). Failure-soft.
+    try {
+      await processarProximaAgendadaSeHouver(fornecedor.id)
+    } catch (err) {
+      console.error('[webhook/nao] processar fila falhou:', err)
     }
   } else {
     await enviarMensagem(
