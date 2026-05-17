@@ -91,6 +91,7 @@ export async function criarCobrancaPacote(
   paymentId: string
   linkPagamento: string
   qrCodePix: string | null
+  qrCodePixImagem: string | null
   vencimento: string
 }> {
   const dueDate = input.vencimento ?? defaultDueDate()
@@ -107,14 +108,16 @@ export async function criarCobrancaPacote(
     },
   })
 
-  // Pra Pix, busca o QR code
+  // Pra Pix, busca o QR code: payload (copia-cola) + encodedImage (PNG base64)
   let qrCodePix: string | null = null
+  let qrCodePixImagem: string | null = null
   if (input.metodo === 'pix') {
     try {
       const pix = await asaasFetch<{ payload: string; encodedImage: string }>(
         `/payments/${payment.id}/pixQrCode`
       )
       qrCodePix = pix.payload
+      qrCodePixImagem = pix.encodedImage
     } catch (err) {
       console.error('[asaas-payments] busca QR code pix falhou:', err)
     }
@@ -130,6 +133,7 @@ export async function criarCobrancaPacote(
     status: 'pendente',
     link_pagamento: payment.invoiceUrl,
     qr_code_pix: qrCodePix,
+    qr_code_pix_imagem: qrCodePixImagem,
     vencimento: dueDate,
   })
 
@@ -137,6 +141,7 @@ export async function criarCobrancaPacote(
     paymentId: payment.id,
     linkPagamento: payment.invoiceUrl,
     qrCodePix,
+    qrCodePixImagem,
     vencimento: dueDate,
   }
 }
