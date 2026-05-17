@@ -183,7 +183,7 @@ function Tabela({
               <Th>Verticais</Th>
               <Th>Pedido min</Th>
               <Th>Raio</Th>
-              <Th>Último lead</Th>
+              <Th>Última oferta</Th>
               <Th>Cadastrado há</Th>
               <Th>Status</Th>
             </tr>

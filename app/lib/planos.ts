@@ -48,9 +48,9 @@ export const PLANOS_CONFIG: Record<
 
 // Pacotes de leads extras avulsos (cliente escolhe na hora do upgrade)
 export const PACOTES_LEADS_EXTRAS = [
-  { quantidade: 5, label: '5 leads' },
-  { quantidade: 10, label: '10 leads' },
-  { quantidade: 25, label: '25 leads' },
+  { quantidade: 5, label: '5 pedidos' },
+  { quantidade: 10, label: '10 pedidos' },
+  { quantidade: 25, label: '25 pedidos' },
 ] as const
 
 // Trial automático ao se cadastrar

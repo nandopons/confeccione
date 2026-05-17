@@ -35,7 +35,7 @@ const DESTAQUE: Record<Plano, string | null> = {
 };
 
 const TOOLTIP_LEADS =
-  "Cota renovada todo mês. Lead conta quando você aceita oferta.";
+  "Cota renovada todo mês. Cada pedido aceito consome 1 da cota. Recusar ou ignorar não consome.";
 
 function precoFormatado(preco: number): string {
   if (preco === 0) return "Grátis";
@@ -85,7 +85,7 @@ export default function TabelaPlanos({ planoAtual }: { planoAtual: Plano }) {
 
               <div className="text-sm text-gray-600 mb-4 flex items-center gap-1.5">
                 <span>
-                  <span className="font-medium">{config.leads_inclusos}</span> leads/mês
+                  <span className="font-medium">{config.leads_inclusos}</span> pedidos/mês
                 </span>
                 <span
                   className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-300 text-gray-400 text-[10px] font-medium cursor-help"

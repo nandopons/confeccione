@@ -347,7 +347,7 @@ export async function GET(req: Request) {
       try {
         await enviarMensagem(
           f.whatsapp,
-          `Olá ${f.nome}! 👋\n\nSeu trial de 90 dias do plano *Pro* terminou. A partir de hoje você está no plano *Free* (3 leads por mês).\n\nQuer continuar recebendo mais leads? Responda aqui que te conto sobre os planos pagos.`
+          `Olá ${f.nome}! 👋\n\nSeu trial de 90 dias do plano *Pro* terminou. A partir de hoje você está no plano *Free* (3 pedidos por mês).\n\nQuer continuar recebendo mais pedidos? Responda aqui que te conto sobre os planos pagos.`
         )
       } catch (err) {
         console.error('[scheduler] notificar trial expirado falhou:', err)

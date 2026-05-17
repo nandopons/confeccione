@@ -124,7 +124,7 @@ export async function POST(req: Request) {
 
   await enviarMensagem(
     numero,
-    `Olá ${nome}! 🎉\n\nSeu cadastro no *Confeccione* foi confirmado.\n\n🎁 *Bônus de cadastro:* você ganhou 90 dias do plano *Pro* gratuitos! Isso significa até 30 leads por mês durante esse período.\n\nEm breve você vai receber pedidos de clientes que batem com o perfil da sua produção. Quando um pedido chegar, basta responder se quer ou não atender.\n\nQualquer dúvida é só chamar aqui mesmo! 🚀`
+    `Olá ${nome}! 🎉\n\nSeu cadastro no *Confeccione* foi confirmado.\n\n🎁 *Bônus de cadastro:* você ganhou 90 dias do plano *Pro* gratuitos! Isso significa até 30 pedidos por mês durante esse período.\n\nEm breve você vai receber pedidos de clientes que batem com o perfil da sua produção. Quando um pedido chegar, basta responder se quer ou não atender.\n\nQualquer dúvida é só chamar aqui mesmo! 🚀`
   )
 
   if (email) {

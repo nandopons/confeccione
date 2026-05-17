@@ -155,7 +155,7 @@ function descricaoPacote(
   tipo: 'pacote_leads_5' | 'pacote_leads_10' | 'pacote_leads_25'
 ): string {
   const qtd = tipo === 'pacote_leads_5' ? 5 : tipo === 'pacote_leads_10' ? 10 : 25
-  return `Confeccione - Pacote de ${qtd} leads extras`
+  return `Confeccione - Pacote de ${qtd} pedidos extras`
 }
 
 /**

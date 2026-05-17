@@ -208,12 +208,12 @@ async function dispararOfertaSemCredito(
     mensagem += `\nDetalhes: ${String(pedido.descricao).trim()}`
   }
 
-  mensagem += `\n\n⚠️ Você atingiu o limite de ${config.leads_inclusos} leads do plano *${config.nome}* este mês.\n\nPra receber este lead, você pode:`
+  mensagem += `\n\n⚠️ Você atingiu o limite de ${config.leads_inclusos} pedidos do plano *${config.nome}* este mês.\n\nPra receber este pedido, você pode:`
 
   // Pacotes de leads extras (preço varia conforme plano)
   PACOTES_LEADS_EXTRAS.forEach((pacote, i) => {
     const preco = pacote.quantidade * config.preco_lead_extra
-    mensagem += `\n*${i + 1}* — Pacote de ${pacote.quantidade} leads por R$ ${preco}`
+    mensagem += `\n*${i + 1}* — Pacote de ${pacote.quantidade} pedidos por R$ ${preco}`
   })
 
   // Opção de upgrade pro próximo plano (se houver um acima)
@@ -222,10 +222,10 @@ async function dispararOfertaSemCredito(
   if (idxAtual >= 0 && idxAtual < planos.length - 1) {
     const proximoPlano = planos[idxAtual + 1]
     const cfgProximo = PLANOS_CONFIG[proximoPlano]
-    mensagem += `\n*4* — Upgrade pro plano *${cfgProximo.nome}* (R$ ${cfgProximo.preco_mes}/mês, ${cfgProximo.leads_inclusos} leads)`
+    mensagem += `\n*4* — Upgrade pro plano *${cfgProximo.nome}* (R$ ${cfgProximo.preco_mes}/mês, ${cfgProximo.leads_inclusos} pedidos)`
   }
 
-  mensagem += `\n*5* — Não tenho interesse neste lead\n\n⏰ Você tem 3 horas pra responder. Se não responder, ofereço pra outro fornecedor.`
+  mensagem += `\n*5* — Não tenho interesse neste pedido\n\n⏰ Você tem 3 horas pra responder. Se não responder, ofereço pra outro fornecedor.`
 
   await enviarMensagem(fornecedor.whatsapp, mensagem)
 }
