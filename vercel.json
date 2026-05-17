@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/detectar-gaps",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/expirar-creditos-avulsos",
+      "schedule": "0 6 * * *"
     }
   ]
 }

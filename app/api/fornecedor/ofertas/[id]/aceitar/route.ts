@@ -21,7 +21,7 @@ import { getFornecedorAtual } from '@/app/lib/auth-server'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { emailContatoFornecedor } from '@/app/lib/email'
 import { tipoLabel } from '@/app/lib/ofertas'
-import { contarOfertasMesAtual, planoEfetivo, PLANOS_CONFIG } from '@/app/lib/planos'
+import { consumirCreditoAvulso, contarOfertasMesAtual, planoEfetivo, PLANOS_CONFIG } from '@/app/lib/planos'
 import { linkWhatsApp } from '@/app/lib/phone'
 import { processarProximaAgendadaSeHouver } from '@/app/lib/fila'
 
@@ -143,6 +143,29 @@ export async function POST(
       .update({ status: 'enviada' })
       .eq('id', oferta.id)
     return NextResponse.json({ erro: 'Erro ao processar' }, { status: 500 })
+  }
+
+  // Consome 1 crédito do lote avulso mais antigo SE a cota mensal estourou.
+  // Failure-soft: aceite é porta de monetização, NUNCA pode falhar por erro
+  // no consumo do lote. Se falhar, fica o "rastro" — a cota mensal continua
+  // calculada por contarOfertasMesAtual (status='aceita'), só o decremento
+  // do lote não acontece. Sinal detectável: lote ativo com qtd > 0 enquanto
+  // fornecedor já passou da cota.
+  try {
+    const planoAtual = planoEfetivo({
+      plano: fornecedorCompleto.plano,
+      plano_expira_em: fornecedorCompleto.plano_expira_em,
+    })
+    const configPlano = PLANOS_CONFIG[planoAtual] ?? PLANOS_CONFIG['free']
+    // contarOfertasMesAtual já reflete o aceite recém-feito (UPDATE oferta
+    // foi confirmado acima). Comparação >= em vez de > porque queremos
+    // consumir SE o aceite atual ultrapassou o limite.
+    const usadosAposEsteAceite = await contarOfertasMesAtual(fornecedor.id)
+    if (usadosAposEsteAceite > configPlano.leads_inclusos) {
+      await consumirCreditoAvulso(fornecedor.id)
+    }
+  } catch (err) {
+    console.error('[aceitar] consumir lote avulso falhou:', err)
   }
 
   // Acorda fila de reenvios do fornecedor (B3). Failure-soft: aceite é

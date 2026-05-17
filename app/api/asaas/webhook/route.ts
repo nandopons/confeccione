@@ -14,7 +14,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { mapearStatusAsaas, type AsaasPaymentStatus } from '@/app/lib/asaas-payments'
-import { PLANOS_CONFIG, type Plano } from '@/app/lib/planos'
+import { PLANOS_CONFIG, creditarLoteAvulso, type Plano } from '@/app/lib/planos'
 import { enviarMensagem } from '@/app/lib/zapi'
 
 const supabase = createClient(
@@ -116,10 +116,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, ignorado: 'pagamento desconhecido' })
     }
 
-    // Se foi pago: aplicar efeito (créditos extras ou ativar plano)
+    // Se foi pago: aplicar efeito (lote de avulsos ou ativar plano)
     if (novoStatus === 'pago') {
       await aplicarEfeitoPagamento({
         fornecedorId: pagamentoAtualizado.fornecedor_id,
+        pagamentoId: pagamentoAtualizado.id,
         tipo: pagamentoAtualizado.tipo as TipoCobranca,
         asaasSubscriptionId: pagamentoAtualizado.asaas_subscription_id,
       })
@@ -159,20 +160,21 @@ const PLANO_POR_ASSINATURA: Record<
 
 /**
  * Aplica o efeito de um pagamento confirmado:
- * - Pacote → adiciona créditos extras ao fornecedor
+ * - Pacote → cria lote em creditos_avulsos (validade 3 meses)
  * - Assinatura → ativa o plano correspondente (sem expira_em, é mensal)
  */
 async function aplicarEfeitoPagamento(params: {
   fornecedorId: string
+  pagamentoId: string
   tipo: TipoCobranca
   asaasSubscriptionId: string | null
 }): Promise<void> {
-  const { fornecedorId, tipo } = params
+  const { fornecedorId, pagamentoId, tipo } = params
 
   // Busca dados atuais do fornecedor
   const { data: fornecedor } = await supabase
     .from('leads_fornecedores')
-    .select('nome, whatsapp, creditos_extras, plano')
+    .select('nome, whatsapp, plano')
     .eq('id', fornecedorId)
     .single()
 
@@ -182,7 +184,7 @@ async function aplicarEfeitoPagamento(params: {
   }
 
   // ============================================================
-  // Caso 1: Pacote de leads → adiciona créditos extras
+  // Caso 1: Pacote de leads → cria lote em creditos_avulsos
   // ============================================================
   if (
     tipo === 'pacote_leads_5' ||
@@ -191,12 +193,20 @@ async function aplicarEfeitoPagamento(params: {
   ) {
     const quantidade = QUANTIDADE_LEADS_POR_PACOTE[tipo]
 
-    await supabase
-      .from('leads_fornecedores')
-      .update({
-        creditos_extras: (fornecedor.creditos_extras ?? 0) + quantidade,
-      })
-      .eq('id', fornecedorId)
+    const resultado = await creditarLoteAvulso({
+      fornecedorId,
+      quantidade,
+      pagamentoId,
+    })
+
+    if (!resultado.ok) {
+      console.error(
+        `[asaas-webhook] creditarLoteAvulso falhou pra pagamento ${pagamentoId}:`,
+        resultado.erro
+      )
+      // Não retorna: notifica o fornecedor mesmo assim (já pagou),
+      // mas o lote não foi criado. Sinaliza pra investigação via log.
+    }
 
     // Notifica fornecedor
     try {

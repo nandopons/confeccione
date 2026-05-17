@@ -107,7 +107,12 @@ export async function contarOfertasMesAtual(fornecedorId: string): Promise<numbe
 
 /**
  * Verifica se o fornecedor ainda tem crédito pra receber oferta normal.
- * Considera créditos extras (pacotes) + cota mensal do plano.
+ * Considera lotes de avulsos ativos + cota mensal do plano.
+ *
+ * O parâmetro `creditos_extras` permanece no shape pra compat com callers
+ * que ainda passam a coluna deprecated, mas o cálculo IGNORA o valor e
+ * lê da tabela creditos_avulsos via listarLotesAtivos. Drop da coluna
+ * fica como TODO futuro.
  */
 export async function temCreditoDisponivel(fornecedor: {
   id: string
@@ -122,17 +127,20 @@ export async function temCreditoDisponivel(fornecedor: {
 }> {
   const planoAtual = planoEfetivo(fornecedor)
   const config = PLANOS_CONFIG[planoAtual] ?? PLANOS_CONFIG['free']
-  const usados = await contarOfertasMesAtual(fornecedor.id)
+  const [usados, lotes] = await Promise.all([
+    contarOfertasMesAtual(fornecedor.id),
+    listarLotesAtivos(fornecedor.id),
+  ])
 
-  // Crédito vem de duas fontes: cota mensal + extras avulsos
-  const tem_credito =
-    usados < config.leads_inclusos || fornecedor.creditos_extras > 0
+  const totalAvulsos = lotes.reduce((s, l) => s + l.quantidade_disponivel, 0)
+
+  const tem_credito = usados < config.leads_inclusos || totalAvulsos > 0
 
   return {
     tem_credito,
     usados_no_mes: usados,
     limite_mes: config.leads_inclusos,
-    creditos_extras: fornecedor.creditos_extras,
+    creditos_extras: totalAvulsos,
   }
 }
 
@@ -170,28 +178,118 @@ export async function registrarGatilhoUpgrade(params: {
   })
 }
 
-/**
- * Consome um crédito do fornecedor (usado quando uma oferta NORMAL é
- * registrada). Prioriza créditos extras antes da cota mensal.
- *
- * IMPORTANTE: a cota mensal não é "consumida" aqui — ela é contada via
- * vw_ofertas_mes_corrente / contarOfertasMesAtual a partir das ofertas
- * registradas. Aqui só decrementamos créditos extras quando aplicável.
- */
-export async function consumirCreditoExtra(
-  fornecedorId: string,
-  fornecedorAtual: { plano: Plano; plano_expira_em: string | null; creditos_extras: number }
-): Promise<void> {
-  const planoAtual = planoEfetivo(fornecedorAtual)
-  const config = PLANOS_CONFIG[planoAtual] ?? PLANOS_CONFIG['free']
-  const usados = await contarOfertasMesAtual(fornecedorId)
+// ============================================================================
+// LOTES DE CRÉDITOS AVULSOS (creditos_avulsos)
+// ============================================================================
 
-  // Só consome crédito extra SE a cota mensal já foi atingida.
-  // Antes disso, a cota cobre, e os extras ficam pra depois.
-  if (usados >= config.leads_inclusos && fornecedorAtual.creditos_extras > 0) {
-    await supabase
-      .from('leads_fornecedores')
-      .update({ creditos_extras: fornecedorAtual.creditos_extras - 1 })
-      .eq('id', fornecedorId)
+export type LoteAvulso = {
+  id: string
+  quantidade_inicial: number
+  quantidade_disponivel: number
+  criado_em: string
+  expira_em: string
+}
+
+/**
+ * Lista lotes ativos do fornecedor (FIFO — mais antigo primeiro).
+ * Ativo = disponível > 0 AND não esgotado AND não expirado AND expira_em > NOW.
+ */
+export async function listarLotesAtivos(
+  fornecedorId: string
+): Promise<LoteAvulso[]> {
+  const { data, error } = await supabase
+    .from('creditos_avulsos')
+    .select('id, quantidade_inicial, quantidade_disponivel, criado_em, expira_em')
+    .eq('fornecedor_id', fornecedorId)
+    .gt('quantidade_disponivel', 0)
+    .gt('expira_em', new Date().toISOString())
+    .is('esgotado_em', null)
+    .is('expirado_em', null)
+    .order('criado_em', { ascending: true })
+
+  if (error) {
+    console.error('[planos/listarLotesAtivos] erro:', error)
+    return []
+  }
+
+  return (data ?? []) as LoteAvulso[]
+}
+
+/**
+ * Cria um novo lote de créditos avulsos. Validade 3 meses desde NOW.
+ * Chamado pelo webhook Asaas quando um pacote_leads_X é pago.
+ *
+ * `pagamentoId` é o id local de pagamentos_asaas (FK pra rastreio).
+ * `tipoOrigem` default 'compra_avulsa' — outras origens (bonus_admin,
+ * cortesia) podem ser usadas no futuro sem alterar o schema.
+ */
+export async function creditarLoteAvulso(params: {
+  fornecedorId: string
+  quantidade: number
+  pagamentoId?: string
+  tipoOrigem?: string
+}): Promise<
+  | { ok: true; loteId: string }
+  | { ok: false; erro: string }
+> {
+  if (params.quantidade <= 0) {
+    return { ok: false, erro: 'quantidade deve ser > 0' }
+  }
+
+  const expiraEm = new Date()
+  expiraEm.setMonth(expiraEm.getMonth() + 3)
+
+  const { data, error } = await supabase
+    .from('creditos_avulsos')
+    .insert({
+      fornecedor_id: params.fornecedorId,
+      quantidade_inicial: params.quantidade,
+      quantidade_disponivel: params.quantidade,
+      pagamento_id: params.pagamentoId ?? null,
+      tipo_origem: params.tipoOrigem ?? 'compra_avulsa',
+      expira_em: expiraEm.toISOString(),
+    })
+    .select('id')
+    .single()
+
+  if (error || !data) {
+    console.error('[planos/creditarLoteAvulso] insert falhou:', error)
+    return { ok: false, erro: error?.message ?? 'erro ao inserir' }
+  }
+
+  return { ok: true, loteId: (data as { id: string }).id }
+}
+
+/**
+ * Consome 1 crédito do lote ativo mais antigo (FIFO) via Postgres function
+ * com FOR UPDATE — race-safe. Caller geralmente é o handler de aceite,
+ * chamado SÓ se a cota mensal estourou.
+ *
+ * Retorna `{ ok: true, loteId, novoDisponivel }` em sucesso, ou
+ * `{ ok: false, erro }` em erro real. Se não há lote ativo, retorna
+ * `{ ok: true, loteId: null, novoDisponivel: 0 }` — caller decide.
+ */
+export async function consumirCreditoAvulso(fornecedorId: string): Promise<
+  | { ok: true; loteId: string | null; novoDisponivel: number }
+  | { ok: false; erro: string }
+> {
+  const { data, error } = await supabase.rpc('consumir_credito_avulso', {
+    p_fornecedor_id: fornecedorId,
+  })
+
+  if (error) {
+    console.error('[planos/consumirCreditoAvulso] rpc falhou:', error)
+    return { ok: false, erro: error.message }
+  }
+
+  const rows = (data ?? []) as Array<{ lote_id: string; novo_disponivel: number }>
+  if (rows.length === 0) {
+    return { ok: true, loteId: null, novoDisponivel: 0 }
+  }
+
+  return {
+    ok: true,
+    loteId: rows[0].lote_id,
+    novoDisponivel: rows[0].novo_disponivel,
   }
 }
