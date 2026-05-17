@@ -23,6 +23,7 @@ import { emailContatoFornecedor } from '@/app/lib/email'
 import { tipoLabel } from '@/app/lib/ofertas'
 import { contarOfertasMesAtual, planoEfetivo, PLANOS_CONFIG } from '@/app/lib/planos'
 import { linkWhatsApp } from '@/app/lib/phone'
+import { processarProximaAgendadaSeHouver } from '@/app/lib/fila'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -142,6 +143,14 @@ export async function POST(
       .update({ status: 'enviada' })
       .eq('id', oferta.id)
     return NextResponse.json({ erro: 'Erro ao processar' }, { status: 500 })
+  }
+
+  // Acorda fila de reenvios do fornecedor (B3). Failure-soft: aceite é
+  // porta de monetização, NUNCA pode falhar só por erro na fila.
+  try {
+    await processarProximaAgendadaSeHouver(fornecedor.id)
+  } catch (err) {
+    console.error('[aceitar] processar fila falhou:', err)
   }
 
   // Cleanup órfão: se este pedido estava registrado como órfão ativo,

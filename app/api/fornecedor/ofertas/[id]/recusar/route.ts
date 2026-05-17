@@ -19,6 +19,7 @@ import { createClient } from '@supabase/supabase-js'
 import { getFornecedorAtual } from '@/app/lib/auth-server'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
+import { processarProximaAgendadaSeHouver } from '@/app/lib/fila'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -108,6 +109,13 @@ export async function POST(
     await criarEDispararOferta(oferta.pedido_id)
   } catch (err) {
     console.error('recusar: reenvio para próximo fornecedor falhou:', err)
+  }
+
+  // 7. Acorda fila de reenvios do fornecedor que recusou (B3). Failure-soft.
+  try {
+    await processarProximaAgendadaSeHouver(fornecedor.id)
+  } catch (err) {
+    console.error('[recusar] processar fila falhou:', err)
   }
 
   return NextResponse.json({ ok: true })

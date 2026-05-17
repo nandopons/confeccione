@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 import { formatarDuracaoRelativa } from '@/app/lib/admin-saude'
 import { ColunaContato } from '../ColunaContato'
@@ -8,6 +9,7 @@ import type { VwPedidoOrfaoAdmin } from '@/app/lib/orfaos'
 
 export type OfertaHistorico = {
   id: string
+  fornecedor_id: string
   /** Status conhecidos hoje: 'enviada' | 'aceita' | 'recusada' | 'expirada'.
    *  Tipado como string pra aceitar valores novos sem mudança de tipo. */
   status: string
@@ -19,9 +21,18 @@ export type OfertaHistorico = {
 export function ModalDetalhesOrfao({
   orfao,
   ofertas,
+  agendadasPorFornecedor,
+  temCreditoPorFornecedor,
+  paresJaAgendados,
 }: {
   orfao: VwPedidoOrfaoAdmin
   ofertas: OfertaHistorico[]
+  /** Map<fornecedor_id, count de agendadas pendentes globais do fornecedor> */
+  agendadasPorFornecedor: Map<string, number>
+  /** Map<fornecedor_id, tem_credito_disponivel> */
+  temCreditoPorFornecedor: Map<string, boolean>
+  /** Set<`${pedido_id}:${fornecedor_id}`> dos pares com agendada pendente */
+  paresJaAgendados: Set<string>
 }) {
   const [aberto, setAberto] = useState(false)
   const [agoraMs, setAgoraMs] = useState<number | null>(null)
@@ -136,7 +147,21 @@ export function ModalDetalhesOrfao({
                 ) : (
                   <ul className="space-y-2">
                     {ofertas.map((o) => (
-                      <ItemOferta key={o.id} oferta={o} agoraMs={agoraMs} />
+                      <ItemOferta
+                        key={o.id}
+                        oferta={o}
+                        agoraMs={agoraMs}
+                        orfaoPedidoId={orfao.pedido_id}
+                        agendadasParaFornecedor={
+                          agendadasPorFornecedor.get(o.fornecedor_id) ?? 0
+                        }
+                        temCredito={
+                          temCreditoPorFornecedor.get(o.fornecedor_id) ?? false
+                        }
+                        jaAgendadoEstePar={paresJaAgendados.has(
+                          `${orfao.pedido_id}:${o.fornecedor_id}`
+                        )}
+                      />
                     ))}
                   </ul>
                 )}
@@ -198,9 +223,17 @@ function Campo({
 function ItemOferta({
   oferta,
   agoraMs,
+  orfaoPedidoId,
+  agendadasParaFornecedor,
+  temCredito,
+  jaAgendadoEstePar,
 }: {
   oferta: OfertaHistorico
   agoraMs: number | null
+  orfaoPedidoId: string
+  agendadasParaFornecedor: number
+  temCredito: boolean
+  jaAgendadoEstePar: boolean
 }) {
   const enviadoStr =
     agoraMs !== null
@@ -211,7 +244,14 @@ function ItemOferta({
     <li className="flex items-start gap-3 text-sm">
       <BadgeOferta status={oferta.status} />
       <div className="flex-1 min-w-0">
-        <div className="text-gray-900">{oferta.fornecedor_nome}</div>
+        <div className="text-gray-900 flex items-center gap-1.5 flex-wrap">
+          <span>{oferta.fornecedor_nome}</span>
+          {agendadasParaFornecedor > 0 && (
+            <span className="text-xs text-gray-500">
+              ({agendadasParaFornecedor} na fila)
+            </span>
+          )}
+        </div>
         <div className="text-xs text-gray-500">
           enviada {enviadoStr}
           {oferta.respondida_em && agoraMs !== null && (
@@ -224,8 +264,100 @@ function ItemOferta({
             </>
           )}
         </div>
+        {oferta.status === 'expirada' && (
+          <div className="mt-1.5">
+            <BotaoAgendarReenvio
+              pedidoId={orfaoPedidoId}
+              fornecedorId={oferta.fornecedor_id}
+              temCredito={temCredito}
+              iniciaAgendado={jaAgendadoEstePar}
+            />
+          </div>
+        )}
       </div>
     </li>
+  )
+}
+
+function BotaoAgendarReenvio({
+  pedidoId,
+  fornecedorId,
+  temCredito,
+  iniciaAgendado,
+}: {
+  pedidoId: string
+  fornecedorId: string
+  temCredito: boolean
+  iniciaAgendado: boolean
+}) {
+  const router = useRouter()
+  type Estado = 'idle' | 'loading' | 'agendado' | 'erro'
+  const [estado, setEstado] = useState<Estado>(
+    iniciaAgendado ? 'agendado' : 'idle'
+  )
+
+  // Disabled checks (precedência: já agendado > sem crédito)
+  const disabledMotivo: string | null = iniciaAgendado
+    ? 'Já agendado pra esse fornecedor'
+    : !temCredito
+      ? 'Fornecedor sem créditos disponíveis'
+      : null
+
+  async function handleClick() {
+    if (estado === 'loading' || estado === 'agendado') return
+    setEstado('loading')
+    try {
+      const res = await fetch('/api/admin/oferta-agendar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pedidoId, fornecedorId }),
+      })
+      // 409 (duplicado) também conta como sucesso visual — já agendado
+      if (res.ok || res.status === 409) {
+        setEstado('agendado')
+        router.refresh() // recarrega Server Component pra atualizar maps
+        return
+      }
+      setEstado('erro')
+    } catch {
+      setEstado('erro')
+    }
+  }
+
+  if (estado === 'agendado') {
+    return (
+      <span className="inline-flex items-center text-xs px-2 py-1 bg-green-50 text-green-700 rounded font-medium">
+        ✓ Agendado
+      </span>
+    )
+  }
+
+  if (disabledMotivo) {
+    return (
+      <button
+        type="button"
+        disabled
+        title={disabledMotivo}
+        className="text-xs px-2 py-1 bg-gray-100 text-gray-400 rounded cursor-not-allowed"
+      >
+        ↻ Agendar reenvio
+      </button>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={estado === 'loading'}
+      className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+    >
+      {estado === 'loading'
+        ? 'Agendando…'
+        : estado === 'erro'
+          ? '⚠ Erro · clique pra tentar de novo'
+          : '↻ Agendar reenvio'}
+    </button>
   )
 }
 
