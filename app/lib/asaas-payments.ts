@@ -5,7 +5,7 @@
 // ============================================================================
 
 import { createClient } from '@supabase/supabase-js'
-import { asaasFetch, centavosParaReais } from './asaas'
+import { ASAAS_BILLING_TYPE, asaasFetch, centavosParaReais, type MetodoPagamento } from './asaas'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -75,15 +75,9 @@ export type CriarCobrancaPacoteInput = {
   asaasCustomerId: string
   tipo: 'pacote_leads_5' | 'pacote_leads_10' | 'pacote_leads_25'
   valorCentavos: number
-  metodo: 'pix' | 'boleto' | 'cartao'
+  metodo: MetodoPagamento
   /** YYYY-MM-DD; default: hoje + 3 dias */
   vencimento?: string
-}
-
-const METODO_TO_BILLING_TYPE: Record<'pix' | 'boleto' | 'cartao', AsaasBillingType> = {
-  pix: 'PIX',
-  boleto: 'BOLETO',
-  cartao: 'CREDIT_CARD',
 }
 
 /**
@@ -96,7 +90,8 @@ export async function criarCobrancaPacote(
 ): Promise<{
   paymentId: string
   linkPagamento: string
-  qrCodePix?: string
+  qrCodePix: string | null
+  vencimento: string
 }> {
   const dueDate = input.vencimento ?? defaultDueDate()
 
@@ -104,7 +99,7 @@ export async function criarCobrancaPacote(
     method: 'POST',
     body: {
       customer: input.asaasCustomerId,
-      billingType: METODO_TO_BILLING_TYPE[input.metodo],
+      billingType: ASAAS_BILLING_TYPE[input.metodo],
       value: centavosParaReais(input.valorCentavos),
       dueDate,
       description: descricaoPacote(input.tipo),
@@ -113,7 +108,7 @@ export async function criarCobrancaPacote(
   })
 
   // Pra Pix, busca o QR code
-  let qrCodePix: string | undefined
+  let qrCodePix: string | null = null
   if (input.metodo === 'pix') {
     try {
       const pix = await asaasFetch<{ payload: string; encodedImage: string }>(
@@ -134,7 +129,7 @@ export async function criarCobrancaPacote(
     metodo: input.metodo,
     status: 'pendente',
     link_pagamento: payment.invoiceUrl,
-    qr_code_pix: qrCodePix ?? null,
+    qr_code_pix: qrCodePix,
     vencimento: dueDate,
   })
 
@@ -142,6 +137,7 @@ export async function criarCobrancaPacote(
     paymentId: payment.id,
     linkPagamento: payment.invoiceUrl,
     qrCodePix,
+    vencimento: dueDate,
   }
 }
 
@@ -167,6 +163,7 @@ export async function buscarCobranca(asaasPaymentId: string): Promise<AsaasPayme
 
 /**
  * Mapeia status do Asaas → status interno (pagamentos_asaas.status).
+ * Failure-soft: status desconhecido cai pra 'pendente'.
  */
 export function mapearStatusAsaas(
   status: AsaasPaymentStatus
@@ -182,7 +179,12 @@ export function mapearStatusAsaas(
   if (status === 'OVERDUE' || status === 'DUNNING_REQUESTED' || status === 'DUNNING_RECEIVED') {
     return 'vencido'
   }
-  if (status === 'REFUNDED' || status === 'REFUND_REQUESTED') {
+  if (
+    status === 'REFUNDED' ||
+    status === 'REFUND_REQUESTED' ||
+    status === 'CHARGEBACK_REQUESTED' ||
+    status === 'CHARGEBACK_DISPUTE'
+  ) {
     return 'estornado'
   }
   if (status === 'DELETED') {

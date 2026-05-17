@@ -1,20 +1,16 @@
 // app/fornecedor/painel/plano/TabelaPlanos.tsx
 // ============================================================================
-// Grid comparativo dos 3 planos (Free/Starter/Pro).
-// Plano atual destacado com borda verde + badge "ATUAL".
-// Botões de upgrade desabilitados (checkout chega no 4c.2).
+// Grid comparativo dos planos pagos (Starter/Pro). Free é omitido — sem
+// upgrade pra Free. Plano atual destacado com borda verde + badge "ATUAL".
+// Botão "Assinar" abre ModalCheckout via BotaoAssinarPlano (client).
 // ============================================================================
 
 import { PLANOS_CONFIG, type Plano } from "@/app/lib/planos";
+import BotaoAssinarPlano from "./BotaoAssinarPlano";
 
-const ORDEM: Plano[] = ["free", "starter", "pro"];
+const ORDEM: Array<Exclude<Plano, "free">> = ["starter", "pro"];
 
-const BENEFICIOS: Record<Plano, string[]> = {
-  free: [
-    "Cadastro básico",
-    "Recebe ofertas compatíveis",
-    "Suporte por e-mail",
-  ],
+const BENEFICIOS: Record<Exclude<Plano, "free">, string[]> = {
   starter: [
     "Selo verificado no perfil",
     "Prioridade média na fila",
@@ -28,8 +24,7 @@ const BENEFICIOS: Record<Plano, string[]> = {
   ],
 };
 
-const DESTAQUE: Record<Plano, string | null> = {
-  free: "Para começar",
+const DESTAQUE: Record<Exclude<Plano, "free">, string | null> = {
   starter: "Mais escolhido",
   pro: "Mais resultados",
 };
@@ -50,15 +45,17 @@ function precoFormatado(preco: number): string {
 export default function TabelaPlanos({
   planoAtual,
   diaAniversario,
+  jaTemCpfCnpj,
 }: {
   planoAtual: Plano;
   diaAniversario?: number | null;
+  jaTemCpfCnpj: boolean;
 }) {
   const tooltipLeads = tooltipDinamico(diaAniversario);
   return (
     <div>
       <h2 className="text-gray-900 text-lg font-medium mb-4">Comparar planos</h2>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {ORDEM.map((id) => {
           const config = PLANOS_CONFIG[id];
           const ehAtual = id === planoAtual;
@@ -119,13 +116,21 @@ export default function TabelaPlanos({
                 ))}
               </ul>
 
-              <button
-                disabled
-                className="w-full py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-400 cursor-not-allowed"
-                title="Em breve"
-              >
-                {ehAtual ? "Plano atual" : "Em breve"}
-              </button>
+              {ehAtual ? (
+                <button
+                  disabled
+                  className="w-full py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-400 cursor-not-allowed"
+                >
+                  Plano atual
+                </button>
+              ) : (
+                <BotaoAssinarPlano
+                  plano={id}
+                  nome={config.nome}
+                  valorCentavos={config.preco_mes * 100}
+                  jaTemCpfCnpj={jaTemCpfCnpj}
+                />
+              )}
             </div>
           );
         })}
