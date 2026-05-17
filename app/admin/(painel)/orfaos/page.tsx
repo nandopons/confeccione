@@ -12,6 +12,7 @@
 
 import { redirect } from 'next/navigation'
 import { eAdminLogado } from '@/app/lib/admin-auth'
+import { supabaseAdmin } from '@/app/lib/supabase-server'
 import {
   listarOrfaos,
   type StatusOrfao,
@@ -22,6 +23,10 @@ import { formatarIdadeHoras } from '@/app/lib/admin-saude'
 import { AcoesOrfao } from './AcoesOrfao'
 import { BotaoDetectar } from './BotaoDetectar'
 import { ColunaContato } from '../ColunaContato'
+import {
+  ModalDetalhesOrfao,
+  type OfertaHistorico,
+} from './ModalDetalhesOrfao'
 
 type FiltroStatus = StatusOrfao | 'todos'
 
@@ -50,6 +55,12 @@ export default async function AdminOrfaosPage({
     : 'aberto'
 
   const orfaos = await listarOrfaos({ status: statusFiltro })
+
+  // Histórico de ofertas pra cada pedido órfão (consumido pelo modal de
+  // detalhes). Carregado eagerly pra modal abrir sem round-trip extra.
+  const ofertasPorPedido = await carregarHistoricoOfertas(
+    orfaos.map((o) => o.pedido_id)
+  )
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -87,7 +98,7 @@ export default async function AdminOrfaosPage({
       {orfaos.length === 0 ? (
         <EmptyState filtro={statusFiltro} />
       ) : (
-        <Tabela orfaos={orfaos} />
+        <Tabela orfaos={orfaos} ofertasPorPedido={ofertasPorPedido} />
       )}
 
       {/* Contagem total */}
@@ -119,7 +130,13 @@ function EmptyState({ filtro }: { filtro: FiltroStatus }) {
   )
 }
 
-function Tabela({ orfaos }: { orfaos: VwPedidoOrfaoAdmin[] }) {
+function Tabela({
+  orfaos,
+  ofertasPorPedido,
+}: {
+  orfaos: VwPedidoOrfaoAdmin[]
+  ofertasPorPedido: Map<string, OfertaHistorico[]>
+}) {
   return (
     <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
       <div className="overflow-x-auto">
@@ -138,7 +155,11 @@ function Tabela({ orfaos }: { orfaos: VwPedidoOrfaoAdmin[] }) {
           </thead>
           <tbody className="divide-y divide-gray-200 text-sm">
             {orfaos.map((o) => (
-              <Linha key={o.orfao_id} o={o} />
+              <Linha
+                key={o.orfao_id}
+                o={o}
+                ofertas={ofertasPorPedido.get(o.pedido_id) ?? []}
+              />
             ))}
           </tbody>
         </table>
@@ -155,7 +176,13 @@ function Th({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Linha({ o }: { o: VwPedidoOrfaoAdmin }) {
+function Linha({
+  o,
+  ofertas,
+}: {
+  o: VwPedidoOrfaoAdmin
+  ofertas: OfertaHistorico[]
+}) {
   return (
     <tr className="hover:bg-gray-50">
       <td className="px-3 py-2.5 whitespace-nowrap">
@@ -192,10 +219,63 @@ function Linha({ o }: { o: VwPedidoOrfaoAdmin }) {
         {o.notas_admin ? o.notas_admin : !o.responsavel_captacao && '—'}
       </td>
       <td className="px-3 py-2.5 whitespace-nowrap">
-        <AcoesOrfao orfaoId={o.orfao_id} statusAtual={o.status_orfao} />
+        <div className="flex gap-1 flex-wrap items-start">
+          <ModalDetalhesOrfao orfao={o} ofertas={ofertas} />
+          <AcoesOrfao orfaoId={o.orfao_id} statusAtual={o.status_orfao} />
+        </div>
       </td>
     </tr>
   )
+}
+
+async function carregarHistoricoOfertas(
+  pedidoIds: string[]
+): Promise<Map<string, OfertaHistorico[]>> {
+  const mapa = new Map<string, OfertaHistorico[]>()
+  if (pedidoIds.length === 0) return mapa
+
+  const { data: ofertasRaw } = await supabaseAdmin
+    .from('ofertas')
+    .select('id, pedido_id, fornecedor_id, status, enviada_em, respondida_em')
+    .in('pedido_id', pedidoIds)
+    .order('enviada_em', { ascending: true })
+
+  const ofertas = (ofertasRaw ?? []) as Array<{
+    id: string
+    pedido_id: string
+    fornecedor_id: string
+    status: string
+    enviada_em: string
+    respondida_em: string | null
+  }>
+  if (ofertas.length === 0) return mapa
+
+  const fornecedorIds = Array.from(
+    new Set(ofertas.map((o) => o.fornecedor_id))
+  )
+  const { data: fornecedoresRaw } = await supabaseAdmin
+    .from('leads_fornecedores')
+    .select('id, nome')
+    .in('id', fornecedorIds)
+
+  const fornecedorMap = new Map(
+    ((fornecedoresRaw ?? []) as Array<{ id: string; nome: string }>).map(
+      (f) => [f.id, f.nome]
+    )
+  )
+
+  for (const o of ofertas) {
+    const lista = mapa.get(o.pedido_id) ?? []
+    lista.push({
+      id: o.id,
+      status: o.status,
+      enviada_em: o.enviada_em,
+      respondida_em: o.respondida_em,
+      fornecedor_nome: fornecedorMap.get(o.fornecedor_id) ?? '—',
+    })
+    mapa.set(o.pedido_id, lista)
+  }
+  return mapa
 }
 
 function BadgePrioridade({ prioridade }: { prioridade: number }) {
