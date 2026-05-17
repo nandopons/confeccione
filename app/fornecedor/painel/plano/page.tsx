@@ -2,9 +2,8 @@
 // ============================================================================
 // Página de gestão de plano do fornecedor (server component).
 // - Card do plano atual (cota + trial)
-// - Tabela comparativa dos 4 planos
-// - Pacotes de leads extras com preço calculado pelo plano efetivo
-//   (botões de compra desabilitados — checkout no 4c.2)
+// - Tabela comparativa dos 3 planos com botão "Assinar"
+// - Pacotes de pedidos extras com botão "Comprar"
 // ============================================================================
 
 import { exigirFornecedorAtual } from "@/app/lib/auth-server";
@@ -14,6 +13,9 @@ import {
   PACOTES_LEADS_EXTRAS,
   listarLotesAtivos,
 } from "@/app/lib/planos";
+import { PRECO_PACOTES_CENTAVOS } from "@/app/lib/asaas-payments";
+import { supabaseAdmin } from "@/app/lib/supabase-server";
+import BotaoComprarPacote from "./BotaoComprarPacote";
 import CardPlanoAtual from "./CardPlanoAtual";
 import PedidosExtrasDisponiveis from "./PedidosExtrasDisponiveis";
 import TabelaPlanos from "./TabelaPlanos";
@@ -22,10 +24,16 @@ export const dynamic = "force-dynamic";
 
 export default async function PaginaPlano() {
   const fornecedor = await exigirFornecedorAtual();
-  const [cota, lotesAtivos] = await Promise.all([
+  const [cota, lotesAtivos, fornFull] = await Promise.all([
     calcularCotaInfo(fornecedor.id),
     listarLotesAtivos(fornecedor.id),
+    supabaseAdmin
+      .from("leads_fornecedores")
+      .select("cpf_cnpj")
+      .eq("id", fornecedor.id)
+      .single(),
   ]);
+  const jaTemCpfCnpj = !!(fornFull.data?.cpf_cnpj && fornFull.data.cpf_cnpj.length > 0);
 
   if (!cota) {
     return (
@@ -52,7 +60,11 @@ export default async function PaginaPlano() {
 
       <CardPlanoAtual cota={cota} />
 
-      <TabelaPlanos planoAtual={cota.plano} diaAniversario={cota.diaAniversario} />
+      <TabelaPlanos
+        planoAtual={cota.plano}
+        diaAniversario={cota.diaAniversario}
+        jaTemCpfCnpj={jaTemCpfCnpj}
+      />
 
       {/* Como funciona sua cota */}
       <div className="mt-8 bg-gray-50 border border-gray-200 rounded-2xl p-6">
@@ -101,11 +113,16 @@ export default async function PaginaPlano() {
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {PACOTES_LEADS_EXTRAS.map((pacote, i) => {
-            const precoTotal = pacote.quantidade * precoPorLead;
+          {PACOTES_LEADS_EXTRAS.map((pacote) => {
+            const tipo = `pacote_leads_${pacote.quantidade}` as
+              | "pacote_leads_5"
+              | "pacote_leads_10"
+              | "pacote_leads_25";
+            const valorCentavos = PRECO_PACOTES_CENTAVOS[tipo][cota.plano];
+            const precoTotal = valorCentavos / 100;
             return (
               <div
-                key={i}
+                key={tipo}
                 className="bg-white border border-gray-200 rounded-2xl p-5 flex flex-col"
               >
                 <div className="text-gray-900 text-2xl font-medium mb-1">
@@ -114,13 +131,12 @@ export default async function PaginaPlano() {
                 <div className="text-gray-500 text-sm mb-4">
                   R$ {precoTotal.toFixed(2).replace(".", ",")}
                 </div>
-                <button
-                  disabled
-                  className="w-full py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-400 cursor-not-allowed"
-                  title="Em breve"
-                >
-                  Em breve
-                </button>
+                <BotaoComprarPacote
+                  tipo={tipo}
+                  quantidade={pacote.quantidade}
+                  valorCentavos={valorCentavos}
+                  jaTemCpfCnpj={jaTemCpfCnpj}
+                />
               </div>
             );
           })}

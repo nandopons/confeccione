@@ -5,7 +5,7 @@
 // ============================================================================
 
 import { createClient } from '@supabase/supabase-js'
-import { asaasFetch, centavosParaReais } from './asaas'
+import { ASAAS_BILLING_TYPE, asaasFetch, centavosParaReais, type MetodoPagamento } from './asaas'
 import { PLANOS_CONFIG, type Plano } from './planos'
 
 const supabase = createClient(
@@ -29,13 +29,7 @@ export type CriarAssinaturaInput = {
   fornecedorId: string
   asaasCustomerId: string
   plano: Exclude<Plano, 'free'>          // não cria assinatura pro free
-  metodo: 'pix' | 'boleto' | 'cartao'
-}
-
-const METODO_TO_BILLING_TYPE = {
-  pix: 'PIX' as const,
-  boleto: 'BOLETO' as const,
-  cartao: 'CREDIT_CARD' as const,
+  metodo: MetodoPagamento
 }
 
 const TIPO_ASSINATURA_POR_PLANO: Record<
@@ -54,11 +48,18 @@ const TIPO_ASSINATURA_POR_PLANO: Record<
  * só quando o webhook confirmar o primeiro pagamento (PAYMENT_CONFIRMED ou
  * PAYMENT_RECEIVED). Isso evita ativar plano pra fornecedor que abriu boleto
  * mas não pagou.
+ *
+ * Se metodo='pix', também busca o QR Code da primeira fatura via
+ * GET /payments/:id/pixQrCode (mesmo padrão de criarCobrancaPacote).
  */
 export async function criarAssinatura(input: CriarAssinaturaInput): Promise<{
   subscriptionId: string
-  primeiraFaturaId: string
-  linkPrimeiraFatura: string
+  primeiraFatura: {
+    paymentId: string
+    linkPagamento: string
+    qrCodePix: string | null
+    vencimento: string
+  }
 }> {
   const config = PLANOS_CONFIG[input.plano] ?? PLANOS_CONFIG['free']
   const valorCentavos = config.preco_mes * 100
@@ -74,7 +75,7 @@ export async function criarAssinatura(input: CriarAssinaturaInput): Promise<{
     method: 'POST',
     body: {
       customer: input.asaasCustomerId,
-      billingType: METODO_TO_BILLING_TYPE[input.metodo],
+      billingType: ASAAS_BILLING_TYPE[input.metodo],
       value: centavosParaReais(valorCentavos),
       nextDueDate,
       cycle: 'MONTHLY',
@@ -93,6 +94,19 @@ export async function criarAssinatura(input: CriarAssinaturaInput): Promise<{
     throw new Error(`Asaas não gerou primeira fatura pra assinatura ${subscription.id}`)
   }
 
+  // Pra Pix, busca o QR code da primeira fatura
+  let qrCodePix: string | null = null
+  if (input.metodo === 'pix') {
+    try {
+      const pix = await asaasFetch<{ payload: string; encodedImage: string }>(
+        `/payments/${primeiraFatura.id}/pixQrCode`
+      )
+      qrCodePix = pix.payload
+    } catch (err) {
+      console.error('[asaas-subscriptions] busca QR code pix falhou:', err)
+    }
+  }
+
   // Registra no banco local
   await supabase.from('pagamentos_asaas').insert({
     fornecedor_id: input.fornecedorId,
@@ -103,13 +117,18 @@ export async function criarAssinatura(input: CriarAssinaturaInput): Promise<{
     metodo: input.metodo,
     status: 'pendente',
     link_pagamento: primeiraFatura.invoiceUrl,
+    qr_code_pix: qrCodePix,
     vencimento: primeiraFatura.dueDate,
   })
 
   return {
     subscriptionId: subscription.id,
-    primeiraFaturaId: primeiraFatura.id,
-    linkPrimeiraFatura: primeiraFatura.invoiceUrl,
+    primeiraFatura: {
+      paymentId: primeiraFatura.id,
+      linkPagamento: primeiraFatura.invoiceUrl,
+      qrCodePix,
+      vencimento: primeiraFatura.dueDate,
+    },
   }
 }
 

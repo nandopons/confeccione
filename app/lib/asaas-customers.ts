@@ -35,13 +35,19 @@ export type CriarCustomerInput = {
 
 /**
  * Cria um novo customer no Asaas e salva o ID no fornecedor.
- * Se o fornecedor já tem asaas_customer_id, retorna esse customer
- * sem criar um duplicado.
+ * Idempotente em 3 camadas:
+ *   1. Se o fornecedor já tem asaas_customer_id local, retorna esse customer.
+ *   2. Senão, faz GET /customers?cpfCnpj=XXX no Asaas. Se existe (foi criado
+ *      em tentativa anterior que falhou no UPDATE local), reusa o id existente.
+ *      Defesa contra o bug: erro entre POST /customers e UPDATE local criava
+ *      um novo customer no Asaas a cada retry (lista de duplicados).
+ *   3. Só então cria customer novo via POST /customers.
+ * Em (2) e (3), faz UPDATE local com o asaas_customer_id resolvido.
  */
 export async function criarOuObterCustomer(
   input: CriarCustomerInput
 ): Promise<AsaasCustomer> {
-  // Verifica se já existe customer pra esse fornecedor
+  // (1) Já tem customer salvo localmente?
   const { data: forn } = await supabase
     .from('leads_fornecedores')
     .select('asaas_customer_id')
@@ -49,33 +55,56 @@ export async function criarOuObterCustomer(
     .single()
 
   if (forn?.asaas_customer_id) {
-    // Já tem customer — busca dados atualizados no Asaas
     return await asaasFetch<AsaasCustomer>(`/customers/${forn.asaas_customer_id}`)
   }
 
-  // Cria customer novo no Asaas
   const cpfCnpj = apenasDigitos(input.cpfCnpj)
   const personType = cpfCnpj.length === 11 ? 'FISICA' : 'JURIDICA'
 
-  const customer = await asaasFetch<AsaasCustomer>('/customers', {
-    method: 'POST',
-    body: {
-      name: input.nome,
-      email: input.email,
-      mobilePhone: apenasDigitos(input.whatsapp),
-      cpfCnpj,
-      personType,
-      // notificationDisabled: true para evitar Asaas mandar e-mail/SMS de cobrança
-      // (a gente cuida da comunicação via WhatsApp/email próprios)
-      notificationDisabled: true,
-    },
+  // (2) Defesa contra duplicação: customer com esse CPF/CNPJ já existe no Asaas?
+  // Acontece quando uma tentativa anterior criou no Asaas mas falhou ao gravar
+  // asaas_customer_id local. Sem essa defesa, a próxima tentativa criaria outro.
+  const existente = await asaasFetch<{ data: AsaasCustomer[] }>('/customers', {
+    query: { cpfCnpj },
   })
 
-  // Salva o ID no fornecedor
-  await supabase
+  let customer: AsaasCustomer
+  if (existente.data && existente.data.length > 0) {
+    customer = existente.data[0]
+    console.warn(
+      `[asaas-customers] reusando customer ${customer.id} (CPF/CNPJ ${cpfCnpj.slice(0, 3)}***) — tentativa anterior provavelmente falhou no UPDATE local`
+    )
+  } else {
+    // (3) Cria customer novo no Asaas
+    customer = await asaasFetch<AsaasCustomer>('/customers', {
+      method: 'POST',
+      body: {
+        name: input.nome,
+        email: input.email,
+        mobilePhone: apenasDigitos(input.whatsapp),
+        cpfCnpj,
+        personType,
+        notificationDisabled: true,
+      },
+    })
+  }
+
+  // Salva o ID no fornecedor (idempotente — vale tanto pra customer novo quanto reusado)
+  const { error: updErr } = await supabase
     .from('leads_fornecedores')
     .update({ asaas_customer_id: customer.id })
     .eq('id', input.fornecedorId)
+
+  if (updErr) {
+    console.error(
+      `[asaas-customers] UPDATE leads_fornecedores.asaas_customer_id falhou pra fornecedor ${input.fornecedorId}, customer ${customer.id}:`,
+      updErr
+    )
+    // Throw pra caller decidir — não silencia. A defesa (2) cobre o próximo retry.
+    throw new Error(
+      `asaas_customer_id update falhou: ${updErr.message}`
+    )
+  }
 
   return customer
 }

@@ -32,8 +32,24 @@ export class AsaasApiError extends Error {
 }
 
 /**
+ * Mapeia método de pagamento "interno" (lowercase) → billingType do Asaas.
+ * Reusado por asaas-payments e asaas-subscriptions.
+ */
+export const ASAAS_BILLING_TYPE = {
+  pix: 'PIX',
+  boleto: 'BOLETO',
+  cartao: 'CREDIT_CARD',
+} as const
+
+export type MetodoPagamento = keyof typeof ASAAS_BILLING_TYPE
+
+/**
  * Fetch tipado contra a API do Asaas.
  * Lança AsaasApiError em caso de erro 4xx/5xx.
+ *
+ * Retry: 1 retry com backoff 1s em 503/504 ou erro de rede (timeout/socket).
+ * NÃO retry em 4xx — esses são erros do caller (CPF inválido, etc) e tentar
+ * de novo não muda o resultado. Beneficia todas as funções que usam asaasFetch.
  */
 export async function asaasFetch<T = unknown>(
   path: string,
@@ -47,7 +63,6 @@ export async function asaasFetch<T = unknown>(
 
   let url = `${API_URL}${path}`
 
-  // Adiciona query params se fornecidos
   if (query) {
     const params = new URLSearchParams()
     for (const [k, v] of Object.entries(query)) {
@@ -59,7 +74,7 @@ export async function asaasFetch<T = unknown>(
     if (qs) url += `?${qs}`
   }
 
-  const res = await fetch(url, {
+  const requestInit: RequestInit = {
     method,
     headers: {
       'Content-Type': 'application/json',
@@ -67,7 +82,22 @@ export async function asaasFetch<T = unknown>(
     },
     body: body ? JSON.stringify(body) : undefined,
     cache: 'no-store',
-  })
+  }
+
+  // Tentativa 1; se falhar com 503/504/network error, retry 1× após 1s.
+  let res: Response
+  try {
+    res = await fetch(url, requestInit)
+    if (res.status === 503 || res.status === 504) {
+      console.warn(`[asaas] ${res.status} em ${method} ${path}, retry em 1s`)
+      await new Promise((r) => setTimeout(r, 1000))
+      res = await fetch(url, requestInit)
+    }
+  } catch (err) {
+    console.warn(`[asaas] erro de rede em ${method} ${path}, retry em 1s:`, err)
+    await new Promise((r) => setTimeout(r, 1000))
+    res = await fetch(url, requestInit)
+  }
 
   // Asaas retorna JSON tanto em sucesso quanto em erro
   let data: unknown = null
