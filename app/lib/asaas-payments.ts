@@ -51,25 +51,22 @@ export type AsaasPaymentStatus =
  */
 export const PRECO_PACOTES_CENTAVOS: Record<
   'pacote_leads_5' | 'pacote_leads_10' | 'pacote_leads_25',
-  Record<'free' | 'starter' | 'pro' | 'enterprise', number>
+  Record<'free' | 'starter' | 'pro', number>
 > = {
   pacote_leads_5: {
     free: 7500,        // 5 × R$ 15
     starter: 6000,     // 5 × R$ 12
     pro: 5000,         // 5 × R$ 10
-    enterprise: 4000,  // 5 × R$ 8
   },
   pacote_leads_10: {
     free: 15000,
     starter: 12000,
     pro: 10000,
-    enterprise: 8000,
   },
   pacote_leads_25: {
     free: 37500,
     starter: 30000,
     pro: 25000,
-    enterprise: 20000,
   },
 }
 

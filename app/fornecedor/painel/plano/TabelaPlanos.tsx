@@ -1,13 +1,13 @@
 // app/fornecedor/painel/plano/TabelaPlanos.tsx
 // ============================================================================
-// Grid comparativo dos 4 planos (Free/Starter/Pro/Enterprise).
+// Grid comparativo dos 3 planos (Free/Starter/Pro).
 // Plano atual destacado com borda verde + badge "ATUAL".
 // Botões de upgrade desabilitados (checkout chega no 4c.2).
 // ============================================================================
 
 import { PLANOS_CONFIG, type Plano } from "@/app/lib/planos";
 
-const ORDEM: Plano[] = ["free", "starter", "pro", "enterprise"];
+const ORDEM: Plano[] = ["free", "starter", "pro"];
 
 const BENEFICIOS: Record<Plano, string[]> = {
   free: [
@@ -26,20 +26,16 @@ const BENEFICIOS: Record<Plano, string[]> = {
     "Perfil destacado",
     "Métricas detalhadas",
   ],
-  enterprise: [
-    "Cobertura nacional",
-    "Gerente de conta dedicado",
-    "Integração via API",
-    "SLA garantido",
-  ],
 };
 
 const DESTAQUE: Record<Plano, string | null> = {
   free: "Para começar",
   starter: "Mais escolhido",
   pro: "Mais resultados",
-  enterprise: "Para fábricas em escala",
 };
+
+const TOOLTIP_LEADS =
+  "Cota renovada todo mês. Lead conta quando você aceita oferta.";
 
 function precoFormatado(preco: number): string {
   if (preco === 0) return "Grátis";
@@ -50,7 +46,7 @@ export default function TabelaPlanos({ planoAtual }: { planoAtual: Plano }) {
   return (
     <div>
       <h2 className="text-gray-900 text-lg font-medium mb-4">Comparar planos</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {ORDEM.map((id) => {
           const config = PLANOS_CONFIG[id];
           const ehAtual = id === planoAtual;
@@ -87,8 +83,17 @@ export default function TabelaPlanos({ planoAtual }: { planoAtual: Plano }) {
                 )}
               </div>
 
-              <div className="text-sm text-gray-600 mb-4">
-                <span className="font-medium">{config.leads_inclusos}</span> leads/mês
+              <div className="text-sm text-gray-600 mb-4 flex items-center gap-1.5">
+                <span>
+                  <span className="font-medium">{config.leads_inclusos}</span> leads/mês
+                </span>
+                <span
+                  className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-300 text-gray-400 text-[10px] font-medium cursor-help"
+                  title={TOOLTIP_LEADS}
+                  aria-label={TOOLTIP_LEADS}
+                >
+                  i
+                </span>
               </div>
 
               <ul className="flex flex-col gap-2 mb-5 flex-1">
