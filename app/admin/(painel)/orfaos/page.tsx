@@ -365,13 +365,14 @@ async function carregarTemCreditoPorFornecedor(
 
   const { data } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('id, plano, plano_expira_em, creditos_extras')
+    .select('id, plano, plano_expira_em, plano_ativado_em, creditos_extras')
     .in('id', fornecedorIds)
 
   const fornecedores = (data ?? []) as Array<{
     id: string
     plano: Plano
     plano_expira_em: string | null
+    plano_ativado_em: string | null
     creditos_extras: number
   }>
 

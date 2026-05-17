@@ -221,7 +221,7 @@ export async function processarProximaAgendadaSeHouver(
   // 1. Checa crédito ANTES de travar
   const { data: forn } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('id, plano, plano_expira_em, creditos_extras')
+    .select('id, plano, plano_expira_em, plano_ativado_em, creditos_extras')
     .eq('id', fornecedorId)
     .maybeSingle()
 
@@ -235,6 +235,7 @@ export async function processarProximaAgendadaSeHouver(
       id: string
       plano: Plano
       plano_expira_em: string | null
+      plano_ativado_em: string | null
       creditos_extras: number
     }
   )

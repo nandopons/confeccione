@@ -52,7 +52,7 @@ export default async function PaginaPlano() {
 
       <CardPlanoAtual cota={cota} />
 
-      <TabelaPlanos planoAtual={cota.plano} />
+      <TabelaPlanos planoAtual={cota.plano} diaAniversario={cota.diaAniversario} />
 
       {/* Como funciona sua cota */}
       <div className="mt-8 bg-gray-50 border border-gray-200 rounded-2xl p-6">

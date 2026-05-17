@@ -34,15 +34,27 @@ const DESTAQUE: Record<Plano, string | null> = {
   pro: "Mais resultados",
 };
 
-const TOOLTIP_LEADS =
+const TOOLTIP_LEADS_GENERICO =
   "Cota renovada todo mês. Cada pedido aceito consome 1 da cota. Recusar ou ignorar não consome.";
+
+function tooltipDinamico(diaAniversario: number | null | undefined): string {
+  if (!diaAniversario) return TOOLTIP_LEADS_GENERICO;
+  return `Cota renovada a cada dia ${diaAniversario} do mês (aniversário do seu plano). Cada pedido aceito consome 1 da cota. Recusar ou ignorar não consome.`;
+}
 
 function precoFormatado(preco: number): string {
   if (preco === 0) return "Grátis";
   return `R$ ${preco}`;
 }
 
-export default function TabelaPlanos({ planoAtual }: { planoAtual: Plano }) {
+export default function TabelaPlanos({
+  planoAtual,
+  diaAniversario,
+}: {
+  planoAtual: Plano;
+  diaAniversario?: number | null;
+}) {
+  const tooltipLeads = tooltipDinamico(diaAniversario);
   return (
     <div>
       <h2 className="text-gray-900 text-lg font-medium mb-4">Comparar planos</h2>
@@ -89,8 +101,8 @@ export default function TabelaPlanos({ planoAtual }: { planoAtual: Plano }) {
                 </span>
                 <span
                   className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-300 text-gray-400 text-[10px] font-medium cursor-help"
-                  title={TOOLTIP_LEADS}
-                  aria-label={TOOLTIP_LEADS}
+                  title={tooltipLeads}
+                  aria-label={tooltipLeads}
                 >
                   i
                 </span>

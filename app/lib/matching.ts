@@ -32,6 +32,7 @@ export type Fornecedor = {
   ultimo_lead_em: string | null
   plano: Plano
   plano_expira_em: string | null
+  plano_ativado_em: string | null
   creditos_extras: number
 }
 
@@ -178,6 +179,7 @@ export async function buscarFornecedorCompativel(
         id: f.id,
         plano: planoEfetivo({ plano: f.plano, plano_expira_em: f.plano_expira_em }),
         plano_expira_em: f.plano_expira_em,
+        plano_ativado_em: f.plano_ativado_em,
         creditos_extras: f.creditos_extras,
       })
       return { fornecedor: f, tem_credito: c.tem_credito }

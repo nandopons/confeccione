@@ -88,7 +88,7 @@ export async function POST(
   // 3. Busca dados completos do fornecedor (precisa de cidade/estado pra notificação)
   const { data: fornecedorCompleto } = await supabase
     .from('leads_fornecedores')
-    .select('id, nome, whatsapp, cidade, estado, plano, plano_expira_em, creditos_extras')
+    .select('id, nome, whatsapp, cidade, estado, plano, plano_expira_em, plano_ativado_em, creditos_extras')
     .eq('id', fornecedor.id)
     .single()
 
@@ -160,7 +160,10 @@ export async function POST(
     // contarOfertasMesAtual já reflete o aceite recém-feito (UPDATE oferta
     // foi confirmado acima). Comparação >= em vez de > porque queremos
     // consumir SE o aceite atual ultrapassou o limite.
-    const usadosAposEsteAceite = await contarOfertasMesAtual(fornecedor.id)
+    const usadosAposEsteAceite = await contarOfertasMesAtual({
+      id: fornecedor.id,
+      plano_ativado_em: fornecedorCompleto.plano_ativado_em,
+    })
     if (usadosAposEsteAceite > configPlano.leads_inclusos) {
       await consumirCreditoAvulso(fornecedor.id)
     }
@@ -261,7 +264,7 @@ export async function POST(
 async function montarResumoCotaMes(fornecedorId: string): Promise<string> {
   const { data: f } = await supabase
     .from('leads_fornecedores')
-    .select('plano, plano_expira_em, creditos_extras')
+    .select('plano, plano_expira_em, plano_ativado_em, creditos_extras')
     .eq('id', fornecedorId)
     .single()
 
@@ -272,7 +275,10 @@ async function montarResumoCotaMes(fornecedorId: string): Promise<string> {
     plano_expira_em: f.plano_expira_em,
   })
   const config = PLANOS_CONFIG[planoAtual]
-  const usados = await contarOfertasMesAtual(fornecedorId)
+  const usados = await contarOfertasMesAtual({
+    id: fornecedorId,
+    plano_ativado_em: f.plano_ativado_em,
+  })
 
   let resumo = `📊 Você usou ${usados} de ${config.leads_inclusos} pedidos do plano *${config.nome}* este mês.`
 

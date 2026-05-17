@@ -10,6 +10,7 @@ import {
   contarOfertasMesAtual,
   listarLotesAtivos,
   planoEfetivo,
+  proximaRenovacao,
   type Plano,
 } from './planos'
 
@@ -45,6 +46,12 @@ export type CotaInfo = {
   porcentagemUsada: number
   /** true se o fornecedor já estourou a cota mensal */
   cotaEstourada: boolean
+
+  /** Dia do mês em que a cota renova (1-31, do plano_ativado_em).
+   *  null se plano_ativado_em estiver vazio (fallback pro mês calendário). */
+  diaAniversario: number | null
+  /** Próxima renovação da cota. null no mesmo caso de diaAniversario. */
+  proximaRenovacao: { data: string; diasRestantes: number } | null
 }
 
 /**
@@ -67,7 +74,10 @@ export async function calcularCotaInfo(fornecedorId: string): Promise<CotaInfo |
 
   const config = PLANOS_CONFIG[plano] ?? PLANOS_CONFIG['free']
   const [leadsUsados, lotes] = await Promise.all([
-    contarOfertasMesAtual(fornecedorId),
+    contarOfertasMesAtual({
+      id: fornecedorId,
+      plano_ativado_em: fornecedor.plano_ativado_em,
+    }),
     listarLotesAtivos(fornecedorId),
   ])
   const creditosExtras = lotes.reduce((s, l) => s + l.quantidade_disponivel, 0)
@@ -88,6 +98,19 @@ export async function calcularCotaInfo(fornecedorId: string): Promise<CotaInfo |
     : null
   const emTrial = plano !== 'free' && expiraEm !== null && expiraEm > agora
 
+  // Aniversário e próxima renovação (null se plano_ativado_em vazio — fallback)
+  let diaAniversario: number | null = null
+  let proximaRenov: { data: string; diasRestantes: number } | null = null
+  if (fornecedor.plano_ativado_em) {
+    diaAniversario = new Date(fornecedor.plano_ativado_em).getUTCDate()
+    const proxData = proximaRenovacao(fornecedor.plano_ativado_em)
+    const diasRestantes = Math.max(
+      0,
+      Math.ceil((proxData.getTime() - agora) / (1000 * 60 * 60 * 24))
+    )
+    proximaRenov = { data: proxData.toISOString(), diasRestantes }
+  }
+
   return {
     plano,
     planoNome: config.nome,
@@ -100,6 +123,8 @@ export async function calcularCotaInfo(fornecedorId: string): Promise<CotaInfo |
     saldoTotal,
     porcentagemUsada,
     cotaEstourada: leadsUsados >= config.leads_inclusos,
+    diaAniversario,
+    proximaRenovacao: proximaRenov,
   }
 }
 
