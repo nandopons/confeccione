@@ -58,6 +58,7 @@ export async function criarAssinatura(input: CriarAssinaturaInput): Promise<{
     paymentId: string
     linkPagamento: string
     qrCodePix: string | null
+    qrCodePixImagem: string | null
     vencimento: string
   }
 }> {
@@ -94,14 +95,16 @@ export async function criarAssinatura(input: CriarAssinaturaInput): Promise<{
     throw new Error(`Asaas não gerou primeira fatura pra assinatura ${subscription.id}`)
   }
 
-  // Pra Pix, busca o QR code da primeira fatura
+  // Pra Pix, busca o QR code da primeira fatura: payload + encodedImage
   let qrCodePix: string | null = null
+  let qrCodePixImagem: string | null = null
   if (input.metodo === 'pix') {
     try {
       const pix = await asaasFetch<{ payload: string; encodedImage: string }>(
         `/payments/${primeiraFatura.id}/pixQrCode`
       )
       qrCodePix = pix.payload
+      qrCodePixImagem = pix.encodedImage
     } catch (err) {
       console.error('[asaas-subscriptions] busca QR code pix falhou:', err)
     }
@@ -118,6 +121,7 @@ export async function criarAssinatura(input: CriarAssinaturaInput): Promise<{
     status: 'pendente',
     link_pagamento: primeiraFatura.invoiceUrl,
     qr_code_pix: qrCodePix,
+    qr_code_pix_imagem: qrCodePixImagem,
     vencimento: primeiraFatura.dueDate,
   })
 
@@ -127,6 +131,7 @@ export async function criarAssinatura(input: CriarAssinaturaInput): Promise<{
       paymentId: primeiraFatura.id,
       linkPagamento: primeiraFatura.invoiceUrl,
       qrCodePix,
+      qrCodePixImagem,
       vencimento: primeiraFatura.dueDate,
     },
   }

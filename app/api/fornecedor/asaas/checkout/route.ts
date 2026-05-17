@@ -164,7 +164,9 @@ export async function POST(req: Request) {
   const limiteJanela = new Date(Date.now() - JANELA_IDEMPOTENCIA_MS).toISOString()
   const { data: existente } = await supabase
     .from('pagamentos_asaas')
-    .select('asaas_payment_id, link_pagamento, qr_code_pix, vencimento')
+    .select(
+      'asaas_payment_id, link_pagamento, qr_code_pix, qr_code_pix_imagem, vencimento'
+    )
     .eq('fornecedor_id', forn.id)
     .eq('tipo', body.tipo)
     .eq('status', 'pendente')
@@ -178,6 +180,7 @@ export async function POST(req: Request) {
       asaas_payment_id: existente.asaas_payment_id,
       link_pagamento: existente.link_pagamento,
       qr_code_pix: existente.qr_code_pix,
+      qr_code_pix_imagem: existente.qr_code_pix_imagem,
       vencimento: existente.vencimento,
       reused: true,
     })
@@ -214,6 +217,7 @@ export async function POST(req: Request) {
         asaas_payment_id: resultado.paymentId,
         link_pagamento: resultado.linkPagamento,
         qr_code_pix: resultado.qrCodePix,
+        qr_code_pix_imagem: resultado.qrCodePixImagem,
         vencimento: resultado.vencimento,
       })
     } else {
@@ -236,6 +240,7 @@ export async function POST(req: Request) {
         asaas_subscription_id: resultado.subscriptionId,
         link_pagamento: resultado.primeiraFatura.linkPagamento,
         qr_code_pix: resultado.primeiraFatura.qrCodePix,
+        qr_code_pix_imagem: resultado.primeiraFatura.qrCodePixImagem,
         vencimento: resultado.primeiraFatura.vencimento,
       })
     }

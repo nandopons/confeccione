@@ -23,6 +23,7 @@ type ResultadoCheckout = {
   asaas_payment_id: string;
   link_pagamento: string | null;
   qr_code_pix: string | null;
+  qr_code_pix_imagem: string | null;
   vencimento: string;
 };
 
@@ -101,6 +102,7 @@ export default function ModalCheckout({
         asaas_payment_id: data.asaas_payment_id,
         link_pagamento: data.link_pagamento,
         qr_code_pix: data.qr_code_pix,
+        qr_code_pix_imagem: data.qr_code_pix_imagem,
         vencimento: data.vencimento,
       });
     } catch {
@@ -274,14 +276,23 @@ function ResultadoView({
     <div className="flex flex-col gap-4">
       {metodo === "pix" && resultado.qr_code_pix && (
         <div className="flex flex-col items-center gap-3 bg-gray-50 border border-gray-200 rounded-xl p-4">
-          <div className="text-xs text-gray-500">
-            Aponte a câmera do app do banco
-          </div>
-          <img
-            src={`data:image/png;base64,${resultado.qr_code_pix}`}
-            alt="QR Code Pix"
-            className="w-48 h-48 border border-gray-200"
-          />
+          {resultado.qr_code_pix_imagem ? (
+            <>
+              <div className="text-xs text-gray-500">
+                Aponte a câmera do app do banco
+              </div>
+              <img
+                src={`data:image/png;base64,${resultado.qr_code_pix_imagem}`}
+                alt="QR Code Pix"
+                className="w-48 h-48 border border-gray-200"
+              />
+            </>
+          ) : (
+            <div className="text-xs text-gray-500 text-center">
+              QR Code indisponível — use o código copia-e-cola abaixo
+              no app do seu banco.
+            </div>
+          )}
           <button
             type="button"
             onClick={() => copiar(resultado.qr_code_pix!)}
