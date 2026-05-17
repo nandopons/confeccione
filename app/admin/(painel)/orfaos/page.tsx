@@ -27,6 +27,7 @@ import {
   ModalDetalhesOrfao,
   type OfertaHistorico,
 } from './ModalDetalhesOrfao'
+import { temCreditoDisponivel, type Plano } from '@/app/lib/planos'
 
 type FiltroStatus = StatusOrfao | 'todos'
 
@@ -61,6 +62,22 @@ export default async function AdminOrfaosPage({
   const ofertasPorPedido = await carregarHistoricoOfertas(
     orfaos.map((o) => o.pedido_id)
   )
+
+  // Estado da fila + crédito por fornecedor — alimentam o botão "Agendar
+  // reenvio" e o indicador "(N na fila)" no modal de detalhes.
+  // Dívida: poderia ser paralelo com carregarHistoricoOfertas via Promise.all
+  // (3 round-trips → 2). Micro-otimização — adiar até vol crescer.
+  const fornecedorIdsUnicos = Array.from(
+    new Set(
+      Array.from(ofertasPorPedido.values())
+        .flat()
+        .map((o) => o.fornecedor_id)
+    )
+  )
+  const [estadoFila, temCreditoPorFornecedor] = await Promise.all([
+    carregarEstadoFila(),
+    carregarTemCreditoPorFornecedor(fornecedorIdsUnicos),
+  ])
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -98,7 +115,13 @@ export default async function AdminOrfaosPage({
       {orfaos.length === 0 ? (
         <EmptyState filtro={statusFiltro} />
       ) : (
-        <Tabela orfaos={orfaos} ofertasPorPedido={ofertasPorPedido} />
+        <Tabela
+          orfaos={orfaos}
+          ofertasPorPedido={ofertasPorPedido}
+          agendadasPorFornecedor={estadoFila.agendadasPorFornecedor}
+          paresJaAgendados={estadoFila.paresJaAgendados}
+          temCreditoPorFornecedor={temCreditoPorFornecedor}
+        />
       )}
 
       {/* Contagem total */}
@@ -133,9 +156,15 @@ function EmptyState({ filtro }: { filtro: FiltroStatus }) {
 function Tabela({
   orfaos,
   ofertasPorPedido,
+  agendadasPorFornecedor,
+  paresJaAgendados,
+  temCreditoPorFornecedor,
 }: {
   orfaos: VwPedidoOrfaoAdmin[]
   ofertasPorPedido: Map<string, OfertaHistorico[]>
+  agendadasPorFornecedor: Map<string, number>
+  paresJaAgendados: Set<string>
+  temCreditoPorFornecedor: Map<string, boolean>
 }) {
   return (
     <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -159,6 +188,9 @@ function Tabela({
                 key={o.orfao_id}
                 o={o}
                 ofertas={ofertasPorPedido.get(o.pedido_id) ?? []}
+                agendadasPorFornecedor={agendadasPorFornecedor}
+                paresJaAgendados={paresJaAgendados}
+                temCreditoPorFornecedor={temCreditoPorFornecedor}
               />
             ))}
           </tbody>
@@ -179,9 +211,15 @@ function Th({ children }: { children: React.ReactNode }) {
 function Linha({
   o,
   ofertas,
+  agendadasPorFornecedor,
+  paresJaAgendados,
+  temCreditoPorFornecedor,
 }: {
   o: VwPedidoOrfaoAdmin
   ofertas: OfertaHistorico[]
+  agendadasPorFornecedor: Map<string, number>
+  paresJaAgendados: Set<string>
+  temCreditoPorFornecedor: Map<string, boolean>
 }) {
   return (
     <tr className="hover:bg-gray-50">
@@ -220,7 +258,13 @@ function Linha({
       </td>
       <td className="px-3 py-2.5 whitespace-nowrap">
         <div className="flex gap-1 flex-wrap items-start">
-          <ModalDetalhesOrfao orfao={o} ofertas={ofertas} />
+          <ModalDetalhesOrfao
+            orfao={o}
+            ofertas={ofertas}
+            agendadasPorFornecedor={agendadasPorFornecedor}
+            paresJaAgendados={paresJaAgendados}
+            temCreditoPorFornecedor={temCreditoPorFornecedor}
+          />
           <AcoesOrfao orfaoId={o.orfao_id} statusAtual={o.status_orfao} />
         </div>
       </td>
@@ -268,6 +312,7 @@ async function carregarHistoricoOfertas(
     const lista = mapa.get(o.pedido_id) ?? []
     lista.push({
       id: o.id,
+      fornecedor_id: o.fornecedor_id,
       status: o.status,
       enviada_em: o.enviada_em,
       respondida_em: o.respondida_em,
@@ -276,6 +321,68 @@ async function carregarHistoricoOfertas(
     mapa.set(o.pedido_id, lista)
   }
   return mapa
+}
+
+/** Carrega estado da fila em 2 estruturas:
+ *  - agendadasPorFornecedor: count global de pendentes por fornecedor
+ *    (alimenta indicador "(N na fila)" ao lado do nome)
+ *  - paresJaAgendados: chaves `${pedido_id}:${fornecedor_id}` de pendentes
+ *    (alimenta estado inicial 'agendado' do BotaoAgendarReenvio) */
+async function carregarEstadoFila(): Promise<{
+  agendadasPorFornecedor: Map<string, number>
+  paresJaAgendados: Set<string>
+}> {
+  const { data } = await supabaseAdmin
+    .from('ofertas_agendadas')
+    .select('pedido_id, fornecedor_id')
+    .is('processada_em', null)
+
+  const linhas = (data ?? []) as Array<{
+    pedido_id: string
+    fornecedor_id: string
+  }>
+
+  const agendadasPorFornecedor = new Map<string, number>()
+  const paresJaAgendados = new Set<string>()
+  for (const a of linhas) {
+    agendadasPorFornecedor.set(
+      a.fornecedor_id,
+      (agendadasPorFornecedor.get(a.fornecedor_id) ?? 0) + 1
+    )
+    paresJaAgendados.add(`${a.pedido_id}:${a.fornecedor_id}`)
+  }
+  return { agendadasPorFornecedor, paresJaAgendados }
+}
+
+/** Pra cada fornecedor único nas ofertas históricas, calcula tem_credito.
+ *  N+1 queries: 1 SELECT plano + N chamadas contarOfertasMesAtual em paralelo.
+ *  Dívida futura: otimizar pra batch quando vol crescer (1 query GROUP BY). */
+async function carregarTemCreditoPorFornecedor(
+  fornecedorIds: string[]
+): Promise<Map<string, boolean>> {
+  const map = new Map<string, boolean>()
+  if (fornecedorIds.length === 0) return map
+
+  const { data } = await supabaseAdmin
+    .from('leads_fornecedores')
+    .select('id, plano, plano_expira_em, creditos_extras')
+    .in('id', fornecedorIds)
+
+  const fornecedores = (data ?? []) as Array<{
+    id: string
+    plano: Plano
+    plano_expira_em: string | null
+    creditos_extras: number
+  }>
+
+  const entries = await Promise.all(
+    fornecedores.map(async (f) => {
+      const r = await temCreditoDisponivel(f)
+      return [f.id, r.tem_credito] as const
+    })
+  )
+  for (const [id, tem] of entries) map.set(id, tem)
+  return map
 }
 
 function BadgePrioridade({ prioridade }: { prioridade: number }) {
