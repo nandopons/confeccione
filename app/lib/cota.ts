@@ -8,6 +8,7 @@ import { createClient } from '@supabase/supabase-js'
 import {
   PLANOS_CONFIG,
   contarOfertasMesAtual,
+  listarLotesAtivos,
   planoEfetivo,
   type Plano,
 } from './planos'
@@ -32,7 +33,7 @@ export type CotaInfo = {
   leadsInclusos: number
   /** Leads usados no mês atual (ofertas enviadas e respondidas) */
   leadsUsados: number
-  /** Créditos extras comprados (não expiram) */
+  /** Total disponível somado de todos os lotes ativos em creditos_avulsos */
   creditosExtras: number
 
   /** Sobra do plano: leadsInclusos - leadsUsados (mínimo 0) */
@@ -53,7 +54,7 @@ export type CotaInfo = {
 export async function calcularCotaInfo(fornecedorId: string): Promise<CotaInfo | null> {
   const { data: fornecedor } = await supabase
     .from('leads_fornecedores')
-    .select('id, plano, plano_expira_em, plano_ativado_em, creditos_extras')
+    .select('id, plano, plano_expira_em, plano_ativado_em')
     .eq('id', fornecedorId)
     .single()
 
@@ -65,8 +66,11 @@ export async function calcularCotaInfo(fornecedorId: string): Promise<CotaInfo |
   })
 
   const config = PLANOS_CONFIG[plano] ?? PLANOS_CONFIG['free']
-  const leadsUsados = await contarOfertasMesAtual(fornecedorId)
-  const creditosExtras = fornecedor.creditos_extras ?? 0
+  const [leadsUsados, lotes] = await Promise.all([
+    contarOfertasMesAtual(fornecedorId),
+    listarLotesAtivos(fornecedorId),
+  ])
+  const creditosExtras = lotes.reduce((s, l) => s + l.quantidade_disponivel, 0)
 
   const saldoMensal = Math.max(0, config.leads_inclusos - leadsUsados)
   const saldoTotal = saldoMensal + creditosExtras

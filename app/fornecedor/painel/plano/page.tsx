@@ -9,15 +9,23 @@
 
 import { exigirFornecedorAtual } from "@/app/lib/auth-server";
 import { calcularCotaInfo } from "@/app/lib/cota";
-import { PLANOS_CONFIG, PACOTES_LEADS_EXTRAS } from "@/app/lib/planos";
+import {
+  PLANOS_CONFIG,
+  PACOTES_LEADS_EXTRAS,
+  listarLotesAtivos,
+} from "@/app/lib/planos";
 import CardPlanoAtual from "./CardPlanoAtual";
+import PedidosExtrasDisponiveis from "./PedidosExtrasDisponiveis";
 import TabelaPlanos from "./TabelaPlanos";
 
 export const dynamic = "force-dynamic";
 
 export default async function PaginaPlano() {
   const fornecedor = await exigirFornecedorAtual();
-  const cota = await calcularCotaInfo(fornecedor.id);
+  const [cota, lotesAtivos] = await Promise.all([
+    calcularCotaInfo(fornecedor.id),
+    listarLotesAtivos(fornecedor.id),
+  ]);
 
   if (!cota) {
     return (
@@ -78,6 +86,8 @@ export default async function PaginaPlano() {
           </div>
         </dl>
       </div>
+
+      <PedidosExtrasDisponiveis lotes={lotesAtivos} />
 
       {/* Pacotes de leads extras */}
       <div className="mt-10">
