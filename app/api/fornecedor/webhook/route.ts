@@ -297,7 +297,7 @@ async function tratarRespostaSemCredito(
 async function montarResumoCotaMes(fornecedorId: string): Promise<string> {
   const { data: f } = await supabase
     .from('leads_fornecedores')
-    .select('plano, plano_expira_em, creditos_extras')
+    .select('plano, plano_expira_em, plano_ativado_em, creditos_extras')
     .eq('id', fornecedorId)
     .single()
 
@@ -308,7 +308,10 @@ async function montarResumoCotaMes(fornecedorId: string): Promise<string> {
     plano_expira_em: f.plano_expira_em,
   })
   const config = PLANOS_CONFIG[planoAtual]
-  const usados = await contarOfertasMesAtual(fornecedorId)
+  const usados = await contarOfertasMesAtual({
+    id: fornecedorId,
+    plano_ativado_em: f.plano_ativado_em,
+  })
 
   let resumo = `📊 Você usou ${usados} de ${config.leads_inclusos} pedidos do plano *${config.nome}* este mês.`
 

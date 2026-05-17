@@ -83,24 +83,29 @@ export function planoEfetivo(fornecedor: {
 
 /**
  * Conta ofertas NORMAIS (não-sem-credito) que o fornecedor ACEITOU
- * no mês corrente. Apenas status='aceita' consome cota — leads recebidos
+ * na janela corrente. Apenas status='aceita' consome cota — leads recebidos
  * mas recusados/expirados não contam (decisão revisada em 2026-05-09).
  *
- * Razão: contar só o que o fornecedor de fato converteu evita injustiça
- * com quem recebe ofertas mas não tem fit pra elas.
+ * Janela: do aniversário do plano (plano_ativado_em) até NOW.
+ * Failure-soft em plano_ativado_em NULL: fallback pro dia 1 do mês
+ * calendário UTC (modelo pré-Sprint 3). Hoje todos os 13 fornecedores têm
+ * plano_ativado_em populado; o fallback existe como defesa.
  */
-export async function contarOfertasMesAtual(fornecedorId: string): Promise<number> {
-  const inicioMes = new Date()
-  inicioMes.setDate(1)
-  inicioMes.setHours(0, 0, 0, 0)
+export async function contarOfertasMesAtual(fornecedor: {
+  id: string
+  plano_ativado_em: string | null
+}): Promise<number> {
+  const inicioJanela = fornecedor.plano_ativado_em
+    ? inicioJanelaCotaAtual(fornecedor.plano_ativado_em)
+    : inicioMesCalendarioUtc()
 
   const { count } = await supabase
     .from('ofertas')
     .select('*', { count: 'exact', head: true })
-    .eq('fornecedor_id', fornecedorId)
+    .eq('fornecedor_id', fornecedor.id)
     .eq('tipo_oferta', 'normal')
     .eq('status', 'aceita')
-    .gte('enviada_em', inicioMes.toISOString())
+    .gte('enviada_em', inicioJanela.toISOString())
 
   return count ?? 0
 }
@@ -118,6 +123,7 @@ export async function temCreditoDisponivel(fornecedor: {
   id: string
   plano: Plano
   plano_expira_em: string | null
+  plano_ativado_em: string | null
   creditos_extras: number
 }): Promise<{
   tem_credito: boolean
@@ -128,7 +134,10 @@ export async function temCreditoDisponivel(fornecedor: {
   const planoAtual = planoEfetivo(fornecedor)
   const config = PLANOS_CONFIG[planoAtual] ?? PLANOS_CONFIG['free']
   const [usados, lotes] = await Promise.all([
-    contarOfertasMesAtual(fornecedor.id),
+    contarOfertasMesAtual({
+      id: fornecedor.id,
+      plano_ativado_em: fornecedor.plano_ativado_em,
+    }),
     listarLotesAtivos(fornecedor.id),
   ])
 
@@ -292,4 +301,109 @@ export async function consumirCreditoAvulso(fornecedorId: string): Promise<
     loteId: rows[0].lote_id,
     novoDisponivel: rows[0].novo_disponivel,
   }
+}
+
+// ============================================================================
+// JANELA DE COTA POR ANIVERSÁRIO DO PLANO
+// ============================================================================
+//
+// Tudo em UTC. Servidor Vercel + BD Supabase rodam UTC. Misturar fuso local
+// com UTC é fonte clássica de bugs em transições de meia-noite no BRT (UTC-3).
+//
+// Edge case do clamp: se o aniversário é dia 31 e o mês corrente tem 30 dias
+// (ou 28/29 em fevereiro), a janela começa no último dia do mês.
+// ============================================================================
+
+/** Último dia do mês informado (mes é 1-12, não zero-indexed). */
+function ultimoDiaDoMes(ano: number, mes: number): number {
+  return new Date(Date.UTC(ano, mes, 0)).getUTCDate()
+}
+
+/**
+ * Início da janela de cota corrente do fornecedor (aniversário do plano).
+ *
+ * Exemplos (NOW = 17 de maio UTC):
+ *   aniv dia 14 → janela = 14 de maio (aniversário deste mês já passou)
+ *   aniv dia 22 → janela = 22 de abril (aniversário deste mês ainda não chegou)
+ *   aniv dia 31, mês com 30 dias → clamp pro dia 30
+ */
+export function inicioJanelaCotaAtual(planoAtivadoEm: string): Date {
+  const ativ = new Date(planoAtivadoEm)
+  const diaAniv = ativ.getUTCDate()
+  const hoje = new Date()
+
+  // Tenta este mês primeiro
+  const ultDiaMesAtual = ultimoDiaDoMes(
+    hoje.getUTCFullYear(),
+    hoje.getUTCMonth() + 1
+  )
+  const candidato = new Date(
+    Date.UTC(
+      hoje.getUTCFullYear(),
+      hoje.getUTCMonth(),
+      Math.min(diaAniv, ultDiaMesAtual)
+    )
+  )
+
+  if (candidato <= hoje) {
+    return candidato
+  }
+
+  // Aniversário deste mês ainda não chegou — janela começou no mês anterior
+  const anoAnterior =
+    hoje.getUTCMonth() === 0 ? hoje.getUTCFullYear() - 1 : hoje.getUTCFullYear()
+  const mesAnterior0 = hoje.getUTCMonth() === 0 ? 11 : hoje.getUTCMonth() - 1
+  const ultDiaMesAnterior = ultimoDiaDoMes(anoAnterior, mesAnterior0 + 1)
+
+  return new Date(
+    Date.UTC(anoAnterior, mesAnterior0, Math.min(diaAniv, ultDiaMesAnterior))
+  )
+}
+
+/**
+ * Próxima renovação (próximo aniversário no futuro). Usado pra UI mostrar
+ * "renova em N dias".
+ */
+export function proximaRenovacao(planoAtivadoEm: string): Date {
+  const ativ = new Date(planoAtivadoEm)
+  const diaAniv = ativ.getUTCDate()
+  const hoje = new Date()
+
+  // Tenta este mês: se aniversário ainda não chegou, é a próxima renovação
+  const ultDiaMesAtual = ultimoDiaDoMes(
+    hoje.getUTCFullYear(),
+    hoje.getUTCMonth() + 1
+  )
+  const candidato = new Date(
+    Date.UTC(
+      hoje.getUTCFullYear(),
+      hoje.getUTCMonth(),
+      Math.min(diaAniv, ultDiaMesAtual)
+    )
+  )
+
+  if (candidato > hoje) {
+    return candidato
+  }
+
+  // Aniversário deste mês já passou (ou é hoje) — próximo é no próximo mês
+  const proxAno =
+    hoje.getUTCMonth() === 11 ? hoje.getUTCFullYear() + 1 : hoje.getUTCFullYear()
+  const proxMes0 = hoje.getUTCMonth() === 11 ? 0 : hoje.getUTCMonth() + 1
+  const ultDiaProxMes = ultimoDiaDoMes(proxAno, proxMes0 + 1)
+
+  return new Date(
+    Date.UTC(proxAno, proxMes0, Math.min(diaAniv, ultDiaProxMes))
+  )
+}
+
+/**
+ * Início do mês calendário corrente em UTC. Fallback quando o fornecedor não
+ * tem plano_ativado_em — equivalente ao comportamento pré-Sprint 3, mas em
+ * UTC (era fuso local antes). Hoje todos os 13 fornecedores têm valor; o
+ * fallback existe pra defesa contra dados inesperados.
+ */
+function inicioMesCalendarioUtc(): Date {
+  const hoje = new Date()
+  return new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), 1))
 }

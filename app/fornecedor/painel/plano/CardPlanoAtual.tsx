@@ -52,6 +52,12 @@ export default function CardPlanoAtual({ cota }: { cota: CotaInfo }) {
         />
       </div>
 
+      {cota.proximaRenovacao && (
+        <div className="text-xs text-gray-500 mt-2">
+          Próxima renovação: {textoProximaRenovacao(cota.proximaRenovacao)}
+        </div>
+      )}
+
       {cota.cotaEstourada && cota.creditosExtras === 0 && (
         <div className="mt-4 bg-orange-50 border border-orange-200 rounded-xl p-4">
           <div className="text-orange-900 font-medium text-sm mb-1">
@@ -70,4 +76,13 @@ export default function CardPlanoAtual({ cota }: { cota: CotaInfo }) {
       )}
     </div>
   );
+}
+
+function textoProximaRenovacao(p: { data: string; diasRestantes: number }): string {
+  if (p.diasRestantes === 0) return "hoje";
+  if (p.diasRestantes === 1) return "amanhã";
+  const d = new Date(p.data);
+  const dia = String(d.getUTCDate()).padStart(2, "0");
+  const mes = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${dia}/${mes} (em ${p.diasRestantes} dias)`;
 }
