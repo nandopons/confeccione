@@ -11,7 +11,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-export type Plano = 'free' | 'starter' | 'pro' | 'enterprise'
+export type Plano = 'free' | 'starter' | 'pro'
 
 // ============================================================================
 // CONFIGURAÇÃO DOS PLANOS
@@ -34,8 +34,8 @@ export const PLANOS_CONFIG: Record<
   },
   starter: {
     nome: 'Starter',
-    preco_mes: 79,
-    leads_inclusos: 15,
+    preco_mes: 89,
+    leads_inclusos: 10,
     preco_lead_extra: 12,
   },
   pro: {
@@ -43,12 +43,6 @@ export const PLANOS_CONFIG: Record<
     preco_mes: 199,
     leads_inclusos: 30,
     preco_lead_extra: 10,
-  },
-  enterprise: {
-    nome: 'Enterprise',
-    preco_mes: 499,
-    leads_inclusos: 50,
-    preco_lead_extra: 8,
   },
 }
 
@@ -127,7 +121,7 @@ export async function temCreditoDisponivel(fornecedor: {
   creditos_extras: number
 }> {
   const planoAtual = planoEfetivo(fornecedor)
-  const config = PLANOS_CONFIG[planoAtual]
+  const config = PLANOS_CONFIG[planoAtual] ?? PLANOS_CONFIG['free']
   const usados = await contarOfertasMesAtual(fornecedor.id)
 
   // Crédito vem de duas fontes: cota mensal + extras avulsos
@@ -189,7 +183,7 @@ export async function consumirCreditoExtra(
   fornecedorAtual: { plano: Plano; plano_expira_em: string | null; creditos_extras: number }
 ): Promise<void> {
   const planoAtual = planoEfetivo(fornecedorAtual)
-  const config = PLANOS_CONFIG[planoAtual]
+  const config = PLANOS_CONFIG[planoAtual] ?? PLANOS_CONFIG['free']
   const usados = await contarOfertasMesAtual(fornecedorId)
 
   // Só consome crédito extra SE a cota mensal já foi atingida.

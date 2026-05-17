@@ -266,7 +266,7 @@ function BadgeStatusFornecedor({ status }: { status: string }) {
 }
 
 function BadgePlano({ plano }: { plano: string }) {
-  const premium = plano === 'pro' || plano === 'enterprise'
+  const premium = plano === 'pro'
   const cor = premium
     ? 'bg-amber-100 text-amber-800'
     : 'bg-gray-100 text-gray-700'

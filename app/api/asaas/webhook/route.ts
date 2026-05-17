@@ -139,7 +139,6 @@ type TipoCobranca =
   | 'pacote_leads_25'
   | 'assinatura_starter'
   | 'assinatura_pro'
-  | 'assinatura_enterprise'
 
 const QUANTIDADE_LEADS_POR_PACOTE: Record<
   'pacote_leads_5' | 'pacote_leads_10' | 'pacote_leads_25',
@@ -151,12 +150,11 @@ const QUANTIDADE_LEADS_POR_PACOTE: Record<
 }
 
 const PLANO_POR_ASSINATURA: Record<
-  'assinatura_starter' | 'assinatura_pro' | 'assinatura_enterprise',
+  'assinatura_starter' | 'assinatura_pro',
   Plano
 > = {
   assinatura_starter: 'starter',
   assinatura_pro: 'pro',
-  assinatura_enterprise: 'enterprise',
 }
 
 /**
@@ -218,8 +216,7 @@ async function aplicarEfeitoPagamento(params: {
   // ============================================================
   if (
     tipo === 'assinatura_starter' ||
-    tipo === 'assinatura_pro' ||
-    tipo === 'assinatura_enterprise'
+    tipo === 'assinatura_pro'
   ) {
     const novoPlano = PLANO_POR_ASSINATURA[tipo]
     const config = PLANOS_CONFIG[novoPlano]

@@ -1,6 +1,6 @@
 // app/lib/asaas-subscriptions.ts
 // ============================================================================
-// Assinaturas recorrentes — usadas pra upgrade de plano (Starter/Pro/Enterprise).
+// Assinaturas recorrentes — usadas pra upgrade de plano (Starter/Pro).
 // Asaas gera faturas mensais automaticamente.
 // ============================================================================
 
@@ -40,11 +40,10 @@ const METODO_TO_BILLING_TYPE = {
 
 const TIPO_ASSINATURA_POR_PLANO: Record<
   Exclude<Plano, 'free'>,
-  'assinatura_starter' | 'assinatura_pro' | 'assinatura_enterprise'
+  'assinatura_starter' | 'assinatura_pro'
 > = {
   starter: 'assinatura_starter',
   pro: 'assinatura_pro',
-  enterprise: 'assinatura_enterprise',
 }
 
 /**
@@ -61,7 +60,7 @@ export async function criarAssinatura(input: CriarAssinaturaInput): Promise<{
   primeiraFaturaId: string
   linkPrimeiraFatura: string
 }> {
-  const config = PLANOS_CONFIG[input.plano]
+  const config = PLANOS_CONFIG[input.plano] ?? PLANOS_CONFIG['free']
   const valorCentavos = config.preco_mes * 100
 
   // Primeira fatura vence em 3 dias (dá tempo do fornecedor pagar)

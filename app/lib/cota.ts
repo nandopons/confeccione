@@ -20,7 +20,7 @@ const supabase = createClient(
 export type CotaInfo = {
   /** Plano efetivo (já considera se trial expirou) */
   plano: Plano
-  /** Nome amigável do plano (Free/Starter/Pro/Enterprise) */
+  /** Nome amigável do plano (Free/Starter/Pro) */
   planoNome: string
 
   /** É trial? (não-free + plano_expira_em no futuro) */
@@ -64,7 +64,7 @@ export async function calcularCotaInfo(fornecedorId: string): Promise<CotaInfo |
     plano_expira_em: fornecedor.plano_expira_em,
   })
 
-  const config = PLANOS_CONFIG[plano]
+  const config = PLANOS_CONFIG[plano] ?? PLANOS_CONFIG['free']
   const leadsUsados = await contarOfertasMesAtual(fornecedorId)
   const creditosExtras = fornecedor.creditos_extras ?? 0
 

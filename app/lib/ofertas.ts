@@ -9,6 +9,7 @@ import {
   planoEfetivo,
   podeReceberGatilhoUpgrade,
   registrarGatilhoUpgrade,
+  type Plano,
 } from './planos'
 import { tipoLabel, prazoLabel } from './ofertas-labels'
 
@@ -193,7 +194,7 @@ async function dispararOfertaSemCredito(
     plano: fornecedor.plano,
     plano_expira_em: fornecedor.plano_expira_em,
   })
-  const config = PLANOS_CONFIG[planoAtual]
+  const config = PLANOS_CONFIG[planoAtual] ?? PLANOS_CONFIG['free']
 
   let mensagem = `Olá ${fornecedor.nome}! 🔔\n\nTenho um pedido que bate com seu perfil:\n\nTipo: ${tipo}`
 
@@ -215,15 +216,10 @@ async function dispararOfertaSemCredito(
     mensagem += `\n*${i + 1}* — Pacote de ${pacote.quantidade} leads por R$ ${preco}`
   })
 
-  // Opção de upgrade pro próximo plano (se não for Enterprise)
-  const planos: Array<'free' | 'starter' | 'pro' | 'enterprise'> = [
-    'free',
-    'starter',
-    'pro',
-    'enterprise',
-  ]
+  // Opção de upgrade pro próximo plano (se houver um acima)
+  const planos: Plano[] = ['free', 'starter', 'pro']
   const idxAtual = planos.indexOf(planoAtual)
-  if (idxAtual < planos.length - 1) {
+  if (idxAtual >= 0 && idxAtual < planos.length - 1) {
     const proximoPlano = planos[idxAtual + 1]
     const cfgProximo = PLANOS_CONFIG[proximoPlano]
     mensagem += `\n*4* — Upgrade pro plano *${cfgProximo.nome}* (R$ ${cfgProximo.preco_mes}/mês, ${cfgProximo.leads_inclusos} leads)`

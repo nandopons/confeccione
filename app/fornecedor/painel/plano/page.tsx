@@ -30,7 +30,8 @@ export default async function PaginaPlano() {
   }
 
   // Preço por lead extra varia pelo plano efetivo do fornecedor
-  const precoPorLead = PLANOS_CONFIG[cota.plano].preco_lead_extra;
+  const configPlano = PLANOS_CONFIG[cota.plano] ?? PLANOS_CONFIG["free"];
+  const precoPorLead = configPlano.preco_lead_extra;
 
   return (
     <section className="px-5 md:px-8 pt-8 pb-12 max-w-4xl mx-auto">
@@ -45,11 +46,44 @@ export default async function PaginaPlano() {
 
       <TabelaPlanos planoAtual={cota.plano} />
 
+      {/* Como funciona sua cota */}
+      <div className="mt-8 bg-gray-50 border border-gray-200 rounded-2xl p-6">
+        <h2 className="text-gray-900 text-base font-medium mb-4">
+          💡 Como funciona sua cota
+        </h2>
+        <dl className="flex flex-col gap-4 text-sm">
+          <div>
+            <dt className="text-gray-700 font-medium mb-1">
+              Quando o lead é contado?
+            </dt>
+            <dd className="text-gray-600 leading-relaxed">
+              Quando uma oferta compatível chega pra você e você aceita.
+              Recusar ou ignorar oferta NÃO consome lead.
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-700 font-medium mb-1">Renovação:</dt>
+            <dd className="text-gray-600 leading-relaxed">
+              Sua cota mensal é renovada todo mês. Cota não usada NÃO acumula no
+              próximo mês.
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-700 font-medium mb-1">
+              Atingiu a cota antes do fim do mês?
+            </dt>
+            <dd className="text-gray-600 leading-relaxed">
+              Você pode adquirir pacotes avulsos de leads abaixo.
+            </dd>
+          </div>
+        </dl>
+      </div>
+
       {/* Pacotes de leads extras */}
       <div className="mt-10">
         <h2 className="text-gray-900 text-lg font-medium mb-1">Leads extras</h2>
         <p className="text-gray-500 text-sm">
-          Leads extras comprados não expiram. Use quando estourar a cota mensal.
+          Leads extras comprados ficam disponíveis até serem consumidos. Use quando estourar a cota mensal.
         </p>
         <p className="text-gray-400 text-xs mb-4 mt-1">
           Preços do seu plano <span className="text-gray-700 font-medium">{cota.planoNome}</span>
