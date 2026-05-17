@@ -38,7 +38,7 @@ export default async function PaginaPlano() {
       <div className="mb-6">
         <h1 className="text-gray-900 text-2xl font-medium mb-1">Plano</h1>
         <p className="text-gray-500 text-sm">
-          Gerencie seu plano e veja seus leads usados este mês.
+          Gerencie seu plano e veja seus pedidos usados este mês.
         </p>
       </div>
 
@@ -54,11 +54,11 @@ export default async function PaginaPlano() {
         <dl className="flex flex-col gap-4 text-sm">
           <div>
             <dt className="text-gray-700 font-medium mb-1">
-              Quando o lead é contado?
+              Quando o pedido é contado?
             </dt>
             <dd className="text-gray-600 leading-relaxed">
-              Quando uma oferta compatível chega pra você e você aceita.
-              Recusar ou ignorar oferta NÃO consome lead.
+              Quando um pedido compatível chega pra você e você aceita atender.
+              Recusar ou ignorar NÃO consome.
             </dd>
           </div>
           <div>
@@ -73,7 +73,7 @@ export default async function PaginaPlano() {
               Atingiu a cota antes do fim do mês?
             </dt>
             <dd className="text-gray-600 leading-relaxed">
-              Você pode adquirir pacotes avulsos de leads abaixo.
+              Você pode adquirir pacotes avulsos de pedidos abaixo.
             </dd>
           </div>
         </dl>
@@ -81,13 +81,13 @@ export default async function PaginaPlano() {
 
       {/* Pacotes de leads extras */}
       <div className="mt-10">
-        <h2 className="text-gray-900 text-lg font-medium mb-1">Leads extras</h2>
+        <h2 className="text-gray-900 text-lg font-medium mb-1">Pedidos extras</h2>
         <p className="text-gray-500 text-sm">
-          Leads extras comprados ficam disponíveis até serem consumidos. Use quando estourar a cota mensal.
+          Pedidos extras comprados ficam disponíveis até serem consumidos. Use quando estourar a cota mensal.
         </p>
         <p className="text-gray-400 text-xs mb-4 mt-1">
           Preços do seu plano <span className="text-gray-700 font-medium">{cota.planoNome}</span>
-          {" · "}R$ {precoPorLead.toFixed(2).replace(".", ",")}/lead
+          {" · "}R$ {precoPorLead.toFixed(2).replace(".", ",")}/pedido
         </p>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -99,7 +99,7 @@ export default async function PaginaPlano() {
                 className="bg-white border border-gray-200 rounded-2xl p-5 flex flex-col"
               >
                 <div className="text-gray-900 text-2xl font-medium mb-1">
-                  {pacote.quantidade} leads
+                  {pacote.quantidade} pedidos
                 </div>
                 <div className="text-gray-500 text-sm mb-4">
                   R$ {precoTotal.toFixed(2).replace(".", ",")}

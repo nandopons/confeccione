@@ -251,7 +251,7 @@ async function montarResumoCotaMes(fornecedorId: string): Promise<string> {
   const config = PLANOS_CONFIG[planoAtual]
   const usados = await contarOfertasMesAtual(fornecedorId)
 
-  let resumo = `📊 Você usou ${usados} de ${config.leads_inclusos} leads do plano *${config.nome}* este mês.`
+  let resumo = `📊 Você usou ${usados} de ${config.leads_inclusos} pedidos do plano *${config.nome}* este mês.`
 
   if (f.creditos_extras > 0) {
     resumo += `\n💎 Créditos extras disponíveis: ${f.creditos_extras}`

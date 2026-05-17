@@ -35,7 +35,7 @@ export default function CardPlanoAtual({ cota }: { cota: CotaInfo }) {
       <div className="flex items-baseline justify-between mb-2">
         <div>
           <span className="text-gray-900 text-2xl font-medium">{cota.leadsUsados}</span>
-          <span className="text-gray-500 text-sm"> / {cota.leadsInclusos} leads aceitos este mês</span>
+          <span className="text-gray-500 text-sm"> / {cota.leadsInclusos} pedidos aceitos este mês</span>
         </div>
         {cota.creditosExtras > 0 && (
           <div className="text-xs text-gray-500">
@@ -58,14 +58,14 @@ export default function CardPlanoAtual({ cota }: { cota: CotaInfo }) {
             Cota mensal esgotada
           </div>
           <p className="text-orange-800 text-xs leading-relaxed">
-            Você não recebe mais leads até o próximo mês ou até comprar leads extras.
+            Você não recebe mais pedidos até o próximo mês ou até comprar pedidos extras.
             Veja os pacotes abaixo.
           </p>
         </div>
       )}
       {cota.cotaEstourada && cota.creditosExtras > 0 && (
         <div className="mt-3 text-xs text-gray-500">
-          Cota mensal esgotada · usando seus {cota.creditosExtras} leads extras
+          Cota mensal esgotada · usando seus {cota.creditosExtras} pedidos extras
         </div>
       )}
     </div>

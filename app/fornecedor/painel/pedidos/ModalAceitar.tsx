@@ -67,7 +67,7 @@ export default function ModalAceitar({
           </li>
           <li className="flex items-start gap-2">
             <span className="text-amber-500 mt-0.5">!</span>
-            <span>Esta ação consome 1 lead da sua cota mensal</span>
+            <span>Ao aceitar, 1 pedido é descontado da sua cota mensal.</span>
           </li>
         </ul>
 

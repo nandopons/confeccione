@@ -202,7 +202,7 @@ async function aplicarEfeitoPagamento(params: {
     try {
       await enviarMensagem(
         fornecedor.whatsapp,
-        `🎉 Pagamento confirmado, ${fornecedor.nome}!\n\nVocê acabou de adicionar *${quantidade} leads extras* à sua conta. Eles ficam disponíveis até serem usados — não expiram com o mês.\n\nVou começar a te ofertar pedidos compatíveis novamente!`
+        `🎉 Pagamento confirmado, ${fornecedor.nome}!\n\nVocê acabou de adicionar *${quantidade} pedidos extras* à sua conta. Eles ficam disponíveis até serem usados.\n\nVou começar a te ofertar pedidos compatíveis novamente!`
       )
     } catch (err) {
       console.error('[asaas-webhook] notificação pacote falhou:', err)
@@ -235,7 +235,7 @@ async function aplicarEfeitoPagamento(params: {
     try {
       await enviarMensagem(
         fornecedor.whatsapp,
-        `🎉 Pagamento confirmado, ${fornecedor.nome}!\n\nSeu plano foi atualizado para *${config.nome}* — agora você recebe até *${config.leads_inclusos} leads por mês*.\n\nA cobrança é mensal e renova automaticamente. Você pode cancelar a qualquer momento pelo painel.`
+        `🎉 Pagamento confirmado, ${fornecedor.nome}!\n\nSeu plano foi atualizado para *${config.nome}* — agora você recebe até *${config.leads_inclusos} pedidos por mês*.\n\nA cobrança é mensal e renova automaticamente. Você pode cancelar a qualquer momento pelo painel.`
       )
     } catch (err) {
       console.error('[asaas-webhook] notificação assinatura falhou:', err)

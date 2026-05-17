@@ -118,7 +118,7 @@ export default async function PainelDashboard() {
             <div className="text-xs text-gray-400 mb-1">Cota deste mês</div>
             <div className="flex items-baseline gap-1 mb-3">
               <span className="text-gray-900 text-2xl font-medium">{cota.leadsUsados}</span>
-              <span className="text-gray-500 text-sm">/ {cota.leadsInclusos} leads</span>
+              <span className="text-gray-500 text-sm">/ {cota.leadsInclusos} pedidos</span>
             </div>
             <div className="bg-gray-100 h-2 rounded-full overflow-hidden mb-2">
               <div
@@ -130,7 +130,7 @@ export default async function PainelDashboard() {
             </div>
             {cota.creditosExtras > 0 && (
               <div className="text-xs text-gray-500">
-                +{cota.creditosExtras} {cota.creditosExtras === 1 ? "lead extra" : "leads extras"}
+                +{cota.creditosExtras} {cota.creditosExtras === 1 ? "pedido extra" : "pedidos extras"}
               </div>
             )}
             {cota.cotaEstourada && cota.creditosExtras === 0 && (

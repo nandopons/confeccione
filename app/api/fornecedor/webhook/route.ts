@@ -263,7 +263,7 @@ async function tratarRespostaSemCredito(
   if (['1', '2', '3', '4'].includes(opcao)) {
     await enviarMensagem(
       fornecedor.whatsapp,
-      `Perfeito, ${fornecedor.nome}! 🎯\n\nRecebi sua escolha (opção ${opcao}). Em poucos minutos um membro da nossa equipe vai te chamar pra finalizar o pagamento e liberar este lead pra você.\n\n⏰ Lembrete: este lead fica reservado pra você por 3 horas. Se passar desse prazo sem fechamento, vou ofertar pra outro fornecedor.`
+      `Perfeito, ${fornecedor.nome}! 🎯\n\nRecebi sua escolha (opção ${opcao}). Em poucos minutos um membro da nossa equipe vai te chamar pra finalizar o pagamento e liberar este pedido pra você.\n\n⏰ Lembrete: este pedido fica reservado pra você por 3 horas. Se passar desse prazo sem fechamento, vou ofertar pra outro fornecedor.`
     )
 
     // Notifica admin pra processar manualmente
@@ -272,7 +272,7 @@ async function tratarRespostaSemCredito(
       try {
         await enviarMensagem(
           ADMIN_WHATSAPP,
-          `🔔 Fornecedor *${fornecedor.nome}* (${fornecedor.whatsapp}) escolheu opção *${opcao}* na oferta sem crédito.\n\nPedido: ${oferta.pedido_id}\nOferta: ${oferta.id}\n\nProcesse o pagamento e libere o lead.`
+          `🔔 Fornecedor *${fornecedor.nome}* (${fornecedor.whatsapp}) escolheu opção *${opcao}* na oferta sem crédito.\n\nPedido: ${oferta.pedido_id}\nOferta: ${oferta.id}\n\nProcesse o pagamento e libere o pedido.`
         )
       } catch (err) {
         console.error('aviso admin sem crédito falhou:', err)
@@ -310,7 +310,7 @@ async function montarResumoCotaMes(fornecedorId: string): Promise<string> {
   const config = PLANOS_CONFIG[planoAtual]
   const usados = await contarOfertasMesAtual(fornecedorId)
 
-  let resumo = `📊 Você usou ${usados} de ${config.leads_inclusos} leads do plano *${config.nome}* este mês.`
+  let resumo = `📊 Você usou ${usados} de ${config.leads_inclusos} pedidos do plano *${config.nome}* este mês.`
 
   if (f.creditos_extras > 0) {
     resumo += `\n💎 Créditos extras disponíveis: ${f.creditos_extras}`
