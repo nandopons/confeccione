@@ -3,6 +3,8 @@
 // Se RESEND_API_KEY não estiver configurada, a função loga e sai sem erro —
 // assim dá pra rodar local sem quebrar o fluxo de pedidos/cadastros.
 
+import { formatarWhatsappBR } from './format'
+
 const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 const FROM = 'Confeccione <contato@confeccione.com.br>'
 const REPLY_TO = 'contato@confeccione.com.br'
@@ -445,14 +447,16 @@ export async function emailContatoFornecedor(params: {
   const nomeClienteEsc = escapeHtml(params.nomeCliente)
   const tipoEsc = escapeHtml(params.tipo)
   const nomeFornEsc = escapeHtml(params.nomeFornecedor)
-  const whatsFornEsc = escapeHtml(params.whatsappFornecedor)
+  // Texto visível usa formato BR; href do wa.me usa E.164 cru (whatsLink abaixo)
+  const whatsFornVisivel = formatarWhatsappBR(params.whatsappFornecedor)
+  const whatsFornEsc = escapeHtml(whatsFornVisivel)
   const localFornEsc = escapeHtml(
     params.cidadeFornecedor
       ? `${params.cidadeFornecedor} / ${params.estadoFornecedor}`
       : params.estadoFornecedor
   )
 
-  // Link wa.me — remove tudo que não é dígito
+  // Link wa.me — remove tudo que não é dígito (precisa E.164)
   const whatsLink = params.whatsappFornecedor.replace(/\D/g, '')
 
   const subject = `Encontramos um fornecedor pro seu pedido!`
@@ -486,7 +490,7 @@ export async function emailContatoFornecedor(params: {
 Encontramos um fornecedor pro seu pedido de ${params.tipo}.
 
 Fornecedor: ${params.nomeFornecedor}
-WhatsApp: ${params.whatsappFornecedor}
+WhatsApp: ${whatsFornVisivel}
 Localização: ${params.cidadeFornecedor ? `${params.cidadeFornecedor} / ` : ''}${params.estadoFornecedor}
 
 Ele vai te chamar nas próximas horas. Se preferir, você também pode entrar em contato direto:
