@@ -167,6 +167,10 @@ export function ModalDetalhesOrfao({
                 )}
               </Secao>
 
+              <Secao titulo="Ofertar manualmente">
+                <OfertarManual pedidoId={orfao.pedido_id} />
+              </Secao>
+
               <div className="mt-6 flex justify-end">
                 <button
                   ref={closeButtonRef}
@@ -358,6 +362,171 @@ function BotaoAgendarReenvio({
           ? '⚠ Erro · clique pra tentar de novo'
           : '↻ Agendar reenvio'}
     </button>
+  )
+}
+
+// =============================================================================
+// OFERTAR MANUAL — dropdown de fornecedores + botão
+// =============================================================================
+
+type FornecedorCompativel = {
+  id: string
+  nome: string
+  estado: string
+  tipos_produto: string[]
+  pedido_minimo: number
+  raio_atendimento: string
+  compativel: boolean
+}
+
+function OfertarManual({ pedidoId }: { pedidoId: string }) {
+  const router = useRouter()
+  const [fornecedores, setFornecedores] = useState<FornecedorCompativel[]>([])
+  const [loading, setLoading] = useState(true)
+  const [erroCarregar, setErroCarregar] = useState<string | null>(null)
+  const [incluirTodos, setIncluirTodos] = useState(false)
+  const [selecionado, setSelecionado] = useState<string>('')
+
+  type Estado = 'idle' | 'enviando' | 'enviado' | 'erro'
+  const [estado, setEstado] = useState<Estado>('idle')
+  const [erroEnvio, setErroEnvio] = useState<string | null>(null)
+
+  // Carrega lista quando incluirTodos muda
+  useEffect(() => {
+    let cancelado = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- pattern padrão pra fetch com loading state
+    setLoading(true)
+    setErroCarregar(null)
+    const url = `/api/admin/fornecedores-compativeis?pedidoId=${pedidoId}&incluirTodos=${incluirTodos}`
+    fetch(url)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelado) return
+        if (data.ok) {
+          setFornecedores(data.fornecedores as FornecedorCompativel[])
+          setSelecionado('')
+        } else {
+          setErroCarregar(data.erro ?? 'erro ao carregar')
+        }
+      })
+      .catch(() => {
+        if (!cancelado) setErroCarregar('erro de rede')
+      })
+      .finally(() => {
+        if (!cancelado) setLoading(false)
+      })
+    return () => {
+      cancelado = true
+    }
+  }, [pedidoId, incluirTodos])
+
+  async function handleEnviar() {
+    if (!selecionado || estado === 'enviando' || estado === 'enviado') return
+    setEstado('enviando')
+    setErroEnvio(null)
+    try {
+      const res = await fetch('/api/admin/ofertar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pedidoId,
+          fornecedorId: selecionado,
+          forcar: incluirTodos,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setEstado('enviado')
+        router.refresh()
+        return
+      }
+      setEstado('erro')
+      const motivos: string[] = Array.isArray(data.motivos) ? data.motivos : []
+      setErroEnvio(
+        motivos.length > 0
+          ? `${data.erro}: ${motivos.join('; ')}`
+          : (data.erro ?? 'erro')
+      )
+    } catch {
+      setEstado('erro')
+      setErroEnvio('erro de rede')
+    }
+  }
+
+  if (estado === 'enviado') {
+    return (
+      <div className="text-sm px-3 py-2 bg-green-50 text-green-800 rounded">
+        ✓ Oferta enviada. WhatsApp e e-mail disparados.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <label className="block">
+        <span className="sr-only">Fornecedor</span>
+        <select
+          value={selecionado}
+          onChange={(e) => setSelecionado(e.target.value)}
+          disabled={loading || estado === 'enviando'}
+          className="block w-full px-3 py-2 text-sm border border-gray-300 rounded-md disabled:opacity-60"
+        >
+          {loading ? (
+            <option value="">Carregando…</option>
+          ) : fornecedores.length === 0 ? (
+            <option value="">
+              {incluirTodos
+                ? 'Nenhum fornecedor disponível'
+                : 'Nenhum fornecedor compatível'}
+            </option>
+          ) : (
+            <>
+              <option value="">Selecione um fornecedor…</option>
+              {fornecedores.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.nome} · {f.estado} ·{' '}
+                  {f.tipos_produto.slice(0, 2).join('/')}
+                  {f.tipos_produto.length > 2 ? '…' : ''}
+                  {!f.compativel ? ' ⚠' : ''}
+                </option>
+              ))}
+            </>
+          )}
+        </select>
+      </label>
+
+      <label className="inline-flex items-center gap-2 text-xs text-gray-600">
+        <input
+          type="checkbox"
+          checked={incluirTodos}
+          onChange={(e) => setIncluirTodos(e.target.checked)}
+          disabled={estado === 'enviando'}
+          className="w-3.5 h-3.5"
+        />
+        <span>
+          Mostrar todos os fornecedores (ignora critérios — admin assume risco)
+        </span>
+      </label>
+
+      {erroCarregar && (
+        <div className="text-xs text-red-700">⚠ {erroCarregar}</div>
+      )}
+
+      {erroEnvio && estado === 'erro' && (
+        <div className="text-xs text-red-700">⚠ {erroEnvio}</div>
+      )}
+
+      <button
+        type="button"
+        onClick={handleEnviar}
+        disabled={
+          !selecionado || estado === 'enviando' || loading
+        }
+        className="text-sm px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+      >
+        {estado === 'enviando' ? 'Enviando…' : 'Enviar oferta agora'}
+      </button>
+    </div>
   )
 }
 
