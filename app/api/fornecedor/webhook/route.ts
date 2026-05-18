@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { variantesWhatsApp, linkWhatsApp } from '@/app/lib/phone'
+import { formatarWhatsappBR } from '@/app/lib/format'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { emailContatoFornecedor } from '@/app/lib/email'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
@@ -143,7 +144,7 @@ async function tratarRespostaFornecedor(
 
     await enviarMensagem(
       fornecedor.whatsapp,
-      `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${pedido.whatsapp}\nE-mail: ${pedido.email}\n\n👉 Falar com o cliente: ${linkWhatsApp(pedido.whatsapp)}\n\nEntre em contato direto pra combinar detalhes. Boa venda!\n\n${resumoCota}`
+      `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${formatarWhatsappBR(pedido.whatsapp)}\nE-mail: ${pedido.email}\n\n👉 Falar com o cliente: ${linkWhatsApp(pedido.whatsapp)}\n\nEntre em contato direto pra combinar detalhes. Boa venda!\n\n${resumoCota}`
     )
 
     // ============================================================
@@ -157,7 +158,7 @@ async function tratarRespostaFornecedor(
       `Boa notícia, ${pedido.nome}! 🎉\n\n` +
       `Encontramos um fornecedor pro seu pedido de ${tipo}:\n\n` +
       `*${fornecedor.nome}*\n` +
-      `📱 ${fornecedor.whatsapp}\n` +
+      `📱 ${formatarWhatsappBR(fornecedor.whatsapp)}\n` +
       `📍 ${localFornec}\n\n` +
       `👉 Falar com o fornecedor: ${linkWhatsApp(fornecedor.whatsapp)}\n\n` +
       `Ele vai te chamar nas próximas horas. Se preferir, você pode entrar em contato direto.\n\n` +

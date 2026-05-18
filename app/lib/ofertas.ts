@@ -110,7 +110,7 @@ async function dispararOfertaNormal(
   const tipo = tipoLabel[pedido.tipo] ?? pedido.tipo
   const prazo = prazoLabel[pedido.prazo] ?? pedido.prazo
 
-  let mensagem = `Olá ${fornecedor.nome}! Temos um pedido que bate com seu perfil:\n\nTipo: ${tipo}`
+  let mensagem = `Novo pedido:\n\nTipo: ${tipo}`
 
   if (pedido.quantidade !== null && pedido.quantidade !== undefined) {
     mensagem += `\nQuantidade: ${pedido.quantidade} peças`
@@ -123,7 +123,7 @@ async function dispararOfertaNormal(
   }
 
   mensagem +=
-    '\n\nQuer atender esse cliente? Responde SIM ou NAO nas próximas 4h. Se não responder vamos oferecer pra outro fornecedor.'
+    '\n\nQuer atender este cliente? Responde Sim ou Não.'
 
   await enviarMensagem(fornecedor.whatsapp, mensagem)
 
@@ -196,7 +196,7 @@ async function dispararOfertaSemCredito(
   })
   const config = PLANOS_CONFIG[planoAtual] ?? PLANOS_CONFIG['free']
 
-  let mensagem = `Olá ${fornecedor.nome}! 🔔\n\nTenho um pedido que bate com seu perfil:\n\nTipo: ${tipo}`
+  let mensagem = `Novo pedido:\n\nTipo: ${tipo}`
 
   if (pedido.quantidade !== null && pedido.quantidade !== undefined) {
     mensagem += `\nQuantidade: ${pedido.quantidade} peças`

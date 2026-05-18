@@ -23,6 +23,7 @@ import { emailContatoFornecedor } from '@/app/lib/email'
 import { tipoLabel } from '@/app/lib/ofertas'
 import { consumirCreditoAvulso, contarOfertasMesAtual, planoEfetivo, PLANOS_CONFIG } from '@/app/lib/planos'
 import { linkWhatsApp } from '@/app/lib/phone'
+import { formatarWhatsappBR } from '@/app/lib/format'
 import { processarProximaAgendadaSeHouver } from '@/app/lib/fila'
 
 const supabase = createClient(
@@ -203,7 +204,7 @@ export async function POST(
     const resumoCota = await montarResumoCotaMes(fornecedor.id)
     await enviarMensagem(
       fornecedorCompleto.whatsapp,
-      `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${pedido.whatsapp}\nE-mail: ${pedido.email}\n\n👉 Falar com o cliente: ${linkWhatsApp(pedido.whatsapp)}\n\nEntre em contato direto pra combinar detalhes. Boa venda!\n\n${resumoCota}`
+      `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${formatarWhatsappBR(pedido.whatsapp)}\nE-mail: ${pedido.email}\n\n👉 Falar com o cliente: ${linkWhatsApp(pedido.whatsapp)}\n\nEntre em contato direto pra combinar detalhes. Boa venda!\n\n${resumoCota}`
     )
   } catch (err) {
     console.error('aceitar: aviso fornecedor whatsapp falhou:', err)
@@ -218,7 +219,7 @@ export async function POST(
     `Boa notícia, ${pedido.nome}! 🎉\n\n` +
     `Encontramos um fornecedor pro seu pedido de ${tipo}:\n\n` +
     `*${fornecedorCompleto.nome}*\n` +
-    `📱 ${fornecedorCompleto.whatsapp}\n` +
+    `📱 ${formatarWhatsappBR(fornecedorCompleto.whatsapp)}\n` +
     `📍 ${localFornec}\n\n` +
     `👉 Falar com o fornecedor: ${linkWhatsApp(fornecedorCompleto.whatsapp)}\n\n` +
     `Ele vai te chamar nas próximas horas. Se preferir, você pode entrar em contato direto.\n\n` +
