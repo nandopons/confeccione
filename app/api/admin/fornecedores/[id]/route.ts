@@ -55,7 +55,7 @@ export async function GET(
 
   const { data: stats, error: errS } = await supabaseAdmin
     .from('ofertas')
-    .select('status, enviada_em, pedido_id')
+    .select('status, enviada_em, respondida_em, pedido_id')
     .eq('fornecedor_id', id)
 
   if (errS) return NextResponse.json({ erro: errS.message }, { status: 500 })
@@ -66,6 +66,9 @@ export async function GET(
   let expiradas = 0
   const enviadas = ofertas.length
   let ultimaOferta: string | null = null
+  let ultimaAceitacao: string | null = null
+  let somaRespostaMs = 0
+  let countResposta = 0
   const pedidosOfertados: string[] = []
 
   for (const o of ofertas) {
@@ -76,10 +79,31 @@ export async function GET(
     if (!ultimaOferta || (o.enviada_em && o.enviada_em > ultimaOferta)) {
       ultimaOferta = o.enviada_em
     }
+    // Tempo médio de resposta: só ofertas aceitas+recusadas, ignora expiradas/pendentes
+    if (
+      (o.status === 'aceita' || o.status === 'recusada') &&
+      o.enviada_em &&
+      o.respondida_em
+    ) {
+      const delta =
+        new Date(o.respondida_em).getTime() - new Date(o.enviada_em).getTime()
+      if (delta >= 0) {
+        somaRespostaMs += delta
+        countResposta++
+      }
+    }
+    // Última aceitação: max(respondida_em) onde status='aceita'
+    if (o.status === 'aceita' && o.respondida_em) {
+      if (!ultimaAceitacao || o.respondida_em > ultimaAceitacao) {
+        ultimaAceitacao = o.respondida_em
+      }
+    }
   }
 
   const denom = enviadas - expiradas
   const taxaResposta = denom > 0 ? (aceitas + recusadas) / denom : null
+  const tempoMedioRespostaMs =
+    countResposta > 0 ? Math.round(somaRespostaMs / countResposta) : null
 
   let perdeuParaOutro = 0
   if (pedidosOfertados.length > 0) {
@@ -92,16 +116,6 @@ export async function GET(
     perdeuParaOutro = pedidos?.length ?? 0
   }
 
-  const { data: historico } = await supabaseAdmin
-    .from('ofertas')
-    .select(
-      'id, status, enviada_em, respondida_em, tentativa_numero, ' +
-        'pedido:pedidos(id, tipo, quantidade, estado, prazo, status)',
-    )
-    .eq('fornecedor_id', id)
-    .order('enviada_em', { ascending: false })
-    .limit(20)
-
   return NextResponse.json({
     fornecedor,
     metricas: {
@@ -112,8 +126,9 @@ export async function GET(
       taxa_resposta: taxaResposta,
       ultima_oferta_em: ultimaOferta,
       perdeu_para_outro: perdeuParaOutro,
+      tempo_medio_resposta_ms: tempoMedioRespostaMs,
+      ultima_aceitacao_em: ultimaAceitacao,
     },
-    historico: historico ?? [],
   })
 }
 
