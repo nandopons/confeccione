@@ -15,6 +15,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { ColunaContato } from '../ColunaContato'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
 import { BadgePlano, BadgeStatusFornecedor } from './_helpers'
+import { calcularDiasInatividade, formatarUltimaOferta } from './_format'
+import FornecedorOverlay from './FornecedorOverlay'
 
 // Mesmas 9 verticais do banco, em ordem alfabética
 const VERTICAIS = [
@@ -78,6 +80,7 @@ export default function FornecedoresTabela() {
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
   const [acaoLoading, setAcaoLoading] = useState<string | null>(null)
+  const [fornecedorAberto, setFornecedorAberto] = useState<string | null>(null)
 
   // Debounce da busca (300ms)
   useEffect(() => {
@@ -268,6 +271,13 @@ export default function FornecedoresTabela() {
         </div>
       )}
 
+      {fornecedorAberto && (
+        <FornecedorOverlay
+          fornecedorId={fornecedorAberto}
+          onClose={() => setFornecedorAberto(null)}
+        />
+      )}
+
       {dados.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-gray-200">
           <table className="w-full text-sm">
@@ -322,6 +332,7 @@ export default function FornecedoresTabela() {
                   carregandoAcao={acaoLoading === f.id}
                   onPausar={() => pausar(f)}
                   onReativar={() => reativar(f)}
+                  onAbrir={() => setFornecedorAberto(f.id)}
                 />
               ))}
             </tbody>
@@ -372,11 +383,13 @@ function Linha({
   carregandoAcao,
   onPausar,
   onReativar,
+  onAbrir,
 }: {
   fornecedor: Fornecedor
   carregandoAcao: boolean
   onPausar: () => void
   onReativar: () => void
+  onAbrir: () => void
 }) {
   const pausado = fornecedor.status === 'pausado'
   const diasInatividade = calcularDiasInatividade(fornecedor.ultimo_lead_em)
@@ -387,8 +400,12 @@ function Linha({
     : (fornecedor.estado ?? '—')
 
   return (
-    <tr className={`border-t border-gray-100 hover:bg-gray-50 ${opacidade}`}>
-      <td className="px-3 py-2.5">
+    <tr
+      onClick={onAbrir}
+      className={`cursor-pointer border-t border-gray-100 hover:bg-gray-50 ${opacidade}`}
+    >
+      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+        {/* stopPropagation: botão WhatsApp 💬 não deve abrir o overlay */}
         <ColunaContato
           nome={fornecedor.nome ?? '(sem nome)'}
           whatsapp={fornecedor.whatsapp}
@@ -457,7 +474,8 @@ function Linha({
           <BadgeStatusFornecedor status={fornecedor.status} />
         </span>
       </td>
-      <td className="px-3 py-2.5">
+      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+        {/* stopPropagation: botão de ação não deve abrir o overlay */}
         {pausado ? (
           <button
             type="button"
@@ -482,22 +500,4 @@ function Linha({
   )
 }
 
-// ============================================================================
-// Helpers locais
-// ============================================================================
-
-function calcularDiasInatividade(ultimoLead: string | null): number | null {
-  if (!ultimoLead) return null
-  const ms = Date.now() - new Date(ultimoLead).getTime()
-  return Math.floor(ms / (1000 * 60 * 60 * 24))
-}
-
-function formatarUltimaOferta(d: string | null): string {
-  if (!d) return 'nunca'
-  const dias = calcularDiasInatividade(d) ?? 0
-  if (dias === 0) return 'hoje'
-  if (dias === 1) return 'ontem'
-  if (dias < 30) return `${dias}d atrás`
-  if (dias < 365) return `${Math.floor(dias / 30)}m atrás`
-  return `${Math.floor(dias / 365)}a atrás`
-}
+// (helpers de formatação foram movidos pra ./_format na Fase 3b)
