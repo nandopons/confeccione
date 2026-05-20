@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { estaEmHorarioComercial, proximoHorarioValido } from '@/app/lib/horario'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
 import { emailConfirmacaoCliente } from '@/app/lib/email'
 import { normalizarWhatsApp, validarWhatsApp } from '@/app/lib/phone'
@@ -76,17 +75,13 @@ export async function POST(req: Request) {
     )
   }
 
-  if (estaEmHorarioComercial()) {
-    try {
-      await criarEDispararOferta(data.id)
-    } catch (err) {
-      console.error('criarEDispararOferta error:', err)
-    }
-  } else {
-    await supabase
-      .from('pedidos')
-      .update({ buscar_apos: proximoHorarioValido().toISOString() })
-      .eq('id', data.id)
+  // Dispara a 1ª oferta. O gate de horário comercial vive dentro de
+  // criarEDispararOferta: fora de hora, ela agenda buscar_apos e a TAREFA 2
+  // do scheduler acorda o pedido no próximo ciclo válido.
+  try {
+    await criarEDispararOferta(data.id)
+  } catch (err) {
+    console.error('criarEDispararOferta error:', err)
   }
 
   if (email) {
