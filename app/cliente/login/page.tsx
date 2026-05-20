@@ -6,6 +6,7 @@
 // Se já logado, redireciona pro painel imediatamente.
 // ============================================================================
 
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getContaAtual } from '@/app/lib/cliente-auth'
 import LoginForm from './LoginForm'
@@ -28,6 +29,14 @@ export default async function ClienteLoginPage({
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
+        <div className="mb-6">
+          <Link
+            href="/"
+            className="text-sm text-gray-600 hover:text-gray-900 transition-colors inline-flex items-center gap-1"
+          >
+            ← Voltar pra home
+          </Link>
+        </div>
         <div className="text-center mb-6">
           <h1 className="text-2xl font-semibold text-gray-900">Confeccione</h1>
           <p className="text-sm text-gray-500 mt-1">
