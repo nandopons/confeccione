@@ -14,6 +14,7 @@ import { corStatus, labelStatus } from '@/app/lib/cliente-status'
 import { formatarWhatsappBR } from '@/app/lib/format'
 import { linkWhatsApp } from '@/app/lib/phone'
 import SolicitarOutroFornecedorButton from './SolicitarOutroFornecedorButton'
+import CompartilharArtesButton from './CompartilharArtesButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,6 +48,14 @@ type OfertaTimeline = {
   status: string
   enviada_em: string
   respondida_em: string | null
+}
+
+type Compartilhamento = {
+  id: string
+  arquivos_count: number
+  acessos_count: number
+  expira_em: string
+  criado_em: string
 }
 
 export default async function PedidoDetalhePage({
@@ -93,6 +102,16 @@ export default async function PedidoDetalhePage({
     .order('criado_em', { ascending: true })
 
   const solicitacoes = (solicitacoesRaw ?? []) as Solicitacao[]
+
+  // Compartilhamentos de artes registrados
+  const { data: compartilhamentosRaw } = await supabaseAdmin
+    .from('compartilhamentos_artes')
+    .select('id, arquivos_count, acessos_count, expira_em, criado_em')
+    .eq('pedido_id', id)
+    .order('criado_em', { ascending: true })
+
+  const compartilhamentos = (compartilhamentosRaw ?? []) as Compartilhamento[]
+
   const podeMostrarTrocar =
     !STATUS_TERMINAL.includes(pedido.status) &&
     (ofertas.length > 0 || pedido.fornecedor_aceito_id !== null)
@@ -188,6 +207,10 @@ export default async function PedidoDetalhePage({
           >
             Conversar no WhatsApp
           </a>
+          <CompartilharArtesButton
+            pedidoId={pedido.id}
+            fornecedorNome={pedido.fornecedor_aceito.nome}
+          />
         </div>
       )}
 
@@ -244,6 +267,20 @@ export default async function PedidoDetalhePage({
                 s.motivo
                   ? `${formatarDataHora(s.criado_em)} · Motivo: ${s.motivo}`
                   : formatarDataHora(s.criado_em)
+              }
+            />
+          ))}
+
+          {/* Compartilhamentos de artes */}
+          {compartilhamentos.map((c) => (
+            <PassoTimeline
+              key={c.id}
+              icone="📎"
+              texto={`Você compartilhou ${c.arquivos_count} ${c.arquivos_count === 1 ? 'arquivo' : 'arquivos'} com o fornecedor`}
+              detalhe={
+                c.acessos_count > 0
+                  ? `${formatarDataHora(c.criado_em)} · Aberto ${c.acessos_count}x pelo fornecedor`
+                  : `${formatarDataHora(c.criado_em)} · Ainda não aberto`
               }
             />
           ))}

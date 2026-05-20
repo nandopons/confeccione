@@ -35,6 +35,12 @@ export default async function ClientePainelLayout({
           </div>
           <div className="flex items-center gap-4">
             <Link
+              href="/cliente/repositorio"
+              className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              Arquivos
+            </Link>
+            <Link
               href="/cliente/perfil"
               className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
             >
