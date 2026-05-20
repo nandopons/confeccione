@@ -6,8 +6,8 @@
 // ============================================================================
 
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
-import { getContaAtual } from '@/app/lib/cliente-auth'
+import { notFound, redirect } from 'next/navigation'
+import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 import { corStatus, labelStatus } from '@/app/lib/cliente-status'
@@ -65,6 +65,7 @@ export default async function PedidoDetalhePage({
 }) {
   const conta = await getContaAtual()
   if (!conta) return null
+  if (!perfilCompleto(conta)) redirect('/cliente/perfil?completar=1')
 
   const { id } = await params
 

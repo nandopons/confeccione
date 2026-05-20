@@ -139,6 +139,15 @@ export async function eClienteLogado(): Promise<boolean> {
 }
 
 /**
+ * Perfil considerado completo pra usar o painel. Por ora só exige WhatsApp
+ * (canal pelo qual fornecedores e follow-ups chegam ao cliente). Nome segue
+ * opcional. Usado pelo guard das pages do painel.
+ */
+export function perfilCompleto(conta: { whatsapp: string | null }): boolean {
+  return Boolean(conta.whatsapp && conta.whatsapp.trim().length > 0)
+}
+
+/**
  * Cria nova sessão pra conta. Retorna o token CRU (pra cookie); banco guarda
  * apenas o hash.
  */

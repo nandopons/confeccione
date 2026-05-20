@@ -5,7 +5,8 @@
 // ============================================================================
 
 import Link from 'next/link'
-import { getContaAtual } from '@/app/lib/cliente-auth'
+import { redirect } from 'next/navigation'
+import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 import { corStatus, labelStatus } from '@/app/lib/cliente-status'
@@ -23,13 +24,22 @@ type PedidoLinha = {
   fornecedor_aceito_id: string | null
 }
 
-export default async function PainelClientePage() {
+export default async function PainelClientePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ criado?: string }>
+}) {
   // Layout já redirecionou se não logado — getContaAtual sempre vai retornar conta
   const conta = await getContaAtual()
   if (!conta) {
     // defensivo (não deveria acontecer)
     return null
   }
+  // Force complete perfil: sem WhatsApp não dá pra usar o painel
+  if (!perfilCompleto(conta)) {
+    redirect('/cliente/perfil?completar=1')
+  }
+  const { criado } = await searchParams
 
   const { data: pedidosRaw } = await supabaseAdmin
     .from('pedidos')
@@ -53,7 +63,23 @@ export default async function PainelClientePage() {
         </div>
       </div>
 
-      <h2 className="text-lg font-semibold text-gray-900 mb-3">Seus pedidos</h2>
+      {criado && (
+        <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+          Pedido recebido! Vamos buscar fornecedores compatíveis e te avisar por aqui.
+        </div>
+      )}
+
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-lg font-semibold text-gray-900">Seus pedidos</h2>
+        {pedidos.length > 0 && (
+          <Link
+            href="/cliente/pedido/novo"
+            className="inline-flex items-center gap-1 px-4 py-2 rounded-md bg-[#1D9E75] text-white text-sm font-medium hover:bg-[#178761]"
+          >
+            + Novo pedido
+          </Link>
+        )}
+      </div>
 
       {pedidos.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-2xl p-12 text-center">
@@ -61,7 +87,7 @@ export default async function PainelClientePage() {
             Você ainda não tem pedidos.
           </p>
           <Link
-            href="/"
+            href="/cliente/pedido/novo"
             className="inline-block px-5 py-2.5 rounded-md bg-[#1D9E75] text-white text-sm font-medium hover:bg-[#178761]"
           >
             Fazer pedido

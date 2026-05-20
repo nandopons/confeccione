@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
 import { emailConfirmacaoCliente } from '@/app/lib/email'
 import { normalizarWhatsApp, validarWhatsApp } from '@/app/lib/phone'
+import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
 import { loginComEmailUrl } from '@/app/lib/url'
@@ -13,7 +14,30 @@ const supabase = createClient(
 )
 
 export async function POST(req: Request) {
-  const { tipo, quantidade, prazo, estado, nome, whatsapp, email, descricao } = await req.json()
+  const body = await req.json()
+
+  // Cliente autenticado (sessão): dados pessoais vêm da conta, não do body.
+  // Anônimo (home): conta = null → comportamento original intacto.
+  const conta = await getContaAtual()
+
+  const tipo = body.tipo
+  const quantidade = body.quantidade
+  const prazo = body.prazo
+  const estado = body.estado
+  const descricao = body.descricao
+  const nome = conta ? (conta.nome ?? conta.email.split('@')[0]) : body.nome
+  const email = conta ? conta.email : body.email
+  const whatsapp = conta ? conta.whatsapp : body.whatsapp
+  const contaId: string | null = conta?.id ?? null
+
+  // Cliente autenticado precisa de perfil completo (WhatsApp) pra criar pedido.
+  // A página /cliente/pedido/novo já bloqueia antes, isto é defesa em profundidade.
+  if (conta && !perfilCompleto(conta)) {
+    return NextResponse.json(
+      { error: 'Complete seu perfil (WhatsApp) antes de criar um pedido.' },
+      { status: 400 },
+    )
+  }
 
   // ============================================================
   // Validação de campos obrigatórios
@@ -64,6 +88,7 @@ export async function POST(req: Request) {
       email,
       descricao: descricao || null,
       status: 'buscando_fornecedor',
+      conta_id: contaId,
     })
     .select('id')
     .single()

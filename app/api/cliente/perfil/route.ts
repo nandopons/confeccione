@@ -49,7 +49,11 @@ export async function POST(req: Request) {
     }
     const digitos = body.whatsapp.replace(/\D/g, '')
     if (digitos.length === 0) {
-      atualizacao.whatsapp = null
+      // WhatsApp é obrigatório: nunca permite salvar vazio (nem limpar depois).
+      return NextResponse.json(
+        { erro: 'WhatsApp é obrigatório' },
+        { status: 400 },
+      )
     } else if (!/^[1-9][0-9]{10,11}$/.test(digitos)) {
       return NextResponse.json(
         { erro: 'WhatsApp inválido (use DDD + número, 10 ou 11 dígitos)' },

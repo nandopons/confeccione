@@ -5,7 +5,8 @@
 // ============================================================================
 
 import Link from 'next/link'
-import { getContaAtual } from '@/app/lib/cliente-auth'
+import { redirect } from 'next/navigation'
+import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
 import { listarArquivos, QUOTA_BYTES } from '@/app/lib/arquivos-cliente'
 import RepositorioClient from './RepositorioClient'
 
@@ -14,6 +15,7 @@ export const dynamic = 'force-dynamic'
 export default async function RepositorioPage() {
   const conta = await getContaAtual()
   if (!conta) return null // layout redireciona
+  if (!perfilCompleto(conta)) redirect('/cliente/perfil?completar=1')
 
   const { arquivos, usadoBytes } = await listarArquivos(conta.id)
 
