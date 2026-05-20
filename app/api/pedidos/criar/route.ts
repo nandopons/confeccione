@@ -1,9 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { estaEmHorarioComercial, proximoHorarioValido } from '@/app/lib/horario'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
 import { emailConfirmacaoCliente } from '@/app/lib/email'
 import { normalizarWhatsApp, validarWhatsApp } from '@/app/lib/phone'
+import { enviarMensagem } from '@/app/lib/zapi'
+import { tipoLabel } from '@/app/lib/ofertas-labels'
+import { loginComEmailUrl } from '@/app/lib/url'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -73,17 +75,13 @@ export async function POST(req: Request) {
     )
   }
 
-  if (estaEmHorarioComercial()) {
-    try {
-      await criarEDispararOferta(data.id)
-    } catch (err) {
-      console.error('criarEDispararOferta error:', err)
-    }
-  } else {
-    await supabase
-      .from('pedidos')
-      .update({ buscar_apos: proximoHorarioValido().toISOString() })
-      .eq('id', data.id)
+  // Dispara a 1ª oferta. O gate de horário comercial vive dentro de
+  // criarEDispararOferta: fora de hora, ela agenda buscar_apos e a TAREFA 2
+  // do scheduler acorda o pedido no próximo ciclo válido.
+  try {
+    await criarEDispararOferta(data.id)
+  } catch (err) {
+    console.error('criarEDispararOferta error:', err)
   }
 
   if (email) {
@@ -101,5 +99,32 @@ export async function POST(req: Request) {
       console.error('email confirmação falhou:', err)
     }
   }
+
+  // WhatsApp de confirmação ao cliente, jogando-o pro painel.
+  // Só dispara com whatsapp válido; await, mas failure-soft.
+  if (validarWhatsApp(whatsapp)) {
+    const tipoDesc = tipoLabel[tipo] ?? tipo
+    const linhaPedido = [
+      `*${tipoDesc}*`,
+      typeof quantidade === 'number' ? `${quantidade} peças` : null,
+      estado || null,
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    const mensagemCliente =
+      `✅ *Confeccione — Pedido recebido*\n\n` +
+      `Olá *${nome}*!\n\n` +
+      `Recebemos seu pedido:\n${linhaPedido}\n\n` +
+      `Em breve enviamos para fornecedores compatíveis. Avisaremos quando alguém aceitar.\n\n` +
+      `Enquanto isso, você pode acompanhar tudo pelo seu painel — inclusive subir referências, modelagens ou logomarcas:\n\n` +
+      `🔗 ${loginComEmailUrl(email)}\n\n` +
+      `— Confeccione`
+    try {
+      await enviarMensagem(normalizarWhatsApp(whatsapp), mensagemCliente)
+    } catch (err) {
+      console.error('whatsapp confirmação cliente falhou:', err)
+    }
+  }
+
   return NextResponse.json({ ok: true, protocolo: data.id, status: 'buscando_fornecedor' })
 }

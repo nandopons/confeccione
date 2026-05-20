@@ -27,7 +27,7 @@ function brasilParts() {
 
 export function estaEmHorarioComercial(): boolean {
   const { diaSemana, hora } = brasilParts()
-  return diaSemana >= 1 && diaSemana <= 5 && hora >= 8 && hora < 22
+  return diaSemana >= 1 && diaSemana <= 5 && hora >= 8 && hora < 20
 }
 
 /**
@@ -53,8 +53,8 @@ export function proximoHorarioValido(): Date {
     add = 1 // domingo -> segunda
   } else if (diaSemana === 6) {
     add = 2 // sábado -> segunda
-  } else if (hora >= 22) {
-    add = diaSemana === 5 ? 3 : 1 // sexta pós-22h -> segunda; outros -> dia seguinte
+  } else if (hora >= 20) {
+    add = diaSemana === 5 ? 3 : 1 // sexta pós-20h -> segunda; outros -> dia seguinte
   } else {
     add = 0 // dia útil antes das 8h -> mesmo dia
   }

@@ -4,6 +4,7 @@
 // assim dá pra rodar local sem quebrar o fluxo de pedidos/cadastros.
 
 import { formatarWhatsappBR } from './format'
+import { loginComEmailUrl, painelClientePedidoUrl } from './url'
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 const FROM = 'Confeccione <contato@confeccione.com.br>'
@@ -278,6 +279,10 @@ export async function emailConfirmacaoCliente(params: {
         4. Se recusar, já partimos pro próximo — sem você precisar fazer nada
       </div>
     </div>
+    <div style="text-align:center;margin:24px 0;">
+      <a href="${loginComEmailUrl(params.email)}" style="display:inline-block;background:#1D9E75;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:600;font-size:15px;">Acessar meu painel</a>
+    </div>
+    <p style="margin:0 0 0;color:#666;font-size:14px;">No painel você acompanha o status em tempo real e pode subir referências, modelagens ou logomarcas pro fornecedor.</p>
     <p style="margin:16px 0 0;color:#666;font-size:14px;">Guarde o número do protocolo caso precise falar com a gente.</p>
     `,
     preheader
@@ -298,6 +303,9 @@ Próximos passos:
 2. Ele tem até 4h pra aceitar
 3. Se aceitar, entramos em contato no seu WhatsApp pra alinhar os detalhes
 4. Se recusar, já partimos pro próximo — sem você precisar fazer nada
+
+Acesse seu painel pra acompanhar o status e subir referências/modelagens/logomarcas:
+${loginComEmailUrl(params.email)}
 
 Guarde o número do protocolo caso precise falar com a gente.
 
@@ -443,6 +451,7 @@ export async function emailContatoFornecedor(params: {
   whatsappFornecedor: string
   cidadeFornecedor: string | null
   estadoFornecedor: string
+  pedidoId: string
 }): Promise<void> {
   const nomeClienteEsc = escapeHtml(params.nomeCliente)
   const tipoEsc = escapeHtml(params.tipo)
@@ -481,6 +490,10 @@ export async function emailContatoFornecedor(params: {
         <strong>Daqui a 24h vamos te chamar no WhatsApp</strong> pra saber se deu certo. Se não rolou, a gente busca outro fornecedor pra você.
       </div>
     </div>
+    <div style="text-align:center;margin:24px 0;">
+      <a href="${painelClientePedidoUrl(params.pedidoId)}" style="display:inline-block;background:#1D9E75;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:600;font-size:15px;">Gerenciar pelo painel</a>
+    </div>
+    <p style="margin:0 0 0;color:#666;font-size:14px;">No painel você acompanha este pedido — inclusive pode solicitar outro fornecedor se precisar.</p>
     `,
     preheader
   )
@@ -497,6 +510,9 @@ Ele vai te chamar nas próximas horas. Se preferir, você também pode entrar em
 https://wa.me/${whatsLink}
 
 Daqui a 24h vamos te chamar no WhatsApp pra saber se deu certo. Se não rolou, a gente busca outro fornecedor pra você.
+
+Gerencie este pedido pelo painel (inclusive pedir outro fornecedor):
+${painelClientePedidoUrl(params.pedidoId)}
 
 Confeccione
 ${SITE_URL}`

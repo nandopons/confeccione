@@ -78,7 +78,7 @@ export default function PerfilForm({
           onChange={(e) => setNome(e.target.value)}
           maxLength={100}
           placeholder="Seu nome (opcional)"
-          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm placeholder:text-gray-400 placeholder:font-normal"
         />
       </label>
 
@@ -93,7 +93,7 @@ export default function PerfilForm({
           onChange={(e) => setWhatsapp(formatarMascaraBR(e.target.value))}
           maxLength={16}
           placeholder="(11) 99999-9999"
-          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm placeholder:text-gray-400 placeholder:font-normal"
         />
         <p className="text-xs text-gray-500 mt-1">
           DDD + número. Se preenchido, o código de login também será enviado aqui.

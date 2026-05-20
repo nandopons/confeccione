@@ -12,6 +12,7 @@ import {
   type Plano,
 } from './planos'
 import { tipoLabel, prazoLabel } from './ofertas-labels'
+import { estaEmHorarioComercial, proximoHorarioValido } from './horario'
 
 // Re-export pra preservar imports server existentes (api routes etc).
 // Client components devem importar direto de './ofertas-labels' pra não
@@ -26,6 +27,26 @@ const supabase = createClient(
 const HORAS_4_MS = 4 * 60 * 60 * 1000
 
 export async function criarEDispararOferta(pedidoId: string): Promise<void> {
+  // Gate de horário comercial centralizado: se estiver fora, agenda
+  // buscar_apos e sai. A TAREFA 2 do scheduler acorda o pedido no próximo
+  // ciclo válido. Cobre TODOS os call-sites (criação, recusas, webhooks,
+  // órfãos) — evita disparar oferta a fornecedor fora de hora.
+  if (!estaEmHorarioComercial()) {
+    const proximo = proximoHorarioValido()
+    const { error: errAgenda } = await supabase
+      .from('pedidos')
+      .update({ buscar_apos: proximo.toISOString() })
+      .eq('id', pedidoId)
+    if (errAgenda) {
+      console.error('criarEDispararOferta: falhou ao agendar buscar_apos', errAgenda)
+    } else {
+      console.log(
+        `[horario] criarEDispararOferta fora de hora — pedido ${pedidoId} agendado pra ${proximo.toISOString()}`
+      )
+    }
+    return
+  }
+
   const { data: pedido, error: pedidoErr } = await supabase
     .from('pedidos')
     .select('*')

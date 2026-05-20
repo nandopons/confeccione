@@ -11,6 +11,7 @@ import {
   contarOfertasMesAtual,
   planoEfetivo,
 } from '@/app/lib/planos'
+import { painelClientePedidoUrl } from '@/app/lib/url'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -162,7 +163,9 @@ async function tratarRespostaFornecedor(
       `📍 ${localFornec}\n\n` +
       `👉 Falar com o fornecedor: ${linkWhatsApp(fornecedor.whatsapp)}\n\n` +
       `Ele vai te chamar nas próximas horas. Se preferir, você pode entrar em contato direto.\n\n` +
-      `Daqui a 24h te chamo aqui pra saber se deu certo!`
+      `Daqui a 24h te chamo aqui pra saber se deu certo!\n\n` +
+      `🔗 Você pode gerenciar este pedido pelo painel — inclusive solicitar outro fornecedor se precisar:\n${painelClientePedidoUrl(oferta.pedido_id)}\n\n` +
+      `— Confeccione`
 
     try {
       await enviarMensagem(pedido.whatsapp, mensagemCliente)
@@ -180,6 +183,7 @@ async function tratarRespostaFornecedor(
           whatsappFornecedor: fornecedor.whatsapp,
           cidadeFornecedor: fornecedor.cidade,
           estadoFornecedor: fornecedor.estado,
+          pedidoId: oferta.pedido_id,
         })
       } catch (err) {
         console.error('aviso cliente email falhou:', err)
@@ -343,6 +347,13 @@ async function tratarRespostaCliente(
     : followup.pedidos
 
   if (!pedido) return NextResponse.json({ ok: true })
+
+  console.warn(
+    '[LEGACY] Recebida resposta 1/2/3 do cliente em',
+    new Date().toISOString(),
+    '— fluxo legado mantido durante transição pro painel. Pedido:',
+    followup.pedido_id,
+  )
 
   const opcao = texto.trim()
 

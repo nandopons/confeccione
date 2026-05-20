@@ -119,7 +119,7 @@ export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
             }
             placeholder="000000"
             required
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-center text-xl tracking-[0.5em] font-mono"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-center text-xl tracking-[0.5em] font-mono placeholder:text-gray-400 placeholder:font-normal"
           />
         </label>
 
@@ -161,7 +161,7 @@ export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
           onChange={(e) => setEmail(e.target.value)}
           placeholder="seu@email.com"
           required
-          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm placeholder:text-gray-400 placeholder:font-normal"
         />
         <p className="text-xs text-gray-500 mt-1">
           Use o mesmo e-mail que você usou pra fazer o pedido.

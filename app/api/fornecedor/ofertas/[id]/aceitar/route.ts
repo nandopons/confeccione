@@ -25,6 +25,7 @@ import { consumirCreditoAvulso, contarOfertasMesAtual, planoEfetivo, PLANOS_CONF
 import { linkWhatsApp } from '@/app/lib/phone'
 import { formatarWhatsappBR } from '@/app/lib/format'
 import { processarProximaAgendadaSeHouver } from '@/app/lib/fila'
+import { painelClientePedidoUrl } from '@/app/lib/url'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -223,7 +224,9 @@ export async function POST(
     `📍 ${localFornec}\n\n` +
     `👉 Falar com o fornecedor: ${linkWhatsApp(fornecedorCompleto.whatsapp)}\n\n` +
     `Ele vai te chamar nas próximas horas. Se preferir, você pode entrar em contato direto.\n\n` +
-    `Daqui a 24h te chamo aqui pra saber se deu certo!`
+    `Daqui a 24h te chamo aqui pra saber se deu certo!\n\n` +
+    `🔗 Você pode gerenciar este pedido pelo painel — inclusive solicitar outro fornecedor se precisar:\n${painelClientePedidoUrl(pedido.id)}\n\n` +
+    `— Confeccione`
 
   try {
     await enviarMensagem(pedido.whatsapp, mensagemCliente)
@@ -242,6 +245,7 @@ export async function POST(
         whatsappFornecedor: fornecedorCompleto.whatsapp,
         cidadeFornecedor: fornecedorCompleto.cidade,
         estadoFornecedor: fornecedorCompleto.estado,
+        pedidoId: pedido.id,
       })
     } catch (err) {
       console.error('aceitar: aviso cliente email falhou:', err)
