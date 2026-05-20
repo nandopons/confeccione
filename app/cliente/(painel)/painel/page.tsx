@@ -8,10 +8,11 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
-import { listarArquivos } from '@/app/lib/arquivos-cliente'
-import { formatarTamanho } from '@/app/lib/arquivos-format'
+import { listarArquivos, QUOTA_BYTES, BUCKET_ARTES } from '@/app/lib/arquivos-cliente'
+import { ehImagem } from '@/app/lib/arquivos-format'
 import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 import { corStatus, labelStatus } from '@/app/lib/cliente-status'
+import BibliotecaCard from './BibliotecaCard'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,8 +54,26 @@ export default async function PainelClientePage({
 
   const pedidos = (pedidosRaw ?? []) as PedidoLinha[]
 
-  // Resumo da biblioteca de artes pro card
+  // Resumo da biblioteca de artes pro card (últimos 5 + signed URL p/ imagens)
   const { arquivos: artes, usadoBytes } = await listarArquivos(conta.id)
+  const ultimosArquivos = await Promise.all(
+    artes.slice(0, 5).map(async (a) => {
+      let url: string | null = null
+      if (ehImagem(a.display_name)) {
+        const { data } = await supabaseAdmin.storage
+          .from(BUCKET_ARTES)
+          .createSignedUrl(a.storage_path, 3600)
+        url = data?.signedUrl ?? null
+      }
+      return {
+        id: a.id,
+        display_name: a.display_name,
+        mime_type: a.mime_type,
+        tamanho_bytes: a.tamanho_bytes,
+        url,
+      }
+    }),
+  )
 
   return (
     <section className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -68,31 +87,13 @@ export default async function PainelClientePage({
         </div>
       </div>
 
-      {/* Card: Biblioteca de Artes */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-5 mb-6">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
-              Sua Biblioteca de Artes
-            </h3>
-            <p className="mt-1.5 text-sm text-gray-700">
-              Coloque sua logo e artes aqui para compartilhar facilmente com
-              fornecedores.
-            </p>
-            <p className="mt-1 text-xs text-gray-500">
-              {artes.length === 0
-                ? 'Faça upload da sua logo e modelagens — só vai precisar uma vez.'
-                : `${artes.length} ${artes.length === 1 ? 'arquivo' : 'arquivos'} · ${formatarTamanho(usadoBytes)} usados de 50 MB`}
-            </p>
-          </div>
-          <Link
-            href="/cliente/repositorio"
-            className="shrink-0 inline-block px-4 py-2 rounded-md bg-[#1D9E75] text-white text-sm font-medium hover:bg-[#178761]"
-          >
-            Acessar
-          </Link>
-        </div>
-      </div>
+      {/* Card: Biblioteca de Artes (com upload integrado) */}
+      <BibliotecaCard
+        arquivosIniciais={ultimosArquivos}
+        totalCount={artes.length}
+        usadoInicial={usadoBytes}
+        quotaBytes={QUOTA_BYTES}
+      />
 
       {criado && (
         <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">

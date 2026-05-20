@@ -7,9 +7,10 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
+import SelectDropdown from '@/app/components/SelectDropdown'
 
 // Espelha a lista da home (app/page.tsx). Mantido aqui pra não tocar a home.
 const NICHOS_PRINCIPAIS = [
@@ -46,6 +47,16 @@ export default function NovoPedidoForm({ nomeExibido, email }: Props) {
   const [showExtras, setShowExtras] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+  const formRef = useRef<HTMLDivElement>(null)
+
+  // Catch 3: ao abrir a página, rola até o form (passo 1). Só no mount.
+  useEffect(() => {
+    const coarse = window.matchMedia('(pointer: coarse)').matches
+    formRef.current?.scrollIntoView({
+      behavior: coarse ? 'auto' : 'smooth',
+      block: 'start',
+    })
+  }, [])
 
   function avancar() {
     setErro(null)
@@ -92,7 +103,7 @@ export default function NovoPedidoForm({ nomeExibido, email }: Props) {
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl p-6">
+    <div ref={formRef} className="bg-white border border-gray-200 rounded-2xl p-6 scroll-mt-4">
       {/* Indicador de passo */}
       <div className="flex items-center mb-6">
         {[1, 2].map((i) => (
@@ -189,29 +200,24 @@ export default function NovoPedidoForm({ nomeExibido, email }: Props) {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">Estado (UF)</label>
-                <select
+                <SelectDropdown
+                  ariaLabel="Estado (UF)"
                   value={estado}
-                  onChange={(e) => setEstado(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]"
-                >
-                  <option value="">Selecione...</option>
-                  {UFS.map((uf) => (
-                    <option key={uf} value={uf}>{uf}</option>
-                  ))}
-                </select>
+                  onChange={setEstado}
+                  options={UFS.map((uf) => ({ value: uf, label: uf }))}
+                />
               </div>
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">Prazo desejado</label>
-                <select
+                <SelectDropdown
+                  ariaLabel="Prazo desejado"
                   value={prazo}
-                  onChange={(e) => setPrazo(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]"
-                >
-                  <option value="">Selecione...</option>
-                  {Object.entries(prazoLabel).map(([id, label]) => (
-                    <option key={id} value={id}>{label}</option>
-                  ))}
-                </select>
+                  onChange={setPrazo}
+                  options={Object.entries(prazoLabel).map(([id, label]) => ({
+                    value: id,
+                    label,
+                  }))}
+                />
               </div>
             </div>
           </div>
