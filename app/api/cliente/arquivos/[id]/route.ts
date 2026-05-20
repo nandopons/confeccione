@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { getContaAtual } from '@/app/lib/cliente-auth'
 import { BUCKET_ARTES, normalizarDisplayName } from '@/app/lib/arquivos-cliente'
+import { splitExtensao } from '@/app/lib/arquivos-format'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,6 +38,28 @@ export async function PATCH(
     return NextResponse.json({ erro: 'Nome inválido' }, { status: 400 })
   }
   const displayName = normalizarDisplayName(body.display_name)
+
+  // Ownership + storage_path pra validar a extensão. Cliente só edita o nome
+  // base; a extensão é imutável (impede forjar display_name='hack.exe').
+  const { data: arquivo } = await supabaseAdmin
+    .from('arquivos_cliente')
+    .select('storage_path')
+    .eq('id', id)
+    .eq('conta_id', conta.id)
+    .maybeSingle<{ storage_path: string }>()
+
+  if (!arquivo) {
+    return NextResponse.json({ erro: 'Arquivo não encontrado' }, { status: 404 })
+  }
+
+  const extOriginal = splitExtensao(arquivo.storage_path).ext.toLowerCase()
+  const extNova = splitExtensao(displayName).ext.toLowerCase()
+  if (extOriginal !== extNova) {
+    return NextResponse.json(
+      { erro: 'A extensão do arquivo não pode ser alterada' },
+      { status: 400 },
+    )
+  }
 
   const { data: atualizado, error } = await supabaseAdmin
     .from('arquivos_cliente')
