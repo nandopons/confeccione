@@ -15,7 +15,8 @@
 //   7. audit_log 'pedido.compartilhar_artes'
 //   8. Retorna { ok, compartilhamento_id, link_token, arquivos_count, expira_em }
 //
-// Privacidade: a mensagem ao fornecedor NÃO inclui contato/nome do cliente.
+// Privacidade: a mensagem inclui o NOME do cliente + descritor do pedido, mas
+// NUNCA o contato (whatsapp/email) do cliente. A página pública também não.
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -25,6 +26,8 @@ import { getContaAtual } from '@/app/lib/cliente-auth'
 import { registrarAudit } from '@/app/lib/audit'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { listarArquivos } from '@/app/lib/arquivos-cliente'
+import { tipoLabel } from '@/app/lib/ofertas-labels'
+import { SITE_URL } from '@/app/lib/url'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,6 +43,10 @@ type Pedido = {
   id: string
   conta_id: string | null
   status: string
+  nome: string | null
+  tipo: string
+  quantidade: number | null
+  estado: string | null
   fornecedor_aceito_id: string | null
   fornecedor_aceito?: { nome: string | null; whatsapp: string } | null
 }
@@ -59,7 +66,7 @@ export async function POST(
   const { data: pedidoRaw } = await supabaseAdmin
     .from('pedidos')
     .select(
-      'id, conta_id, status, fornecedor_aceito_id, ' +
+      'id, conta_id, status, nome, tipo, quantidade, estado, fornecedor_aceito_id, ' +
         'fornecedor_aceito:leads_fornecedores!fornecedor_aceito_id(nome, whatsapp)',
     )
     .eq('id', pedidoId)
@@ -121,17 +128,27 @@ export async function POST(
     return NextResponse.json({ erro: 'Erro ao processar' }, { status: 500 })
   }
 
-  // 6. Dispara WhatsApp pro fornecedor (AWAIT — sem contato do cliente)
-  const linkPublico = `${req.nextUrl.origin}/artes/${linkToken}`
-  const saudacao = pedido.fornecedor_aceito.nome
-    ? `Olá, ${pedido.fornecedor_aceito.nome}!`
-    : 'Olá!'
+  // 6. Dispara WhatsApp pro fornecedor (AWAIT — nome do cliente + descritor,
+  //    nunca o contato dele). URL absoluta canônica (não derivada do request).
+  const linkPublico = `${SITE_URL}/artes/${linkToken}`
+  const fornecedorNome = pedido.fornecedor_aceito.nome ?? 'fornecedor'
+  const clienteNome = pedido.nome ?? conta.nome ?? 'O cliente'
+  const tipoDesc = tipoLabel[pedido.tipo] ?? pedido.tipo
   const plural = arquivos.length === 1 ? 'arquivo' : 'arquivos'
+  const linhaPedido = [
+    `*${tipoDesc}*`,
+    pedido.quantidade != null ? `${pedido.quantidade} peças` : null,
+    pedido.estado || null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
   const mensagem =
     `🎨 *Confeccione — Artes do pedido*\n\n` +
-    `${saudacao}\n\n` +
-    `O cliente compartilhou ${arquivos.length} ${plural} com você para este pedido.\n\n` +
-    `Acesse (link válido por ${LINK_VALIDADE_DIAS} dias):\n${linkPublico}`
+    `Olá *${fornecedorNome}*,\n\n` +
+    `O cliente *${clienteNome}* compartilhou ${arquivos.length} ${plural} com você para o pedido de:\n` +
+    `${linhaPedido}\n\n` +
+    `📎 Acesse aqui (link válido por ${LINK_VALIDADE_DIAS} dias):\n${linkPublico}\n\n` +
+    `— Confeccione`
 
   const whatsappEnviado = await enviarMensagem(
     pedido.fornecedor_aceito.whatsapp,
