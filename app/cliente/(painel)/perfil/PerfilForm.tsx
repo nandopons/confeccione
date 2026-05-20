@@ -8,10 +8,12 @@ export default function PerfilForm({
   email,
   nomeInicial,
   whatsappInicial,
+  completar = false,
 }: {
   email: string
   nomeInicial: string
   whatsappInicial: string
+  completar?: boolean
 }) {
   const router = useRouter()
   const [nome, setNome] = useState(nomeInicial)
@@ -39,6 +41,12 @@ export default function PerfilForm({
       const j = await r.json()
       if (!r.ok) {
         setMsg({ tipo: 'erro', texto: j.erro ?? 'Erro ao salvar' })
+        return
+      }
+      // No modo "completar", manda pro painel assim que salvar.
+      if (completar) {
+        router.push('/cliente/painel')
+        router.refresh()
         return
       }
       setMsg({ tipo: 'sucesso', texto: 'Perfil salvo!' })
@@ -84,7 +92,7 @@ export default function PerfilForm({
 
       <label className="block">
         <span className="text-sm font-medium text-gray-700 block mb-1">
-          WhatsApp
+          WhatsApp{completar ? ' *' : ''}
         </span>
         <input
           type="tel"
