@@ -42,3 +42,6 @@ next-env.d.ts
 prompt*.txt
 .claude/
 .env*.local
+
+# arquivo de trabalho de sprint (briefing, não vai pro repo)
+/sprint-ux-pos-aceite.md

@@ -98,7 +98,7 @@ export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
             Enviamos um código de 6 dígitos pra <strong>{email}</strong>{' '}
             {canalTxt}.
           </p>
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-gray-600 mt-1">
             Confira sua caixa de entrada (e a pasta de spam, por garantia).
           </p>
         </div>
@@ -163,7 +163,7 @@ export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
           required
           className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm placeholder:text-gray-400 placeholder:font-normal"
         />
-        <p className="text-xs text-gray-500 mt-1">
+        <p className="text-xs text-gray-600 mt-1">
           Use o mesmo e-mail que você usou pra fazer o pedido.
         </p>
       </label>

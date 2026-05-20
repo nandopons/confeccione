@@ -6,7 +6,10 @@
 // ============================================================================
 
 import { exigirFornecedorAtual } from '@/app/lib/auth-server'
-import { buscarOfertasFornecedor } from '@/app/lib/ofertas-painel'
+import {
+  buscarOfertasFornecedor,
+  buscarLinksArtes,
+} from '@/app/lib/ofertas-painel'
 import PedidosTabs from './PedidosTabs'
 
 export const dynamic = 'force-dynamic'
@@ -21,6 +24,13 @@ export default async function PedidosPage() {
     buscarOfertasFornecedor(fornecedor.id, 'historico'),
   ])
 
+  // Links de artes compartilhadas, escopados ao fornecedor logado e a
+  // compartilhamentos não-expirados (depende dos pedido_ids das aceitas).
+  const linksArtes = await buscarLinksArtes(
+    fornecedor.id,
+    aceitas.map((o) => o.pedido_id),
+  )
+
   return (
     <section className="px-5 md:px-8 pt-8 pb-12 max-w-4xl mx-auto">
       <h1 className="text-gray-900 text-2xl font-medium mb-1">Pedidos</h1>
@@ -32,6 +42,7 @@ export default async function PedidosPage() {
         pendentes={pendentes}
         aceitas={aceitas}
         historico={historico}
+        linksArtes={linksArtes}
       />
     </section>
   )
