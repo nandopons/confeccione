@@ -5,6 +5,7 @@
 // /cliente/login fica FORA pra evitar loop de redirect.
 // ============================================================================
 
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getContaAtual } from '@/app/lib/cliente-auth'
 import LogoutButton from './LogoutButton'
@@ -32,7 +33,15 @@ export default async function ClientePainelLayout({
             </h1>
             <p className="text-xs text-gray-500">Olá, {nomeExibido}</p>
           </div>
-          <LogoutButton />
+          <div className="flex items-center gap-4">
+            <Link
+              href="/cliente/perfil"
+              className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              Perfil
+            </Link>
+            <LogoutButton />
+          </div>
         </div>
       </header>
       <main>{children}</main>
