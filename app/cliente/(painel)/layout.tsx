@@ -3,12 +3,14 @@
 // Layout do painel do cliente autenticado.
 // Route group "(painel)" agrupa pages que exigem sessão válida.
 // /cliente/login fica FORA pra evitar loop de redirect.
+//
+// Navegação: sidebar desktop / bottom nav mobile via <PainelNavCliente>
+// (duplicado do padrão do painel do fornecedor).
 // ============================================================================
 
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getContaAtual } from '@/app/lib/cliente-auth'
-import LogoutButton from './LogoutButton'
+import PainelNavCliente from './PainelNavCliente'
 
 export default async function ClientePainelLayout({
   children,
@@ -20,37 +22,17 @@ export default async function ClientePainelLayout({
     redirect('/cliente/login')
   }
 
-  // Saudação: usa nome se tiver, senão a parte antes do @ do email
+  // Nome exibido na sidebar: usa nome se tiver, senão a parte antes do @.
   const nomeExibido = conta.nome ?? conta.email.split('@')[0]
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">
-              Confeccione
-            </h1>
-            <p className="text-xs text-gray-600">Olá, {nomeExibido}</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <Link
-              href="/cliente/repositorio"
-              className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              Arquivos
-            </Link>
-            <Link
-              href="/cliente/perfil"
-              className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              Perfil
-            </Link>
-            <LogoutButton />
-          </div>
-        </div>
-      </header>
-      <main>{children}</main>
+      <div className="md:flex">
+        <PainelNavCliente nomeCliente={nomeExibido} />
+
+        {/* Conteúdo principal — pb-20 no mobile pra bottom bar não cobrir */}
+        <main className="flex-1 min-w-0 pb-20 md:pb-0">{children}</main>
+      </div>
     </div>
   )
 }
