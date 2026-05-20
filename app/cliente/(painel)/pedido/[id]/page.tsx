@@ -13,8 +13,18 @@ import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 import { corStatus, labelStatus } from '@/app/lib/cliente-status'
 import { formatarWhatsappBR } from '@/app/lib/format'
 import { linkWhatsApp } from '@/app/lib/phone'
+import SolicitarOutroFornecedorButton from './SolicitarOutroFornecedorButton'
 
 export const dynamic = 'force-dynamic'
+
+const STATUS_TERMINAL = ['concluido', 'expirado_sem_resposta', 'manual_pausado']
+const LIMITE_TROCAS_FREE = 2
+
+type Solicitacao = {
+  id: string
+  motivo: string | null
+  criado_em: string
+}
 
 type PedidoDetalhe = {
   id: string
@@ -75,6 +85,19 @@ export default async function PedidoDetalhePage({
 
   const ofertas = (ofertasRaw ?? []) as OfertaTimeline[]
 
+  // Solicitações de troca registradas
+  const { data: solicitacoesRaw } = await supabaseAdmin
+    .from('solicitacoes_outro_fornecedor')
+    .select('id, motivo, criado_em')
+    .eq('pedido_id', id)
+    .order('criado_em', { ascending: true })
+
+  const solicitacoes = (solicitacoesRaw ?? []) as Solicitacao[]
+  const podeMostrarTrocar =
+    !STATUS_TERMINAL.includes(pedido.status) &&
+    (ofertas.length > 0 || pedido.fornecedor_aceito_id !== null)
+  const podeTrocar = solicitacoes.length < LIMITE_TROCAS_FREE
+
   const tipo = tipoLabel[pedido.tipo] ?? pedido.tipo
   const prazo = pedido.prazo ? (prazoLabel[pedido.prazo] ?? pedido.prazo) : null
   const criado = formatarDataHora(pedido.criado_em)
@@ -134,6 +157,15 @@ export default async function PedidoDetalhePage({
             </div>
           )}
         </dl>
+
+        {podeMostrarTrocar && (
+          <SolicitarOutroFornecedorButton
+            pedidoId={pedido.id}
+            trocasRealizadas={solicitacoes.length}
+            limiteTrocas={LIMITE_TROCAS_FREE}
+            podeTrocar={podeTrocar}
+          />
+        )}
       </div>
 
       {/* Status / Fornecedor */}
@@ -201,6 +233,20 @@ export default async function PedidoDetalhePage({
               }
             />
           )}
+
+          {/* Solicitações de troca (ordem cronológica) */}
+          {solicitacoes.map((s) => (
+            <PassoTimeline
+              key={s.id}
+              icone="🔄"
+              texto="Você pediu trocar de fornecedor"
+              detalhe={
+                s.motivo
+                  ? `${formatarDataHora(s.criado_em)} · Motivo: ${s.motivo}`
+                  : formatarDataHora(s.criado_em)
+              }
+            />
+          ))}
 
           {/* Se órfão */}
           {semFornecedor && (
