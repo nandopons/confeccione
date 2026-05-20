@@ -255,7 +255,6 @@ export default function CadastroFornecedor() {
                     placeholder="Selecione..."
                     value={estado}
                     onChange={setEstado}
-                    triggerClassName="border border-gray-200 rounded-xl px-3 py-3 bg-white"
                     options={ufs.map(uf => ({ value: uf, label: uf }))}
                   />
                 </div>
