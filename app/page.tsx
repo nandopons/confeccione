@@ -170,6 +170,14 @@ export default function Home() {
         <h1 className="text-white text-2xl md:text-4xl font-medium leading-tight mb-4">Conectamos você às melhores<br />confecções e costureiras do Brasil</h1>
         <p className="text-gray-400 text-base max-w-xl mx-auto mb-8 leading-relaxed">Faça seu pedido em minutos. Receba orçamentos de fornecedores verificados. Produza com confiança.</p>
         <button onClick={() => document.getElementById("pedido")?.scrollIntoView({ behavior: "smooth" })} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white font-medium px-8 py-4 rounded-xl text-base transition-colors">Fazer meu pedido agora</button>
+        <div className="mt-4 text-center">
+          <Link
+            href="/cliente/login"
+            className="text-sm text-gray-300 hover:text-white underline underline-offset-4 transition-colors"
+          >
+            Já fez pedido? Acompanhar meu pedido
+          </Link>
+        </div>
       </section>
 
       <div className="bg-[#1a1a1a] px-6 py-3 flex flex-wrap items-center justify-center gap-6">
