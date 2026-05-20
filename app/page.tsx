@@ -305,7 +305,6 @@ export default function Home() {
                     placeholder="Selecione..."
                     value={prazo}
                     onChange={setPrazo}
-                    triggerClassName="border border-gray-200 rounded-xl px-3 py-2 bg-white"
                     options={Object.entries(prazos).map(([value, label]) => ({ value, label }))}
                   />
                 </div>
@@ -316,7 +315,6 @@ export default function Home() {
                     placeholder="Selecione..."
                     value={estado}
                     onChange={setEstado}
-                    triggerClassName="border border-gray-200 rounded-xl px-3 py-2 bg-white"
                     options={ufs.map(uf => ({ value: uf, label: uf }))}
                   />
                 </div>
