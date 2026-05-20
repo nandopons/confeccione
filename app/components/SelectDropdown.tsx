@@ -97,24 +97,31 @@ export default function SelectDropdown({
       {aberto && (
         <ul
           role="listbox"
-          className="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-md shadow-lg max-h-64 overflow-auto py-1"
+          className="absolute top-full left-0 right-0 mt-1 z-50 max-h-60 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg py-1"
         >
-          {options.map((o, i) => (
-            <li key={o.value}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={o.value === value}
-                onClick={() => escolher(o.value)}
-                onMouseEnter={() => setDestaque(i)}
-                className={`w-full text-left px-3 py-2 text-sm ${
-                  i === destaque ? 'bg-[#E1F5EE] text-[#0F6E56]' : 'text-gray-700'
-                } ${o.value === value ? 'font-medium' : ''}`}
-              >
-                {o.label}
-              </button>
-            </li>
-          ))}
+          {options.map((o, i) => {
+            const selecionadoItem = o.value === value
+            return (
+              <li key={o.value}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selecionadoItem}
+                  onClick={() => escolher(o.value)}
+                  onMouseEnter={() => setDestaque(i)}
+                  className={`w-full text-left px-3 py-2 text-sm ${
+                    selecionadoItem
+                      ? 'bg-[#E1F5EE] text-[#0F6E56] font-medium'
+                      : i === destaque
+                        ? 'bg-gray-50 text-gray-800'
+                        : 'text-gray-800 hover:bg-gray-50'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>
