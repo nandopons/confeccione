@@ -18,6 +18,9 @@ type Props = {
   onChange: (value: string) => void
   placeholder: string
   label: string
+  // Classes cosméticas do botão (borda/raio/padding/bg). Default = estilo do
+  // painel; a home/cadastro passam rounded-xl pra casar com os outros campos.
+  triggerClassName?: string
 }
 
 export default function SelectModal({
@@ -26,6 +29,7 @@ export default function SelectModal({
   onChange,
   placeholder,
   label,
+  triggerClassName = 'border border-gray-300 rounded-md px-3 py-2 bg-white',
 }: Props) {
   const [open, setOpen] = useState(false)
   const selectedLabel = options.find((o) => o.value === value)?.label
@@ -58,7 +62,7 @@ export default function SelectModal({
         aria-expanded={open}
         aria-label={label}
         onClick={() => setOpen(true)}
-        className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-left flex items-center justify-between gap-2 bg-white focus:outline-none focus:border-[#1D9E75]"
+        className={`w-full text-sm text-left flex items-center justify-between gap-2 focus:outline-none focus:border-[#1D9E75] ${triggerClassName}`}
       >
         <span className={selectedLabel ? 'text-gray-800' : 'text-gray-400'}>
           {selectedLabel ?? placeholder}
