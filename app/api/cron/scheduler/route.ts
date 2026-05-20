@@ -4,6 +4,9 @@ import { estaEmHorarioComercial, estaEmJanelaRetryPassivo } from '@/app/lib/hora
 import { criarEDispararOferta } from '@/app/lib/ofertas'
 import { enviarMensagem, whatsappAdminFornecedorExpirou } from '@/app/lib/zapi'
 import { emailAdminFornecedorExpirou } from '@/app/lib/email'
+import { tipoLabel } from '@/app/lib/ofertas-labels'
+import { painelClientePedidoUrl } from '@/app/lib/url'
+import { validarWhatsApp } from '@/app/lib/phone'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -11,7 +14,6 @@ const supabase = createClient(
 )
 
 const HORAS_24 = 24 * 60 * 60 * 1000
-const HORAS_48 = 48 * 60 * 60 * 1000
 
 export async function GET(req: Request) {
   // Validação de segurança: só aceita chamadas com o secret correto.
@@ -172,18 +174,21 @@ export async function GET(req: Request) {
   }
 
   // ===========================================================
-  // TAREFA 3: follow-up 24h após fornecedor aceitar
+  // TAREFA 3: follow-up 24h e 48h (time + painel-driven — Sprint 3.5)
   // ===========================================================
-  // Pedidos com status=aguardando_contato OU em_negociacao,
-  // cuja oferta foi aceita há 24h+, e ainda não receberam o
-  // follow-up correspondente.
+  // Pedidos não-terminais com fornecedor aceito. Gatilhos por TEMPO (cadência
+  // 24h → +24h) e por ACESSO AO PAINEL — NÃO dependem mais de resposta 1/2/3.
+  // ultimo_acesso_painel posterior ao follow-up anterior = pedido vivo, não
+  // escala. O status do pedido não decide mais o tipo: quem decide é quais
+  // follow-ups já foram enviados. Mantemos o filtro de status em
+  // [aguardando_contato, em_negociacao] só pra excluir terminais (concluido,
+  // expirado, pausado) e pedidos re-buscando (esses têm fornecedor_aceito_id
+  // nulo e já caem fora pelo filtro abaixo).
   const corte24h = new Date(agora.getTime() - HORAS_24).toISOString()
 
-  // Busca pedidos elegíveis pra follow-up
-  // (pra cada um, conferir individualmente se já tem follow-up e qual)
   const { data: pedidosFollowup, error: errFollowup } = await supabase
     .from('pedidos')
-    .select('id, nome, whatsapp, status, fornecedor_aceito_id')
+    .select('id, nome, whatsapp, tipo, status, fornecedor_aceito_id, ultimo_acesso_painel')
     .in('status', ['aguardando_contato', 'em_negociacao'])
     .not('fornecedor_aceito_id', 'is', null)
 
@@ -191,7 +196,7 @@ export async function GET(req: Request) {
     resumo.erros.push(`buscar pedidos pra followup: ${errFollowup.message}`)
   } else if (pedidosFollowup && pedidosFollowup.length > 0) {
     for (const pedido of pedidosFollowup) {
-      // Busca a oferta aceita mais recente desse pedido
+      // Oferta aceita mais recente (referência do 24h_inicial)
       const { data: ofertaAceita } = await supabase
         .from('ofertas')
         .select('enviada_em')
@@ -203,50 +208,42 @@ export async function GET(req: Request) {
 
       if (!ofertaAceita) continue
 
-      // Determina qual follow-up disparar baseado no status
-      // - status=aguardando_contato → tentar mandar 24h_inicial (se ainda não mandou)
-      // - status=em_negociacao → tentar mandar 48h_lembrete (24h após o '2' do cliente)
-      const tipoEsperado =
-        pedido.status === 'aguardando_contato' ? '24h_inicial' : '48h_lembrete'
+      // Follow-ups já enviados — decide o próximo passo pela EXISTÊNCIA deles
+      const { data: fusExistentes } = await supabase
+        .from('followups')
+        .select('tipo, enviado_em')
+        .eq('pedido_id', pedido.id)
 
-      // Pra '24h_inicial': verifica se passaram 24h desde a oferta aceita
-      // Pra '48h_lembrete': verifica se passaram 24h desde o último follow-up respondido com '2'
+      const fu24h = fusExistentes?.find((f) => f.tipo === '24h_inicial') ?? null
+      const fu48h = fusExistentes?.find((f) => f.tipo === '48h_lembrete') ?? null
+
+      let tipoEsperado: '24h_inicial' | '48h_lembrete'
       let referenciaTempo: string
 
-      if (tipoEsperado === '24h_inicial') {
+      if (!fu24h) {
+        tipoEsperado = '24h_inicial'
         referenciaTempo = ofertaAceita.enviada_em
+      } else if (!fu48h) {
+        tipoEsperado = '48h_lembrete'
+        referenciaTempo = fu24h.enviado_em
+        // Painel-driven: acessou o painel depois do 24h_inicial → vivo, não escala
+        if (
+          pedido.ultimo_acesso_painel &&
+          new Date(pedido.ultimo_acesso_painel).getTime() >=
+            new Date(fu24h.enviado_em).getTime()
+        ) {
+          continue
+        }
       } else {
-        // pra 48h_lembrete: usa o respondido_em do follow-up anterior (que foi respondido com '2')
-        const { data: ultimoFollowup } = await supabase
-          .from('followups')
-          .select('respondido_em')
-          .eq('pedido_id', pedido.id)
-          .not('respondido_em', 'is', null)
-          .order('respondido_em', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-
-        if (!ultimoFollowup || !ultimoFollowup.respondido_em) continue
-        referenciaTempo = ultimoFollowup.respondido_em
+        continue // já mandou os dois
       }
 
-      // Já passou 24h desde a referência?
+      // Passou 24h desde a referência?
       if (new Date(referenciaTempo).getTime() > new Date(corte24h).getTime()) {
-        continue // ainda não passou 24h
+        continue
       }
 
-      // Já existe follow-up desse tipo pra esse pedido? (idempotência)
-      const { data: jaExiste } = await supabase
-        .from('followups')
-        .select('id')
-        .eq('pedido_id', pedido.id)
-        .eq('tipo', tipoEsperado)
-        .maybeSingle()
-
-      if (jaExiste) continue
-
-      // Inserir follow-up ANTES de enviar a mensagem (evita duplicidade
-      // se a mensagem demorar e o cron rodar de novo)
+      // Insere ANTES de enviar (idempotência se o cron rodar de novo)
       const { error: errInsert } = await supabase
         .from('followups')
         .insert({ pedido_id: pedido.id, tipo: tipoEsperado })
@@ -256,45 +253,81 @@ export async function GET(req: Request) {
         continue
       }
 
-      // Monta e envia a mensagem
+      // Nome do fornecedor aceito (sem dados de contato)
+      const { data: forn } = await supabase
+        .from('leads_fornecedores')
+        .select('nome')
+        .eq('id', pedido.fornecedor_aceito_id)
+        .maybeSingle()
+      const fornecedorNome = forn?.nome ?? 'o fornecedor'
+      const tipoDesc = tipoLabel[pedido.tipo] ?? pedido.tipo
+      const linkPainel = painelClientePedidoUrl(pedido.id)
+
       const mensagem =
         tipoEsperado === '24h_inicial'
-          ? `Oi ${pedido.nome}! 👋 Faz 24h que te conectei com um fornecedor. Como tá indo? Responde com:\n\n1 - DEU CERTO, fechei\n2 - AINDA AGUARDANDO, ele falou comigo, estamos conversando\n3 - NÃO DEU CERTO, quero outro fornecedor`
-          : `Oi ${pedido.nome}! Tô passando aqui de novo pra ver como ficou com o fornecedor. Responde com:\n\n1 - DEU CERTO, fechei\n2 - AINDA AGUARDANDO, ainda estamos conversando\n3 - NÃO DEU CERTO, quero outro fornecedor`
+          ? `👋 *Confeccione — Como está seu pedido?*\n\n` +
+            `Olá *${pedido.nome}*,\n\n` +
+            `Faz 24h que conectamos você ao fornecedor *${fornecedorNome}* para o pedido de ${tipoDesc}.\n\n` +
+            `Tudo certo na negociação?\n\n` +
+            `Você pode acompanhar tudo e gerenciar este pedido pelo seu painel — inclusive solicitar outro fornecedor se necessário:\n\n` +
+            `🔗 ${linkPainel}\n\n` +
+            `— Confeccione`
+          : `👋 *Confeccione — Última chance de salvar este pedido*\n\n` +
+            `Olá *${pedido.nome}*,\n\n` +
+            `Já faz 48h e não tivemos retorno. Sem nenhuma ação sua nas próximas horas, vamos marcar este pedido como expirado.\n\n` +
+            `Pra mantê-lo ativo, acesse o painel e nos diga o que está acontecendo — pode solicitar outro fornecedor, perguntar pelo suporte, ou só clicar pra confirmar que segue em andamento:\n\n` +
+            `🔗 ${linkPainel}\n\n` +
+            `— Confeccione`
 
-      try {
-        await enviarMensagem(pedido.whatsapp, mensagem)
-        if (tipoEsperado === '24h_inicial') {
-          resumo.followups_24h_enviados += 1
-        } else {
-          resumo.followups_48h_enviados += 1
+      // Só dispara Z-API com whatsapp válido (failure-soft)
+      if (pedido.whatsapp && validarWhatsApp(pedido.whatsapp)) {
+        try {
+          await enviarMensagem(pedido.whatsapp, mensagem)
+        } catch (err) {
+          resumo.erros.push(
+            `envio followup ${pedido.id}: ${err instanceof Error ? err.message : String(err)}`
+          )
         }
-      } catch (err) {
-        resumo.erros.push(
-          `envio followup ${pedido.id}: ${err instanceof Error ? err.message : String(err)}`
-        )
       }
+
+      if (tipoEsperado === '24h_inicial') resumo.followups_24h_enviados += 1
+      else resumo.followups_48h_enviados += 1
     }
   }
 
   // ===========================================================
-  // TAREFA 4: expirar pedidos sem resposta após 48h do lembrete
+  // TAREFA 4: expirar pedidos sem ação após o lembrete 48h (Sprint 3.5)
   // ===========================================================
-  // Pedido recebeu '48h_lembrete' há mais de 24h e ainda não respondeu
-  // → marca como expirado_sem_resposta
-  const corte48h = new Date(agora.getTime() - HORAS_48).toISOString()
-
+  // Expira se o 48h_lembrete foi enviado há > 24h E o cliente NÃO acessou o
+  // painel depois dele. Não depende mais de resposta 1/2/3 (respondido_em) —
+  // acesso ao painel é o único sinal de "vivo".
   const { data: paraExpirar, error: errExpirar } = await supabase
     .from('followups')
     .select('pedido_id, enviado_em')
     .eq('tipo', '48h_lembrete')
-    .is('respondido_em', null)
-    .lt('enviado_em', corte48h)
+    .lt('enviado_em', corte24h)
 
   if (errExpirar) {
     resumo.erros.push(`buscar pra expirar: ${errExpirar.message}`)
   } else if (paraExpirar && paraExpirar.length > 0) {
     for (const fu of paraExpirar) {
+      // Acessou o painel depois do lembrete? → pedido vivo, não expira
+      const { data: ped } = await supabase
+        .from('pedidos')
+        .select('status, ultimo_acesso_painel')
+        .eq('id', fu.pedido_id)
+        .maybeSingle()
+
+      if (!ped) continue
+      if (!['aguardando_contato', 'em_negociacao'].includes(ped.status)) continue
+      if (
+        ped.ultimo_acesso_painel &&
+        new Date(ped.ultimo_acesso_painel).getTime() >=
+          new Date(fu.enviado_em).getTime()
+      ) {
+        continue
+      }
+
       const { error: errUpdate } = await supabase
         .from('pedidos')
         .update({ status: 'expirado_sem_resposta' })
