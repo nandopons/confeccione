@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
-import SelectDropdown from '@/app/components/SelectDropdown'
+import SelectModal from '@/app/components/SelectModal'
 
 // Espelha a lista da home (app/page.tsx). Mantido aqui pra não tocar a home.
 const NICHOS_PRINCIPAIS = [
@@ -200,8 +200,9 @@ export default function NovoPedidoForm({ nomeExibido, email }: Props) {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">Estado (UF)</label>
-                <SelectDropdown
-                  ariaLabel="Estado (UF)"
+                <SelectModal
+                  label="Estado (UF)"
+                  placeholder="Selecione..."
                   value={estado}
                   onChange={setEstado}
                   options={UFS.map((uf) => ({ value: uf, label: uf }))}
@@ -209,8 +210,9 @@ export default function NovoPedidoForm({ nomeExibido, email }: Props) {
               </div>
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">Prazo desejado</label>
-                <SelectDropdown
-                  ariaLabel="Prazo desejado"
+                <SelectModal
+                  label="Prazo desejado"
+                  placeholder="Selecione..."
                   value={prazo}
                   onChange={setPrazo}
                   options={Object.entries(prazoLabel).map(([id, label]) => ({
