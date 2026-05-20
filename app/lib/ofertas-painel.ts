@@ -171,3 +171,43 @@ export function calcularTempoRestante(expiraEm: string): {
 
   return { horas, minutos, totalMs: restante }
 }
+
+/**
+ * Mapa pedido_id -> URL pública de artes, ESCOPADO ao fornecedor logado e a
+ * compartilhamentos NÃO-expirados. Segurança: filtra por fornecedor_id, então
+ * o fornecedor só recebe tokens emitidos pra ele (nunca os de outro). Token
+ * expirado some do mapa → o painel esconde o link.
+ *
+ * NOTA: o conteúdo por trás do token é o repositório inteiro da conta, não os
+ * arquivos do pedido (over-share per-conta, pré-existente — ver DEBT.md). Isto
+ * aqui só surfaça o link que o fornecedor já recebeu por WhatsApp.
+ */
+export async function buscarLinksArtes(
+  fornecedorId: string,
+  pedidoIds: string[],
+): Promise<Record<string, string>> {
+  if (pedidoIds.length === 0) return {}
+
+  const agora = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('compartilhamentos_artes')
+    .select('pedido_id, link_token, criado_em')
+    .eq('fornecedor_id', fornecedorId)
+    .in('pedido_id', pedidoIds)
+    .gt('expira_em', agora)
+    .order('criado_em', { ascending: false })
+
+  if (error || !data) {
+    if (error) console.error('buscarLinksArtes: erro', error)
+    return {}
+  }
+
+  // Mais recente por pedido vence (já vem ordenado desc).
+  const mapa: Record<string, string> = {}
+  for (const row of data) {
+    if (!mapa[row.pedido_id]) {
+      mapa[row.pedido_id] = `/artes/${row.link_token}`
+    }
+  }
+  return mapa
+}

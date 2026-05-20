@@ -11,9 +11,12 @@ import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 
 type Props = {
   oferta: OfertaPainel
+  // URL pública das artes compartilhadas, quando há compartilhamento válido
+  // (não-expirado) deste pedido pra este fornecedor. Ausente = não renderiza.
+  artesUrl?: string
 }
 
-export default function CardOfertaAceita({ oferta }: Props) {
+export default function CardOfertaAceita({ oferta, artesUrl }: Props) {
   const tipo = tipoLabel[oferta.pedido_tipo] ?? oferta.pedido_tipo
   const prazo = prazoLabel[oferta.pedido_prazo] ?? oferta.pedido_prazo
   const dataAceite = formatarData(oferta.criado_em)
@@ -70,6 +73,17 @@ export default function CardOfertaAceita({ oferta }: Props) {
         <div className="bg-gray-50 rounded-xl p-4 text-center text-gray-500 text-sm">
           Contato indisponível
         </div>
+      )}
+
+      {artesUrl && (
+        <a
+          href={artesUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-3 inline-flex items-center gap-1 text-emerald-700 text-sm font-medium hover:text-emerald-800 underline"
+        >
+          Ver artes compartilhadas →
+        </a>
       )}
 
       <p className="text-gray-400 text-xs mt-3">Aceito em {dataAceite}</p>

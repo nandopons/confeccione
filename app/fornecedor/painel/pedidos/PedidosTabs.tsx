@@ -18,9 +18,15 @@ type Props = {
   pendentes: OfertaPainel[]
   aceitas: OfertaPainel[]
   historico: OfertaPainel[]
+  linksArtes: Record<string, string>
 }
 
-export default function PedidosTabs({ pendentes, aceitas, historico }: Props) {
+export default function PedidosTabs({
+  pendentes,
+  aceitas,
+  historico,
+  linksArtes,
+}: Props) {
   const [tab, setTab] = useState<Tab>('pendentes')
 
   const tabs: { id: Tab; label: string; count: number }[] = [
@@ -80,6 +86,7 @@ export default function PedidosTabs({ pendentes, aceitas, historico }: Props) {
         <ListaOfertas
           ofertas={aceitas}
           tipo="aceitas"
+          linksArtes={linksArtes}
           mensagemVazio="Você ainda não aceitou nenhum pedido. As aceitas vão aparecer aqui com o contato direto do cliente."
         />
       )}
@@ -102,10 +109,12 @@ function ListaOfertas({
   ofertas,
   tipo,
   mensagemVazio,
+  linksArtes,
 }: {
   ofertas: OfertaPainel[]
   tipo: Tab
   mensagemVazio: string
+  linksArtes?: Record<string, string>
 }) {
   if (ofertas.length === 0) {
     return (
@@ -123,7 +132,13 @@ function ListaOfertas({
           return <CardOfertaPendente key={oferta.id} oferta={oferta} />
         }
         if (tipo === 'aceitas') {
-          return <CardOfertaAceita key={oferta.id} oferta={oferta} />
+          return (
+            <CardOfertaAceita
+              key={oferta.id}
+              oferta={oferta}
+              artesUrl={linksArtes?.[oferta.pedido_id]}
+            />
+          )
         }
         return <CardOfertaHistorico key={oferta.id} oferta={oferta} />
       })}
