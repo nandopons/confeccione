@@ -16,6 +16,7 @@ import {
   reunirNome,
   splitExtensao,
 } from '@/app/lib/arquivos-format'
+import { enviarArquivo } from '@/app/lib/arquivos-upload'
 
 type Arquivo = {
   id: string
@@ -65,27 +66,15 @@ export default function RepositorioClient({
     setEnviando(true)
     try {
       for (const file of Array.from(files)) {
-        const fd = new FormData()
-        fd.append('file', file)
-        const r = await fetch('/api/cliente/arquivos/upload', {
-          method: 'POST',
-          credentials: 'same-origin',
-          body: fd,
-        })
-        const j = await r.json().catch(() => ({}))
-        if (!r.ok) {
-          setErro(
-            j.erro ??
-              (r.status === 413
-                ? 'Espaço insuficiente para este arquivo.'
-                : 'Erro ao enviar arquivo.'),
-          )
+        const res = await enviarArquivo(file)
+        if (!res.ok) {
+          setErro(res.erro)
           break
         }
         // url só é gerada no servidor; recém-enviado entra sem preview até o
         // próximo carregamento (refresh abaixo re-gera no servidor).
-        setArquivos((prev) => [{ ...j.arquivo, url: null }, ...prev])
-        setUsado(j.usado_bytes)
+        setArquivos((prev) => [{ ...res.arquivo, url: null }, ...prev])
+        setUsado(res.usado_bytes)
       }
       router.refresh()
     } catch {
@@ -247,27 +236,38 @@ export default function RepositorioClient({
                 {/* Metadata + ações */}
                 <div className="p-2.5 flex-1 flex flex-col gap-1">
                   {renomeandoId === a.id ? (
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="text"
-                        value={baseEditado}
-                        autoFocus
-                        maxLength={100}
-                        onChange={(e) => setBaseEditado(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleRenomear(a)
-                          if (e.key === 'Escape') setRenomeandoId(null)
-                        }}
-                        className="min-w-0 flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
-                      />
-                      <span className="text-gray-400 text-xs select-none shrink-0">{ext}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleRenomear(a)}
-                        className="text-xs text-[#1D9E75] hover:text-[#178761] font-medium shrink-0"
-                      >
-                        Salvar
-                      </button>
+                    <div className="flex flex-col gap-2 py-1">
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={baseEditado}
+                          autoFocus
+                          maxLength={100}
+                          onChange={(e) => setBaseEditado(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleRenomear(a)
+                            if (e.key === 'Escape') setRenomeandoId(null)
+                          }}
+                          className="min-w-0 flex-1 px-2.5 py-1.5 border border-gray-300 rounded-md text-xs focus:outline-none focus:border-[#1D9E75]"
+                        />
+                        <span className="text-gray-400 text-xs select-none shrink-0">{ext}</span>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <button
+                          type="button"
+                          onClick={() => handleRenomear(a)}
+                          className="text-xs text-[#1D9E75] hover:text-[#178761] font-medium"
+                        >
+                          Salvar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRenomeandoId(null)}
+                          className="text-xs text-gray-500 hover:text-gray-800"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <>
