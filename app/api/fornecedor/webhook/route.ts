@@ -348,6 +348,13 @@ async function tratarRespostaCliente(
 
   if (!pedido) return NextResponse.json({ ok: true })
 
+  console.warn(
+    '[LEGACY] Recebida resposta 1/2/3 do cliente em',
+    new Date().toISOString(),
+    '— fluxo legado mantido durante transição pro painel. Pedido:',
+    followup.pedido_id,
+  )
+
   const opcao = texto.trim()
 
   if (opcao === '1') {
