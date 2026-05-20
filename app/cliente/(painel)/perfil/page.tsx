@@ -4,7 +4,6 @@
 // Email é read-only (chave da conta). Nome e WhatsApp são editáveis.
 // ============================================================================
 
-import Link from 'next/link'
 import { getContaAtual } from '@/app/lib/cliente-auth'
 import PerfilForm from './PerfilForm'
 
@@ -23,15 +22,6 @@ export default async function PerfilPage({
 
   return (
     <section className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      {!modoCompletar && (
-        <Link
-          href="/cliente/painel"
-          className="text-sm text-gray-600 hover:text-gray-900 inline-block mb-4 transition-colors"
-        >
-          ← Voltar
-        </Link>
-      )}
-
       <h2 className="text-lg font-semibold text-gray-900 mb-4">Perfil</h2>
 
       {modoCompletar && (
