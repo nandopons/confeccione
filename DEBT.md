@@ -27,3 +27,18 @@ Todo fornecedor que algum dia recebeu um link de compartilhamento de um cliente 
 Decisão de produto do Fernando, **fora desta sprint**. Não tocar sem essa decisão.
 
 ---
+
+## ⚪ Tokens de cor de texto — sem hierarquia (design system)
+
+**Descoberto em:** Sprint "UX pós-aceite" (Item 4), 2026-05-20.
+
+### O quê
+Não existe token/variável de "texto secundário/muted". O projeto (Tailwind v4) só define `--color-background` e `--color-foreground` no `globals.css`. As cores de texto são utilitárias cruas espalhadas inline: ~26 arquivos com `text-gray-400`, ~39 com `text-gray-500`, ~34 com `text-gray-600`.
+
+### Por que importa
+Ajustes de contraste/acessibilidade viram caça pontual arquivo por arquivo (foi o caso do Item 4, resolvido só em `/cliente/login`). Sem hierarquia, é fácil reintroduzir cinzas que reprovam WCAG AA e gerar inconsistência.
+
+### Como revisitar
+Sprint própria: definir hierarquia (`text-primary` / `text-secondary` / `text-muted`), fixar o contraste AA de cada nível, e migrar os ~90 usos de uma vez.
+
+---
