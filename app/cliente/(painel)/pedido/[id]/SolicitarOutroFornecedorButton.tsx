@@ -150,7 +150,7 @@ export default function SolicitarOutroFornecedorButton({
                     rows={3}
                     placeholder="Ajuda a gente a melhorar..."
                     disabled={enviando}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm resize-none disabled:opacity-50"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm resize-none disabled:opacity-50 placeholder:text-gray-400 placeholder:font-normal"
                   />
                   <div className="text-xs text-gray-400 text-right mt-1">
                     {motivo.length}/500
