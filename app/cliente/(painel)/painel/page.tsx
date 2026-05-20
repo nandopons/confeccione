@@ -7,7 +7,8 @@
 import Link from 'next/link'
 import { getContaAtual } from '@/app/lib/cliente-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
-import { tipoLabel } from '@/app/lib/ofertas-labels'
+import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
+import { corStatus, labelStatus } from '@/app/lib/cliente-status'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,23 +17,10 @@ type PedidoLinha = {
   tipo: string
   quantidade: number | null
   estado: string | null
+  prazo: string | null
   status: string
   criado_em: string
   fornecedor_aceito_id: string | null
-}
-
-const STATUS_LABEL: Record<string, { label: string; cor: string }> = {
-  novo: { label: 'Novo', cor: 'bg-gray-100 text-gray-700' },
-  buscando_fornecedor: {
-    label: 'Buscando fornecedor',
-    cor: 'bg-blue-100 text-blue-800',
-  },
-  aguardando_contato: {
-    label: 'Fornecedor encontrado',
-    cor: 'bg-green-100 text-green-800',
-  },
-  finalizado: { label: 'Finalizado', cor: 'bg-emerald-100 text-emerald-800' },
-  orfao: { label: 'Sem fornecedor', cor: 'bg-orange-100 text-orange-800' },
 }
 
 export default async function PainelClientePage() {
@@ -45,7 +33,9 @@ export default async function PainelClientePage() {
 
   const { data: pedidosRaw } = await supabaseAdmin
     .from('pedidos')
-    .select('id, tipo, quantidade, estado, status, criado_em, fornecedor_aceito_id')
+    .select(
+      'id, tipo, quantidade, estado, prazo, status, criado_em, fornecedor_aceito_id',
+    )
     .eq('conta_id', conta.id)
     .order('criado_em', { ascending: false })
 
@@ -90,21 +80,17 @@ export default async function PainelClientePage() {
 
 function LinhaPedido({ pedido }: { pedido: PedidoLinha }) {
   const tipo = tipoLabel[pedido.tipo] ?? pedido.tipo
-  const statusInfo =
-    STATUS_LABEL[pedido.status] ?? {
-      label: pedido.status,
-      cor: 'bg-gray-100 text-gray-500',
-    }
-  const data = new Date(pedido.criado_em).toLocaleDateString('pt-BR')
+  const prazo = pedido.prazo ? (prazoLabel[pedido.prazo] ?? pedido.prazo) : null
+  const dataHora = formatarDataHora(pedido.criado_em)
 
   return (
     <li>
       <Link
         href={`/cliente/pedido/${pedido.id}`}
-        className="block bg-white border border-gray-200 rounded-2xl p-4 hover:border-gray-300 transition-colors"
+        className="block bg-white border border-gray-200 rounded-2xl p-4 hover:border-gray-300 transition-colors group"
       >
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-gray-900 font-medium">{tipo}</span>
               {pedido.quantidade !== null && (
@@ -115,16 +101,39 @@ function LinhaPedido({ pedido }: { pedido: PedidoLinha }) {
               {pedido.estado && (
                 <span className="text-gray-500 text-sm">· {pedido.estado}</span>
               )}
+              {prazo && (
+                <span className="text-gray-500 text-sm">· Prazo: {prazo}</span>
+              )}
             </div>
-            <div className="text-xs text-gray-500 mt-1">Criado em {data}</div>
+            <div className="text-xs text-gray-500 mt-1">
+              Criado em {dataHora}
+            </div>
           </div>
-          <span
-            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${statusInfo.cor}`}
-          >
-            {statusInfo.label}
-          </span>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span
+              className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${corStatus(pedido.status)}`}
+            >
+              {labelStatus(pedido.status)}
+            </span>
+            <span
+              aria-hidden="true"
+              className="text-gray-400 group-hover:text-gray-600 transition-colors text-lg leading-none"
+            >
+              ›
+            </span>
+          </div>
         </div>
       </Link>
     </li>
   )
+}
+
+function formatarDataHora(iso: string): string {
+  const d = new Date(iso)
+  const dia = String(d.getDate()).padStart(2, '0')
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const ano = d.getFullYear()
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${dia}/${mes}/${ano} às ${hh}:${mm}`
 }

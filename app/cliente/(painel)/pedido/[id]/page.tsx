@@ -10,24 +10,11 @@ import { notFound } from 'next/navigation'
 import { getContaAtual } from '@/app/lib/cliente-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
+import { corStatus, labelStatus } from '@/app/lib/cliente-status'
 import { formatarWhatsappBR } from '@/app/lib/format'
 import { linkWhatsApp } from '@/app/lib/phone'
 
 export const dynamic = 'force-dynamic'
-
-const STATUS_LABEL: Record<string, { label: string; cor: string }> = {
-  novo: { label: 'Novo', cor: 'bg-gray-100 text-gray-700' },
-  buscando_fornecedor: {
-    label: 'Buscando fornecedor',
-    cor: 'bg-blue-100 text-blue-800',
-  },
-  aguardando_contato: {
-    label: 'Fornecedor encontrado',
-    cor: 'bg-green-100 text-green-800',
-  },
-  finalizado: { label: 'Finalizado', cor: 'bg-emerald-100 text-emerald-800' },
-  orfao: { label: 'Sem fornecedor', cor: 'bg-orange-100 text-orange-800' },
-}
 
 type PedidoDetalhe = {
   id: string
@@ -90,14 +77,12 @@ export default async function PedidoDetalhePage({
 
   const tipo = tipoLabel[pedido.tipo] ?? pedido.tipo
   const prazo = pedido.prazo ? (prazoLabel[pedido.prazo] ?? pedido.prazo) : null
-  const statusInfo =
-    STATUS_LABEL[pedido.status] ?? {
-      label: pedido.status,
-      cor: 'bg-gray-100 text-gray-500',
-    }
-  const criado = new Date(pedido.criado_em).toLocaleDateString('pt-BR')
+  const criado = formatarDataHora(pedido.criado_em)
 
   const aceito = pedido.fornecedor_aceito_id && pedido.fornecedor_aceito
+  const ofertaAceita = ofertas.find((o) => o.status === 'aceita')
+  const semFornecedor =
+    pedido.status === 'expirado_sem_resposta' || pedido.status === 'orfao'
 
   return (
     <section className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -112,12 +97,14 @@ export default async function PedidoDetalhePage({
         <div className="flex items-start justify-between gap-3 mb-3">
           <div>
             <h1 className="text-xl font-semibold text-gray-900">{tipo}</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Criado em {criado}</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Criado em {criado}
+            </p>
           </div>
           <span
-            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${statusInfo.cor}`}
+            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${corStatus(pedido.status)}`}
           >
-            {statusInfo.label}
+            {labelStatus(pedido.status)}
           </span>
         </div>
 
@@ -172,7 +159,7 @@ export default async function PedidoDetalhePage({
         </div>
       )}
 
-      {pedido.status === 'orfao' && (
+      {semFornecedor && (
         <div className="bg-orange-50 border border-orange-200 rounded-2xl p-5 mb-6">
           <div className="text-orange-900 font-medium text-sm mb-1">
             Estamos com dificuldade em encontrar fornecedor
@@ -185,46 +172,88 @@ export default async function PedidoDetalhePage({
         </div>
       )}
 
-      {/* Timeline */}
-      {ofertas.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-2xl p-5">
-          <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
-            Histórico
-          </h3>
-          <ul className="space-y-2 text-sm">
-            <li className="flex gap-3">
-              <span className="text-gray-400 min-w-[80px]">{criado}</span>
-              <span>Pedido criado</span>
-            </li>
-            {ofertas.map((o) => {
-              const d = new Date(o.enviada_em).toLocaleDateString('pt-BR')
-              return (
-                <li key={o.id} className="flex gap-3">
-                  <span className="text-gray-400 min-w-[80px]">{d}</span>
-                  <span>
-                    {statusOfertaTxt(o.status)}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-      )}
+      {/* Acompanhamento — sempre visível, condicional os passos */}
+      <div className="bg-white border border-gray-200 rounded-2xl p-5">
+        <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
+          Acompanhamento
+        </h3>
+        <ol className="relative border-l border-gray-200 pl-4 space-y-4 text-sm">
+          {/* Sempre: pedido criado */}
+          <PassoTimeline icone="✅" texto="Pedido criado" detalhe={criado} />
+
+          {/* Se tem ofertas enviadas */}
+          {ofertas.length > 0 && (
+            <PassoTimeline
+              icone="📤"
+              texto={`${ofertas.length} ${ofertas.length === 1 ? 'oferta enviada' : 'ofertas enviadas'} a fornecedores`}
+            />
+          )}
+
+          {/* Se aceito */}
+          {aceito && pedido.fornecedor_aceito && (
+            <PassoTimeline
+              icone="✅"
+              texto={`Fornecedor ${pedido.fornecedor_aceito.nome ?? 'parceiro'} aceitou`}
+              detalhe={
+                ofertaAceita?.respondida_em
+                  ? formatarDataHora(ofertaAceita.respondida_em)
+                  : undefined
+              }
+            />
+          )}
+
+          {/* Se órfão */}
+          {semFornecedor && (
+            <PassoTimeline
+              icone="⚠️"
+              texto="Não encontramos fornecedor disponível"
+            />
+          )}
+
+          {/* Se buscando e ainda sem ofertas */}
+          {pedido.status === 'buscando_fornecedor' && ofertas.length === 0 && (
+            <PassoTimeline
+              icone="⏳"
+              texto="Procurando fornecedores compatíveis..."
+            />
+          )}
+        </ol>
+      </div>
     </section>
   )
 }
 
-function statusOfertaTxt(status: string): string {
-  switch (status) {
-    case 'enviada':
-      return 'Oferta enviada pra um fornecedor compatível'
-    case 'aceita':
-      return 'Fornecedor aceitou seu pedido'
-    case 'recusada':
-      return 'Fornecedor recusou — buscando outro'
-    case 'expirada':
-      return 'Fornecedor não respondeu a tempo — buscando outro'
-    default:
-      return `Oferta ${status}`
-  }
+function PassoTimeline({
+  icone,
+  texto,
+  detalhe,
+}: {
+  icone: string
+  texto: string
+  detalhe?: string
+}) {
+  return (
+    <li className="relative">
+      <span
+        aria-hidden="true"
+        className="absolute -left-[26px] top-0 flex items-center justify-center w-5 h-5 bg-white rounded-full text-sm"
+      >
+        {icone}
+      </span>
+      <div className="text-gray-900">{texto}</div>
+      {detalhe && (
+        <div className="text-xs text-gray-500 mt-0.5">{detalhe}</div>
+      )}
+    </li>
+  )
+}
+
+function formatarDataHora(iso: string): string {
+  const d = new Date(iso)
+  const dia = String(d.getDate()).padStart(2, '0')
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const ano = d.getFullYear()
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  return `${dia}/${mes}/${ano} às ${hh}:${mm}`
 }

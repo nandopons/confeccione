@@ -24,7 +24,7 @@ export default function LogoutButton() {
       type="button"
       onClick={handleClick}
       disabled={loading}
-      className="text-sm text-gray-600 hover:text-gray-900 underline disabled:opacity-50"
+      className="text-sm text-gray-600 hover:text-gray-900 transition-colors disabled:opacity-50"
     >
       {loading ? 'Saindo…' : 'Sair'}
     </button>

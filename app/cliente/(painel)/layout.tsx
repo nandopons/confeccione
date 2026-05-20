@@ -19,7 +19,8 @@ export default async function ClientePainelLayout({
     redirect('/cliente/login')
   }
 
-  const nomeExibido = conta.nome ?? conta.email
+  // Saudação: usa nome se tiver, senão a parte antes do @ do email
+  const nomeExibido = conta.nome ?? conta.email.split('@')[0]
 
   return (
     <div className="min-h-screen bg-gray-50">
