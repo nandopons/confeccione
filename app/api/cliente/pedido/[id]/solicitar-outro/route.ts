@@ -93,7 +93,7 @@ export async function POST(
   if ((trocas ?? 0) >= LIMITE_TROCAS_FREE) {
     return NextResponse.json(
       {
-        erro: `Você já trocou de fornecedor ${LIMITE_TROCAS_FREE} vezes neste pedido. Plano Free permite até ${LIMITE_TROCAS_FREE} trocas.`,
+        erro: 'Limite de trocas do plano atual atingido.',
         trocas_realizadas: trocas,
         limite: LIMITE_TROCAS_FREE,
       },

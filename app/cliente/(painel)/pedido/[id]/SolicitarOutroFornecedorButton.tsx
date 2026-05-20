@@ -34,8 +34,6 @@ export default function SolicitarOutroFornecedorButton({
   const [erro, setErro] = useState<string | null>(null)
   const [sucesso, setSucesso] = useState(false)
 
-  const trocasRestantes = limiteTrocas - trocasRealizadas
-
   // ESC fecha
   useEffect(() => {
     if (!aberto) return
@@ -80,8 +78,8 @@ export default function SolicitarOutroFornecedorButton({
   if (!podeTrocar) {
     return (
       <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-md text-xs text-gray-600">
-        Você já trocou de fornecedor {trocasRealizadas} vezes neste pedido
-        (limite do plano Free).
+        Trocas usadas: <strong>{trocasRealizadas} de {limiteTrocas}</strong> no
+        plano atual.
       </div>
     )
   }
@@ -133,21 +131,12 @@ export default function SolicitarOutroFornecedorButton({
                 </h2>
                 <p className="text-sm text-gray-600 mb-4 leading-relaxed">
                   Vamos buscar outro fornecedor compatível com seu pedido. O
-                  fornecedor atual deixa de receber atualizações deste pedido.
-                  {trocasRestantes - 1 > 0 ? (
-                    <>
-                      {' '}
-                      Você ainda pode trocar mais{' '}
-                      <strong>{trocasRestantes - 1}</strong>{' '}
-                      {trocasRestantes - 1 === 1 ? 'vez' : 'vezes'}.
-                    </>
-                  ) : (
-                    <>
-                      {' '}
-                      Esta é a sua <strong>última</strong> troca disponível
-                      neste pedido.
-                    </>
-                  )}
+                  fornecedor atual deixa de receber atualizações deste pedido.{' '}
+                  Trocas restantes neste pedido:{' '}
+                  <strong>
+                    {limiteTrocas - trocasRealizadas} de {limiteTrocas}
+                  </strong>{' '}
+                  (plano atual).
                 </p>
 
                 <label className="block mb-4">
