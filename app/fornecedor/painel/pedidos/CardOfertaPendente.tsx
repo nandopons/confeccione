@@ -127,12 +127,7 @@ export default function CardOfertaPendente({ oferta }: Props) {
             linkLabel="Abrir conversa"
           />
           {estado.cliente.email && (
-            <Linha
-              rotulo="E-mail"
-              valor={estado.cliente.email}
-              link={`mailto:${estado.cliente.email}`}
-              linkLabel="Enviar e-mail"
-            />
+            <Linha rotulo="E-mail" valor={estado.cliente.email} />
           )}
         </div>
 

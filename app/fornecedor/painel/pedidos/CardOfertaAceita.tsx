@@ -63,12 +63,7 @@ export default function CardOfertaAceita({ oferta }: Props) {
           />
 
           {oferta.cliente_email && (
-            <Linha
-              rotulo="E-mail"
-              valor={oferta.cliente_email}
-              link={`mailto:${oferta.cliente_email}`}
-              linkLabel="Enviar e-mail"
-            />
+            <Linha rotulo="E-mail" valor={oferta.cliente_email} />
           )}
         </div>
       ) : (
