@@ -278,6 +278,13 @@ export default function RepositorioClient({
                         {formatarTamanho(a.tamanho_bytes)}
                       </div>
                       <div className="flex items-center gap-3 mt-0.5">
+                        <a
+                          href={`/api/cliente/arquivos/${a.id}/download`}
+                          download={a.display_name}
+                          className="text-[11px] text-gray-500 hover:text-gray-800"
+                        >
+                          Baixar
+                        </a>
                         <button
                           type="button"
                           onClick={() => iniciarRenomear(a)}
