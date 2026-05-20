@@ -280,8 +280,8 @@ export default function NovoPedidoForm({ nomeExibido, email }: Props) {
             </div>
           </div>
 
-          <div className="bg-gray-50 rounded-md p-3 mt-3 text-xs text-gray-500">
-            Em nome de <strong className="text-gray-700">{nomeExibido}</strong> · {email}
+          <div className="bg-gray-50 rounded-md p-3 mt-3 text-xs text-gray-600">
+            Em nome de <strong className="text-gray-800">{nomeExibido}</strong> · {email}
           </div>
 
           {erro && (

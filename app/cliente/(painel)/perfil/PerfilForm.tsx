@@ -69,7 +69,7 @@ export default function PerfilForm({
           type="email"
           value={email}
           readOnly
-          className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm bg-gray-50 text-gray-600"
+          className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm bg-gray-50 text-gray-700"
         />
         <p className="text-xs text-gray-500 mt-1">
           O e-mail identifica sua conta e não pode ser alterado.

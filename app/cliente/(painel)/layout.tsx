@@ -31,7 +31,7 @@ export default async function ClientePainelLayout({
             <h1 className="text-xl font-semibold text-gray-900">
               Confeccione
             </h1>
-            <p className="text-xs text-gray-500">Olá, {nomeExibido}</p>
+            <p className="text-xs text-gray-600">Olá, {nomeExibido}</p>
           </div>
           <div className="flex items-center gap-4">
             <Link
