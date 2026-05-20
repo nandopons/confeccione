@@ -62,7 +62,13 @@ function isActive(pathname: string | null, href: string): boolean {
   return pathname.startsWith(href);
 }
 
-export default function PainelNavCliente({ nomeCliente }: { nomeCliente: string }) {
+export default function PainelNavCliente({
+  nomeCliente,
+  plano,
+}: {
+  nomeCliente: string;
+  plano: string;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const [saindo, setSaindo] = useState(false);
@@ -101,6 +107,14 @@ export default function PainelNavCliente({ nomeCliente }: { nomeCliente: string 
           <div className="text-sm text-gray-900 font-medium truncate" title={nomeCliente}>
             {nomeCliente}
           </div>
+          <Link
+            href="/cliente/perfil"
+            title="Ver plano"
+            aria-label={`Plano ${plano} — ver no perfil`}
+            className="inline-block mt-2 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs font-medium capitalize hover:bg-gray-200 transition-colors"
+          >
+            {plano}
+          </Link>
         </div>
 
         <nav className="flex-1 flex flex-col gap-1">
