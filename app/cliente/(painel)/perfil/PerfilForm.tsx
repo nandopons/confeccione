@@ -4,6 +4,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+type Modo = 'leitura' | 'edicao'
+
 export default function PerfilForm({
   email,
   nomeInicial,
@@ -23,6 +25,8 @@ export default function PerfilForm({
     tipo: 'sucesso' | 'erro'
     texto: string
   } | null>(null)
+  // Onboarding (completar) entra direto em edição; fora dele, começa em leitura.
+  const [modo, setModo] = useState<Modo>(completar ? 'edicao' : 'leitura')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -50,6 +54,8 @@ export default function PerfilForm({
         return
       }
       setMsg({ tipo: 'sucesso', texto: 'Perfil salvo!' })
+      // Volta pra leitura mostrando os valores salvos (estão no state).
+      setModo('leitura')
       // refresh server component (layout vai re-renderizar saudação)
       router.refresh()
     } catch {
@@ -59,6 +65,43 @@ export default function PerfilForm({
     }
   }
 
+  function cancelarEdicao() {
+    // Descarta mudanças não salvas e volta pra leitura.
+    setNome(nomeInicial)
+    setWhatsapp(formatarMascaraBR(whatsappInicial))
+    setMsg(null)
+    setModo('leitura')
+  }
+
+  // ===================== MODO LEITURA =====================
+  if (modo === 'leitura') {
+    return (
+      <div className="flex flex-col gap-4">
+        <CampoLeitura rotulo="E-mail" valor={email} />
+        <CampoLeitura rotulo="Nome" valor={nome} />
+        <CampoLeitura rotulo="WhatsApp" valor={whatsapp} />
+
+        {msg && msg.tipo === 'sucesso' && (
+          <div className="rounded-md p-3 text-sm border border-green-200 bg-green-50 text-green-800">
+            {msg.texto}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => {
+            setMsg(null)
+            setModo('edicao')
+          }}
+          className="self-start px-4 py-2 rounded-md border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition-colors"
+        >
+          Editar
+        </button>
+      </div>
+    )
+  }
+
+  // ===================== MODO EDIÇÃO =====================
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <label className="block">
@@ -120,14 +163,43 @@ export default function PerfilForm({
         </div>
       )}
 
-      <button
-        type="submit"
-        disabled={salvando}
-        className="w-full py-2.5 rounded-md bg-[#1D9E75] text-white text-sm font-medium hover:bg-[#178761] disabled:opacity-50"
-      >
-        {salvando ? 'Salvando…' : 'Salvar'}
-      </button>
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={salvando}
+          className="flex-1 py-2.5 rounded-md bg-[#1D9E75] text-white text-sm font-medium hover:bg-[#178761] disabled:opacity-50"
+        >
+          {salvando ? 'Salvando…' : 'Salvar'}
+        </button>
+        {!completar && (
+          <button
+            type="button"
+            onClick={cancelarEdicao}
+            disabled={salvando}
+            className="px-4 py-2.5 rounded-md border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            Cancelar
+          </button>
+        )}
+      </div>
     </form>
+  )
+}
+
+// Linha de dado em modo leitura. Vazio → "Não informado" discreto.
+function CampoLeitura({ rotulo, valor }: { rotulo: string; valor: string }) {
+  const vazio = valor.trim().length === 0
+  return (
+    <div>
+      <span className="text-sm font-medium text-gray-700 block mb-1">
+        {rotulo}
+      </span>
+      <p
+        className={`text-sm ${vazio ? 'text-gray-500 italic' : 'text-gray-900'}`}
+      >
+        {vazio ? 'Não informado' : valor}
+      </p>
+    </div>
   )
 }
 
