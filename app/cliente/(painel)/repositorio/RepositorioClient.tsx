@@ -1,12 +1,21 @@
 // app/cliente/(painel)/repositorio/RepositorioClient.tsx
 // ============================================================================
-// Interação do repositório: upload (sequencial, valida quota no servidor),
-// renomear inline e excluir. Barra de quota no topo. Client Component.
+// Interação do repositório: upload, renomear (preservando extensão), excluir.
+// Lista em grade com preview de imagens (~120px) + modal grande ao clicar.
+// Arquivos não-imagem mostram um ícone com a extensão.
 // ============================================================================
 
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import {
+  ehImagem,
+  extensaoLabel,
+  formatarTamanho,
+  reunirNome,
+  splitExtensao,
+} from '@/app/lib/arquivos-format'
 
 type Arquivo = {
   id: string
@@ -14,6 +23,7 @@ type Arquivo = {
   mime_type: string | null
   tamanho_bytes: number
   criado_em: string
+  url: string | null
 }
 
 type Props = {
@@ -27,15 +37,27 @@ export default function RepositorioClient({
   usadoInicial,
   quotaBytes,
 }: Props) {
+  const router = useRouter()
   const [arquivos, setArquivos] = useState<Arquivo[]>(arquivosIniciais)
   const [usado, setUsado] = useState(usadoInicial)
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const [renomeandoId, setRenomeandoId] = useState<string | null>(null)
-  const [novoNome, setNovoNome] = useState('')
+  const [baseEditado, setBaseEditado] = useState('')
+  const [modalUrl, setModalUrl] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const pct = Math.min(100, Math.round((usado / quotaBytes) * 100))
+
+  // Esc fecha o modal de imagem
+  useEffect(() => {
+    if (!modalUrl) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setModalUrl(null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [modalUrl])
 
   async function handleArquivos(files: FileList | null) {
     if (!files || files.length === 0) return
@@ -60,9 +82,12 @@ export default function RepositorioClient({
           )
           break
         }
-        setArquivos((prev) => [j.arquivo, ...prev])
+        // url só é gerada no servidor; recém-enviado entra sem preview até o
+        // próximo carregamento (refresh abaixo re-gera no servidor).
+        setArquivos((prev) => [{ ...j.arquivo, url: null }, ...prev])
         setUsado(j.usado_bytes)
       }
+      router.refresh()
     } catch {
       setErro('Erro de conexão. Tente novamente.')
     } finally {
@@ -71,19 +96,26 @@ export default function RepositorioClient({
     }
   }
 
-  async function handleRenomear(id: string) {
-    const nome = novoNome.trim()
-    if (nome.length === 0) {
+  function iniciarRenomear(a: Arquivo) {
+    setErro(null)
+    setRenomeandoId(a.id)
+    setBaseEditado(splitExtensao(a.display_name).base)
+  }
+
+  async function handleRenomear(a: Arquivo) {
+    const { ext } = splitExtensao(a.display_name)
+    const novoDisplay = reunirNome(baseEditado, ext)
+    if (novoDisplay.trim().length === 0 || baseEditado.trim().length === 0) {
       setRenomeandoId(null)
       return
     }
     setErro(null)
     try {
-      const r = await fetch(`/api/cliente/arquivos/${id}`, {
+      const r = await fetch(`/api/cliente/arquivos/${a.id}`, {
         method: 'PATCH',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ display_name: nome }),
+        body: JSON.stringify({ display_name: novoDisplay }),
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) {
@@ -91,7 +123,7 @@ export default function RepositorioClient({
         return
       }
       setArquivos((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, display_name: j.arquivo.display_name } : a)),
+        prev.map((x) => (x.id === a.id ? { ...x, display_name: j.arquivo.display_name } : x)),
       )
       setRenomeandoId(null)
     } catch {
@@ -177,82 +209,122 @@ export default function RepositorioClient({
           </p>
         </div>
       ) : (
-        <ul className="space-y-2">
-          {arquivos.map((a) => (
-            <li
-              key={a.id}
-              className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3"
-            >
-              <span className="text-2xl shrink-0" aria-hidden="true">
-                {(a.mime_type ?? '').startsWith('image/') ? '🖼️' : '📄'}
-              </span>
-
-              <div className="min-w-0 flex-1">
-                {renomeandoId === a.id ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={novoNome}
-                      autoFocus
-                      maxLength={200}
-                      onChange={(e) => setNovoNome(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleRenomear(a.id)
-                        if (e.key === 'Escape') setRenomeandoId(null)
-                      }}
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {arquivos.map((a) => {
+            const imagem = ehImagem(a.display_name)
+            const { ext } = splitExtensao(a.display_name)
+            return (
+              <div
+                key={a.id}
+                className="bg-white border border-gray-200 rounded-xl overflow-hidden flex flex-col"
+              >
+                {/* Preview */}
+                {imagem && a.url ? (
+                  <button
+                    type="button"
+                    onClick={() => setModalUrl(a.url)}
+                    className="block h-[120px] w-full bg-gray-100"
+                    title="Ver maior"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={a.url}
+                      alt={a.display_name}
+                      className="h-[120px] w-full object-cover"
                     />
-                    <button
-                      type="button"
-                      onClick={() => handleRenomear(a.id)}
-                      className="text-sm text-[#1D9E75] hover:text-[#178761] font-medium"
-                    >
-                      Salvar
-                    </button>
-                  </div>
+                  </button>
                 ) : (
-                  <>
-                    <div className="text-sm text-gray-900 truncate" title={a.display_name}>
-                      {a.display_name}
-                    </div>
-                    <div className="text-xs text-gray-500">
-                      {formatarTamanho(a.tamanho_bytes)}
-                    </div>
-                  </>
+                  <div className="h-[120px] w-full bg-gray-50 flex flex-col items-center justify-center gap-1">
+                    <span className="text-3xl" aria-hidden="true">
+                      {imagem ? '🖼️' : '📄'}
+                    </span>
+                    <span className="text-[10px] font-semibold tracking-wide text-gray-400">
+                      {imagem ? 'PRÉVIA AO RECARREGAR' : extensaoLabel(a.display_name)}
+                    </span>
+                  </div>
                 )}
-              </div>
 
-              {renomeandoId !== a.id && (
-                <div className="flex items-center gap-3 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRenomeandoId(a.id)
-                      setNovoNome(a.display_name)
-                    }}
-                    className="text-xs text-gray-500 hover:text-gray-800"
-                  >
-                    Renomear
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleExcluir(a)}
-                    className="text-xs text-red-600 hover:text-red-800"
-                  >
-                    Excluir
-                  </button>
+                {/* Metadata + ações */}
+                <div className="p-2.5 flex-1 flex flex-col gap-1">
+                  {renomeandoId === a.id ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={baseEditado}
+                        autoFocus
+                        maxLength={100}
+                        onChange={(e) => setBaseEditado(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleRenomear(a)
+                          if (e.key === 'Escape') setRenomeandoId(null)
+                        }}
+                        className="min-w-0 flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
+                      />
+                      <span className="text-gray-400 text-xs select-none shrink-0">{ext}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRenomear(a)}
+                        className="text-xs text-[#1D9E75] hover:text-[#178761] font-medium shrink-0"
+                      >
+                        Salvar
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="text-xs text-gray-900 truncate" title={a.display_name}>
+                        {a.display_name}
+                      </div>
+                      <div className="text-[11px] text-gray-400">
+                        {formatarTamanho(a.tamanho_bytes)}
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => iniciarRenomear(a)}
+                          className="text-[11px] text-gray-500 hover:text-gray-800"
+                        >
+                          Renomear
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleExcluir(a)}
+                          className="text-[11px] text-red-600 hover:text-red-800"
+                        >
+                          Excluir
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
-              )}
-            </li>
-          ))}
-        </ul>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Modal de imagem grande */}
+      {modalUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70"
+          onClick={() => setModalUrl(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setModalUrl(null)}
+            aria-label="Fechar"
+            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/90 text-gray-800 text-xl flex items-center justify-center hover:bg-white"
+          >
+            ×
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={modalUrl}
+            alt="Visualização"
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-[90vw] max-h-[80vh] object-contain rounded-lg shadow-2xl"
+          />
+        </div>
       )}
     </div>
   )
-}
-
-function formatarTamanho(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
