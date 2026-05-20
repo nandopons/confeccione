@@ -371,6 +371,18 @@ export default function Home() {
               <h3 className="text-gray-900 text-lg font-medium mb-2">Pedido enviado!</h3>
               <p className="text-gray-400 text-sm max-w-xs mx-auto mb-5 leading-relaxed">Os fornecedores ideais para o seu pedido já estão sendo notificados. Você receberá orçamentos em até <strong>24 horas</strong> pelo WhatsApp.</p>
               <div className="bg-[#E1F5EE] text-[#0F6E56] font-medium text-sm px-6 py-3 rounded-xl inline-block mb-4">Número do pedido: #CF-{protocolo}</div>
+
+              <div className="mt-6 bg-gray-50 border border-gray-200 rounded-2xl p-5 max-w-sm mx-auto">
+                <p className="text-sm text-gray-700 mb-3">
+                  ✨ Acompanhe seu pedido em tempo real e organize tudo num só lugar
+                </p>
+                <a
+                  href={`/cliente/login?email=${encodeURIComponent(email)}`}
+                  className="inline-block px-5 py-2.5 rounded-md bg-[#1D9E75] text-white text-sm font-medium hover:bg-[#178761]"
+                >
+                  Criar conta grátis →
+                </a>
+              </div>
             </div>
           )}
         </div>
