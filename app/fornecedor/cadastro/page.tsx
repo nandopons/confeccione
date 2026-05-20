@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
+import SelectModal from "@/app/components/SelectModal";
 import { formatarCpfCnpj, validarCpfCnpj, apenasDigitos } from "@/app/lib/cpf-cnpj";
 
 const tiposProdutoPrincipais = [
@@ -249,10 +250,14 @@ export default function CadastroFornecedor() {
               <div className="grid grid-cols-2 gap-4 mb-5">
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">Estado (UF) <span className="text-red-400">*</span></label>
-                  <select value={estado} onChange={e => setEstado(e.target.value)} className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]">
-                    <option value="">Selecione...</option>
-                    {ufs.map(uf => <option key={uf} value={uf}>{uf}</option>)}
-                  </select>
+                  <SelectModal
+                    label="Estado (UF)"
+                    placeholder="Selecione..."
+                    value={estado}
+                    onChange={setEstado}
+                    triggerClassName="border border-gray-200 rounded-xl px-3 py-3 bg-white"
+                    options={ufs.map(uf => ({ value: uf, label: uf }))}
+                  />
                 </div>
                 <div>
                   <label className="text-xs text-gray-400 mb-1 block">Cidade (opcional)</label>
