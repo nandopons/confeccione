@@ -85,6 +85,17 @@ export default async function PedidoDetalhePage({
 
   const pedido = pedidoRaw as unknown as PedidoDetalhe
 
+  // Registra acesso ao painel (sinal de "pedido vivo", usado no follow-up).
+  // await pra garantir a escrita em serverless; erro não bloqueia o render.
+  const { error: errAcesso } = await supabaseAdmin
+    .from('pedidos')
+    .update({ ultimo_acesso_painel: new Date().toISOString() })
+    .eq('id', id)
+    .eq('conta_id', conta.id)
+  if (errAcesso) {
+    console.warn('[pedido] update ultimo_acesso_painel falhou:', errAcesso.message)
+  }
+
   // Timeline de ofertas (mínimo: data + status)
   const { data: ofertasRaw } = await supabaseAdmin
     .from('ofertas')
