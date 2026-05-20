@@ -8,11 +8,8 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
-import { listarArquivos, QUOTA_BYTES, BUCKET_ARTES } from '@/app/lib/arquivos-cliente'
-import { ehImagem } from '@/app/lib/arquivos-format'
 import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 import { corStatus, labelStatus } from '@/app/lib/cliente-status'
-import BibliotecaCard from './BibliotecaCard'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,47 +51,8 @@ export default async function PainelClientePage({
 
   const pedidos = (pedidosRaw ?? []) as PedidoLinha[]
 
-  // Resumo da biblioteca de artes pro card (últimos 5 + signed URL p/ imagens)
-  const { arquivos: artes, usadoBytes } = await listarArquivos(conta.id)
-  const ultimosArquivos = await Promise.all(
-    artes.slice(0, 5).map(async (a) => {
-      let url: string | null = null
-      if (ehImagem(a.display_name)) {
-        const { data } = await supabaseAdmin.storage
-          .from(BUCKET_ARTES)
-          .createSignedUrl(a.storage_path, 3600)
-        url = data?.signedUrl ?? null
-      }
-      return {
-        id: a.id,
-        display_name: a.display_name,
-        mime_type: a.mime_type,
-        tamanho_bytes: a.tamanho_bytes,
-        url,
-      }
-    }),
-  )
-
   return (
     <section className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      {/* Card do plano */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-5 mb-6">
-        <div className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
-          Seu plano
-        </div>
-        <div className="text-lg font-semibold text-gray-900 mt-0.5 capitalize">
-          {conta.plano}
-        </div>
-      </div>
-
-      {/* Card: Biblioteca de Artes (com upload integrado) */}
-      <BibliotecaCard
-        arquivosIniciais={ultimosArquivos}
-        totalCount={artes.length}
-        usadoInicial={usadoBytes}
-        quotaBytes={QUOTA_BYTES}
-      />
-
       {criado && (
         <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">
           Pedido recebido! Vamos buscar fornecedores compatíveis e te avisar por aqui.

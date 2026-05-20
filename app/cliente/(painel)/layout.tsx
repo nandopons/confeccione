@@ -28,7 +28,7 @@ export default async function ClientePainelLayout({
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="md:flex">
-        <PainelNavCliente nomeCliente={nomeExibido} />
+        <PainelNavCliente nomeCliente={nomeExibido} plano={conta.plano} />
 
         {/* Conteúdo principal — pb-20 no mobile pra bottom bar não cobrir */}
         <main className="flex-1 min-w-0 pb-20 md:pb-0">{children}</main>
