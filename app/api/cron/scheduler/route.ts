@@ -4,9 +4,6 @@ import { estaEmHorarioComercial, estaEmJanelaRetryPassivo } from '@/app/lib/hora
 import { criarEDispararOferta } from '@/app/lib/ofertas'
 import { enviarMensagem, whatsappAdminFornecedorExpirou } from '@/app/lib/zapi'
 import { emailAdminFornecedorExpirou } from '@/app/lib/email'
-import { tipoLabel } from '@/app/lib/ofertas-labels'
-import { painelClientePedidoUrl } from '@/app/lib/url'
-import { validarWhatsApp } from '@/app/lib/phone'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,8 +26,6 @@ export async function GET(req: Request) {
     ofertas_reenviadas: 0,
     notificacoes_expiracao: 0,
     pedidos_buscar_apos: 0,
-    followups_24h_enviados: 0,
-    followups_48h_enviados: 0,
     pedidos_expirados_sem_resposta: 0,
     trials_expirados: 0,
     pedidos_retry_passivo: 0,
@@ -173,127 +168,12 @@ export async function GET(req: Request) {
     }
   }
 
-  // ===========================================================
-  // TAREFA 3: follow-up 24h e 48h (time + painel-driven — Sprint 3.5)
-  // ===========================================================
-  // Pedidos não-terminais com fornecedor aceito. Gatilhos por TEMPO (cadência
-  // 24h → +24h) e por ACESSO AO PAINEL — NÃO dependem mais de resposta 1/2/3.
-  // ultimo_acesso_painel posterior ao follow-up anterior = pedido vivo, não
-  // escala. O status do pedido não decide mais o tipo: quem decide é quais
-  // follow-ups já foram enviados. Mantemos o filtro de status em
-  // [aguardando_contato, em_negociacao] só pra excluir terminais (concluido,
-  // expirado, pausado) e pedidos re-buscando (esses têm fornecedor_aceito_id
-  // nulo e já caem fora pelo filtro abaixo).
+  // TAREFA 3 (follow-ups 24h/48h do cliente) REMOVIDA — o cliente agora conta
+  // só com a notificação de aceite + o painel pra se autogerenciar. Sem
+  // cutucadas. (A nova regra de expiração vive na TAREFA 4, abaixo.)
+
+  // Corte de 24h: ainda usado pela TAREFA 4 (expiração) abaixo.
   const corte24h = new Date(agora.getTime() - HORAS_24).toISOString()
-
-  const { data: pedidosFollowup, error: errFollowup } = await supabase
-    .from('pedidos')
-    .select('id, nome, whatsapp, tipo, status, fornecedor_aceito_id, ultimo_acesso_painel')
-    .in('status', ['aguardando_contato', 'em_negociacao'])
-    .not('fornecedor_aceito_id', 'is', null)
-
-  if (errFollowup) {
-    resumo.erros.push(`buscar pedidos pra followup: ${errFollowup.message}`)
-  } else if (pedidosFollowup && pedidosFollowup.length > 0) {
-    for (const pedido of pedidosFollowup) {
-      // Oferta aceita mais recente (referência do 24h_inicial)
-      const { data: ofertaAceita } = await supabase
-        .from('ofertas')
-        .select('enviada_em')
-        .eq('pedido_id', pedido.id)
-        .eq('status', 'aceita')
-        .order('enviada_em', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (!ofertaAceita) continue
-
-      // Follow-ups já enviados — decide o próximo passo pela EXISTÊNCIA deles
-      const { data: fusExistentes } = await supabase
-        .from('followups')
-        .select('tipo, enviado_em')
-        .eq('pedido_id', pedido.id)
-
-      const fu24h = fusExistentes?.find((f) => f.tipo === '24h_inicial') ?? null
-      const fu48h = fusExistentes?.find((f) => f.tipo === '48h_lembrete') ?? null
-
-      let tipoEsperado: '24h_inicial' | '48h_lembrete'
-      let referenciaTempo: string
-
-      if (!fu24h) {
-        tipoEsperado = '24h_inicial'
-        referenciaTempo = ofertaAceita.enviada_em
-      } else if (!fu48h) {
-        tipoEsperado = '48h_lembrete'
-        referenciaTempo = fu24h.enviado_em
-        // Painel-driven: acessou o painel depois do 24h_inicial → vivo, não escala
-        if (
-          pedido.ultimo_acesso_painel &&
-          new Date(pedido.ultimo_acesso_painel).getTime() >=
-            new Date(fu24h.enviado_em).getTime()
-        ) {
-          continue
-        }
-      } else {
-        continue // já mandou os dois
-      }
-
-      // Passou 24h desde a referência?
-      if (new Date(referenciaTempo).getTime() > new Date(corte24h).getTime()) {
-        continue
-      }
-
-      // Insere ANTES de enviar (idempotência se o cron rodar de novo)
-      const { error: errInsert } = await supabase
-        .from('followups')
-        .insert({ pedido_id: pedido.id, tipo: tipoEsperado })
-
-      if (errInsert) {
-        resumo.erros.push(`insert followup ${pedido.id}: ${errInsert.message}`)
-        continue
-      }
-
-      // Nome do fornecedor aceito (sem dados de contato)
-      const { data: forn } = await supabase
-        .from('leads_fornecedores')
-        .select('nome')
-        .eq('id', pedido.fornecedor_aceito_id)
-        .maybeSingle()
-      const fornecedorNome = forn?.nome ?? 'o fornecedor'
-      const tipoDesc = tipoLabel[pedido.tipo] ?? pedido.tipo
-      const linkPainel = painelClientePedidoUrl(pedido.id)
-
-      const mensagem =
-        tipoEsperado === '24h_inicial'
-          ? `👋 *Confeccione — Como está seu pedido?*\n\n` +
-            `Olá *${pedido.nome}*,\n\n` +
-            `Faz 24h que conectamos você ao fornecedor *${fornecedorNome}* para o pedido de ${tipoDesc}.\n\n` +
-            `Tudo certo na negociação?\n\n` +
-            `Você pode acompanhar tudo e gerenciar este pedido pelo seu painel — inclusive solicitar outro fornecedor se necessário:\n\n` +
-            `🔗 ${linkPainel}\n\n` +
-            `— Confeccione`
-          : `👋 *Confeccione — Última chance de salvar este pedido*\n\n` +
-            `Olá *${pedido.nome}*,\n\n` +
-            `Já faz 48h e não tivemos retorno. Sem nenhuma ação sua nas próximas horas, vamos marcar este pedido como expirado.\n\n` +
-            `Pra mantê-lo ativo, acesse o painel e nos diga o que está acontecendo — pode solicitar outro fornecedor, perguntar pelo suporte, ou só clicar pra confirmar que segue em andamento:\n\n` +
-            `🔗 ${linkPainel}\n\n` +
-            `— Confeccione`
-
-      // Só dispara Z-API com whatsapp válido (failure-soft)
-      if (pedido.whatsapp && validarWhatsApp(pedido.whatsapp)) {
-        try {
-          await enviarMensagem(pedido.whatsapp, mensagem)
-        } catch (err) {
-          resumo.erros.push(
-            `envio followup ${pedido.id}: ${err instanceof Error ? err.message : String(err)}`
-          )
-        }
-      }
-
-      if (tipoEsperado === '24h_inicial') resumo.followups_24h_enviados += 1
-      else resumo.followups_48h_enviados += 1
-    }
-  }
 
   // ===========================================================
   // TAREFA 4: expirar pedidos sem ação após o lembrete 48h (Sprint 3.5)

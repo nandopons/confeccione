@@ -42,3 +42,20 @@ Ajustes de contraste/acessibilidade viram caça pontual arquivo por arquivo (foi
 Sprint própria: definir hierarquia (`text-primary` / `text-secondary` / `text-muted`), fixar o contraste AA de cada nível, e migrar os ~90 usos de uma vez.
 
 ---
+
+## ⚪ Régua de follow-up do cliente — código/dado morto pós-redesenho
+
+**Descoberto/criado em:** Sprint "régua do cliente calma", 2026-05-21.
+
+### O quê
+Os follow-ups 24h/48h do cliente foram removidos (TAREFA 3 do scheduler) e a expiração (TAREFA 4) foi desacoplada da tabela `followups`. Com isso ficaram mortos:
+- **Tabela `followups`** — não é mais escrita por nada. Sem schema change (não dropada).
+- **ROTA 2 do webhook** (`app/api/fornecedor/webhook/route.ts`) + **`tratarRespostaCliente`** — só disparavam quando existia um `followups` sem resposta pro telefone do cliente; como nenhum é mais criado, viraram inalcançáveis. (Já estavam marcados "legacy" no histórico.)
+
+### Por que importa
+Não quebra nada: a ROTA 1 (resposta do fornecedor, SIM/NÃO) é checada **antes** e é independente; um cliente que escreve cai no `return ok` silencioso. Mas é código/dado morto que confunde e merece limpeza.
+
+### Como revisitar
+Sprint **dedicada** (mexe no webhook, que tem o fluxo do fornecedor — risco): remover ROTA 2 + `tratarRespostaCliente` e decidir dropar/arquivar a tabela `followups` (migration). **Não tocar junto com mudanças do fornecedor.**
+
+---
