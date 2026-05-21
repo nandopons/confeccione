@@ -128,7 +128,7 @@ export default function CaptacaoPage() {
       : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100')
 
   const inputCls =
-    'w-full px-3 py-2 rounded-md border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900/10'
+    'w-full px-3 py-2 rounded-md border border-gray-300 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-900/10'
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -157,7 +157,7 @@ export default function CaptacaoPage() {
           <select
             value={segmento}
             onChange={(e) => setSegmento(e.target.value)}
-            className="ml-1 px-2 py-1.5 rounded-md border border-gray-300 text-sm"
+            className="ml-1 px-2 py-1.5 rounded-md border border-gray-300 text-sm text-gray-900"
           >
             {SEGMENTOS.map((s) => (
               <option key={s.id} value={s.id}>
@@ -210,7 +210,7 @@ export default function CaptacaoPage() {
               'Uma linha por contato:\nNome, email@x.com, 5581999999999\nOutro, outro@y.com, 5581988888888'
             }
             rows={8}
-            className="w-full px-3 py-2 rounded-md border border-gray-300 text-sm font-mono"
+            className="w-full px-3 py-2 rounded-md border border-gray-300 text-sm text-gray-900 placeholder:text-gray-500 font-mono"
           />
           <p className="text-xs text-gray-500 mt-1">
             Separadores aceitos: vírgula, ponto-e-vírgula ou tab.
