@@ -25,6 +25,7 @@ import {
   tempoBloqueioRestante,
 } from '@/app/lib/cliente-auth'
 import { emailCodigoLogin } from '@/app/lib/email'
+import { primeiroNome } from '@/app/lib/nome'
 import { enviarMensagem } from '@/app/lib/zapi'
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -97,7 +98,7 @@ export async function POST(req: Request) {
   promises.push(
     emailCodigoLogin({
       email,
-      nome: nomePraTemplate,
+      nome: primeiroNome(nomePraTemplate),
       codigo,
       validadeMinutos: OTP_VALIDADE_MINUTOS,
     })
@@ -111,7 +112,7 @@ export async function POST(req: Request) {
 
   // WhatsApp — só se conta já tem whatsapp registrado
   if (conta.whatsapp) {
-    const nome = conta.nome ?? ''
+    const nome = primeiroNome(conta.nome ?? '')
     const saudacao = nome ? `Olá ${nome}! ` : ''
     promises.push(
       enviarMensagem(

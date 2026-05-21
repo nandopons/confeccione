@@ -7,6 +7,7 @@ import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
 import { loginComEmailUrl } from '@/app/lib/url'
+import { primeiroNome } from '@/app/lib/nome'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -113,7 +114,7 @@ export async function POST(req: Request) {
     try {
       await emailConfirmacaoCliente({
         email,
-        nomeCliente: nome,
+        nomeCliente: primeiroNome(nome),
         protocolo: data.id,
         tipo,
         quantidade,
@@ -138,7 +139,7 @@ export async function POST(req: Request) {
       .join(' · ')
     const mensagemCliente =
       `✅ *Confeccione — Pedido recebido*\n\n` +
-      `Olá *${nome}*!\n\n` +
+      `Olá *${primeiroNome(nome)}*!\n\n` +
       `Recebemos seu pedido:\n${linhaPedido}\n\n` +
       `Em breve enviamos para fornecedores compatíveis. Avisaremos quando alguém aceitar.\n\n` +
       `Enquanto isso, você pode acompanhar tudo pelo seu painel — inclusive subir referências, modelagens ou logomarcas:\n\n` +
