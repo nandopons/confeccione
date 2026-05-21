@@ -10,7 +10,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const HORAS_24 = 24 * 60 * 60 * 1000
+// Pedido aceito que o cliente nunca acessou no painel expira após este prazo.
+const PRAZO_EXPIRACAO_MS = 7 * 24 * 60 * 60 * 1000 // 7 dias
 
 export async function GET(req: Request) {
   // Validação de segurança: só aceita chamadas com o secret correto.
@@ -172,50 +173,65 @@ export async function GET(req: Request) {
   // só com a notificação de aceite + o painel pra se autogerenciar. Sem
   // cutucadas. (A nova regra de expiração vive na TAREFA 4, abaixo.)
 
-  // Corte de 24h: ainda usado pela TAREFA 4 (expiração) abaixo.
-  const corte24h = new Date(agora.getTime() - HORAS_24).toISOString()
+  // ===========================================================
+  // TAREFA 4: expira pedido aceito que o cliente NUNCA acessou no painel
+  // ===========================================================
+  // Sem follow-ups, a expiração é silenciosa e depende só de:
+  //   1) houve aceite (fornecedor_aceito_id, status não-terminal);
+  //   2) o cliente NUNCA acessou o painel após o aceite;
+  //   3) o aceite já tem mais que PRAZO_EXPIRACAO_MS.
+  // Acessou o painel em qualquer momento >= aceite → VIVO, nunca expira por
+  // inatividade. Continua silenciosa (só muda o status).
+  const corteExpiracao = new Date(
+    agora.getTime() - PRAZO_EXPIRACAO_MS,
+  ).toISOString()
 
-  // ===========================================================
-  // TAREFA 4: expirar pedidos sem ação após o lembrete 48h (Sprint 3.5)
-  // ===========================================================
-  // Expira se o 48h_lembrete foi enviado há > 24h E o cliente NÃO acessou o
-  // painel depois dele. Não depende mais de resposta 1/2/3 (respondido_em) —
-  // acesso ao painel é o único sinal de "vivo".
-  const { data: paraExpirar, error: errExpirar } = await supabase
-    .from('followups')
-    .select('pedido_id, enviado_em')
-    .eq('tipo', '48h_lembrete')
-    .lt('enviado_em', corte24h)
+  const { data: aceitosPendentes, error: errExpirar } = await supabase
+    .from('pedidos')
+    .select('id, status, ultimo_acesso_painel')
+    .in('status', ['aguardando_contato', 'em_negociacao'])
+    .not('fornecedor_aceito_id', 'is', null)
 
   if (errExpirar) {
     resumo.erros.push(`buscar pra expirar: ${errExpirar.message}`)
-  } else if (paraExpirar && paraExpirar.length > 0) {
-    for (const fu of paraExpirar) {
-      // Acessou o painel depois do lembrete? → pedido vivo, não expira
-      const { data: ped } = await supabase
-        .from('pedidos')
-        .select('status, ultimo_acesso_painel')
-        .eq('id', fu.pedido_id)
+  } else if (aceitosPendentes && aceitosPendentes.length > 0) {
+    for (const ped of aceitosPendentes) {
+      // Momento do aceite = quando o fornecedor respondeu SIM (oferta aceita).
+      const { data: ofertaAceita } = await supabase
+        .from('ofertas')
+        .select('respondida_em, enviada_em')
+        .eq('pedido_id', ped.id)
+        .eq('status', 'aceita')
+        .order('respondida_em', { ascending: false })
+        .limit(1)
         .maybeSingle()
 
-      if (!ped) continue
-      if (!['aguardando_contato', 'em_negociacao'].includes(ped.status)) continue
+      if (!ofertaAceita) continue
+      const aceiteISO = ofertaAceita.respondida_em ?? ofertaAceita.enviada_em
+      if (!aceiteISO) continue
+
+      // VIVO: acessou o painel em qualquer momento >= aceite → nunca expira.
       if (
         ped.ultimo_acesso_painel &&
         new Date(ped.ultimo_acesso_painel).getTime() >=
-          new Date(fu.enviado_em).getTime()
+          new Date(aceiteISO).getTime()
       ) {
+        continue
+      }
+
+      // Nunca acessou: só expira quando o aceite já passou do prazo.
+      if (new Date(aceiteISO).getTime() > new Date(corteExpiracao).getTime()) {
         continue
       }
 
       const { error: errUpdate } = await supabase
         .from('pedidos')
         .update({ status: 'expirado_sem_resposta' })
-        .eq('id', fu.pedido_id)
+        .eq('id', ped.id)
         .in('status', ['aguardando_contato', 'em_negociacao'])
 
       if (errUpdate) {
-        resumo.erros.push(`expirar pedido ${fu.pedido_id}: ${errUpdate.message}`)
+        resumo.erros.push(`expirar pedido ${ped.id}: ${errUpdate.message}`)
         continue
       }
 
