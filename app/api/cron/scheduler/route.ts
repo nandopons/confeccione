@@ -4,6 +4,11 @@ import { estaEmHorarioComercial, estaEmJanelaRetryPassivo } from '@/app/lib/hora
 import { criarEDispararOferta } from '@/app/lib/ofertas'
 import { enviarMensagem, whatsappAdminFornecedorExpirou } from '@/app/lib/zapi'
 import { emailAdminFornecedorExpirou } from '@/app/lib/email'
+import {
+  dispararToqueCaptacao,
+  proximoAgendamento,
+  jaConverteu,
+} from '@/app/lib/captacao'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -27,6 +32,9 @@ export async function GET(req: Request) {
     trials_expirados: 0,
     pedidos_retry_passivo: 0,
     pedidos_retry_pulado: false,
+    captacao_followups_enviados: 0,
+    captacao_convertidos: 0,
+    captacao_esgotados: 0,
     erros: [] as string[],
   }
 
@@ -278,6 +286,72 @@ export async function GET(req: Request) {
     }
   } else {
     resumo.pedidos_retry_pulado = true
+  }
+
+  // ===========================================================
+  // TAREFA 7: follow-ups de captação de fornecedores
+  // ===========================================================
+  // Fila = contatos 'ativo' com proximo_envio_em vencido. Pra cada um: checa
+  // conversão (já virou lead), senão dispara o follow-up da próxima etapa e
+  // reagenda/esgota. Teto por execução protege o rate limit da Z-API. Já roda
+  // só em horário comercial (o handler retorna cedo fora dele).
+  {
+    const { data: fila } = await supabase
+      .from('captacao_fornecedores')
+      .select('id, nome, email, whatsapp, segmento, etapa, canal_email, canal_whatsapp')
+      .eq('status', 'ativo')
+      .lte('proximo_envio_em', agoraISO)
+      .limit(40)
+
+    for (const c of fila ?? []) {
+      // 1) já se cadastrou? marca convertido e para.
+      const converteu = await jaConverteu(c.email, c.whatsapp)
+      if (converteu) {
+        await supabase
+          .from('captacao_fornecedores')
+          .update({
+            status: 'convertido',
+            convertido_em: agoraISO,
+            proximo_envio_em: null,
+            atualizado_em: agoraISO,
+          })
+          .eq('id', c.id)
+        resumo.captacao_convertidos += 1
+        continue
+      }
+
+      // 2) próxima etapa a enviar = etapa atual + 1 (1, 2 ou 3)
+      const etapaAEnviar = c.etapa + 1
+
+      const envio = await dispararToqueCaptacao({
+        id: c.id,
+        nome: c.nome,
+        email: c.email,
+        whatsapp: c.whatsapp,
+        segmento: c.segmento,
+        etapa: etapaAEnviar,
+        canal_email: c.canal_email,
+        canal_whatsapp: c.canal_whatsapp,
+      })
+
+      // 3) reagenda o toque seguinte ou esgota
+      const { proximoEnvioEm } = proximoAgendamento(etapaAEnviar)
+
+      await supabase
+        .from('captacao_fornecedores')
+        .update({
+          etapa: etapaAEnviar,
+          ultimo_envio_em: agoraISO,
+          proximo_envio_em: proximoEnvioEm,
+          status: proximoEnvioEm ? 'ativo' : 'esgotado',
+          atualizado_em: agoraISO,
+          ...(envio.enviouAlgo ? {} : { ultimo_erro: 'falha no follow-up' }),
+        })
+        .eq('id', c.id)
+
+      if (envio.enviouAlgo) resumo.captacao_followups_enviados += 1
+      if (!proximoEnvioEm) resumo.captacao_esgotados += 1
+    }
   }
 
   return NextResponse.json({

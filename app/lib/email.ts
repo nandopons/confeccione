@@ -563,3 +563,65 @@ ${SITE_URL}`
 
   await enviarEmail({ to: params.email, subject, html, text })
 }
+
+// ─── Email 8: Captação de fornecedor (convite/follow-ups) ───────────────
+//
+// Diferente das demais funções deste arquivo, RETORNA boolean: a orquestração
+// da captação (captacao.ts) usa o sinal de sucesso pra marcar status/erros.
+// REST direto (sem SDK), mesmos FROM/REPLY_TO/RESEND_ENDPOINT. Texto puro
+// vira <p>/<br> no HTML. Sucesso = resp.ok.
+
+export async function emailCaptacaoFornecedor(params: {
+  para: string
+  assunto: string
+  corpo: string
+}): Promise<boolean> {
+  const { para, assunto, corpo } = params
+
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) {
+    console.warn('[captacao] RESEND_API_KEY ausente — email não enviado:', { para, assunto })
+    return false
+  }
+  if (!para || !para.includes('@')) {
+    console.warn('[captacao] destinatário inválido, ignorando:', para)
+    return false
+  }
+
+  const html = corpo
+    .split('\n')
+    .map((linha) =>
+      linha.trim() === ''
+        ? '<br/>'
+        : `<p style="margin:0 0 12px;font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#111">${linha}</p>`,
+    )
+    .join('')
+
+  try {
+    const resp = await fetch(RESEND_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: FROM,
+        to: [para],
+        reply_to: REPLY_TO,
+        subject: assunto,
+        html,
+        text: corpo,
+      }),
+    })
+
+    if (!resp.ok) {
+      const body = await resp.text()
+      console.error('[captacao] Resend erro', resp.status, body)
+      return false
+    }
+    return true
+  } catch (err) {
+    console.error('[captacao] exceção ao enviar e-mail', err)
+    return false
+  }
+}
