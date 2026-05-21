@@ -10,9 +10,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-// Pedido aceito que o cliente nunca acessou no painel expira após este prazo.
-const PRAZO_EXPIRACAO_MS = 7 * 24 * 60 * 60 * 1000 // 7 dias
-
 export async function GET(req: Request) {
   // Validação de segurança: só aceita chamadas com o secret correto.
   // O Vercel Cron envia automaticamente o header Authorization: Bearer <CRON_SECRET>.
@@ -27,7 +24,6 @@ export async function GET(req: Request) {
     ofertas_reenviadas: 0,
     notificacoes_expiracao: 0,
     pedidos_buscar_apos: 0,
-    pedidos_expirados_sem_resposta: 0,
     trials_expirados: 0,
     pedidos_retry_passivo: 0,
     pedidos_retry_pulado: false,
@@ -169,75 +165,14 @@ export async function GET(req: Request) {
     }
   }
 
-  // TAREFA 3 (follow-ups 24h/48h do cliente) REMOVIDA — o cliente agora conta
-  // só com a notificação de aceite + o painel pra se autogerenciar. Sem
-  // cutucadas. (A nova regra de expiração vive na TAREFA 4, abaixo.)
-
-  // ===========================================================
-  // TAREFA 4: expira pedido aceito que o cliente NUNCA acessou no painel
-  // ===========================================================
-  // Sem follow-ups, a expiração é silenciosa e depende só de:
-  //   1) houve aceite (fornecedor_aceito_id, status não-terminal);
-  //   2) o cliente NUNCA acessou o painel após o aceite;
-  //   3) o aceite já tem mais que PRAZO_EXPIRACAO_MS.
-  // Acessou o painel em qualquer momento >= aceite → VIVO, nunca expira por
-  // inatividade. Continua silenciosa (só muda o status).
-  const corteExpiracao = new Date(
-    agora.getTime() - PRAZO_EXPIRACAO_MS,
-  ).toISOString()
-
-  const { data: aceitosPendentes, error: errExpirar } = await supabase
-    .from('pedidos')
-    .select('id, status, ultimo_acesso_painel')
-    .in('status', ['aguardando_contato', 'em_negociacao'])
-    .not('fornecedor_aceito_id', 'is', null)
-
-  if (errExpirar) {
-    resumo.erros.push(`buscar pra expirar: ${errExpirar.message}`)
-  } else if (aceitosPendentes && aceitosPendentes.length > 0) {
-    for (const ped of aceitosPendentes) {
-      // Momento do aceite = quando o fornecedor respondeu SIM (oferta aceita).
-      const { data: ofertaAceita } = await supabase
-        .from('ofertas')
-        .select('respondida_em, enviada_em')
-        .eq('pedido_id', ped.id)
-        .eq('status', 'aceita')
-        .order('respondida_em', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (!ofertaAceita) continue
-      const aceiteISO = ofertaAceita.respondida_em ?? ofertaAceita.enviada_em
-      if (!aceiteISO) continue
-
-      // VIVO: acessou o painel em qualquer momento >= aceite → nunca expira.
-      if (
-        ped.ultimo_acesso_painel &&
-        new Date(ped.ultimo_acesso_painel).getTime() >=
-          new Date(aceiteISO).getTime()
-      ) {
-        continue
-      }
-
-      // Nunca acessou: só expira quando o aceite já passou do prazo.
-      if (new Date(aceiteISO).getTime() > new Date(corteExpiracao).getTime()) {
-        continue
-      }
-
-      const { error: errUpdate } = await supabase
-        .from('pedidos')
-        .update({ status: 'expirado_sem_resposta' })
-        .eq('id', ped.id)
-        .in('status', ['aguardando_contato', 'em_negociacao'])
-
-      if (errUpdate) {
-        resumo.erros.push(`expirar pedido ${ped.id}: ${errUpdate.message}`)
-        continue
-      }
-
-      resumo.pedidos_expirados_sem_resposta += 1
-    }
-  }
+  // TAREFAS 3 e 4 (follow-ups 24h/48h + expiração automática do cliente)
+  // REMOVIDAS. O cliente conta só com a notificação de aceite + o painel pra
+  // se autogerenciar, e NADA expira automaticamente — decisão de produto:
+  // base pequena, cada pedido é dado valioso, pedido só sai do fluxo
+  // manualmente. A lógica de expiração validada (7 dias sem acesso ao painel,
+  // dry-run conferido) está no histórico pra reaproveitar — ver DEBT.md.
+  // O status 'expirado_sem_resposta' segue no schema, só não é mais atribuído
+  // automaticamente.
 
   // ===========================================================
   // TAREFA 5: expirar trial Pro (vira free automaticamente)
