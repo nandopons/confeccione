@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
   }
 
   // 3. Validações de pré-condição
-  const STATUS_DISPARAVEL = ['buscando_fornecedor', 'aguardando_contato']
+  const STATUS_DISPARAVEL = ['buscando_fornecedor']
   if (!STATUS_DISPARAVEL.includes(pedido.status)) {
     return NextResponse.json(
       { erro: `pedido em status '${pedido.status}' — não disparável` },

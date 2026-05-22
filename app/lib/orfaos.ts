@@ -33,7 +33,6 @@ const IDADE_MIN_ORFAO_HORAS = 4
  *  avançando. Compartilhado entre detectarOrfaos() e o dashboard /admin
  *  (queries de contagem) — fonte única de verdade. */
 export const STATUS_PEDIDO_DETECTAVEL: readonly string[] = [
-  'aguardando_contato',
   'buscando_fornecedor',
 ]
 
@@ -140,7 +139,7 @@ export function calcularPrioridade(pedido: PedidoCandidato): number {
  *
  *  Critério (ver migrations/2026-05-16-pedidos-orfaos.sql pro contexto):
  *    1. criado há mais de 4h
- *    2. status em (aguardando_contato, buscando_fornecedor)
+ *    2. status = buscando_fornecedor
  *    3. sem fornecedor aceito
  *    4. sem oferta em status 'enviada' ou 'aceita'
  *    5. ofertas terminais OU zero ofertas

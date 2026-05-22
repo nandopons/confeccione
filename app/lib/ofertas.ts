@@ -317,10 +317,7 @@ export async function dispararOfertaParaFornecedor(
     .single()
   if (!pedido) return { ok: false, erro: 'pedido não encontrado' }
 
-  if (
-    pedido.status !== 'aguardando_contato' &&
-    pedido.status !== 'buscando_fornecedor'
-  ) {
+  if (pedido.status !== 'buscando_fornecedor') {
     return {
       ok: false,
       erro: `pedido em status ${pedido.status}, não disparável`,
