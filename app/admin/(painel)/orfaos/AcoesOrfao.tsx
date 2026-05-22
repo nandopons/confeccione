@@ -23,6 +23,12 @@ function botoesPraStatus(atual: StatusOrfao): BotaoAcao[] {
         { label: 'Resolvido', destino: 'resolvido', classe: 'bg-green-600 hover:bg-green-700' },
         { label: 'Descartar', destino: 'descartado', classe: 'bg-gray-500 hover:bg-gray-600' },
       ]
+    // INALCANÇÁVEL no UI consolidado (pós-Bloco B): a aba "Precisa de atenção"
+    // só lista órfãos aberto/em_captacao, então AcoesOrfao nunca recebe
+    // statusAtual resolvido/descartado e este "Reabrir" nunca renderiza. A
+    // reabertura de pedido agora vive em POST /api/admin/pedidos/reabrir (botão
+    // "Reabrir busca" no ModalDetalhesPedido). NÃO é um segundo caminho vivo —
+    // mantido só por completude do switch. Remover é cleanup opcional futuro.
     case 'resolvido':
     case 'descartado':
       return [
