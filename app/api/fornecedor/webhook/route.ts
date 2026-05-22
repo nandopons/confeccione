@@ -163,7 +163,7 @@ async function tratarRespostaFornecedor(
       `📍 ${localFornec}\n\n` +
       `👉 Falar com o fornecedor: ${linkWhatsApp(fornecedor.whatsapp)}\n\n` +
       `Ele vai te chamar nas próximas horas. Se preferir, você pode entrar em contato direto.\n\n` +
-      `Daqui a 24h te chamo aqui pra saber se deu certo!\n\n` +
+      `Vou acompanhar e em alguns dias confirmo se fechou. Qualquer coisa, é só me chamar por aqui.\n\n` +
       `🔗 Você pode gerenciar este pedido pelo painel — inclusive solicitar outro fornecedor se precisar:\n${painelClientePedidoUrl(oferta.pedido_id)}\n\n` +
       `— Confeccione`
 
