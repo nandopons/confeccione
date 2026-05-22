@@ -1,15 +1,15 @@
 // app/admin/(painel)/pedidos/page.tsx
 // ============================================================================
-// /admin/pedidos — pedidos em execução agrupados em 5 abas mutuamente exclusivas.
+// /admin/pedidos — pedidos em execução em 5 abas mutuamente exclusivas.
+// Cada linha tem 👁 Detalhes (ModalDetalhesPedido). A aba "Precisa de atenção"
+// consolidou a antiga tela de órfãos (detectar + ações via modal).
 //
-// Server Component. Carrega SÓ os dados da aba ativa (sem custo das outras).
-//
-// Abas (precedência p/ exclusividade — um pedido = uma aba):
-//   1. em_oferta              → tem oferta 'enviada' (maior precedência)
-//   2. em_negociacao          → pedido.status='em_negociacao' (fornecedor aceito)
-//   3. precisa_atencao        → órfão ativo OU buscando sem oferta/sem agendamento;
-//                               exclui quem tem oferta enviada (vai p/ em_oferta)
-//   4. aguardando_expediente  → buscar_apos futuro; exclui órfão ativo (vai p/ precisa_atencao)
+// Abas (precedência — um pedido = uma aba):
+//   1. em_oferta              → tem oferta 'enviada'
+//   2. em_negociacao          → pedido.status='em_negociacao'
+//   3. precisa_atencao        → órfão ativo (buscando) OU buscando sem oferta/
+//                               agendamento; exclui quem tem oferta enviada
+//   4. aguardando_expediente  → buscar_apos futuro; exclui órfão ativo
 //   5. concluido              → pedido.status='concluido'
 // ============================================================================
 
@@ -22,6 +22,15 @@ import {
 } from '@/app/lib/admin-saude'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
 import { ColunaContato } from '../ColunaContato'
+import { BotaoDetectar } from '../orfaos/BotaoDetectar'
+import {
+  ModalDetalhesPedido,
+  type InfoOrfao,
+} from '../orfaos/ModalDetalhesOrfao'
+import {
+  carregarDadosDetalhe,
+  type DadosDetalhe,
+} from '@/app/lib/admin-pedido-detalhe'
 
 // ============================================================================
 // Tipos e constantes
@@ -73,10 +82,9 @@ type LinhaAguardando = {
 
 type LinhaPrecisaAtencao = {
   pedido: PedidoBase
-  /** prioridade do órfão (0-100) ou null se ainda não registrado como órfão */
-  prioridade: number | null
   motivo: string
-  ehOrfao: boolean
+  /** Presente quando o pedido já é órfão registrado (alimenta o modal). */
+  orfao: InfoOrfao | null
 }
 
 type LinhaConcluido = {
@@ -104,55 +112,71 @@ export default async function AdminPedidosPage({
 
   const agoraMs = Date.now()
 
-  // Carrega só dados da aba ativa
+  // Carrega só dados da aba ativa + o detalhe (modal) pros pedidos exibidos.
   let conteudo: React.ReactNode
   let total = 0
 
   if (aba === 'em_oferta') {
     const dados = await carregarEmOferta()
     total = dados.length
-    conteudo =
-      dados.length === 0 ? (
-        <EmptyState texto="Nenhum pedido com oferta ativa no momento." />
-      ) : (
-        <TabelaEmOferta dados={dados} agoraMs={agoraMs} />
-      )
+    if (dados.length === 0) {
+      conteudo = <EmptyState texto="Nenhum pedido com oferta ativa no momento." />
+    } else {
+      const detalhe = await carregarDadosDetalhe(dados.map((d) => d.pedido.id))
+      conteudo = <TabelaEmOferta dados={dados} agoraMs={agoraMs} detalhe={detalhe} />
+    }
   } else if (aba === 'em_negociacao') {
     const dados = await carregarEmNegociacao()
     total = dados.length
-    conteudo =
-      dados.length === 0 ? (
-        <EmptyState texto="Nenhum pedido em negociação." />
-      ) : (
-        <TabelaEmNegociacao dados={dados} agoraMs={agoraMs} />
+    if (dados.length === 0) {
+      conteudo = <EmptyState texto="Nenhum pedido em negociação." />
+    } else {
+      const detalhe = await carregarDadosDetalhe(dados.map((d) => d.pedido.id))
+      conteudo = (
+        <TabelaEmNegociacao dados={dados} agoraMs={agoraMs} detalhe={detalhe} />
       )
+    }
   } else if (aba === 'precisa_atencao') {
     const dados = await carregarPrecisaAtencao(agoraMs)
     total = dados.length
-    conteudo =
-      dados.length === 0 ? (
-        <EmptyState texto="Nenhum pedido precisando de atenção. Painel limpo." />
-      ) : (
-        <TabelaPrecisaAtencao dados={dados} agoraMs={agoraMs} />
-      )
+    const detalhe =
+      dados.length > 0
+        ? await carregarDadosDetalhe(dados.map((d) => d.pedido.id))
+        : null
+    conteudo = (
+      <>
+        <div className="mb-3 flex justify-end">
+          <BotaoDetectar />
+        </div>
+        {dados.length === 0 || detalhe === null ? (
+          <EmptyState texto="Nenhum pedido precisando de atenção. Painel limpo." />
+        ) : (
+          <TabelaPrecisaAtencao dados={dados} agoraMs={agoraMs} detalhe={detalhe} />
+        )}
+      </>
+    )
   } else if (aba === 'aguardando_expediente') {
     const dados = await carregarAguardandoExpediente(agoraMs)
     total = dados.length
-    conteudo =
-      dados.length === 0 ? (
-        <EmptyState texto="Nenhum pedido aguardando expediente." />
-      ) : (
-        <TabelaAguardando dados={dados} agoraMs={agoraMs} />
+    if (dados.length === 0) {
+      conteudo = <EmptyState texto="Nenhum pedido aguardando expediente." />
+    } else {
+      const detalhe = await carregarDadosDetalhe(dados.map((d) => d.pedido.id))
+      conteudo = (
+        <TabelaAguardando dados={dados} agoraMs={agoraMs} detalhe={detalhe} />
       )
+    }
   } else {
     const dados = await carregarConcluidos()
     total = dados.length
-    conteudo =
-      dados.length === 0 ? (
-        <EmptyState texto="Nenhum pedido concluído ainda." />
-      ) : (
-        <TabelaConcluidos dados={dados} agoraMs={agoraMs} />
+    if (dados.length === 0) {
+      conteudo = <EmptyState texto="Nenhum pedido concluído ainda." />
+    } else {
+      const detalhe = await carregarDadosDetalhe(dados.map((d) => d.pedido.id))
+      conteudo = (
+        <TabelaConcluidos dados={dados} agoraMs={agoraMs} detalhe={detalhe} />
       )
+    }
   }
 
   return (
@@ -197,8 +221,7 @@ export default async function AdminPedidosPage({
 // Helpers de conjuntos (precedência entre abas)
 // ============================================================================
 
-/** pedido_ids com oferta 'enviada' ativa. Em oferta tem a maior precedência:
- *  qualquer aba "abaixo" exclui esses pedidos. */
+/** pedido_ids com oferta 'enviada' ativa. Em oferta tem a maior precedência. */
 async function pedidosComOfertaEnviada(): Promise<Set<string>> {
   const { data } = await supabaseAdmin
     .from('ofertas')
@@ -209,8 +232,7 @@ async function pedidosComOfertaEnviada(): Promise<Set<string>> {
   )
 }
 
-/** pedido_ids com órfão ATIVO (aberto/em_captacao). Precisa-de-atenção vence
- *  Aguardando-expediente. */
+/** pedido_ids com órfão ATIVO (aberto/em_captacao). */
 async function pedidosOrfaoAtivo(): Promise<Set<string>> {
   const { data } = await supabaseAdmin
     .from('pedidos_orfaos')
@@ -226,7 +248,6 @@ async function pedidosOrfaoAtivo(): Promise<Set<string>> {
 // ============================================================================
 
 async function carregarEmOferta(): Promise<LinhaEmOferta[]> {
-  // Q1: ofertas enviadas (ordenadas por enviada_em ASC = mais antiga primeiro)
   const { data: ofertasRaw } = await supabaseAdmin
     .from('ofertas')
     .select('id, pedido_id, fornecedor_id, enviada_em')
@@ -246,7 +267,6 @@ async function carregarEmOferta(): Promise<LinhaEmOferta[]> {
     new Set(ofertas.map((o) => o.fornecedor_id))
   )
 
-  // Q2 e Q3 em paralelo
   const [{ data: pedidosRaw }, { data: fornecedoresRaw }] = await Promise.all([
     supabaseAdmin
       .from('pedidos')
@@ -268,7 +288,6 @@ async function carregarEmOferta(): Promise<LinhaEmOferta[]> {
     )
   )
 
-  // Filtra ofertas cujo pedido ainda está não-atribuído + mantém ordem da Q1
   const linhas: LinhaEmOferta[] = []
   for (const o of ofertas) {
     const pedido = pedidoMap.get(o.pedido_id)
@@ -284,7 +303,6 @@ async function carregarEmOferta(): Promise<LinhaEmOferta[]> {
 }
 
 async function carregarEmNegociacao(): Promise<LinhaEmNegociacao[]> {
-  // Q1: pedidos em negociação
   const { data: pedidosRaw } = await supabaseAdmin
     .from('pedidos')
     .select(
@@ -304,7 +322,6 @@ async function carregarEmNegociacao(): Promise<LinhaEmNegociacao[]> {
   )
   const pedidoIds = pedidos.map((p) => p.id)
 
-  // Q2 e Q3 em paralelo
   const [{ data: fornecedoresRaw }, { data: ofertasAceitasRaw }] =
     await Promise.all([
       fornecedorIds.length > 0
@@ -334,7 +351,6 @@ async function carregarEmNegociacao(): Promise<LinhaEmNegociacao[]> {
     ).map((o) => [o.pedido_id, o.respondida_em])
   )
 
-  // Sort por respondida_em DESC. null vai pro final.
   const linhas: LinhaEmNegociacao[] = pedidos
     .map((p) => ({
       pedido: {
@@ -360,23 +376,20 @@ async function carregarEmNegociacao(): Promise<LinhaEmNegociacao[]> {
   return linhas
 }
 
-/** Precisa de atenção = órfão ativo (via vw) UNIÃO buscando-sem-oferta-sem-
- *  agendamento, dedup por pedido_id (órfão vence, traz prioridade/motivo),
- *  excluindo quem tem oferta enviada (precedência: Em oferta). */
+/** Precisa de atenção = órfão ativo (buscando) UNIÃO buscando-sem-oferta-sem-
+ *  agendamento, dedup por pedido_id (órfão vence), excluindo oferta enviada. */
 async function carregarPrecisaAtencao(
   agoraMs: number
 ): Promise<LinhaPrecisaAtencao[]> {
   const agoraIso = new Date(agoraMs).toISOString()
   const comOferta = await pedidosComOfertaEnviada()
 
-  // (1) órfãos ativos — via view (já traz dados do pedido + prioridade/motivo).
-  //     Filtra pedido_status='buscando_fornecedor': um órfão stale num pedido já
-  //     aceito (em_negociacao) NÃO pode aparecer aqui (senão duplica com a aba
-  //     "Em negociação"). Garante exclusividade independente da limpeza do órfão.
+  // (1) órfãos ativos — via view. Filtra pedido_status='buscando_fornecedor'
+  //     pra um órfão stale num pedido já aceito NÃO duplicar com "Em negociação".
   const { data: orfaosRaw } = await supabaseAdmin
     .from('vw_pedidos_orfaos_admin')
     .select(
-      'pedido_id, tipo, quantidade, estado, nome, whatsapp, pedido_criado_em, prioridade, motivo_orfao, status_orfao'
+      'pedido_id, tipo, quantidade, estado, nome, whatsapp, pedido_criado_em, orfao_id, prioridade, motivo_orfao, status_orfao, notas_admin, responsavel_captacao'
     )
     .in('status_orfao', ['aberto', 'em_captacao'])
     .eq('pedido_status', 'buscando_fornecedor')
@@ -389,12 +402,15 @@ async function carregarPrecisaAtencao(
     nome: string
     whatsapp: string
     pedido_criado_em: string
+    orfao_id: string
     prioridade: number
     motivo_orfao: string | null
+    status_orfao: InfoOrfao['status_orfao']
+    notas_admin: string | null
+    responsavel_captacao: string | null
   }>
 
-  // (2) buscando "preso": status=buscando_fornecedor, sem fornecedor aceito,
-  //     buscar_apos nulo/passado (não é "aguardando expediente").
+  // (2) buscando "preso": sem fornecedor, buscar_apos nulo/passado.
   const { data: stuckRaw } = await supabaseAdmin
     .from('pedidos')
     .select('id, tipo, quantidade, estado, nome, whatsapp, criado_em')
@@ -404,7 +420,6 @@ async function carregarPrecisaAtencao(
 
   const stuck = (stuckRaw ?? []) as PedidoBase[]
 
-  // União dedup por pedido_id, excluindo quem tem oferta enviada.
   const map = new Map<string, LinhaPrecisaAtencao>()
 
   for (const o of orfaos) {
@@ -419,9 +434,15 @@ async function carregarPrecisaAtencao(
         whatsapp: o.whatsapp,
         criado_em: o.pedido_criado_em,
       },
-      prioridade: o.prioridade,
       motivo: o.motivo_orfao ?? 'sem fornecedor',
-      ehOrfao: true,
+      orfao: {
+        orfao_id: o.orfao_id,
+        status_orfao: o.status_orfao,
+        prioridade: o.prioridade,
+        motivo_orfao: o.motivo_orfao,
+        notas_admin: o.notas_admin,
+        responsavel_captacao: o.responsavel_captacao,
+      },
     })
   }
 
@@ -430,17 +451,16 @@ async function carregarPrecisaAtencao(
     if (map.has(p.id)) continue // já entrou como órfão (vence)
     map.set(p.id, {
       pedido: p,
-      prioridade: null,
       motivo: 'buscando, sem oferta ativa',
-      ehOrfao: false,
+      orfao: null,
     })
   }
 
-  // Ordena: maior prioridade primeiro (null = ainda não pontuado, vai depois),
-  // depois mais antigo primeiro.
+  // Ordena: maior prioridade primeiro (sem órfão = -1, vai depois), depois
+  // mais antigo primeiro.
   return Array.from(map.values()).sort((a, b) => {
-    const pa = a.prioridade ?? -1
-    const pb = b.prioridade ?? -1
+    const pa = a.orfao?.prioridade ?? -1
+    const pb = b.orfao?.prioridade ?? -1
     if (pb !== pa) return pb - pa
     return (
       new Date(a.pedido.criado_em).getTime() -
@@ -532,15 +552,44 @@ async function carregarConcluidos(): Promise<LinhaConcluido[]> {
 }
 
 // ============================================================================
+// Sub-components: célula de detalhes (modal) reusada por todas as abas
+// ============================================================================
+
+function CelulaDetalhes({
+  pedidoId,
+  detalhe,
+  orfao,
+}: {
+  pedidoId: string
+  detalhe: DadosDetalhe
+  orfao?: InfoOrfao | null
+}) {
+  const pedido = detalhe.pedidoDetalhe.get(pedidoId)
+  if (!pedido) return <span className="text-gray-400 text-xs">—</span>
+  return (
+    <ModalDetalhesPedido
+      pedido={pedido}
+      orfao={orfao ?? undefined}
+      ofertas={detalhe.ofertasPorPedido.get(pedidoId) ?? []}
+      agendadasPorFornecedor={detalhe.agendadasPorFornecedor}
+      temCreditoPorFornecedor={detalhe.temCreditoPorFornecedor}
+      paresJaAgendados={detalhe.paresJaAgendados}
+    />
+  )
+}
+
+// ============================================================================
 // Sub-components: tabelas por aba
 // ============================================================================
 
 function TabelaEmOferta({
   dados,
   agoraMs,
+  detalhe,
 }: {
   dados: LinhaEmOferta[]
   agoraMs: number
+  detalhe: DadosDetalhe
 }) {
   return (
     <TabelaWrapper>
@@ -551,6 +600,7 @@ function TabelaEmOferta({
           <Th>Idade pedido</Th>
           <Th>Oferta há</Th>
           <Th>Fornecedor</Th>
+          <Th>Detalhes</Th>
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-200 text-sm">
@@ -574,6 +624,9 @@ function TabelaEmOferta({
                 {formatarIdadeHoras(idadeOfertaH)}
               </Td>
               <Td className="text-gray-900">{l.fornecedor_nome}</Td>
+              <Td>
+                <CelulaDetalhes pedidoId={l.pedido.id} detalhe={detalhe} />
+              </Td>
             </tr>
           )
         })}
@@ -585,9 +638,11 @@ function TabelaEmOferta({
 function TabelaEmNegociacao({
   dados,
   agoraMs,
+  detalhe,
 }: {
   dados: LinhaEmNegociacao[]
   agoraMs: number
+  detalhe: DadosDetalhe
 }) {
   return (
     <TabelaWrapper>
@@ -598,6 +653,7 @@ function TabelaEmNegociacao({
           <Th>Idade pedido</Th>
           <Th>Negociando há</Th>
           <Th>Fornecedor aceito</Th>
+          <Th>Detalhes</Th>
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-200 text-sm">
@@ -624,6 +680,9 @@ function TabelaEmNegociacao({
                 {negociandoStr}
               </Td>
               <Td className="text-gray-900">{l.fornecedor_nome}</Td>
+              <Td>
+                <CelulaDetalhes pedidoId={l.pedido.id} detalhe={detalhe} />
+              </Td>
             </tr>
           )
         })}
@@ -635,9 +694,11 @@ function TabelaEmNegociacao({
 function TabelaPrecisaAtencao({
   dados,
   agoraMs,
+  detalhe,
 }: {
   dados: LinhaPrecisaAtencao[]
   agoraMs: number
+  detalhe: DadosDetalhe
 }) {
   return (
     <TabelaWrapper>
@@ -649,6 +710,7 @@ function TabelaPrecisaAtencao({
           <Th>Idade pedido</Th>
           <Th>Prioridade</Th>
           <Th>Motivo</Th>
+          <Th>Detalhes</Th>
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-200 text-sm">
@@ -675,9 +737,16 @@ function TabelaPrecisaAtencao({
                 {formatarIdadeHoras(idadePedidoH)}
               </Td>
               <Td className="whitespace-nowrap text-gray-700">
-                {l.prioridade !== null ? l.prioridade : '—'}
+                {l.orfao ? l.orfao.prioridade : '—'}
               </Td>
               <Td className="text-gray-600 text-xs max-w-[220px]">{l.motivo}</Td>
+              <Td>
+                <CelulaDetalhes
+                  pedidoId={l.pedido.id}
+                  detalhe={detalhe}
+                  orfao={l.orfao}
+                />
+              </Td>
             </tr>
           )
         })}
@@ -689,9 +758,11 @@ function TabelaPrecisaAtencao({
 function TabelaAguardando({
   dados,
   agoraMs,
+  detalhe,
 }: {
   dados: LinhaAguardando[]
   agoraMs: number
+  detalhe: DadosDetalhe
 }) {
   return (
     <TabelaWrapper>
@@ -701,6 +772,7 @@ function TabelaAguardando({
           <Th>Cliente</Th>
           <Th>Idade pedido</Th>
           <Th>Retoma em</Th>
+          <Th>Detalhes</Th>
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-200 text-sm">
@@ -723,6 +795,9 @@ function TabelaAguardando({
                 {formatarIdadeHoras(idadePedidoH)}
               </Td>
               <Td className="whitespace-nowrap text-gray-700">{retomaStr}</Td>
+              <Td>
+                <CelulaDetalhes pedidoId={l.pedido.id} detalhe={detalhe} />
+              </Td>
             </tr>
           )
         })}
@@ -734,9 +809,11 @@ function TabelaAguardando({
 function TabelaConcluidos({
   dados,
   agoraMs,
+  detalhe,
 }: {
   dados: LinhaConcluido[]
   agoraMs: number
+  detalhe: DadosDetalhe
 }) {
   return (
     <TabelaWrapper>
@@ -746,6 +823,7 @@ function TabelaConcluidos({
           <Th>Cliente</Th>
           <Th>Idade pedido</Th>
           <Th>Fornecedor</Th>
+          <Th>Detalhes</Th>
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-200 text-sm">
@@ -764,6 +842,9 @@ function TabelaConcluidos({
                 {formatarIdadeHoras(idadePedidoH)}
               </Td>
               <Td className="text-gray-900">{l.fornecedor_nome}</Td>
+              <Td>
+                <CelulaDetalhes pedidoId={l.pedido.id} detalhe={detalhe} />
+              </Td>
             </tr>
           )
         })}

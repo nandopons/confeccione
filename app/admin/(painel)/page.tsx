@@ -190,7 +190,7 @@ export default async function AdminDashboardPage() {
     {
       label: 'Órfãos ativos',
       valor: resCardOrfaosAtivos.count ?? 0,
-      href: '/admin/orfaos',
+      href: '/admin/pedidos?aba=precisa_atencao',
     },
   ]
 
