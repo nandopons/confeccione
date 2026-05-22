@@ -6,7 +6,7 @@
 //   1. Valida sessão do fornecedor logado
 //   2. Valida que a oferta existe, pertence ao fornecedor logado, e está pendente
 //   3. UPDATE oferta: status = 'aceita'
-//   4. UPDATE pedido: status = 'aguardando_contato', fornecedor_aceito_id
+//   4. UPDATE pedido: status = 'em_negociacao', fornecedor_aceito_id
 //   5. Notifica fornecedor (WhatsApp) com dados do cliente + cota
 //   6. Notifica cliente (WhatsApp + email opcional) com dados do fornecedor
 //
@@ -128,11 +128,11 @@ export async function POST(
     return NextResponse.json({ erro: 'Erro ao processar' }, { status: 500 })
   }
 
-  // 6. UPDATE pedido → aguardando_contato
+  // 6. UPDATE pedido → em_negociacao
   const { error: updatePedidoErr } = await supabase
     .from('pedidos')
     .update({
-      status: 'aguardando_contato',
+      status: 'em_negociacao',
       fornecedor_aceito_id: fornecedor.id,
     })
     .eq('id', pedido.id)

@@ -136,7 +136,7 @@ async function tratarRespostaFornecedor(
 
     await supabase
       .from('pedidos')
-      .update({ status: 'aguardando_contato', fornecedor_aceito_id: fornecedor.id })
+      .update({ status: 'em_negociacao', fornecedor_aceito_id: fornecedor.id })
       .eq('id', oferta.pedido_id)
 
     // Envia dados do cliente pro fornecedor + resumo de leads do mês
