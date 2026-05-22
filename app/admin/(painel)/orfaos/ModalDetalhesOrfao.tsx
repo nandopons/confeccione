@@ -54,6 +54,12 @@ export function ModalDetalhesPedido({
   // buscando fornecedor. Em negociação/concluído → modal view-only.
   const podeOfertar = pedido.pedido_status === 'buscando_fornecedor'
 
+  // Reabrir = devolver pra busca quem SAIU dela. Mutuamente exclusivo de
+  // podeOfertar (status diferente).
+  const podeReabrir =
+    pedido.pedido_status === 'em_negociacao' ||
+    pedido.pedido_status === 'concluido'
+
   // Captura agora apenas no client após abrir — sem Date.now() no render
   // pra evitar qualquer chance de hydration mismatch.
   useEffect(() => {
@@ -221,6 +227,16 @@ export function ModalDetalhesPedido({
               {podeOfertar && (
                 <Secao titulo="Ofertar manualmente">
                   <OfertarManual pedidoId={pedido.pedido_id} />
+                </Secao>
+              )}
+
+              {podeReabrir && (
+                <Secao titulo="Reabrir busca">
+                  <p className="text-xs text-gray-500 mb-2">
+                    Devolve o pedido pra busca e remove o vínculo do fornecedor
+                    aceito.
+                  </p>
+                  <ReabrirBusca pedidoId={pedido.pedido_id} />
                 </Secao>
               )}
 
@@ -591,6 +607,55 @@ function OfertarManual({ pedidoId }: { pedidoId: string }) {
         {estado === 'enviando' ? 'Enviando…' : 'Enviar oferta agora'}
       </button>
     </div>
+  )
+}
+
+// =============================================================================
+// REABRIR BUSCA — devolve um pedido em_negociacao/concluido pra busca
+// =============================================================================
+
+function ReabrirBusca({ pedidoId }: { pedidoId: string }) {
+  const router = useRouter()
+  type Estado = 'idle' | 'loading' | 'erro'
+  const [estado, setEstado] = useState<Estado>('idle')
+
+  async function handleClick() {
+    if (estado === 'loading') return
+    // Confirm sempre — o botão só aparece pra pedido com fornecedor aceito/fechado.
+    const ok = window.confirm(
+      'Esse pedido tem fornecedor aceito — reabrir remove o vínculo e volta à busca. Confirma?'
+    )
+    if (!ok) return
+    setEstado('loading')
+    try {
+      const res = await fetch('/api/admin/pedidos/reabrir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pedido_id: pedidoId }),
+      })
+      if (res.ok) {
+        router.refresh()
+        return
+      }
+      setEstado('erro')
+    } catch {
+      setEstado('erro')
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={estado === 'loading'}
+      className="text-sm px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded font-medium disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+    >
+      {estado === 'loading'
+        ? 'Reabrindo…'
+        : estado === 'erro'
+          ? '⚠ Erro · clique pra tentar de novo'
+          : '↻ Reabrir busca'}
+    </button>
   )
 }
 
