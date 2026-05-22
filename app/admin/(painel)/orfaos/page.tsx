@@ -24,7 +24,7 @@ import { AcoesOrfao } from './AcoesOrfao'
 import { BotaoDetectar } from './BotaoDetectar'
 import { ColunaContato } from '../ColunaContato'
 import {
-  ModalDetalhesOrfao,
+  ModalDetalhesPedido,
   type OfertaHistorico,
 } from './ModalDetalhesOrfao'
 import { temCreditoDisponivel, type Plano } from '@/app/lib/planos'
@@ -258,8 +258,26 @@ function Linha({
       </td>
       <td className="px-3 py-2.5 whitespace-nowrap">
         <div className="flex gap-1 flex-wrap items-start">
-          <ModalDetalhesOrfao
-            orfao={o}
+          <ModalDetalhesPedido
+            pedido={{
+              pedido_id: o.pedido_id,
+              tipo: o.tipo,
+              quantidade: o.quantidade,
+              estado: o.estado,
+              nome: o.nome,
+              whatsapp: o.whatsapp,
+              email: o.email,
+              prazo: o.prazo,
+              descricao: o.descricao,
+              pedido_status: o.pedido_status,
+              pedido_criado_em: o.pedido_criado_em,
+            }}
+            orfao={{
+              orfao_id: o.orfao_id,
+              status_orfao: o.status_orfao,
+              prioridade: o.prioridade,
+              motivo_orfao: o.motivo_orfao,
+            }}
             ofertas={ofertas}
             agendadasPorFornecedor={agendadasPorFornecedor}
             paresJaAgendados={paresJaAgendados}

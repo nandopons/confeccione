@@ -5,27 +5,54 @@ import { useRouter } from 'next/navigation'
 import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 import { formatarDuracaoRelativa } from '@/app/lib/admin-saude'
 import { ColunaContato } from '../ColunaContato'
-import type { VwPedidoOrfaoAdmin } from '@/app/lib/orfaos'
+import type { StatusOrfao } from '@/app/lib/orfaos'
 
 export type OfertaHistorico = {
   id: string
   fornecedor_id: string
-  /** Status conhecidos hoje: 'enviada' | 'aceita' | 'recusada' | 'expirada'.
-   *  Tipado como string pra aceitar valores novos sem mudança de tipo. */
+  /** Status conhecidos: enviada | aceita | recusada | recusada_sem_credito |
+   *  expirada | expirada_sem_credito. Tipado como string pra aceitar valores
+   *  novos sem mudança de tipo (caem no fallback de DesfechoOferta). */
   status: string
   enviada_em: string
   respondida_em: string | null
   fornecedor_nome: string
 }
 
-export function ModalDetalhesOrfao({
+/** Dados base de QUALQUER pedido — presentes em qualquer aba. */
+export type PedidoDetalhe = {
+  pedido_id: string
+  tipo: string
+  quantidade: number | null
+  estado: string
+  nome: string
+  whatsapp: string
+  email: string | null
+  prazo: string | null
+  descricao: string | null
+  pedido_status: string
+  pedido_criado_em: string
+}
+
+/** Infos de órfão — só quando o pedido É órfão. Ausente = pedido comum. */
+export type InfoOrfao = {
+  orfao_id: string
+  status_orfao: StatusOrfao
+  prioridade: number
+  motivo_orfao: string | null
+}
+
+export function ModalDetalhesPedido({
+  pedido,
   orfao,
   ofertas,
   agendadasPorFornecedor,
   temCreditoPorFornecedor,
   paresJaAgendados,
 }: {
-  orfao: VwPedidoOrfaoAdmin
+  pedido: PedidoDetalhe
+  /** Presente só pra pedidos órfãos — esconde a seção de órfão quando ausente. */
+  orfao?: InfoOrfao
   ofertas: OfertaHistorico[]
   /** Map<fornecedor_id, count de agendadas pendentes globais do fornecedor> */
   agendadasPorFornecedor: Map<string, number>
@@ -37,6 +64,8 @@ export function ModalDetalhesOrfao({
   const [aberto, setAberto] = useState(false)
   const [agoraMs, setAgoraMs] = useState<number | null>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
+
+  const tituloId = `modal-${pedido.pedido_id}-titulo`
 
   // Captura agora apenas no client após abrir — sem Date.now() no render
   // pra evitar qualquer chance de hydration mismatch.
@@ -72,7 +101,7 @@ export function ModalDetalhesOrfao({
         <div
           role="dialog"
           aria-modal="true"
-          aria-labelledby={`modal-${orfao.orfao_id}-titulo`}
+          aria-labelledby={tituloId}
           className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6"
         >
           {/* Overlay clicável */}
@@ -85,26 +114,26 @@ export function ModalDetalhesOrfao({
           <div className="relative bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-y-auto">
             <div className="px-6 py-5">
               <h2
-                id={`modal-${orfao.orfao_id}-titulo`}
+                id={tituloId}
                 className="text-lg font-semibold text-gray-900 mb-1"
               >
-                Detalhes do pedido órfão
+                {orfao ? 'Detalhes do pedido órfão' : 'Detalhes do pedido'}
               </h2>
               <p className="text-xs text-gray-500 mb-5">
-                {tipoLabel[orfao.tipo] ?? orfao.tipo} ·{' '}
-                {orfao.quantidade !== null
-                  ? `${orfao.quantidade} peças`
+                {tipoLabel[pedido.tipo] ?? pedido.tipo} ·{' '}
+                {pedido.quantidade !== null
+                  ? `${pedido.quantidade} peças`
                   : 'qtd não informada'}{' '}
-                · {orfao.estado}
+                · {pedido.estado}
               </p>
 
               <Secao titulo="Cliente">
-                <ColunaContato nome={orfao.nome} whatsapp={orfao.whatsapp} />
+                <ColunaContato nome={pedido.nome} whatsapp={pedido.whatsapp} />
                 <div className="mt-2 space-y-0.5 text-sm text-gray-700">
-                  {orfao.email && <div>Email: {orfao.email}</div>}
-                  {orfao.prazo && (
+                  {pedido.email && <div>Email: {pedido.email}</div>}
+                  {pedido.prazo && (
                     <div>
-                      Prazo: {prazoLabel[orfao.prazo] ?? orfao.prazo}
+                      Prazo: {prazoLabel[pedido.prazo] ?? pedido.prazo}
                     </div>
                   )}
                 </div>
@@ -115,22 +144,24 @@ export function ModalDetalhesOrfao({
                   <Campo label="Criado em">
                     {agoraMs !== null
                       ? formatarDuracaoRelativa(
-                          new Date(orfao.pedido_criado_em).getTime(),
+                          new Date(pedido.pedido_criado_em).getTime(),
                           agoraMs
                         )
                       : '…'}
                   </Campo>
-                  <Campo label="Status do pedido">{orfao.pedido_status}</Campo>
-                  <Campo label="Motivo do órfão">
-                    {orfao.motivo_orfao ?? '—'}
-                  </Campo>
+                  <Campo label="Status do pedido">{pedido.pedido_status}</Campo>
+                  {orfao && (
+                    <Campo label="Motivo do órfão">
+                      {orfao.motivo_orfao ?? '—'}
+                    </Campo>
+                  )}
                 </dl>
               </Secao>
 
               <Secao titulo="Descrição do cliente">
-                {orfao.descricao ? (
+                {pedido.descricao ? (
                   <p className="text-sm text-gray-900 whitespace-pre-wrap">
-                    {orfao.descricao}
+                    {pedido.descricao}
                   </p>
                 ) : (
                   <p className="text-sm text-gray-500 italic">
@@ -151,7 +182,7 @@ export function ModalDetalhesOrfao({
                         key={o.id}
                         oferta={o}
                         agoraMs={agoraMs}
-                        orfaoPedidoId={orfao.pedido_id}
+                        pedidoId={pedido.pedido_id}
                         agendadasParaFornecedor={
                           agendadasPorFornecedor.get(o.fornecedor_id) ?? 0
                         }
@@ -159,7 +190,7 @@ export function ModalDetalhesOrfao({
                           temCreditoPorFornecedor.get(o.fornecedor_id) ?? false
                         }
                         jaAgendadoEstePar={paresJaAgendados.has(
-                          `${orfao.pedido_id}:${o.fornecedor_id}`
+                          `${pedido.pedido_id}:${o.fornecedor_id}`
                         )}
                       />
                     ))}
@@ -168,7 +199,7 @@ export function ModalDetalhesOrfao({
               </Secao>
 
               <Secao titulo="Ofertar manualmente">
-                <OfertarManual pedidoId={orfao.pedido_id} />
+                <OfertarManual pedidoId={pedido.pedido_id} />
               </Secao>
 
               <div className="mt-6 flex justify-end">
@@ -187,6 +218,9 @@ export function ModalDetalhesOrfao({
     </>
   )
 }
+
+/** Re-export do nome antigo — preserva imports existentes. */
+export const ModalDetalhesOrfao = ModalDetalhesPedido
 
 // =============================================================================
 // Sub-components
@@ -227,14 +261,14 @@ function Campo({
 function ItemOferta({
   oferta,
   agoraMs,
-  orfaoPedidoId,
+  pedidoId,
   agendadasParaFornecedor,
   temCredito,
   jaAgendadoEstePar,
 }: {
   oferta: OfertaHistorico
   agoraMs: number | null
-  orfaoPedidoId: string
+  pedidoId: string
   agendadasParaFornecedor: number
   temCredito: boolean
   jaAgendadoEstePar: boolean
@@ -244,9 +278,13 @@ function ItemOferta({
       ? formatarDuracaoRelativa(new Date(oferta.enviada_em).getTime(), agoraMs)
       : '…'
 
+  // Reoferecível = expirou (sem resposta). Recusou NÃO reoferece.
+  const reofertavel =
+    oferta.status === 'expirada' || oferta.status === 'expirada_sem_credito'
+
   return (
     <li className="flex items-start gap-3 text-sm">
-      <BadgeOferta status={oferta.status} />
+      <DesfechoOferta status={oferta.status} />
       <div className="flex-1 min-w-0">
         <div className="text-gray-900 flex items-center gap-1.5 flex-wrap">
           <span>{oferta.fornecedor_nome}</span>
@@ -268,10 +306,10 @@ function ItemOferta({
             </>
           )}
         </div>
-        {oferta.status === 'expirada' && (
+        {reofertavel && (
           <div className="mt-1.5">
             <BotaoAgendarReenvio
-              pedidoId={orfaoPedidoId}
+              pedidoId={pedidoId}
               fornecedorId={oferta.fornecedor_id}
               temCredito={temCredito}
               iniciaAgendado={jaAgendadoEstePar}
@@ -530,14 +568,23 @@ function OfertarManual({ pedidoId }: { pedidoId: string }) {
   )
 }
 
-function BadgeOferta({ status }: { status: string }) {
-  // Só mapeia status com evidência no banco (enviada/aceita/recusada/expirada).
-  // Valores futuros caem no fallback genérico — renderizam crus, ficam visíveis.
+/** Badge do DESFECHO da oferta (visão admin). Vermelho = recusou (não
+ *  reoferecer); cinza = expirou (pode reoferecer); verde = aceitou; amarelo =
+ *  ainda aberta. Valores novos caem no fallback genérico (renderizam crus). */
+function DesfechoOferta({ status }: { status: string }) {
   const config: Record<string, { cor: string; label: string }> = {
-    enviada:  { cor: 'bg-yellow-100 text-yellow-800', label: 'Enviada' },
-    aceita:   { cor: 'bg-green-100 text-green-800',   label: 'Aceita' },
-    recusada: { cor: 'bg-red-100 text-red-800',       label: 'Recusada' },
-    expirada: { cor: 'bg-gray-200 text-gray-700',     label: 'Expirada' },
+    enviada: { cor: 'bg-yellow-100 text-yellow-800', label: 'Aguardando resposta' },
+    aceita: { cor: 'bg-green-100 text-green-800', label: 'Aceitou' },
+    recusada: { cor: 'bg-red-100 text-red-800', label: 'Recusou' },
+    recusada_sem_credito: {
+      cor: 'bg-red-100 text-red-800',
+      label: 'Recusou (sem crédito)',
+    },
+    expirada: { cor: 'bg-gray-200 text-gray-700', label: 'Expirou sem resposta' },
+    expirada_sem_credito: {
+      cor: 'bg-gray-200 text-gray-700',
+      label: 'Expirou (sem crédito)',
+    },
   }
   const def = config[status] ?? {
     cor: 'bg-gray-100 text-gray-500',
