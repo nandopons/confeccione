@@ -5,34 +5,15 @@ import { useRouter } from 'next/navigation'
 import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 import { formatarDuracaoRelativa } from '@/app/lib/admin-saude'
 import { ColunaContato } from '../ColunaContato'
+import { AcoesOrfao } from './AcoesOrfao'
 import type { StatusOrfao } from '@/app/lib/orfaos'
+import type {
+  OfertaHistorico,
+  PedidoDetalhe,
+} from '@/app/lib/admin-pedido-detalhe'
 
-export type OfertaHistorico = {
-  id: string
-  fornecedor_id: string
-  /** Status conhecidos: enviada | aceita | recusada | recusada_sem_credito |
-   *  expirada | expirada_sem_credito. Tipado como string pra aceitar valores
-   *  novos sem mudança de tipo (caem no fallback de DesfechoOferta). */
-  status: string
-  enviada_em: string
-  respondida_em: string | null
-  fornecedor_nome: string
-}
-
-/** Dados base de QUALQUER pedido — presentes em qualquer aba. */
-export type PedidoDetalhe = {
-  pedido_id: string
-  tipo: string
-  quantidade: number | null
-  estado: string
-  nome: string
-  whatsapp: string
-  email: string | null
-  prazo: string | null
-  descricao: string | null
-  pedido_status: string
-  pedido_criado_em: string
-}
+// Re-export dos tipos (compat com imports antigos via este arquivo).
+export type { OfertaHistorico, PedidoDetalhe }
 
 /** Infos de órfão — só quando o pedido É órfão. Ausente = pedido comum. */
 export type InfoOrfao = {
@@ -40,6 +21,8 @@ export type InfoOrfao = {
   status_orfao: StatusOrfao
   prioridade: number
   motivo_orfao: string | null
+  notas_admin: string | null
+  responsavel_captacao: string | null
 }
 
 export function ModalDetalhesPedido({
@@ -66,6 +49,10 @@ export function ModalDetalhesPedido({
   const closeButtonRef = useRef<HTMLButtonElement>(null)
 
   const tituloId = `modal-${pedido.pedido_id}-titulo`
+
+  // Ofertar/reenviar só faz sentido (e a lib só permite) com o pedido ainda
+  // buscando fornecedor. Em negociação/concluído → modal view-only.
+  const podeOfertar = pedido.pedido_status === 'buscando_fornecedor'
 
   // Captura agora apenas no client após abrir — sem Date.now() no render
   // pra evitar qualquer chance de hydration mismatch.
@@ -150,13 +137,45 @@ export function ModalDetalhesPedido({
                       : '…'}
                   </Campo>
                   <Campo label="Status do pedido">{pedido.pedido_status}</Campo>
-                  {orfao && (
-                    <Campo label="Motivo do órfão">
-                      {orfao.motivo_orfao ?? '—'}
-                    </Campo>
-                  )}
                 </dl>
               </Secao>
+
+              {orfao && (
+                <Secao titulo="Captação (órfão)">
+                  <div className="space-y-3 text-sm">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <BadgeStatusOrfao status={orfao.status_orfao} />
+                      <span className="text-xs text-gray-500">
+                        prioridade {orfao.prioridade}
+                      </span>
+                    </div>
+                    <div className="text-gray-700">
+                      <span className="text-gray-500">Motivo: </span>
+                      {orfao.motivo_orfao ?? '—'}
+                    </div>
+                    {(orfao.responsavel_captacao || orfao.notas_admin) && (
+                      <div className="text-gray-700 space-y-0.5">
+                        {orfao.responsavel_captacao && (
+                          <div>
+                            <span className="text-gray-500">Responsável: </span>
+                            {orfao.responsavel_captacao}
+                          </div>
+                        )}
+                        {orfao.notas_admin && (
+                          <div>
+                            <span className="text-gray-500">Notas: </span>
+                            {orfao.notas_admin}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    <AcoesOrfao
+                      orfaoId={orfao.orfao_id}
+                      statusAtual={orfao.status_orfao}
+                    />
+                  </div>
+                </Secao>
+              )}
 
               <Secao titulo="Descrição do cliente">
                 {pedido.descricao ? (
@@ -183,6 +202,7 @@ export function ModalDetalhesPedido({
                         oferta={o}
                         agoraMs={agoraMs}
                         pedidoId={pedido.pedido_id}
+                        podeOfertar={podeOfertar}
                         agendadasParaFornecedor={
                           agendadasPorFornecedor.get(o.fornecedor_id) ?? 0
                         }
@@ -198,9 +218,11 @@ export function ModalDetalhesPedido({
                 )}
               </Secao>
 
-              <Secao titulo="Ofertar manualmente">
-                <OfertarManual pedidoId={pedido.pedido_id} />
-              </Secao>
+              {podeOfertar && (
+                <Secao titulo="Ofertar manualmente">
+                  <OfertarManual pedidoId={pedido.pedido_id} />
+                </Secao>
+              )}
 
               <div className="mt-6 flex justify-end">
                 <button
@@ -262,6 +284,7 @@ function ItemOferta({
   oferta,
   agoraMs,
   pedidoId,
+  podeOfertar,
   agendadasParaFornecedor,
   temCredito,
   jaAgendadoEstePar,
@@ -269,6 +292,7 @@ function ItemOferta({
   oferta: OfertaHistorico
   agoraMs: number | null
   pedidoId: string
+  podeOfertar: boolean
   agendadasParaFornecedor: number
   temCredito: boolean
   jaAgendadoEstePar: boolean
@@ -278,9 +302,11 @@ function ItemOferta({
       ? formatarDuracaoRelativa(new Date(oferta.enviada_em).getTime(), agoraMs)
       : '…'
 
-  // Reoferecível = expirou (sem resposta). Recusou NÃO reoferece.
+  // Reoferecível = expirou (sem resposta). Recusou NÃO reoferece. E só quando
+  // o pedido ainda está buscando (podeOfertar).
   const reofertavel =
-    oferta.status === 'expirada' || oferta.status === 'expirada_sem_credito'
+    podeOfertar &&
+    (oferta.status === 'expirada' || oferta.status === 'expirada_sem_credito')
 
   return (
     <li className="flex items-start gap-3 text-sm">
@@ -595,6 +621,24 @@ function DesfechoOferta({ status }: { status: string }) {
       className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${def.cor}`}
     >
       {def.label}
+    </span>
+  )
+}
+
+/** Badge do status_orfao (na seção de captação do modal). */
+function BadgeStatusOrfao({ status }: { status: StatusOrfao }) {
+  const map: Record<StatusOrfao, { cor: string; label: string }> = {
+    aberto: { cor: 'bg-blue-100 text-blue-800', label: 'Aberto' },
+    em_captacao: { cor: 'bg-yellow-100 text-yellow-800', label: 'Em captação' },
+    resolvido: { cor: 'bg-green-100 text-green-800', label: 'Resolvido' },
+    descartado: { cor: 'bg-gray-200 text-gray-700', label: 'Descartado' },
+  }
+  const { cor, label } = map[status]
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cor}`}
+    >
+      {label}
     </span>
   )
 }
