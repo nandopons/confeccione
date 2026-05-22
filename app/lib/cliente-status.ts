@@ -5,7 +5,6 @@
 // ============================================================================
 
 export const STATUS_PEDIDO_LABEL: Record<string, string> = {
-  aguardando_contato: 'Aguardando início',
   buscando_fornecedor: 'Procurando fornecedor',
   em_negociacao: 'Negociando com fornecedor',
   concluido: 'Concluído',
@@ -14,7 +13,6 @@ export const STATUS_PEDIDO_LABEL: Record<string, string> = {
 }
 
 export const STATUS_PEDIDO_COR: Record<string, string> = {
-  aguardando_contato: 'bg-gray-100 text-gray-700',
   buscando_fornecedor: 'bg-blue-100 text-blue-700',
   em_negociacao: 'bg-sky-100 text-sky-700',
   concluido: 'bg-green-100 text-green-700',
