@@ -487,7 +487,7 @@ export async function emailContatoFornecedor(params: {
     </div>
     <div style="background:#fffbeb;border-left:3px solid #f59e0b;padding:14px 18px;margin:24px 0;border-radius:6px;">
       <div style="color:#1f2937;font-size:14px;line-height:1.6;">
-        <strong>Daqui a 24h vamos te chamar no WhatsApp</strong> pra saber se deu certo. Se não rolou, a gente busca outro fornecedor pra você.
+        <strong>Vamos acompanhar</strong> e em alguns dias confirmamos se fechou. Se precisar, você pode pedir outro fornecedor pelo painel.
       </div>
     </div>
     <div style="text-align:center;margin:24px 0;">
@@ -509,7 +509,7 @@ Localização: ${params.cidadeFornecedor ? `${params.cidadeFornecedor} / ` : ''}
 Ele vai te chamar nas próximas horas. Se preferir, você também pode entrar em contato direto:
 https://wa.me/${whatsLink}
 
-Daqui a 24h vamos te chamar no WhatsApp pra saber se deu certo. Se não rolou, a gente busca outro fornecedor pra você.
+Vamos acompanhar e em alguns dias confirmamos se fechou. Se precisar, você pode pedir outro fornecedor pelo painel.
 
 Gerencie este pedido pelo painel (inclusive pedir outro fornecedor):
 ${painelClientePedidoUrl(params.pedidoId)}
