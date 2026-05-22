@@ -1,20 +1,21 @@
 // app/admin/(painel)/pedidos/page.tsx
 // ============================================================================
-// /admin/pedidos — pedidos em execução agrupados em 3 abas.
+// /admin/pedidos — pedidos em execução agrupados em 5 abas mutuamente exclusivas.
 //
 // Server Component. Carrega SÓ os dados da aba ativa (sem custo das outras).
-// Sem ações de mutation nesta Fase 1 — leitura apenas.
 //
-// Abas:
-//   em_oferta              → pedidos com oferta enviada aguardando resposta
-//   em_negociacao          → pedidos com fornecedor aceito, em contato com cliente
-//   aguardando_expediente  → pedidos com buscar_apos > NOW (esperando expediente)
+// Abas (precedência p/ exclusividade — um pedido = uma aba):
+//   1. em_oferta              → tem oferta 'enviada' (maior precedência)
+//   2. em_negociacao          → pedido.status='em_negociacao' (fornecedor aceito)
+//   3. precisa_atencao        → órfão ativo OU buscando sem oferta/sem agendamento;
+//                               exclui quem tem oferta enviada (vai p/ em_oferta)
+//   4. aguardando_expediente  → buscar_apos futuro; exclui órfão ativo (vai p/ precisa_atencao)
+//   5. concluido              → pedido.status='concluido'
 // ============================================================================
 
 import { redirect } from 'next/navigation'
 import { eAdminLogado } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
-import { STATUS_PEDIDO_DETECTAVEL } from '@/app/lib/orfaos'
 import {
   formatarIdadeHoras,
   formatarDuracaoFutura,
@@ -26,12 +27,19 @@ import { ColunaContato } from '../ColunaContato'
 // Tipos e constantes
 // ============================================================================
 
-type Aba = 'em_oferta' | 'em_negociacao' | 'aguardando_expediente'
+type Aba =
+  | 'em_oferta'
+  | 'em_negociacao'
+  | 'precisa_atencao'
+  | 'aguardando_expediente'
+  | 'concluido'
 
 const ABAS: Array<{ valor: Aba; label: string }> = [
   { valor: 'em_oferta', label: 'Em oferta' },
   { valor: 'em_negociacao', label: 'Em negociação' },
+  { valor: 'precisa_atencao', label: 'Precisa de atenção' },
   { valor: 'aguardando_expediente', label: 'Aguardando expediente' },
+  { valor: 'concluido', label: 'Concluídos' },
 ]
 
 const ABAS_VALIDAS = ABAS.map((a) => a.valor) as readonly Aba[]
@@ -61,6 +69,19 @@ type LinhaEmNegociacao = {
 type LinhaAguardando = {
   pedido: PedidoBase
   buscar_apos: string
+}
+
+type LinhaPrecisaAtencao = {
+  pedido: PedidoBase
+  /** prioridade do órfão (0-100) ou null se ainda não registrado como órfão */
+  prioridade: number | null
+  motivo: string
+  ehOrfao: boolean
+}
+
+type LinhaConcluido = {
+  pedido: PedidoBase
+  fornecedor_nome: string
 }
 
 // ============================================================================
@@ -105,7 +126,16 @@ export default async function AdminPedidosPage({
       ) : (
         <TabelaEmNegociacao dados={dados} agoraMs={agoraMs} />
       )
-  } else {
+  } else if (aba === 'precisa_atencao') {
+    const dados = await carregarPrecisaAtencao(agoraMs)
+    total = dados.length
+    conteudo =
+      dados.length === 0 ? (
+        <EmptyState texto="Nenhum pedido precisando de atenção. Painel limpo." />
+      ) : (
+        <TabelaPrecisaAtencao dados={dados} agoraMs={agoraMs} />
+      )
+  } else if (aba === 'aguardando_expediente') {
     const dados = await carregarAguardandoExpediente(agoraMs)
     total = dados.length
     conteudo =
@@ -113,6 +143,15 @@ export default async function AdminPedidosPage({
         <EmptyState texto="Nenhum pedido aguardando expediente." />
       ) : (
         <TabelaAguardando dados={dados} agoraMs={agoraMs} />
+      )
+  } else {
+    const dados = await carregarConcluidos()
+    total = dados.length
+    conteudo =
+      dados.length === 0 ? (
+        <EmptyState texto="Nenhum pedido concluído ainda." />
+      ) : (
+        <TabelaConcluidos dados={dados} agoraMs={agoraMs} />
       )
   }
 
@@ -151,6 +190,34 @@ export default async function AdminPedidosPage({
         </p>
       )}
     </div>
+  )
+}
+
+// ============================================================================
+// Helpers de conjuntos (precedência entre abas)
+// ============================================================================
+
+/** pedido_ids com oferta 'enviada' ativa. Em oferta tem a maior precedência:
+ *  qualquer aba "abaixo" exclui esses pedidos. */
+async function pedidosComOfertaEnviada(): Promise<Set<string>> {
+  const { data } = await supabaseAdmin
+    .from('ofertas')
+    .select('pedido_id')
+    .eq('status', 'enviada')
+  return new Set(
+    ((data ?? []) as Array<{ pedido_id: string }>).map((o) => o.pedido_id)
+  )
+}
+
+/** pedido_ids com órfão ATIVO (aberto/em_captacao). Precisa-de-atenção vence
+ *  Aguardando-expediente. */
+async function pedidosOrfaoAtivo(): Promise<Set<string>> {
+  const { data } = await supabaseAdmin
+    .from('pedidos_orfaos')
+    .select('pedido_id')
+    .in('status_orfao', ['aberto', 'em_captacao'])
+  return new Set(
+    ((data ?? []) as Array<{ pedido_id: string }>).map((o) => o.pedido_id)
   )
 }
 
@@ -293,20 +360,161 @@ async function carregarEmNegociacao(): Promise<LinhaEmNegociacao[]> {
   return linhas
 }
 
+/** Precisa de atenção = órfão ativo (via vw) UNIÃO buscando-sem-oferta-sem-
+ *  agendamento, dedup por pedido_id (órfão vence, traz prioridade/motivo),
+ *  excluindo quem tem oferta enviada (precedência: Em oferta). */
+async function carregarPrecisaAtencao(
+  agoraMs: number
+): Promise<LinhaPrecisaAtencao[]> {
+  const agoraIso = new Date(agoraMs).toISOString()
+  const comOferta = await pedidosComOfertaEnviada()
+
+  // (1) órfãos ativos — via view (já traz dados do pedido + prioridade/motivo).
+  //     Filtra pedido_status='buscando_fornecedor': um órfão stale num pedido já
+  //     aceito (em_negociacao) NÃO pode aparecer aqui (senão duplica com a aba
+  //     "Em negociação"). Garante exclusividade independente da limpeza do órfão.
+  const { data: orfaosRaw } = await supabaseAdmin
+    .from('vw_pedidos_orfaos_admin')
+    .select(
+      'pedido_id, tipo, quantidade, estado, nome, whatsapp, pedido_criado_em, prioridade, motivo_orfao, status_orfao'
+    )
+    .in('status_orfao', ['aberto', 'em_captacao'])
+    .eq('pedido_status', 'buscando_fornecedor')
+
+  const orfaos = (orfaosRaw ?? []) as Array<{
+    pedido_id: string
+    tipo: string
+    quantidade: number | null
+    estado: string
+    nome: string
+    whatsapp: string
+    pedido_criado_em: string
+    prioridade: number
+    motivo_orfao: string | null
+  }>
+
+  // (2) buscando "preso": status=buscando_fornecedor, sem fornecedor aceito,
+  //     buscar_apos nulo/passado (não é "aguardando expediente").
+  const { data: stuckRaw } = await supabaseAdmin
+    .from('pedidos')
+    .select('id, tipo, quantidade, estado, nome, whatsapp, criado_em')
+    .eq('status', 'buscando_fornecedor')
+    .is('fornecedor_aceito_id', null)
+    .or(`buscar_apos.is.null,buscar_apos.lte.${agoraIso}`)
+
+  const stuck = (stuckRaw ?? []) as PedidoBase[]
+
+  // União dedup por pedido_id, excluindo quem tem oferta enviada.
+  const map = new Map<string, LinhaPrecisaAtencao>()
+
+  for (const o of orfaos) {
+    if (comOferta.has(o.pedido_id)) continue
+    map.set(o.pedido_id, {
+      pedido: {
+        id: o.pedido_id,
+        tipo: o.tipo,
+        quantidade: o.quantidade,
+        estado: o.estado,
+        nome: o.nome,
+        whatsapp: o.whatsapp,
+        criado_em: o.pedido_criado_em,
+      },
+      prioridade: o.prioridade,
+      motivo: o.motivo_orfao ?? 'sem fornecedor',
+      ehOrfao: true,
+    })
+  }
+
+  for (const p of stuck) {
+    if (comOferta.has(p.id)) continue
+    if (map.has(p.id)) continue // já entrou como órfão (vence)
+    map.set(p.id, {
+      pedido: p,
+      prioridade: null,
+      motivo: 'buscando, sem oferta ativa',
+      ehOrfao: false,
+    })
+  }
+
+  // Ordena: maior prioridade primeiro (null = ainda não pontuado, vai depois),
+  // depois mais antigo primeiro.
+  return Array.from(map.values()).sort((a, b) => {
+    const pa = a.prioridade ?? -1
+    const pb = b.prioridade ?? -1
+    if (pb !== pa) return pb - pa
+    return (
+      new Date(a.pedido.criado_em).getTime() -
+      new Date(b.pedido.criado_em).getTime()
+    )
+  })
+}
+
 async function carregarAguardandoExpediente(
   agoraMs: number
 ): Promise<LinhaAguardando[]> {
   const agoraIso = new Date(agoraMs).toISOString()
 
+  // Exclui órfãos ativos (precedência: vão pra "Precisa de atenção").
+  const orfaoAtivo = await pedidosOrfaoAtivo()
+
   const { data } = await supabaseAdmin
     .from('pedidos')
     .select('id, tipo, quantidade, estado, nome, whatsapp, criado_em, buscar_apos')
     .gt('buscar_apos', agoraIso)
-    .in('status', STATUS_PEDIDO_DETECTAVEL as string[])
+    .eq('status', 'buscando_fornecedor')
     .is('fornecedor_aceito_id', null)
     .order('buscar_apos', { ascending: true })
 
   const pedidos = (data ?? []) as Array<PedidoBase & { buscar_apos: string }>
+  return pedidos
+    .filter((p) => !orfaoAtivo.has(p.id))
+    .map((p) => ({
+      pedido: {
+        id: p.id,
+        tipo: p.tipo,
+        quantidade: p.quantidade,
+        estado: p.estado,
+        nome: p.nome,
+        whatsapp: p.whatsapp,
+        criado_em: p.criado_em,
+      },
+      buscar_apos: p.buscar_apos,
+    }))
+}
+
+async function carregarConcluidos(): Promise<LinhaConcluido[]> {
+  const { data: pedidosRaw } = await supabaseAdmin
+    .from('pedidos')
+    .select(
+      'id, tipo, quantidade, estado, nome, whatsapp, criado_em, fornecedor_aceito_id'
+    )
+    .eq('status', 'concluido')
+    .order('criado_em', { ascending: false })
+
+  const pedidos = (pedidosRaw ?? []) as Array<
+    PedidoBase & { fornecedor_aceito_id: string | null }
+  >
+  if (pedidos.length === 0) return []
+
+  const fornecedorIds = Array.from(
+    new Set(
+      pedidos.map((p) => p.fornecedor_aceito_id).filter(Boolean) as string[]
+    )
+  )
+  const { data: fornecedoresRaw } =
+    fornecedorIds.length > 0
+      ? await supabaseAdmin
+          .from('leads_fornecedores')
+          .select('id, nome')
+          .in('id', fornecedorIds)
+      : { data: [] as Array<{ id: string; nome: string }> }
+
+  const fornecedorMap = new Map(
+    ((fornecedoresRaw ?? []) as Array<{ id: string; nome: string }>).map(
+      (f) => [f.id, f.nome]
+    )
+  )
+
   return pedidos.map((p) => ({
     pedido: {
       id: p.id,
@@ -317,7 +525,9 @@ async function carregarAguardandoExpediente(
       whatsapp: p.whatsapp,
       criado_em: p.criado_em,
     },
-    buscar_apos: p.buscar_apos,
+    fornecedor_nome:
+      (p.fornecedor_aceito_id && fornecedorMap.get(p.fornecedor_aceito_id)) ??
+      '—',
   }))
 }
 
@@ -422,6 +632,60 @@ function TabelaEmNegociacao({
   )
 }
 
+function TabelaPrecisaAtencao({
+  dados,
+  agoraMs,
+}: {
+  dados: LinhaPrecisaAtencao[]
+  agoraMs: number
+}) {
+  return (
+    <TabelaWrapper>
+      <thead className="bg-gray-50 text-xs text-gray-600 uppercase tracking-wider">
+        <tr>
+          <Th>Sinal</Th>
+          <Th>Pedido</Th>
+          <Th>Cliente</Th>
+          <Th>Idade pedido</Th>
+          <Th>Prioridade</Th>
+          <Th>Motivo</Th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-gray-200 text-sm">
+        {dados.map((l) => {
+          const idadePedidoH =
+            (agoraMs - new Date(l.pedido.criado_em).getTime()) / 3600_000
+          return (
+            <tr
+              key={l.pedido.id}
+              className="hover:bg-gray-50 border-l-4 border-l-red-500"
+            >
+              <Td className="whitespace-nowrap">
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-800">
+                  ● Precisa de você
+                </span>
+              </Td>
+              <Td>
+                <PedidoResumo p={l.pedido} />
+              </Td>
+              <Td>
+                <ColunaContato nome={l.pedido.nome} whatsapp={l.pedido.whatsapp} />
+              </Td>
+              <Td className="whitespace-nowrap text-gray-700">
+                {formatarIdadeHoras(idadePedidoH)}
+              </Td>
+              <Td className="whitespace-nowrap text-gray-700">
+                {l.prioridade !== null ? l.prioridade : '—'}
+              </Td>
+              <Td className="text-gray-600 text-xs max-w-[220px]">{l.motivo}</Td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </TabelaWrapper>
+  )
+}
+
 function TabelaAguardando({
   dados,
   agoraMs,
@@ -459,6 +723,47 @@ function TabelaAguardando({
                 {formatarIdadeHoras(idadePedidoH)}
               </Td>
               <Td className="whitespace-nowrap text-gray-700">{retomaStr}</Td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </TabelaWrapper>
+  )
+}
+
+function TabelaConcluidos({
+  dados,
+  agoraMs,
+}: {
+  dados: LinhaConcluido[]
+  agoraMs: number
+}) {
+  return (
+    <TabelaWrapper>
+      <thead className="bg-gray-50 text-xs text-gray-600 uppercase tracking-wider">
+        <tr>
+          <Th>Pedido</Th>
+          <Th>Cliente</Th>
+          <Th>Idade pedido</Th>
+          <Th>Fornecedor</Th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-gray-200 text-sm">
+        {dados.map((l) => {
+          const idadePedidoH =
+            (agoraMs - new Date(l.pedido.criado_em).getTime()) / 3600_000
+          return (
+            <tr key={l.pedido.id} className="hover:bg-gray-50">
+              <Td>
+                <PedidoResumo p={l.pedido} />
+              </Td>
+              <Td>
+                <ColunaContato nome={l.pedido.nome} whatsapp={l.pedido.whatsapp} />
+              </Td>
+              <Td className="whitespace-nowrap text-gray-700">
+                {formatarIdadeHoras(idadePedidoH)}
+              </Td>
+              <Td className="text-gray-900">{l.fornecedor_nome}</Td>
             </tr>
           )
         })}
