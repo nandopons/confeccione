@@ -170,7 +170,7 @@ export default function Home() {
       <SiteHeader />
 
       <section className="bg-[#111] px-6 py-16 text-center">
-        <h1 className="text-white text-2xl md:text-4xl font-medium leading-snug md:leading-tight mb-4">Conectamos você às melhores<br className="hidden md:block" />confecções e costureiras do Brasil</h1>
+        <h1 className="text-white text-2xl md:text-4xl font-medium leading-snug md:leading-tight mb-4">Conectamos você às melhores confecções e costureiras do Brasil</h1>
         <p className="text-gray-400 text-base max-w-xl mx-auto mb-8 leading-relaxed">Faça seu pedido em minutos. Receba orçamentos de fornecedores verificados. Produza com confiança.</p>
         <button onClick={() => document.getElementById("pedido")?.scrollIntoView({ behavior: "smooth" })} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white font-medium px-8 py-4 rounded-xl text-base transition-colors">Fazer meu pedido agora</button>
         <div className="mt-4 text-center">
