@@ -245,7 +245,8 @@ export default function Home() {
         <PortoDigitalBadge variant="inline" />
       </section>
 
-      <section id="pedido" className="px-6 pt-12 pb-16 max-w-2xl mx-auto scroll-mt-40 md:scroll-mt-48">
+      <section id="pedido" className="bg-[#F7F8F9] scroll-mt-40 md:scroll-mt-48">
+        <div className="px-6 pt-12 pb-16 max-w-2xl mx-auto">
         <div className="flex flex-col items-start gap-2 md:flex-row md:items-center md:gap-3 mb-1">
           <h2 className="text-gray-900 text-xl font-medium">Faça seu pedido</h2>
           <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">3 passos simples</span>
@@ -263,7 +264,7 @@ export default function Home() {
           ))}
         </div>
 
-        <div className="border border-gray-200 rounded-2xl p-6">
+        <div className="bg-white shadow-sm border border-gray-200 rounded-2xl p-6">
           {step === 0 && (
             <>
               <p className="text-gray-900 font-medium mb-1">O que você precisa produzir?</p>
@@ -463,6 +464,7 @@ export default function Home() {
             <p className="text-sm text-gray-900 font-medium">Precisa de ajuda?</p>
             <p className="text-xs text-gray-400 leading-relaxed">Nosso time atende pelo WhatsApp{" "}<a href={linkWhatsAppSuporte("Olá! Estou com uma dúvida no pedido")} target="_blank" rel="noopener noreferrer" className="font-medium text-[#0F6E56] hover:underline">(81) 99578-2077</a>. Chame a qualquer momento que a gente te guia pelo processo.</p>
           </div>
+        </div>
         </div>
       </section>
 
