@@ -238,7 +238,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="bg-[#0a0a0a] px-6 pt-8 pb-10 hidden md:flex justify-center">
+      <section className="bg-[#0a0a0a] px-6 pt-6 pb-10 hidden md:flex justify-center">
         <PortoDigitalBadge variant="inline" />
       </section>
 
