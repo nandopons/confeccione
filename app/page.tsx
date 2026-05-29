@@ -237,7 +237,7 @@ export default function Home() {
         <PortoDigitalBadge variant="inline" />
       </section>
 
-      <section id="pedido" className="px-6 pt-12 pb-16 max-w-2xl mx-auto scroll-mt-20">
+      <section id="pedido" className="px-6 pt-12 pb-16 max-w-2xl mx-auto scroll-mt-28">
         <div className="flex flex-col items-start gap-2 md:flex-row md:items-center md:gap-3 mb-1">
           <h2 className="text-gray-900 text-xl font-medium">Faça seu pedido</h2>
           <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">3 passos simples</span>
