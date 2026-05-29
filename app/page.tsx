@@ -169,7 +169,7 @@ export default function Home() {
 
       <section className="relative h-[88vh] min-h-[600px] overflow-hidden bg-[#0a0a0a]">
         {/* Foto contida na metade direita (desktop) / fundo (mobile) — tamanho ~nativo, sem esticar */}
-        <div className="absolute inset-0 z-0 md:left-auto md:w-[55%]">
+        <div className="absolute inset-0 z-0 md:left-auto md:w-[60%]">
           <Image
             src="/hero/hero-estampa.jpg"
             alt="Estampa de confecção sob demanda"
@@ -186,7 +186,7 @@ export default function Home() {
           className="hidden md:block absolute inset-0 z-[1]"
           style={{
             background: [
-              "linear-gradient(90deg, #0a0a0a 0%, rgba(10,10,10,0.85) 15%, rgba(10,10,10,0.2) 45%, rgba(10,10,10,0) 70%)",
+              "linear-gradient(90deg, #0a0a0a 0%, #0a0a0a 25%, rgba(10,10,10,0.7) 45%, rgba(10,10,10,0.3) 60%, rgba(10,10,10,0) 80%)",
               "linear-gradient(180deg, rgba(10,10,10,0.6) 0%, rgba(10,10,10,0) 25%, rgba(10,10,10,0) 70%, rgba(10,10,10,0.7) 100%)",
               "linear-gradient(270deg, rgba(10,10,10,0.5) 0%, rgba(10,10,10,0) 12%)",
             ].join(", "),
