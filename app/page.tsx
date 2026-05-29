@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import SiteHeader from "@/app/components/SiteHeader";
 import SiteFooter from "@/app/components/SiteFooter";
+import PortoDigitalBadge from "@/app/components/PortoDigitalBadge";
 import SelectModal from "@/app/components/SelectModal";
 import { linkWhatsAppSuporte } from "@/app/lib/contatos";
 
@@ -177,7 +178,7 @@ export default function Home() {
             preload
             quality={85}
             sizes="(min-width: 768px) 60vw, 100vw"
-            className="object-cover object-center md:object-contain"
+            className="object-cover object-center"
           />
         </div>
 
@@ -230,6 +231,10 @@ export default function Home() {
           <div className="text-white text-xs font-medium">Empresa embarcada</div>
           <div className="text-gray-400 text-[10px]">no Porto Digital</div>
         </div>
+      </section>
+
+      <section className="bg-[#0a0a0a] px-6 py-16 flex justify-center">
+        <PortoDigitalBadge variant="inline" />
       </section>
 
       <section id="pedido" className="px-6 pt-12 pb-16 max-w-2xl mx-auto scroll-mt-20">
