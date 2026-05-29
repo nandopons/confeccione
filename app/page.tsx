@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import SiteHeader from "@/app/components/SiteHeader";
 import SiteFooter from "@/app/components/SiteFooter";
-import PortoDigitalBadge from "@/app/components/PortoDigitalBadge";
 import SelectModal from "@/app/components/SelectModal";
 import { linkWhatsAppSuporte } from "@/app/lib/contatos";
 
@@ -167,35 +167,68 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-white font-sans">
 
-      <SiteHeader />
+      <section className="relative h-[88vh] min-h-[600px] overflow-hidden bg-[#0a0a0a]">
+        <Image
+          src="/hero/hero-estampa.jpg"
+          alt="Estampa de confecção sob demanda"
+          fill
+          preload
+          sizes="100vw"
+          className="object-cover object-center"
+        />
+        {/* Overlays de gradiente para legibilidade (tratamento via CSS, sem editar a foto) */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(90deg, rgba(8,8,8,0.9) 0%, rgba(8,8,8,0.55) 42%, rgba(8,8,8,0.25) 68%, rgba(8,8,8,0.4) 100%)",
+          }}
+        />
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(8,8,8,0.45) 0%, rgba(8,8,8,0) 28%, rgba(8,8,8,0) 72%, rgba(8,8,8,0.55) 100%)",
+          }}
+        />
 
-      <section className="bg-[#111] px-6 py-16 text-center">
-        <h1 className="text-white text-2xl md:text-4xl font-medium leading-snug md:leading-tight mb-4">Conectamos você às melhores confecções e costureiras do Brasil</h1>
-        <p className="text-gray-400 text-base max-w-xl mx-auto mb-8 leading-relaxed">Faça seu pedido em minutos. Receba orçamentos de fornecedores verificados. Produza com confiança.</p>
-        <button onClick={() => document.getElementById("pedido")?.scrollIntoView({ behavior: "smooth" })} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white font-medium px-8 py-4 rounded-xl text-base transition-colors">Fazer meu pedido agora</button>
-        <div className="mt-4 text-center">
-          <Link
-            href="/cliente/login"
-            className="text-sm text-gray-300 hover:text-white underline underline-offset-4 transition-colors"
-          >
-            Já fez pedido? Acompanhar meu pedido
-          </Link>
+        <SiteHeader transparent />
+
+        <div
+          className="relative z-10 h-full flex items-center px-8 md:px-12"
+          style={{ fontFamily: "var(--font-manrope)" }}
+        >
+          <div className="w-full md:max-w-[70%]">
+            <h1 className="text-white font-semibold text-3xl md:text-4xl leading-tight tracking-tight">
+              Confecções e costureiras<br />
+              de <span className="text-[#1D9E75]">todo o Brasil</span>
+            </h1>
+            <p className="font-light text-sm text-gray-400 max-w-sm mt-4 leading-relaxed">
+              Faça seu pedido em minutos. Receba orçamentos de fornecedores verificados.
+            </p>
+            <div className="mt-6 flex items-center gap-6">
+              <button
+                onClick={() => document.getElementById("pedido")?.scrollIntoView({ behavior: "smooth" })}
+                className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-6 py-2.5 rounded text-sm font-medium transition-colors"
+              >
+                Fazer meu pedido →
+              </button>
+              <Link
+                href="/cliente/login"
+                className="text-xs text-gray-400 hover:text-gray-200 underline underline-offset-4 whitespace-nowrap transition-colors"
+              >
+                Já fez pedido? Acompanhar
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Selo institucional sutil — só texto, sem o ícone azul (regra de marca) */}
+        <div className="absolute bottom-6 right-8 z-10 text-right opacity-80">
+          <div className="text-white text-xs font-medium">Empresa embarcada</div>
+          <div className="text-gray-400 text-[10px]">no Porto Digital</div>
         </div>
       </section>
-
-      <div className="bg-[#1a1a1a] px-6 py-8 md:pt-3 md:pb-10">
-        <div className="hidden md:flex flex-wrap items-center justify-center gap-6">
-          {["Fornecedores verificados", "Pagamento seguro", "Atendimento humano no WhatsApp", "Todo o Brasil"].map((item) => (
-            <div key={item} className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#1D9E75] flex-shrink-0" />
-              <span className="text-gray-400 text-xs">{item}</span>
-            </div>
-          ))}
-        </div>
-        <div className="mt-0 md:mt-10 flex justify-center">
-          <PortoDigitalBadge variant="inline" />
-        </div>
-      </div>
 
       <section id="pedido" className="px-6 pt-12 pb-16 max-w-2xl mx-auto scroll-mt-20">
         <div className="flex flex-col items-start gap-2 md:flex-row md:items-center md:gap-3 mb-1">

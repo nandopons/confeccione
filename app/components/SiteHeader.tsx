@@ -6,7 +6,7 @@ import SouFornecedorModal from "./SouFornecedorModal";
 
 type StatusSessao = "desconhecido" | "logado" | "nao-logado";
 
-export default function SiteHeader() {
+export default function SiteHeader({ transparent = false }: { transparent?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
@@ -32,106 +32,117 @@ export default function SiteHeader() {
   }, []);
 
   function handleSouFornecedor() {
-    // Fecha drawer mobile (no-op em desktop)
     setOpen(false);
     if (statusSessao === "logado") {
       router.push("/fornecedor/painel");
       return;
     }
-    // 'nao-logado' ou 'desconhecido' (loading inicial) → abre modal
     setModalAberto(true);
   }
 
+  const navClass = transparent
+    ? "absolute top-0 left-0 right-0 z-20 bg-transparent"
+    : "sticky top-0 z-40 bg-[#111]";
+
+  const Logo = (
+    <Link
+      href="/"
+      onClick={close}
+      className="flex items-center gap-2 md:gap-3 hover:opacity-80 transition-opacity"
+    >
+      <svg width="32" height="32" viewBox="0 0 60 60" fill="none">
+        <path d="M30 6 A24 24 0 0 1 54 30" stroke="white" strokeWidth="10" strokeLinecap="round" />
+        <path d="M54 30 A24 24 0 0 1 30 54" stroke="white" strokeWidth="10" strokeLinecap="round" opacity="0.5" />
+        <path d="M30 54 A24 24 0 0 1 6 30" stroke="white" strokeWidth="10" strokeLinecap="round" opacity="0.75" />
+        <path d="M6 30 A24 24 0 0 1 30 6" stroke="white" strokeWidth="10" strokeLinecap="round" opacity="0.35" />
+        <circle cx="30" cy="30" r="5" fill="white" />
+      </svg>
+      <span className="text-white font-medium tracking-widest text-base md:text-lg">CONFECCIONE</span>
+    </Link>
+  );
+
   return (
-    <nav className="bg-[#111] px-4 md:px-6 py-4 flex items-center justify-between sticky top-0 z-40">
-      <Link href="/" className="flex items-center gap-2 md:gap-3">
-        <svg width="32" height="32" viewBox="0 0 60 60" fill="none">
-          <path d="M30 6 A24 24 0 0 1 54 30" stroke="white" strokeWidth="10" strokeLinecap="round"/>
-          <path d="M54 30 A24 24 0 0 1 30 54" stroke="white" strokeWidth="10" strokeLinecap="round" opacity="0.5"/>
-          <path d="M30 54 A24 24 0 0 1 6 30" stroke="white" strokeWidth="10" strokeLinecap="round" opacity="0.75"/>
-          <path d="M6 30 A24 24 0 0 1 30 6" stroke="white" strokeWidth="10" strokeLinecap="round" opacity="0.35"/>
-          <circle cx="30" cy="30" r="5" fill="white"/>
-        </svg>
-        <span className="text-white font-medium tracking-widest text-base md:text-lg">CONFECCIONE</span>
-      </Link>
+    <>
+      <nav className={`${navClass} px-4 md:px-6 py-4 flex items-center justify-between`}>
+        {Logo}
 
-      <div className="hidden md:flex items-center gap-2 md:gap-3">
-        <button
-          type="button"
-          onClick={handleSouFornecedor}
-          className="whitespace-nowrap text-white text-xs md:text-sm border border-white/20 px-2 md:px-4 py-2 rounded-full hover:bg-white/10 transition-colors"
-        >
-          {statusSessao === "logado" ? (
-            "Painel"
-          ) : (
-            <>
-              <span className="hidden md:inline">Sou fornecedor</span>
-              <span className="md:hidden">Fornecedor</span>
-            </>
-          )}
-        </button>
-        <Link href="/saiba-mais" className="whitespace-nowrap text-white text-xs md:text-sm border border-white/20 px-2 md:px-4 py-2 rounded-full hover:bg-white/10 transition-colors">
-          Saiba mais
-        </Link>
-        <Link href="/#pedido" className="whitespace-nowrap text-white text-xs md:text-sm font-medium bg-[#1D9E75] hover:bg-[#0F6E56] px-2 md:px-4 py-2 rounded-full transition-colors">
-          Fazer meu pedido
-        </Link>
-      </div>
-
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-label={open ? "Fechar menu" : "Abrir menu"}
-        aria-expanded={open}
-        aria-controls="site-header-mobile-menu"
-        className="md:hidden text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
-      >
-        {open ? (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <line x1="6" y1="6" x2="18" y2="18" />
-            <line x1="18" y1="6" x2="6" y2="18" />
-          </svg>
-        ) : (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <line x1="4" y1="7" x2="20" y2="7" />
-            <line x1="4" y1="12" x2="20" y2="12" />
-            <line x1="4" y1="17" x2="20" y2="17" />
-          </svg>
-        )}
-      </button>
-
-      {open && (
-        <div
-          id="site-header-mobile-menu"
-          className="md:hidden absolute top-full left-0 right-0 bg-[#111] border-t border-white/10 flex flex-col p-4 gap-2"
-        >
+        <div className="flex items-center gap-3 md:gap-4">
           <button
             type="button"
             onClick={handleSouFornecedor}
-            className="text-left text-white text-sm border border-white/20 px-4 py-3 rounded-xl hover:bg-white/10 transition-colors"
+            className="whitespace-nowrap text-sm text-gray-200 hover:text-white transition-colors"
           >
             {statusSessao === "logado" ? "Painel" : "Sou fornecedor"}
           </button>
-          <Link
-            href="/saiba-mais"
-            onClick={close}
-            className="text-white text-sm border border-white/20 px-4 py-3 rounded-xl hover:bg-white/10 transition-colors"
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-label="Abrir menu"
+            aria-expanded={open}
+            aria-controls="site-menu-drawer"
+            className="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
           >
-            Saiba mais
-          </Link>
-          <Link
-            href="/#pedido"
-            onClick={close}
-            className="text-white text-sm font-medium bg-[#1D9E75] hover:bg-[#0F6E56] px-4 py-3 rounded-xl transition-colors"
-          >
-            Fazer meu pedido
-          </Link>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="4" y1="7" x2="20" y2="7" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="17" x2="20" y2="17" />
+            </svg>
+          </button>
         </div>
-      )}
+      </nav>
 
-      {modalAberto && (
-        <SouFornecedorModal onClose={() => setModalAberto(false)} />
-      )}
-    </nav>
+      {/* Drawer lateral direito */}
+      <div className={`fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`} aria-hidden={!open}>
+        <div
+          className={`absolute inset-0 bg-black/50 transition-opacity duration-300 ${open ? "opacity-100" : "opacity-0"}`}
+          onClick={close}
+        />
+        <div
+          id="site-menu-drawer"
+          className={`absolute top-0 right-0 h-full w-72 max-w-[80%] bg-[#0a0a0a] border-l border-white/10 shadow-xl flex flex-col transition-transform duration-300 ${open ? "translate-x-0" : "translate-x-full"}`}
+        >
+          <div className="flex justify-end p-4">
+            <button
+              type="button"
+              onClick={close}
+              aria-label="Fechar menu"
+              className="w-10 h-10 flex items-center justify-center rounded-full text-white hover:bg-white/10 transition-colors"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="6" y1="6" x2="18" y2="18" />
+                <line x1="18" y1="6" x2="6" y2="18" />
+              </svg>
+            </button>
+          </div>
+
+          <nav className="flex flex-col px-6 py-2 gap-1 text-gray-300">
+            <Link href="/#pedido" onClick={close} className="py-3 border-b border-white/5 hover:text-white transition-colors">
+              Fazer meu pedido
+            </Link>
+            <Link href="/sobre" onClick={close} className="py-3 border-b border-white/5 hover:text-white transition-colors">
+              Sobre
+            </Link>
+            <Link href="/saiba-mais" onClick={close} className="py-3 border-b border-white/5 hover:text-white transition-colors">
+              Saiba mais
+            </Link>
+            <Link href="/porto-digital" onClick={close} className="py-3 border-b border-white/5 hover:text-white transition-colors">
+              Porto Digital
+            </Link>
+            <button
+              type="button"
+              onClick={handleSouFornecedor}
+              className="py-3 border-b border-white/5 text-left hover:text-white transition-colors"
+            >
+              {statusSessao === "logado" ? "Painel do fornecedor" : "Sou fornecedor"}
+            </button>
+            <Link href="/cliente/login" onClick={close} className="py-3 hover:text-white transition-colors">
+              Acompanhar meu pedido
+            </Link>
+          </nav>
+        </div>
+      </div>
+
+      {modalAberto && <SouFornecedorModal onClose={() => setModalAberto(false)} />}
+    </>
   );
 }
