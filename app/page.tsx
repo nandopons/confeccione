@@ -168,54 +168,57 @@ export default function Home() {
     <main className="min-h-screen bg-white font-sans">
 
       <section className="relative h-[88vh] min-h-[600px] overflow-hidden bg-[#0a0a0a]">
-        <Image
-          src="/hero/hero-estampa.jpg"
-          alt="Estampa de confecção sob demanda"
-          fill
-          preload
-          sizes="100vw"
-          className="object-cover object-center"
-        />
-        {/* Overlays de gradiente para legibilidade (tratamento via CSS, sem editar a foto) */}
+        {/* Foto contida na metade direita (desktop) / fundo (mobile) — tamanho ~nativo, sem esticar */}
+        <div className="absolute inset-0 z-0 md:left-auto md:w-[55%]">
+          <Image
+            src="/hero/hero-estampa.jpg"
+            alt="Estampa de confecção sob demanda"
+            fill
+            preload
+            quality={85}
+            sizes="(min-width: 768px) 55vw, 100vw"
+            className="object-cover object-center"
+          />
+        </div>
+
+        {/* Mescla desktop: dissolve a foto no preto sólido, sem borda dura */}
         <div
-          className="absolute inset-0"
+          className="hidden md:block absolute inset-0 z-[1]"
           style={{
-            background:
-              "linear-gradient(90deg, rgba(8,8,8,0.9) 0%, rgba(8,8,8,0.55) 42%, rgba(8,8,8,0.25) 68%, rgba(8,8,8,0.4) 100%)",
+            background: [
+              "linear-gradient(90deg, #0a0a0a 0%, rgba(10,10,10,0.85) 15%, rgba(10,10,10,0.2) 45%, rgba(10,10,10,0) 70%)",
+              "linear-gradient(180deg, rgba(10,10,10,0.6) 0%, rgba(10,10,10,0) 25%, rgba(10,10,10,0) 70%, rgba(10,10,10,0.7) 100%)",
+              "linear-gradient(270deg, rgba(10,10,10,0.5) 0%, rgba(10,10,10,0) 12%)",
+            ].join(", "),
           }}
         />
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(8,8,8,0.45) 0%, rgba(8,8,8,0) 28%, rgba(8,8,8,0) 72%, rgba(8,8,8,0.55) 100%)",
-          }}
-        />
+        {/* Mobile: foto ao fundo + escurecimento forte para legibilidade */}
+        <div className="md:hidden absolute inset-0 z-[1] bg-[rgba(10,10,10,0.7)]" />
 
         <SiteHeader transparent />
 
         <div
-          className="relative z-10 h-full flex items-center px-8 md:px-12"
+          className="relative z-10 h-full flex items-center px-8 md:px-16 lg:px-20"
           style={{ fontFamily: "var(--font-manrope)" }}
         >
-          <div className="w-full md:max-w-[70%]">
-            <h1 className="text-white font-semibold text-3xl md:text-4xl leading-tight tracking-tight">
+          <div className="max-w-[520px]">
+            <h1 className="text-white font-semibold text-3xl md:text-4xl lg:text-5xl leading-[1.1] tracking-tight">
               Confecções e costureiras<br />
               de <span className="text-[#1D9E75]">todo o Brasil</span>
             </h1>
-            <p className="font-light text-sm text-gray-400 max-w-sm mt-4 leading-relaxed">
+            <p className="font-light text-sm md:text-base text-gray-300 max-w-md mt-4 leading-relaxed">
               Faça seu pedido em minutos. Receba orçamentos de fornecedores verificados.
             </p>
-            <div className="mt-6 flex items-center gap-6">
+            <div className="mt-7 flex items-center gap-6">
               <button
                 onClick={() => document.getElementById("pedido")?.scrollIntoView({ behavior: "smooth" })}
-                className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-6 py-2.5 rounded text-sm font-medium transition-colors"
+                className="bg-[#1D9E75] hover:bg-[#178a64] text-white px-6 py-2.5 rounded text-sm font-medium transition-colors"
               >
                 Fazer meu pedido →
               </button>
               <Link
                 href="/cliente/login"
-                className="text-xs text-gray-400 hover:text-gray-200 underline underline-offset-4 whitespace-nowrap transition-colors"
+                className="text-xs text-gray-300 hover:text-gray-100 underline underline-offset-4 whitespace-nowrap transition-colors"
               >
                 Já fez pedido? Acompanhar
               </Link>
