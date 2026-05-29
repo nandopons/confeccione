@@ -214,7 +214,7 @@ export default function Home() {
                 onClick={() => {
                   const el = document.getElementById("pedido");
                   if (!el) return;
-                  const y = el.getBoundingClientRect().top + window.scrollY - 250;
+                  const y = el.getBoundingClientRect().top + window.scrollY - 80;
                   window.scrollTo({ top: y, behavior: "smooth" });
                 }}
                 className="bg-[#1D9E75] hover:bg-[#178a64] text-white px-5 md:px-6 py-2.5 rounded text-sm font-medium whitespace-nowrap transition-colors"
