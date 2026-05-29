@@ -32,7 +32,7 @@ export default function SobrePage() {
             A Confeccione é um marketplace brasileiro que conecta clientes que precisam
             fabricar roupa a fornecedores de confecção compatíveis. O matching considera
             tipo de peça, quantidade, prazo e localização — e o pedido é oferecido
-            automaticamente ao fornecedor certo, via WhatsApp e email.
+            automaticamente ao fornecedor certo.
           </p>
         </section>
 
