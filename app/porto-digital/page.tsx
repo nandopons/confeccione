@@ -40,18 +40,12 @@ export default function PortoDigitalPage() {
           <h2 className="text-white text-xl font-medium mb-3">
             O que significa estar embarcada
           </h2>
-          <p className="text-gray-400 leading-relaxed mb-4">
-            A Confeccione integra o ecossistema do Porto Digital como empresa
-            embarcada na vertical de Economia Criativa, em que o distrito abriga
-            negócios que utilizam tecnologia da informação na criação, fabricação
-            e distribuição de produtos nos setores de design, moda, games,
-            cine-vídeo-animação e fotografia.
-          </p>
           <p className="text-gray-400 leading-relaxed">
-            O embarque não envolve investimento financeiro nem aceleração formal —
-            trata-se da chancela institucional do Núcleo de Gestão do Porto Digital
-            (NGPD) de que a Confeccione atende aos critérios técnicos e setoriais
-            do distrito.
+            A Confeccione integra o ecossistema do Porto Digital, distrito que
+            reúne empresas de tecnologia da informação, comunicação e economia
+            criativa. A plataforma se posiciona na interseção dessas verticais —
+            engenharia de software aplicada ao setor de moda e confecção de
+            roupas.
           </p>
         </section>
 
