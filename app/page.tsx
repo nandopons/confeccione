@@ -227,7 +227,7 @@ export default function Home() {
         </div>
 
         {/* Selo institucional sutil — só texto, sem o ícone azul (regra de marca) */}
-        <div className="absolute bottom-6 right-8 z-10 text-right opacity-80">
+        <div className="absolute bottom-6 right-8 z-10 text-right opacity-80 md:hidden">
           <div className="text-white text-xs font-medium">Empresa embarcada</div>
           <div className="text-gray-400 text-[10px]">no Porto Digital</div>
         </div>
