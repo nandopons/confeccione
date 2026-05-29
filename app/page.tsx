@@ -253,7 +253,7 @@ export default function Home() {
         </div>
         <p className="text-gray-400 text-sm mb-6">Preencha as informações abaixo e receba orçamentos em até 24h.</p>
 
-        <div className="flex items-center bg-white shadow-sm border border-gray-200 rounded-2xl px-5 py-4 mb-8">
+        <div className="flex items-center bg-white shadow-sm border border-gray-100 rounded-xl px-4 py-3 mb-8">
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex items-center flex-1 last:flex-none">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0 transition-all ${i < step ? "bg-[#1D9E75] text-white" : i === step ? "bg-[#111] text-white" : "bg-gray-100 text-gray-400"}`}>
