@@ -6,8 +6,8 @@ export default function SiteFooter() {
   return (
     <footer className="bg-[#0a0a0a] px-6 py-8">
       <div className="max-w-4xl mx-auto">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-6 md:gap-4 text-center md:text-left">
+          <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <svg width="24" height="24" viewBox="0 0 60 60" fill="none">
               <path d="M30 6 A24 24 0 0 1 54 30" stroke="white" strokeWidth="10" strokeLinecap="round"/>
               <path d="M54 30 A24 24 0 0 1 30 54" stroke="white" strokeWidth="10" strokeLinecap="round" opacity="0.5"/>
@@ -16,16 +16,18 @@ export default function SiteFooter() {
               <circle cx="30" cy="30" r="5" fill="white"/>
             </svg>
             <span className="text-white text-sm font-medium tracking-widest">CONFECCIONE</span>
-          </div>
-          <p className="text-gray-600 text-xs">
+          </Link>
+
+          <div className="text-gray-600 text-xs flex flex-col items-center md:items-start gap-1.5">
             <a href="mailto:contato@confeccione.com.br" className="hover:text-gray-400 transition-colors">contato@confeccione.com.br</a>
-            {" · "}
             <a href={`https://wa.me/${WHATSAPP_SUPORTE}`} target="_blank" rel="noopener noreferrer" className="hover:text-gray-400 transition-colors">(81) 99578-2077</a>
-            {" · "}
-            <Link href="/sobre" className="hover:text-gray-400 transition-colors">Sobre</Link>
-            {" · "}
-            <Link href="/fornecedor/entrar" className="hover:text-gray-400 transition-colors">Área do fornecedor</Link>
-          </p>
+            <span>
+              <Link href="/sobre" className="hover:text-gray-400 transition-colors">Sobre</Link>
+              {" · "}
+              <Link href="/fornecedor/entrar" className="hover:text-gray-400 transition-colors">Área do fornecedor</Link>
+            </span>
+          </div>
+
           <p className="text-gray-600 text-xs">© 2026 Confeccione · CNPJ 49.307.439/0001-50</p>
         </div>
 
