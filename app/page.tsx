@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
 import SiteFooter from "@/app/components/SiteFooter";
+import PortoDigitalBadge from "@/app/components/PortoDigitalBadge";
 import SelectModal from "@/app/components/SelectModal";
 import { linkWhatsAppSuporte } from "@/app/lib/contatos";
 
@@ -182,13 +183,18 @@ export default function Home() {
         </div>
       </section>
 
-      <div className="bg-[#1a1a1a] px-6 py-3 flex flex-wrap items-center justify-center gap-6">
-        {["Fornecedores verificados", "Pagamento seguro", "Atendimento humano no WhatsApp", "Todo o Brasil"].map((item) => (
-          <div key={item} className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#1D9E75] flex-shrink-0" />
-            <span className="text-gray-400 text-xs">{item}</span>
-          </div>
-        ))}
+      <div className="bg-[#1a1a1a] px-6 pt-3 pb-10">
+        <div className="flex flex-wrap items-center justify-center gap-6">
+          {["Fornecedores verificados", "Pagamento seguro", "Atendimento humano no WhatsApp", "Todo o Brasil"].map((item) => (
+            <div key={item} className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#1D9E75] flex-shrink-0" />
+              <span className="text-gray-400 text-xs">{item}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-10 flex justify-center">
+          <PortoDigitalBadge variant="inline" />
+        </div>
       </div>
 
       <section id="pedido" className="px-6 pt-12 pb-16 max-w-2xl mx-auto scroll-mt-20">
