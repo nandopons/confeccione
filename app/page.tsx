@@ -176,8 +176,8 @@ export default function Home() {
             fill
             preload
             quality={85}
-            sizes="(min-width: 768px) 55vw, 100vw"
-            className="object-cover object-center"
+            sizes="(min-width: 768px) 60vw, 100vw"
+            className="object-cover object-center md:object-contain"
           />
         </div>
 
@@ -186,7 +186,7 @@ export default function Home() {
           className="hidden md:block absolute inset-0 z-[1]"
           style={{
             background: [
-              "linear-gradient(90deg, #0a0a0a 0%, #0a0a0a 25%, rgba(10,10,10,0.7) 45%, rgba(10,10,10,0.3) 60%, rgba(10,10,10,0) 80%)",
+              "linear-gradient(90deg, #0a0a0a 0%, #0a0a0a 30%, rgba(10,10,10,0.85) 50%, rgba(10,10,10,0.5) 68%, rgba(10,10,10,0.15) 85%, rgba(10,10,10,0) 100%)",
               "linear-gradient(180deg, rgba(10,10,10,0.6) 0%, rgba(10,10,10,0) 25%, rgba(10,10,10,0) 70%, rgba(10,10,10,0.7) 100%)",
               "linear-gradient(270deg, rgba(10,10,10,0.5) 0%, rgba(10,10,10,0) 12%)",
             ].join(", "),
@@ -202,9 +202,8 @@ export default function Home() {
           style={{ fontFamily: "var(--font-manrope)" }}
         >
           <div className="max-w-[520px]">
-            <h1 className="text-white font-semibold text-3xl md:text-4xl lg:text-5xl leading-[1.1] tracking-tight">
-              Confecções e costureiras<br />
-              de <span className="text-[#1D9E75]">todo o Brasil</span>
+            <h1 className="text-white font-semibold text-2xl md:text-3xl lg:text-4xl leading-[1.1] tracking-tight">
+              Conectamos você às <span className="text-[#1D9E75]">melhores confecções e costureiras</span> do Brasil
             </h1>
             <p className="font-light text-sm md:text-base text-gray-300 max-w-md mt-4 leading-relaxed">
               Faça seu pedido em minutos. Receba orçamentos de fornecedores verificados.
