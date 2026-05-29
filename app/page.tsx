@@ -215,7 +215,7 @@ export default function Home() {
                   const el = document.getElementById("pedido");
                   if (!el) return;
                   const isMobile = window.innerWidth < 768;
-                  const offset = isMobile ? 0 : 36;
+                  const offset = isMobile ? 0 : -80;
                   const y = el.getBoundingClientRect().top + window.scrollY - offset;
                   window.scrollTo({ top: y, behavior: "smooth" });
                 }}
