@@ -203,15 +203,15 @@ export default function Home() {
         >
           <div className="max-w-[520px]">
             <h1 className="text-white font-semibold text-2xl md:text-3xl lg:text-4xl leading-[1.1] tracking-tight">
-              Conectamos você às <span className="text-[#1D9E75]">melhores confecções e costureiras</span> do Brasil
+              Conectamos você às <span className="text-[#2DD4A7]">melhores confecções e costureiras</span> do Brasil
             </h1>
             <p className="font-light text-sm md:text-base text-gray-300 max-w-md mt-4 leading-relaxed">
               Faça seu pedido em minutos. Receba orçamentos de fornecedores verificados.
             </p>
-            <div className="mt-7 flex items-center gap-6">
+            <div className="mt-7 flex flex-col items-start gap-3 md:flex-row md:items-center md:gap-6">
               <button
                 onClick={() => document.getElementById("pedido")?.scrollIntoView({ behavior: "smooth" })}
-                className="bg-[#1D9E75] hover:bg-[#178a64] text-white px-6 py-2.5 rounded text-sm font-medium transition-colors"
+                className="bg-[#1D9E75] hover:bg-[#178a64] text-white px-5 md:px-6 py-2.5 rounded text-sm font-medium whitespace-nowrap transition-colors"
               >
                 Fazer meu pedido →
               </button>
