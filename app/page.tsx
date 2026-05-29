@@ -188,7 +188,7 @@ export default function Home() {
           style={{
             background: [
               "linear-gradient(90deg, #0a0a0a 0%, #0a0a0a 30%, rgba(10,10,10,0.85) 50%, rgba(10,10,10,0.5) 68%, rgba(10,10,10,0.15) 85%, rgba(10,10,10,0) 100%)",
-              "linear-gradient(180deg, rgba(10,10,10,0.6) 0%, rgba(10,10,10,0) 25%, rgba(10,10,10,0) 70%, rgba(10,10,10,0.7) 100%)",
+              "linear-gradient(180deg, rgba(10,10,10,0.5) 0%, rgba(10,10,10,0) 25%, rgba(10,10,10,0) 55%, rgba(10,10,10,0.7) 80%, #0a0a0a 100%)",
               "linear-gradient(270deg, rgba(10,10,10,0.5) 0%, rgba(10,10,10,0) 12%)",
             ].join(", "),
           }}
