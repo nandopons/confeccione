@@ -2,9 +2,10 @@
 // ============================================================================
 // Dashboard /admin — semáforo de saúde + 4 cards resumo.
 //
-// Server Component. Lê métricas via supabaseAdmin (8 queries paralelas + 1
-// sequencial dependente). Determinismo: agoraMs capturado UMA vez no início
-// do render e propagado pras funções puras de admin-saude.ts.
+// Server Component. Lê métricas via supabaseAdmin (queries paralelas + 1
+// sequencial dependente) e a contagem "Precisa de atenção" via lib (mesmo
+// núcleo da aba). Determinismo: agoraMs capturado UMA vez no início do
+// render e propagado pras funções puras de admin-saude.ts.
 // ============================================================================
 
 import Link from 'next/link'
@@ -18,6 +19,7 @@ import {
   type SemaforoMetricas,
   type SemaforoStatus,
 } from '@/app/lib/admin-saude'
+import { contarPrecisaAtencao } from '@/app/lib/precisa-atencao'
 import { BotaoDispararCron } from './BotaoDispararCron'
 
 export default async function AdminDashboardPage() {
@@ -31,7 +33,8 @@ export default async function AdminDashboardPage() {
   const agoraIso = new Date(agoraMs).toISOString()
 
   // ─────────────────────────────────────────────────────────────
-  // 8 queries em paralelo
+  // queries em paralelo (a última é a contagem "Precisa de atenção"
+  // via lib — mesmo núcleo de seleção da aba)
   // ─────────────────────────────────────────────────────────────
   const [
     resUltimaExec,
@@ -41,7 +44,7 @@ export default async function AdminDashboardPage() {
     resPedidosNaoAtribuidos,
     resCardNegociacao,
     resCardAguardando,
-    resCardOrfaosAtivos,
+    cardPrecisaAtencao,
   ] = await Promise.all([
     supabaseAdmin
       .from('cron_execucoes')
@@ -87,10 +90,9 @@ export default async function AdminDashboardPage() {
       .in('status', STATUS_PEDIDO_DETECTAVEL as string[])
       .is('fornecedor_aceito_id', null),
 
-    supabaseAdmin
-      .from('pedidos_orfaos')
-      .select('id', { count: 'exact', head: true })
-      .in('status_orfao', ['aberto', 'em_captacao']),
+    // Card "Precisa de atenção": MESMO núcleo de seleção da aba
+    // /admin/pedidos?aba=precisa_atencao — card e aba nunca divergem.
+    contarPrecisaAtencao(agoraMs),
   ])
 
   // ─────────────────────────────────────────────────────────────
@@ -188,8 +190,8 @@ export default async function AdminDashboardPage() {
       href: '/admin/pedidos?aba=aguardando_expediente',
     },
     {
-      label: 'Órfãos ativos',
-      valor: resCardOrfaosAtivos.count ?? 0,
+      label: 'Precisa de atenção',
+      valor: cardPrecisaAtencao,
       href: '/admin/pedidos?aba=precisa_atencao',
     },
   ]
