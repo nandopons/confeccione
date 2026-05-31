@@ -36,7 +36,7 @@ export function BotaoDispararCron() {
       const dur = typeof data?.duracao_ms === 'number' ? data.duracao_ms : 0
       setToast({
         tipo: 'ok',
-        texto: `Cron disparado · ${n} ${n === 1 ? 'órfão' : 'órfãos'} · ${dur}ms`,
+        texto: `Cron disparado · ${n} ${n === 1 ? 'pedido sem fornecedor' : 'pedidos sem fornecedor'} · ${dur}ms`,
       })
       router.refresh()
       setTimeout(() => setToast(null), TOAST_OK_MS)

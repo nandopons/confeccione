@@ -25,10 +25,10 @@ export function BotaoDetectar() {
       const n = typeof data?.detectados === 'number' ? data.detectados : 0
       const msg =
         n === 0
-          ? 'Nenhum novo órfão.'
+          ? 'Nenhum novo pedido sem fornecedor.'
           : n === 1
-            ? '1 novo órfão detectado'
-            : `${n} novos órfãos detectados`
+            ? '1 novo pedido sem fornecedor'
+            : `${n} novos pedidos sem fornecedor`
       setToast(msg)
       router.refresh()
       setTimeout(() => setToast(null), TOAST_MS)

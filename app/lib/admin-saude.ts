@@ -127,8 +127,8 @@ export function mensagemSemaforo(
 
   partes.push(
     m.orfaosNovosNestaHora === 0
-      ? '0 órfãos novos nesta hora'
-      : `${m.orfaosNovosNestaHora} ${m.orfaosNovosNestaHora === 1 ? 'órfão novo' : 'órfãos novos'} nesta hora`
+      ? '0 pedidos novos sem fornecedor nesta hora'
+      : `${m.orfaosNovosNestaHora} ${m.orfaosNovosNestaHora === 1 ? 'pedido novo sem fornecedor' : 'pedidos novos sem fornecedor'} nesta hora`
   )
 
   // Avisos contextuais — só aparecem se houver problema relevante
