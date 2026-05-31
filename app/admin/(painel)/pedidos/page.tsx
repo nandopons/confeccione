@@ -31,6 +31,11 @@ import {
   carregarDadosDetalhe,
   type DadosDetalhe,
 } from '@/app/lib/admin-pedido-detalhe'
+import {
+  carregarPrecisaAtencao,
+  type PedidoBase,
+  type LinhaPrecisaAtencao,
+} from '@/app/lib/precisa-atencao'
 
 // ============================================================================
 // Tipos e constantes
@@ -53,16 +58,6 @@ const ABAS: Array<{ valor: Aba; label: string }> = [
 
 const ABAS_VALIDAS = ABAS.map((a) => a.valor) as readonly Aba[]
 
-type PedidoBase = {
-  id: string
-  tipo: string
-  quantidade: number | null
-  estado: string
-  nome: string
-  whatsapp: string
-  criado_em: string
-}
-
 type LinhaEmOferta = {
   pedido: PedidoBase
   oferta_enviada_em: string
@@ -78,13 +73,6 @@ type LinhaEmNegociacao = {
 type LinhaAguardando = {
   pedido: PedidoBase
   buscar_apos: string
-}
-
-type LinhaPrecisaAtencao = {
-  pedido: PedidoBase
-  motivo: string
-  /** Presente quando o pedido já é órfão registrado (alimenta o modal). */
-  orfao: InfoOrfao | null
 }
 
 type LinhaConcluido = {
@@ -220,17 +208,6 @@ export default async function AdminPedidosPage({
 // ============================================================================
 // Helpers de conjuntos (precedência entre abas)
 // ============================================================================
-
-/** pedido_ids com oferta 'enviada' ativa. Em oferta tem a maior precedência. */
-async function pedidosComOfertaEnviada(): Promise<Set<string>> {
-  const { data } = await supabaseAdmin
-    .from('ofertas')
-    .select('pedido_id')
-    .eq('status', 'enviada')
-  return new Set(
-    ((data ?? []) as Array<{ pedido_id: string }>).map((o) => o.pedido_id)
-  )
-}
 
 /** pedido_ids com órfão ATIVO (aberto/em_captacao). */
 async function pedidosOrfaoAtivo(): Promise<Set<string>> {
@@ -374,99 +351,6 @@ async function carregarEmNegociacao(): Promise<LinhaEmNegociacao[]> {
     })
 
   return linhas
-}
-
-/** Precisa de atenção = órfão ativo (buscando) UNIÃO buscando-sem-oferta-sem-
- *  agendamento, dedup por pedido_id (órfão vence), excluindo oferta enviada. */
-async function carregarPrecisaAtencao(
-  agoraMs: number
-): Promise<LinhaPrecisaAtencao[]> {
-  const agoraIso = new Date(agoraMs).toISOString()
-  const comOferta = await pedidosComOfertaEnviada()
-
-  // (1) órfãos ativos — via view. Filtra pedido_status='buscando_fornecedor'
-  //     pra um órfão stale num pedido já aceito NÃO duplicar com "Em negociação".
-  const { data: orfaosRaw } = await supabaseAdmin
-    .from('vw_pedidos_orfaos_admin')
-    .select(
-      'pedido_id, tipo, quantidade, estado, nome, whatsapp, pedido_criado_em, orfao_id, prioridade, motivo_orfao, status_orfao, notas_admin, responsavel_captacao'
-    )
-    .in('status_orfao', ['aberto', 'em_captacao'])
-    .eq('pedido_status', 'buscando_fornecedor')
-
-  const orfaos = (orfaosRaw ?? []) as Array<{
-    pedido_id: string
-    tipo: string
-    quantidade: number | null
-    estado: string
-    nome: string
-    whatsapp: string
-    pedido_criado_em: string
-    orfao_id: string
-    prioridade: number
-    motivo_orfao: string | null
-    status_orfao: InfoOrfao['status_orfao']
-    notas_admin: string | null
-    responsavel_captacao: string | null
-  }>
-
-  // (2) buscando "preso": sem fornecedor, buscar_apos nulo/passado.
-  const { data: stuckRaw } = await supabaseAdmin
-    .from('pedidos')
-    .select('id, tipo, quantidade, estado, nome, whatsapp, criado_em')
-    .eq('status', 'buscando_fornecedor')
-    .is('fornecedor_aceito_id', null)
-    .or(`buscar_apos.is.null,buscar_apos.lte.${agoraIso}`)
-
-  const stuck = (stuckRaw ?? []) as PedidoBase[]
-
-  const map = new Map<string, LinhaPrecisaAtencao>()
-
-  for (const o of orfaos) {
-    if (comOferta.has(o.pedido_id)) continue
-    map.set(o.pedido_id, {
-      pedido: {
-        id: o.pedido_id,
-        tipo: o.tipo,
-        quantidade: o.quantidade,
-        estado: o.estado,
-        nome: o.nome,
-        whatsapp: o.whatsapp,
-        criado_em: o.pedido_criado_em,
-      },
-      motivo: o.motivo_orfao ?? 'sem fornecedor',
-      orfao: {
-        orfao_id: o.orfao_id,
-        status_orfao: o.status_orfao,
-        prioridade: o.prioridade,
-        motivo_orfao: o.motivo_orfao,
-        notas_admin: o.notas_admin,
-        responsavel_captacao: o.responsavel_captacao,
-      },
-    })
-  }
-
-  for (const p of stuck) {
-    if (comOferta.has(p.id)) continue
-    if (map.has(p.id)) continue // já entrou como órfão (vence)
-    map.set(p.id, {
-      pedido: p,
-      motivo: 'buscando, sem oferta ativa',
-      orfao: null,
-    })
-  }
-
-  // Ordena: maior prioridade primeiro (sem órfão = -1, vai depois), depois
-  // mais antigo primeiro.
-  return Array.from(map.values()).sort((a, b) => {
-    const pa = a.orfao?.prioridade ?? -1
-    const pb = b.orfao?.prioridade ?? -1
-    if (pb !== pa) return pb - pa
-    return (
-      new Date(a.pedido.criado_em).getTime() -
-      new Date(b.pedido.criado_em).getTime()
-    )
-  })
 }
 
 async function carregarAguardandoExpediente(
