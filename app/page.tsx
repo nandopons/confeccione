@@ -269,7 +269,7 @@ export default function Home() {
             <>
               <p className="text-gray-900 font-medium mb-1">O que você precisa produzir?</p>
               <p className="text-gray-400 text-sm mb-5">Escolha o tipo de pedido mais próximo da sua necessidade.</p>
-              <div className="overflow-hidden mb-6">
+              <div className="overflow-hidden mb-4">
                 <div className={`flex transition-transform duration-300 ease-out ${showExtras ? "-translate-x-full" : "translate-x-0"}`}>
                   <div className="flex-shrink-0 w-full">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
