@@ -46,6 +46,8 @@ export default function NovoPedidoForm({ nomeExibido, email }: Props) {
   const [descricao, setDescricao] = useState('')
   const [showExtras, setShowExtras] = useState(false)
   const [enviando, setEnviando] = useState(false)
+  const [organizando, setOrganizando] = useState(false)
+  const [revisado, setRevisado] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const formRef = useRef<HTMLDivElement>(null)
 
@@ -70,6 +72,37 @@ export default function NovoPedidoForm({ nomeExibido, email }: Props) {
       return
     }
     setPasso(2)
+  }
+
+  // Organiza a descrição com IA e mostra pra revisão (mesmo passo). Nunca
+  // bloqueia: em qualquer falha o textarea segue com a descrição original.
+  async function organizarERevisar() {
+    setErro(null)
+    const original = descricao
+    if (original.trim().length < 15) {
+      setRevisado(true)
+      return
+    }
+    setOrganizando(true)
+    try {
+      const r = await fetch('/api/pedido/organizar-descricao', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ descricao: original, tipo }),
+      })
+      const j = await r.json().catch(() => null)
+      setDescricao(
+        (j && typeof j.descricao_organizada === 'string'
+          ? j.descricao_organizada
+          : original) || original
+      )
+    } catch {
+      setDescricao(original)
+    } finally {
+      setOrganizando(false)
+      setRevisado(true)
+    }
   }
 
   async function criar() {
@@ -246,15 +279,23 @@ export default function NovoPedidoForm({ nomeExibido, email }: Props) {
 
           <div>
             <label className="text-xs text-gray-500 mb-1 block">
-              Descreva seu pedido (opcional)
+              {revisado
+                ? 'Detalhes do pedido (revise e ajuste se quiser)'
+                : 'Descreva seu pedido (opcional)'}
             </label>
-            <textarea
-              rows={4}
-              value={descricao}
-              onChange={(e) => setDescricao(e.target.value)}
-              placeholder="Ex: camisa polo P/M/G, logo bordado no peito, cores azul e branco..."
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:border-[#1D9E75] placeholder:text-gray-400 placeholder:font-normal"
-            />
+            {organizando ? (
+              <div className="w-full border border-gray-300 rounded-md px-3 py-3 text-sm text-gray-400 bg-gray-50">
+                Organizando os detalhes…
+              </div>
+            ) : (
+              <textarea
+                rows={revisado ? 5 : 4}
+                value={descricao}
+                onChange={(e) => setDescricao(e.target.value)}
+                placeholder="Ex: camisa polo P/M/G, logo bordado no peito, cores azul e branco..."
+                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:border-[#1D9E75] placeholder:text-gray-400 placeholder:font-normal"
+              />
+            )}
           </div>
 
           {/* Resumo do passo 1 */}
@@ -295,20 +336,27 @@ export default function NovoPedidoForm({ nomeExibido, email }: Props) {
               type="button"
               onClick={() => {
                 setErro(null)
+                setRevisado(false)
                 setPasso(1)
               }}
-              disabled={enviando}
+              disabled={enviando || organizando}
               className="border border-gray-300 text-gray-600 px-5 py-2.5 rounded-md text-sm hover:bg-gray-50 disabled:opacity-50"
             >
               ← Voltar
             </button>
             <button
               type="button"
-              onClick={criar}
-              disabled={enviando}
+              onClick={revisado ? criar : organizarERevisar}
+              disabled={enviando || organizando}
               className="bg-[#1D9E75] hover:bg-[#178761] text-white px-6 py-2.5 rounded-md text-sm font-medium disabled:opacity-50"
             >
-              {enviando ? 'Criando…' : 'Criar pedido'}
+              {organizando
+                ? 'Organizando…'
+                : enviando
+                  ? 'Criando…'
+                  : revisado
+                    ? 'Criar pedido'
+                    : 'Revisar pedido'}
             </button>
           </div>
         </>

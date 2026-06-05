@@ -59,6 +59,8 @@ export default function Home() {
   const [tel, setTel] = useState("");
   const [email, setEmail] = useState("");
   const [descricao, setDescricao] = useState("");
+  const [descricaoRevisada, setDescricaoRevisada] = useState("");
+  const [organizando, setOrganizando] = useState(false);
   const [protocolo] = useState(() => Math.floor(Math.random() * 90000) + 10000);
   const [enviando, setEnviando] = useState(false);
   const [erroEnvio, setErroEnvio] = useState<string | null>(null);
@@ -99,7 +101,7 @@ export default function Home() {
     setStep(1);
   }
 
-  function avancarParaContatos() {
+  async function avancarParaContatos() {
     setErroEnvio(null);
     const faltando: string[] = [];
     if (!qty || qty <= 0) faltando.push('quantidade');
@@ -110,6 +112,35 @@ export default function Home() {
       return;
     }
     setStep(2);
+    await organizarDescricao();
+  }
+
+  // Organiza a descrição com IA pra revisão (step 2). Nunca bloqueia: em
+  // qualquer falha o textarea já vem com a descrição original.
+  async function organizarDescricao() {
+    const original = descricao;
+    if (original.trim().length < 15) {
+      setDescricaoRevisada(original);
+      return;
+    }
+    setOrganizando(true);
+    try {
+      const res = await fetch("/api/pedido/organizar-descricao", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ descricao: original, tipo }),
+      });
+      const data = await res.json().catch(() => null);
+      setDescricaoRevisada(
+        (data && typeof data.descricao_organizada === 'string'
+          ? data.descricao_organizada
+          : original) || original
+      );
+    } catch {
+      setDescricaoRevisada(original);
+    } finally {
+      setOrganizando(false);
+    }
   }
 
   async function enviarPedido() {
@@ -147,7 +178,7 @@ export default function Home() {
           nome,
           whatsapp: tel,
           email,
-          descricao,
+          descricao: descricaoRevisada || descricao,
         }),
       });
       if (!res.ok) {
@@ -417,6 +448,22 @@ export default function Home() {
                   {prazo && <div className="flex justify-between text-gray-600"><span>Prazo</span><span>{prazos[prazo]}</span></div>}
                   {estado && <div className="flex justify-between text-gray-600"><span>Estado</span><span>{estado}</span></div>}
                 </div>
+              </div>
+              <div className="mb-6">
+                <label className="text-xs text-gray-400 mb-1 block">Detalhes do pedido (revise e ajuste se quiser)</label>
+                {organizando ? (
+                  <div className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-400 bg-gray-50">
+                    Organizando os detalhes…
+                  </div>
+                ) : (
+                  <textarea
+                    rows={5}
+                    value={descricaoRevisada}
+                    onChange={e => setDescricaoRevisada(e.target.value)}
+                    placeholder="Ex: camisa polo tamanhos P, M, G, com logo bordado..."
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:border-[#1D9E75]"
+                  />
+                )}
               </div>
               <div className="flex justify-between">
                 <button onClick={() => setStep(1)} className="border border-gray-200 text-gray-400 px-5 py-3 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
