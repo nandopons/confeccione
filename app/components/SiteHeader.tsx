@@ -119,6 +119,9 @@ export default function SiteHeader({ transparent = false }: { transparent?: bool
             <Link href="/#pedido" onClick={close} className="py-3 border-b border-white/5 hover:text-white transition-colors">
               Fazer meu pedido
             </Link>
+            <Link href="/mockup" onClick={close} className="py-3 border-b border-white/5 hover:text-white transition-colors">
+              Monte seu mockup
+            </Link>
             <Link href="/sobre" onClick={close} className="py-3 border-b border-white/5 hover:text-white transition-colors">
               Sobre
             </Link>
