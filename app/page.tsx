@@ -209,7 +209,7 @@ export default function Home() {
             preload
             quality={85}
             sizes="(min-width: 768px) 60vw, 100vw"
-            className="object-cover object-center"
+            className="object-cover object-[12%_50%] brightness-110 md:object-center"
           />
         </div>
 
@@ -225,9 +225,7 @@ export default function Home() {
           }}
         />
         {/* Mobile: foto ao fundo + escurecimento forte para legibilidade */}
-        <div className="md:hidden absolute inset-0 z-[1] bg-[rgba(10,10,10,0.7)]" />
-        {/* Escurecimento geral (desktop) para unificar a foto clara com o visual escuro da marca */}
-        <div className="hidden md:block absolute inset-0 z-[1] bg-black/12" />
+        <div className="md:hidden absolute inset-0 z-[1] bg-[rgba(10,10,10,0.6)]" />
 
         <SiteHeader transparent />
 
