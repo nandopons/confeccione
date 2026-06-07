@@ -219,7 +219,7 @@ export default function Home() {
           style={{
             background: [
               "linear-gradient(90deg, #0a0a0a 0%, #0a0a0a 52%, rgba(10,10,10,0.6) 68%, rgba(10,10,10,0.25) 85%, rgba(10,10,10,0) 100%)",
-              "linear-gradient(180deg, rgba(10,10,10,0.5) 0%, rgba(10,10,10,0) 25%, rgba(10,10,10,0) 55%, rgba(10,10,10,0.7) 80%, #0a0a0a 100%)",
+              "linear-gradient(180deg, rgba(10,10,10,0.5) 0%, rgba(10,10,10,0) 25%, rgba(10,10,10,0) 75%, rgba(10,10,10,0.3) 90%, #0a0a0a 100%)",
               "linear-gradient(270deg, rgba(10,10,10,0.5) 0%, rgba(10,10,10,0) 12%)",
             ].join(", "),
           }}
