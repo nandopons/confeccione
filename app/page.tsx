@@ -203,13 +203,13 @@ export default function Home() {
         {/* Foto contida na metade direita (desktop) / fundo (mobile) — tamanho ~nativo, sem esticar */}
         <div className="absolute inset-0 z-0 md:left-auto md:w-[60%]">
           <Image
-            src="/hero/hero-ilustracao.jpg"
-            alt="Ilustração de peças de vestuário — confecção sob demanda"
+            src="/hero/hero-manequim.jpg"
+            alt="Manequim de costura com fita métrica — ateliê de confecção"
             fill
             preload
             quality={85}
             sizes="(min-width: 768px) 60vw, 100vw"
-            className="object-cover object-[12%_50%] brightness-110 md:object-center"
+            className="object-cover object-[60%_50%]"
           />
         </div>
 
