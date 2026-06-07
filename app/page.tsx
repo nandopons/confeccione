@@ -203,7 +203,7 @@ export default function Home() {
         {/* Foto contida na metade direita (desktop) / fundo (mobile) — tamanho ~nativo, sem esticar */}
         <div className="absolute inset-0 z-0 md:left-auto md:w-[60%]">
           <Image
-            src="/hero/hero-vitrine.jpg"
+            src="/hero/hero-vitrine-v2.jpg"
             alt="Peças de vestuário variadas — confecção sob demanda"
             fill
             preload
@@ -226,6 +226,8 @@ export default function Home() {
         />
         {/* Mobile: foto ao fundo + escurecimento forte para legibilidade */}
         <div className="md:hidden absolute inset-0 z-[1] bg-[rgba(10,10,10,0.7)]" />
+        {/* Escurecimento geral (desktop) para unificar a foto clara com o visual escuro da marca */}
+        <div className="hidden md:block absolute inset-0 z-[1] bg-black/30" />
 
         <SiteHeader transparent />
 
