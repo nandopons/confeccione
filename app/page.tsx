@@ -343,7 +343,7 @@ export default function Home() {
                   </div>
                 </div>
               </div>
-              <div className="flex justify-end">
+              <div className="flex justify-end mt-6">
                 <button onClick={avancarParaDetalhes} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium hover:opacity-85">Continuar →</button>
               </div>
               {erroEnvio && (
