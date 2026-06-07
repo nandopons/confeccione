@@ -203,8 +203,8 @@ export default function Home() {
         {/* Foto contida na metade direita (desktop) / fundo (mobile) — tamanho ~nativo, sem esticar */}
         <div className="absolute inset-0 z-0 md:left-auto md:w-[60%]">
           <Image
-            src="/hero/hero-estampa.jpg"
-            alt="Estampa de confecção sob demanda"
+            src="/hero/hero-vitrine.jpg"
+            alt="Peças de vestuário variadas — confecção sob demanda"
             fill
             preload
             quality={85}
