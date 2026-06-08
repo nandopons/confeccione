@@ -73,7 +73,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   // orçamento (estimativa) + opções de estampa cadastradas
   const [orcamento, setOrcamento] = useState<Orcamento>(null);
   const [semTabela, setSemTabela] = useState(false);
+  const [estimandoPrecos, setEstimandoPrecos] = useState(false);
   const [opcoes, setOpcoes] = useState<{ posicoes: string[]; tamanhos: string[] }>({ posicoes: [], tamanhos: [] });
+  const orcMountRef = useRef(false);
 
   // edição / adição
   const [editOpen, setEditOpen] = useState(false);
@@ -129,13 +131,19 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       .catch(() => {});
   }, []);
 
-  // recalcula o orçamento (estimativa) sempre que as linhas mudam
+  // orçamento: no 1º carregamento, pesquisa automaticamente os preços que
+  // faltam (IA) enquanto o cliente finaliza; nas edições seguintes só recalcula.
   useEffect(() => {
+    const primeira = !orcMountRef.current;
+    orcMountRef.current = true;
     const body = { linhas: linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas ?? [] })) };
-    fetch("/api/orcamento", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    const url = primeira ? "/api/orcamento/pesquisar-faltantes" : "/api/orcamento";
+    if (primeira) setEstimandoPrecos(true);
+    fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json())
       .then((d) => { if (d?.ok) { setOrcamento(d.orcamento); setSemTabela(!!d.semTabela); } })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (primeira) setEstimandoPrecos(false); });
   }, [linhas]);
 
   async function persistir(novas: Linha[]) {
@@ -389,6 +397,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       </div>
 
       {/* ESTIMATIVA DE ORÇAMENTO */}
+      {estimandoPrecos && (!orcamento || orcamento.total_centavos === 0) && (
+        <div className="mt-6 flex items-center gap-2 text-sm text-gray-500">
+          <span className="inline-block w-3.5 h-3.5 border-2 border-gray-300 border-t-[#1D9E75] rounded-full animate-spin" />
+          Pesquisando preços de mercado pros seus produtos…
+        </div>
+      )}
       {orcamento && orcamento.total_centavos > 0 && (
         <div className="mt-6 bg-white border border-gray-200 rounded-2xl shadow-sm p-5">
           <div className="flex items-center justify-between">
@@ -396,14 +410,20 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             <p className="text-xl font-semibold text-[#0F6E56]">{brl(orcamento.total_centavos)}</p>
           </div>
           <p className="text-[11px] text-gray-400 mt-1">Estimativa, sujeita a confirmação. Já inclui a taxa de serviço da Confeccione (3%).</p>
-          {!orcamento.completo && (
-            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-snug">Alguns itens ainda não têm preço/estampa cadastrados — o valor final pode mudar.</p>
+          {estimandoPrecos && <p className="text-[11px] text-gray-400 mt-1">Atualizando preços de mercado…</p>}
+          {!orcamento.completo && !estimandoPrecos && (
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-snug">Alguns itens ainda estão sendo precificados. Se persistir, nosso time ajusta antes de fechar.</p>
           )}
         </div>
       )}
-      {semTabela && (
-        <p className="mt-6 text-xs text-gray-400">Tabela de preços ainda não configurada no admin — a estimativa aparece aqui assim que os preços forem cadastrados.</p>
-      )}
+
+      {/* GARANTIA CONFECCIONE */}
+      <div className="mt-3 bg-[#E1F5EE]/60 border border-[#1D9E75]/20 rounded-xl p-3 flex items-start gap-2">
+        <span aria-hidden className="text-[#0F6E56] leading-none">🔒</span>
+        <p className="text-xs text-[#0F6E56] leading-relaxed">
+          <strong>Pagamento garantido pela Confeccione.</strong> A gente segura o valor e só repassa pro fornecedor quando você confirmar que recebeu o pedido em conformidade. Após o pagamento, liberamos os visualizadores dos seus produtos pra você baixar.
+        </p>
+      </div>
 
       {/* CONTATO + AVANÇAR */}
       <div className="mt-8 bg-white border border-gray-200 rounded-2xl shadow-sm p-5">
@@ -417,7 +437,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         {confirmStep === "feito" && pixResult ? (
           <div className="bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-4">
             <p className="text-sm text-[#0F6E56] font-medium">Pedido confirmado! ✅</p>
-            <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">Enviamos o resumo e o PIX pro seu e-mail. Pague pelo PIX abaixo — assim que o pagamento cair, seu pedido entra em produção.</p>
+            <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">Enviamos o resumo e o PIX pro seu e-mail. Pague pelo PIX abaixo — assim que o pagamento cair, seu pedido entra em produção e você poderá baixar os visualizadores dos produtos. O valor fica garantido pela Confeccione até você receber tudo certinho.</p>
             <div className="mt-3 flex flex-col sm:flex-row gap-4 items-start">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`/api/pedido/assistente/${pedido.id}/pix-qr`} alt="QR Code PIX" className="w-40 h-40 rounded-lg border border-[#1D9E75]/30 bg-white shrink-0" />
