@@ -61,7 +61,14 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [imgs, setImgs] = useState<Record<number, ImgEstado>>({});
   const [verArte, setVerArte] = useState<Record<number, boolean>>({});
   const [salvando, setSalvando] = useState(false);
-  const [avancou, setAvancou] = useState(false);
+
+  // confirmação / pagamento
+  const [confirmStep, setConfirmStep] = useState<"idle" | "form" | "feito">("idle");
+  const [cpf, setCpf] = useState("");
+  const [confirmando, setConfirmando] = useState(false);
+  const [confirmErro, setConfirmErro] = useState<string | null>(null);
+  const [pixResult, setPixResult] = useState<{ copiaCola: string | null; invoiceUrl: string; valorCentavos: number } | null>(null);
+  const [copiado, setCopiado] = useState(false);
 
   // orçamento (estimativa) + opções de estampa cadastradas
   const [orcamento, setOrcamento] = useState<Orcamento>(null);
@@ -257,6 +264,34 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     setArteOpen(false);
   }
 
+  async function confirmarPedido() {
+    if (confirmando) return;
+    const cpfDig = cpf.replace(/\D/g, "");
+    if (cpfDig.length !== 11 && cpfDig.length !== 14) {
+      setConfirmErro("Informe um CPF (11 dígitos) ou CNPJ (14).");
+      return;
+    }
+    setConfirmando(true);
+    setConfirmErro(null);
+    const imagens = linhas.map((_, i) => imgs[i]?.aplicado || imgs[i]?.url).filter((x): x is string => !!x);
+    try {
+      const res = await fetch(`/api/pedido/assistente/${pedido.id}/confirmar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cpfCnpj: cpf, linhas, imagens }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.erro || "Não foi possível confirmar.");
+      setPixResult({ copiaCola: d.copiaCola ?? null, invoiceUrl: d.invoiceUrl, valorCentavos: d.valorCentavos });
+      setConfirmStep("feito");
+    } catch (e) {
+      setConfirmErro(e instanceof Error ? e.message : "Erro ao confirmar.");
+    } finally {
+      setConfirmando(false);
+    }
+  }
+
+  const podeConfirmar = linhas.length > 0 && !!orcamento && orcamento.completo && orcamento.total_centavos > 0;
   const totalPecas = linhas.reduce((acc, l) => acc + (l.total ?? 0), 0);
 
   return (
@@ -379,15 +414,50 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             {(pedido.cep || pedido.complemento) && <p className="text-sm text-gray-500">{[pedido.cep, pedido.complemento].filter(Boolean).join(" · ")}</p>}
           </div>
         )}
-        <button type="button" onClick={() => setAvancou(true)} disabled={linhas.length === 0}
-          className="w-full sm:w-auto bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-6 py-3 rounded-xl transition-colors">
-          Confirmar pedido →
-        </button>
-        {avancou && (
-          <div className="mt-3 bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-3">
-            <p className="text-sm text-[#0F6E56] font-medium">Quase lá! 🚧</p>
-            <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">A confirmação final do pedido chega na próxima etapa. Suas alterações e artes já ficam salvas aqui.</p>
+        {confirmStep === "feito" && pixResult ? (
+          <div className="bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-4">
+            <p className="text-sm text-[#0F6E56] font-medium">Pedido confirmado! ✅</p>
+            <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">Enviamos o resumo e o PIX pro seu e-mail. Pague pelo PIX abaixo — assim que o pagamento cair, seu pedido entra em produção.</p>
+            <div className="mt-3 flex flex-col sm:flex-row gap-4 items-start">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`/api/pedido/assistente/${pedido.id}/pix-qr`} alt="QR Code PIX" className="w-40 h-40 rounded-lg border border-[#1D9E75]/30 bg-white shrink-0" />
+              <div className="flex-1 w-full min-w-0">
+                <p className="text-xs text-gray-500 mb-1">PIX copia e cola:</p>
+                {pixResult.copiaCola && (
+                  <code className="block break-all bg-white border border-gray-200 rounded-lg px-3 py-2 text-[11px] text-gray-700">{pixResult.copiaCola}</code>
+                )}
+                <div className="flex gap-2 mt-2">
+                  {pixResult.copiaCola && (
+                    <button type="button" onClick={() => { navigator.clipboard?.writeText(pixResult.copiaCola!); setCopiado(true); setTimeout(() => setCopiado(false), 2000); }} className="border border-[#1D9E75] text-[#0F6E56] text-xs px-3 py-1.5 rounded-lg hover:bg-white">{copiado ? "Copiado!" : "Copiar código"}</button>
+                  )}
+                  <a href={pixResult.invoiceUrl} target="_blank" rel="noopener noreferrer" className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-xs px-3 py-1.5 rounded-lg">Abrir página de pagamento</a>
+                </div>
+              </div>
+            </div>
           </div>
+        ) : confirmStep === "form" ? (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+            <p className="text-sm font-medium text-gray-900 mb-1">Confirmar e gerar PIX</p>
+            <p className="text-xs text-gray-500 mb-3">Informe seu CPF (ou CNPJ) pra gerar a cobrança. Total: <strong>{orcamento ? brl(orcamento.total_centavos) : ""}</strong>.</p>
+            <input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="CPF ou CNPJ" inputMode="numeric"
+              className="w-full sm:w-64 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
+            <div className="flex gap-2 mt-3">
+              <button type="button" onClick={() => void confirmarPedido()} disabled={confirmando}
+                className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-xl">{confirmando ? "Gerando PIX…" : "Gerar PIX e enviar por e-mail"}</button>
+              <button type="button" onClick={() => { setConfirmStep("idle"); setConfirmErro(null); }} className="text-sm text-gray-500 px-3 py-2.5 rounded-xl hover:bg-gray-100">Cancelar</button>
+            </div>
+            {confirmErro && <p className="text-xs text-red-600 mt-2">{confirmErro}</p>}
+          </div>
+        ) : (
+          <>
+            <button type="button" onClick={() => setConfirmStep("form")} disabled={!podeConfirmar}
+              className="w-full sm:w-auto bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-6 py-3 rounded-xl transition-colors">
+              Confirmar pedido →
+            </button>
+            {!podeConfirmar && linhas.length > 0 && (
+              <p className="text-[11px] text-gray-400 mt-2">Pra confirmar e gerar o PIX, todos os itens precisam ter preço cadastrado (estimativa completa).</p>
+            )}
+          </>
         )}
       </div>
 
