@@ -131,6 +131,7 @@ export default function MockupsAdmin() {
       <p className="text-sm text-gray-500 mb-5">
         Mockups de peça lisa reaproveitados no visualizador. A chave é <code>modelo · cor · material</code> (sem acento, minúsculo).
         Adicionar um produto que já existe substitui a imagem dele.
+        Toda imagem é padronizada automaticamente para <strong>2048×878 (21:9)</strong> com fundo branco — pode subir em qualquer tamanho.
       </p>
 
       {/* Adicionar */}

@@ -14,6 +14,7 @@ import { z } from 'zod'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { chaveMockup, normMockup } from '@/app/lib/mockup-cache'
+import { normalizarMockup } from '@/app/lib/imagem-normalizar'
 
 export const runtime = 'nodejs'
 
@@ -70,13 +71,16 @@ export async function POST(req: NextRequest) {
 
   const chave = chaveMockup(parsed.data.modelo, parsed.data.cor, parsed.data.material)
 
+  // padroniza pro mesmo tamanho dos mockups gerados (2048x878, fundo branco)
+  const imagemNormalizada = await normalizarMockup(parsed.data.imagemDataUrl)
+
   const { error } = await supabaseAdmin.from('mockups_lisos').upsert(
     {
       chave,
       modelo: normMockup(parsed.data.modelo) || null,
       cor: normMockup(parsed.data.cor) || null,
       material: normMockup(parsed.data.material) || null,
-      imagem_data_url: parsed.data.imagemDataUrl,
+      imagem_data_url: imagemNormalizada,
       criado_em: new Date().toISOString(),
     },
     { onConflict: 'chave' }

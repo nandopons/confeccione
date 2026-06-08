@@ -16,6 +16,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { gerarImagem } from '@/app/lib/mockup-image'
 import { chaveMockup, normMockup } from '@/app/lib/mockup-cache'
+import { normalizarMockup } from '@/app/lib/imagem-normalizar'
 
 export const runtime = 'nodejs'
 
@@ -94,13 +95,14 @@ export async function POST(req: Request) {
 
   // 2) gera
   const prompt = montarPrompt(body.data)
-  const r = await gerarImagem({ prompt })
+  const r = await gerarImagem({ prompt, aspectRatio: '21:9', imageSize: '2K' })
 
   if (!r.disponivel) {
     return NextResponse.json({ disponivel: false, motivo: r.motivo })
   }
 
-  const imagemDataUrl = `data:${r.mime};base64,${r.imagemBase64}`
+  // normaliza pro tamanho padrão (2048x878, fundo branco) — igual aos uploads manuais
+  const imagemDataUrl = await normalizarMockup(`data:${r.mime};base64,${r.imagemBase64}`)
 
   // 3) grava no cache (upsert). PRECISA ser awaited: em serverless a função é
   // congelada ao retornar, então um write "fire-and-forget" não completaria.
