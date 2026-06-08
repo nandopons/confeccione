@@ -92,7 +92,11 @@ async function gerarComGemini(prompt: string, imagens: ImagemEntrada[]): Promise
   if (!resp.ok) {
     const txt = await resp.text().catch(() => '')
     console.error('[mockup-image/gemini] HTTP', resp.status, txt.slice(0, 500))
-    return { disponivel: false, motivo: `Provedor retornou erro (${resp.status}).` }
+    const motivo =
+      resp.status === 429
+        ? 'Limite/créditos da geração de imagem atingidos. Tente em instantes.'
+        : `Não foi possível gerar agora (erro ${resp.status}).`
+    return { disponivel: false, motivo }
   }
 
   let data: unknown

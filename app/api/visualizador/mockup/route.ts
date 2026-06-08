@@ -1,9 +1,9 @@
 // app/api/visualizador/mockup/route.ts
 // ============================================================================
 // POST /api/visualizador/mockup — gera o MOCKUP LISO (sem estampa) de uma linha
-// de produto, a partir da descrição que o cliente passou no chat. Uma vista por
-// chamada (frente | costas | lateral). Sem provedor configurado, responde 200
-// com { disponivel: false } e a UI cai num placeholder.
+// de produto, a partir da descrição que o cliente passou no chat. UMA ÚNICA
+// imagem panorâmica com as TRÊS vistas lado a lado (frente, lateral, costas) da
+// mesma peça. Sem provedor configurado, responde 200 com { disponivel:false }.
 // ============================================================================
 
 import { NextResponse } from 'next/server'
@@ -12,38 +12,31 @@ import { gerarImagem } from '@/app/lib/mockup-image'
 
 export const runtime = 'nodejs'
 
-const Vista = z.enum(['frente', 'costas', 'lateral'])
-
 const BodySchema = z.object({
   modelo: z.string().nullable().optional(),
   cor: z.string().nullable().optional(),
   material: z.string().nullable().optional(),
   descricao: z.string().nullable().optional(),
-  vista: Vista.default('frente'),
+  // aceito por retrocompat, mas ignorado: agora geramos as 3 vistas numa imagem só
+  vista: z.string().optional(),
 })
-
-const VISTA_TXT: Record<z.infer<typeof Vista>, string> = {
-  frente: 'vista de frente (parte da frente da peça)',
-  costas: 'vista de costas (parte de trás da peça)',
-  lateral: 'vista lateral (perfil da peça)',
-}
 
 function montarPrompt(b: z.infer<typeof BodySchema>): string {
   const modelo = b.modelo?.trim() || 'camiseta'
   const cor = b.cor?.trim() || 'branca'
   const material = b.material?.trim()
-  const partes = [
-    `Foto de produto para e-commerce de uma ${modelo} ${cor}`,
-    material ? `em ${material}` : null,
-    `LISA, sem nenhuma estampa, sem logo e sem texto`,
-    `${VISTA_TXT[b.vista]}`,
-    `peça centralizada sobre fundo branco neutro, iluminação de estúdio suave, sombra sutil, alta resolução, realista, estilo catálogo`,
-  ].filter(Boolean)
-  let prompt = partes.join(', ') + '.'
+  let prompt =
+    `Foto de catálogo de e-commerce mostrando A MESMA ${modelo} na cor ${cor}` +
+    (material ? `, em ${material}` : '') +
+    `, LISA — sem nenhuma estampa, sem logo e sem texto. ` +
+    `Gere UMA ÚNICA imagem panorâmica (orientação paisagem, proporção aproximada 16:7) com TRÊS ângulos da peça lado a lado, na ordem: ` +
+    `FRENTE à esquerda, VISTA LATERAL (perfil) ao centro e COSTAS à direita. ` +
+    `A peça é vestida por um modelo (enquadramento do pescoço até os quadris), as três tomadas com o MESMO modelo, mesma cor e mesmo tecido, ` +
+    `fundo branco liso e uniforme, iluminação de estúdio suave, sombras sutis, alta resolução, realista, estilo lookbook de produto.`
   if (b.descricao?.trim()) {
-    prompt += ` Detalhes do produto (use só o que for visual e ignore quantidades/tamanhos): ${b.descricao.trim()}.`
+    prompt += ` Detalhes visuais do produto (ignore quantidades e tamanhos): ${b.descricao.trim()}.`
   }
-  prompt += ' Importante: a peça deve aparecer LIMPA, sem qualquer arte aplicada — essa é a base para depois receber a estampa.'
+  prompt += ' IMPORTANTE: a peça deve aparecer totalmente LIMPA, sem qualquer arte aplicada — esta é a base que depois vai receber a estampa.'
   return prompt
 }
 
@@ -61,14 +54,13 @@ export async function POST(req: Request) {
   }
 
   const prompt = montarPrompt(body.data)
-  const r = await gerarImagem({ prompt }) // sem imagens de entrada (texto-only)
+  const r = await gerarImagem({ prompt }) // texto-only
 
   if (!r.disponivel) {
-    return NextResponse.json({ disponivel: false, motivo: r.motivo, vista: body.data.vista })
+    return NextResponse.json({ disponivel: false, motivo: r.motivo })
   }
   return NextResponse.json({
     disponivel: true,
-    vista: body.data.vista,
     imagemDataUrl: `data:${r.mime};base64,${r.imagemBase64}`,
   })
 }

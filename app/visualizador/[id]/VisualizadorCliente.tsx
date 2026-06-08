@@ -2,20 +2,15 @@
 
 // app/visualizador/[id]/VisualizadorCliente.tsx
 // ============================================================================
-// Etapa 2 — Visualizadores. Lista as linhas do pedido como cards: à esquerda o
-// mockup liso do produto (vistas frente/costas/lateral, geradas via Gemini —
-// placeholder enquanto a API não está configurada); à direita os detalhes e as
-// ações (editar, excluir, aplicar minha arte). Permite adicionar produtos e
-// avançar. A aplicação de arte abre um pop-up (estilo Nano Banana) com upload
-// de múltiplas artes + caixa de texto.
+// Etapa 2 — Visualizadores. Cada linha do pedido vira um card com UMA imagem
+// panorâmica do produto liso (frente · lateral · costas lado a lado, gerada via
+// Gemini — placeholder enquanto indisponível), os detalhes e as ações: editar,
+// excluir, adicionar produto e "Aplicar minha arte" (pop-up estilo Nano Banana
+// com upload de múltiplas artes + caixa de texto).
 // ============================================================================
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-
-type Vista = "frente" | "costas" | "lateral";
-const VISTAS: Vista[] = ["frente", "costas", "lateral"];
-const VISTA_LABEL: Record<Vista, string> = { frente: "Frente", costas: "Costas", lateral: "Lateral" };
 
 export type Tamanho = { tamanho: string; qtd: number | null };
 export type Linha = {
@@ -37,8 +32,7 @@ export type PedidoVis = {
   status: string | null;
 };
 
-type ImgEstado = { loading: boolean; url?: string; motivo?: string };
-type ImgsLinha = { frente?: ImgEstado; costas?: ImgEstado; lateral?: ImgEstado; aplicado?: string };
+type ImgEstado = { loading?: boolean; url?: string; motivo?: string; aplicado?: string };
 
 const linhaVazia: Linha = { modelo: "", cor: "", material: "", total: null, tamanhos: [], descricao: "" };
 
@@ -53,8 +47,7 @@ async function fileToDataUrl(file: File): Promise<string> {
 
 export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [linhas, setLinhas] = useState<Linha[]>(pedido.linhas ?? []);
-  const [imgs, setImgs] = useState<Record<number, ImgsLinha>>({});
-  const [vistas, setVistas] = useState<Record<number, Vista>>({});
+  const [imgs, setImgs] = useState<Record<number, ImgEstado>>({});
   const [verArte, setVerArte] = useState<Record<number, boolean>>({});
   const [salvando, setSalvando] = useState(false);
   const [avancou, setAvancou] = useState(false);
@@ -74,47 +67,36 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [arteMotivo, setArteMotivo] = useState<string | null>(null);
   const arteFileRef = useRef<HTMLInputElement>(null);
 
-  const geradasRef = useRef<Set<string>>(new Set());
+  const geradasRef = useRef<Set<number>>(new Set());
 
-  async function gerarVista(i: number, vista: Vista, forcar = false) {
-    const chave = `${i}:${vista}`;
-    if (!forcar && geradasRef.current.has(chave)) return;
-    geradasRef.current.add(chave);
+  async function gerarMockup(i: number, forcar = false) {
+    if (!forcar && geradasRef.current.has(i)) return;
+    geradasRef.current.add(i);
     const l = linhas[i];
     if (!l) return;
-    setImgs((m) => ({ ...m, [i]: { ...m[i], [vista]: { loading: true } } }));
+    setImgs((m) => ({ ...m, [i]: { ...m[i], loading: true, motivo: undefined } }));
     try {
       const res = await fetch("/api/visualizador/mockup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelo: l.modelo, cor: l.cor, material: l.material, descricao: l.descricao, vista }),
+        body: JSON.stringify({ modelo: l.modelo, cor: l.cor, material: l.material, descricao: l.descricao }),
       });
       const data = await res.json().catch(() => null);
       setImgs((m) => ({
         ...m,
-        [i]: {
-          ...m[i],
-          [vista]: data?.disponivel
-            ? { loading: false, url: data.imagemDataUrl }
-            : { loading: false, motivo: data?.motivo || "Não foi possível gerar agora." },
-        },
+        [i]: data?.disponivel
+          ? { ...m[i], loading: false, url: data.imagemDataUrl, motivo: undefined }
+          : { ...m[i], loading: false, motivo: data?.motivo || "Não foi possível gerar agora." },
       }));
     } catch {
-      setImgs((m) => ({ ...m, [i]: { ...m[i], [vista]: { loading: false, motivo: "Erro de conexão." } } }));
+      setImgs((m) => ({ ...m, [i]: { ...m[i], loading: false, motivo: "Erro de conexão." } }));
     }
   }
 
-  // gera a frente de cada linha ao montar
   useEffect(() => {
-    linhas.forEach((_, i) => void gerarVista(i, "frente"));
+    linhas.forEach((_, i) => void gerarMockup(i));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  function trocarVista(i: number, vista: Vista) {
-    setVistas((m) => ({ ...m, [i]: vista }));
-    setVerArte((m) => ({ ...m, [i]: false }));
-    void gerarVista(i, vista);
-  }
 
   async function persistir(novas: Linha[]) {
     setSalvando(true);
@@ -164,13 +146,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     setLinhas(novas);
     setEditOpen(false);
     void persistir(novas);
-    // regenera o mockup da linha alterada
     setImgs((m) => ({ ...m, [alvo]: {} }));
     setVerArte((m) => ({ ...m, [alvo]: false }));
-    geradasRef.current.delete(`${alvo}:frente`);
-    geradasRef.current.delete(`${alvo}:costas`);
-    geradasRef.current.delete(`${alvo}:lateral`);
-    setTimeout(() => void gerarVista(alvo, vistas[alvo] || "frente", true), 0);
+    geradasRef.current.delete(alvo);
+    setTimeout(() => void gerarMockup(alvo, true), 0);
   }
 
   function excluir(i: number) {
@@ -178,11 +157,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     const novas = linhas.filter((_, idx) => idx !== i);
     setLinhas(novas);
     setImgs({});
-    setVistas({});
     setVerArte({});
     geradasRef.current = new Set();
     void persistir(novas);
-    setTimeout(() => novas.forEach((_, idx) => void gerarVista(idx, "frente", true)), 0);
+    setTimeout(() => novas.forEach((_, idx) => void gerarMockup(idx, true)), 0);
   }
 
   // ---- aplicar arte ----
@@ -208,10 +186,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
   async function gerarArte() {
     if (arteIndex === null || artes.length === 0 || gerandoArte) return;
-    const v = vistas[arteIndex] || "frente";
-    const base = imgs[arteIndex]?.[v]?.url;
+    const base = imgs[arteIndex]?.url;
     if (!base) {
-      setArteMotivo("Gere a prévia do produto primeiro (precisa da geração de imagem configurada).");
+      setArteMotivo("Gere a prévia do produto primeiro.");
       return;
     }
     const l = linhas[arteIndex];
@@ -249,61 +226,47 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const totalPecas = linhas.reduce((acc, l) => acc + (l.total ?? 0), 0);
 
   return (
-    <div className="flex-1 w-full max-w-6xl mx-auto px-6 pt-8 pb-16">
+    <div className="flex-1 w-full max-w-5xl mx-auto px-6 pt-8 pb-16">
       <div className="flex items-center justify-between gap-3 mb-1">
         <Link href="/#pedido" className="text-sm text-gray-500 hover:text-gray-800">← Voltar</Link>
         {salvando && <span className="text-xs text-gray-400">salvando…</span>}
       </div>
       <h1 className="text-gray-900 text-2xl font-semibold mt-2">Pré-visualização dos seus produtos</h1>
       <p className="text-gray-500 text-sm mt-1 mb-6">
-        Veja cada produto liso, ajuste o que precisar e aplique suas artes. {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
+        Veja cada produto liso (frente · lateral · costas), ajuste o que precisar e aplique suas artes. {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
       </p>
 
       <div className="space-y-5">
         {linhas.map((l, i) => {
-          const v = vistas[i] || "frente";
-          const mostrandoArte = !!verArte[i] && !!imgs[i]?.aplicado;
-          const cur = imgs[i]?.[v];
-          const urlMostrar = mostrandoArte ? imgs[i]?.aplicado : cur?.url;
+          const st = imgs[i] || {};
+          const mostrandoArte = !!verArte[i] && !!st.aplicado;
+          const urlMostrar = mostrandoArte ? st.aplicado : st.url;
           return (
-            <div key={i} className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden grid md:grid-cols-[300px_1fr]">
-              {/* VISUALIZADOR */}
-              <div className="border-b md:border-b-0 md:border-r border-gray-100 p-4 flex flex-col">
-                <div className="flex gap-1 mb-3">
-                  {VISTAS.map((vv) => (
-                    <button key={vv} type="button" onClick={() => trocarVista(i, vv)}
-                      className={"px-2.5 py-1 rounded-lg text-xs border transition-colors " + (v === vv && !mostrandoArte ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 text-gray-500 hover:bg-gray-50")}>
-                      {VISTA_LABEL[vv]}
-                    </button>
-                  ))}
-                  {imgs[i]?.aplicado && (
-                    <button type="button" onClick={() => setVerArte((m) => ({ ...m, [i]: !m[i] }))}
-                      className={"ml-auto px-2.5 py-1 rounded-lg text-xs border transition-colors " + (mostrandoArte ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 text-gray-500 hover:bg-gray-50")}>
-                      {mostrandoArte ? "Com arte" : "Ver arte"}
-                    </button>
-                  )}
-                </div>
-                <div className="flex-1 aspect-square rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center overflow-hidden relative">
+            <div key={i} className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+              {/* VISUALIZADOR — imagem panorâmica (frente · lateral · costas) */}
+              <div className="relative bg-gray-50 border-b border-gray-100">
+                <div className="w-full aspect-[16/7] flex items-center justify-center overflow-hidden">
                   {urlMostrar ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={urlMostrar} alt={`${l.modelo ?? "produto"} ${v}`} className="w-full h-full object-contain" />
-                  ) : cur?.loading ? (
-                    <span className="text-xs text-gray-400">gerando prévia…</span>
+                    <img src={urlMostrar} alt={`${l.modelo ?? "produto"} ${l.cor ?? ""}`} className="w-full h-full object-contain" />
+                  ) : st.loading ? (
+                    <span className="text-xs text-gray-400">gerando prévia… (frente · lateral · costas)</span>
                   ) : (
                     <div className="text-center px-4">
                       <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-gray-100 flex items-center justify-center text-gray-300 text-xl">👕</div>
-                      <p className="text-[11px] text-gray-400 leading-snug">{cur?.motivo || "Prévia ainda não gerada."}</p>
-                      <button type="button" onClick={() => void gerarVista(i, v, true)} className="mt-2 text-[11px] text-[#0F6E56] hover:underline">Tentar gerar</button>
+                      <p className="text-[11px] text-gray-400 leading-snug max-w-xs mx-auto">{st.motivo || "Prévia ainda não gerada."}</p>
+                      <button type="button" onClick={() => void gerarMockup(i, true)} className="mt-2 text-[11px] text-[#0F6E56] hover:underline">Tentar gerar</button>
                     </div>
                   )}
-                  {mostrandoArte && (
-                    <span className="absolute top-2 left-2 bg-[#0F6E56] text-white text-[10px] px-2 py-0.5 rounded-full">com sua arte</span>
-                  )}
                 </div>
-                <button type="button" onClick={() => abrirArte(i)}
-                  className="mt-3 w-full border border-[#1D9E75] text-[#0F6E56] hover:bg-[#E1F5EE] text-sm font-medium px-3 py-2 rounded-xl transition-colors">
-                  + Aplicar minha arte
-                </button>
+                {st.aplicado && (
+                  <div className="absolute top-2 left-2 flex gap-1">
+                    <button type="button" onClick={() => setVerArte((m) => ({ ...m, [i]: false }))}
+                      className={"px-2.5 py-1 rounded-lg text-xs border transition-colors " + (!mostrandoArte ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-500 hover:bg-gray-50")}>Liso</button>
+                    <button type="button" onClick={() => setVerArte((m) => ({ ...m, [i]: true }))}
+                      className={"px-2.5 py-1 rounded-lg text-xs border transition-colors " + (mostrandoArte ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-500 hover:bg-gray-50")}>Com arte</button>
+                  </div>
+                )}
               </div>
 
               {/* DETALHES */}
@@ -328,6 +291,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 {l.descricao && <p className="text-sm text-gray-500 mt-3 leading-relaxed">{l.descricao}</p>}
 
                 <div className="flex flex-wrap gap-2 mt-4">
+                  <button type="button" onClick={() => abrirArte(i)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-3.5 py-1.5 rounded-lg">+ Aplicar minha arte</button>
                   <button type="button" onClick={() => abrirEdicao(i)} className="border border-gray-200 text-gray-700 hover:bg-gray-50 text-sm px-3 py-1.5 rounded-lg">Editar</button>
                   <button type="button" onClick={() => excluir(i)} className="border border-gray-200 text-red-600 hover:bg-red-50 text-sm px-3 py-1.5 rounded-lg">Excluir</button>
                 </div>
@@ -337,7 +301,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         })}
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-3">
+      <div className="mt-4">
         <button type="button" onClick={() => abrirEdicao(null)} className="border-2 border-dashed border-gray-300 text-gray-600 hover:border-[#1D9E75] hover:text-[#0F6E56] text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">
           + Adicionar produto
         </button>
@@ -417,7 +381,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             </div>
 
             <div className="p-5 grid sm:grid-cols-2 gap-5">
-              {/* esquerda: artes + instruções */}
               <div>
                 <p className="text-xs text-gray-500 font-medium mb-2">Suas artes ({artes.length}/8)</p>
                 <div className="grid grid-cols-3 gap-2">
@@ -449,10 +412,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 {arteMotivo && <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-snug">{arteMotivo}</p>}
               </div>
 
-              {/* direita: resultado / base */}
               <div>
                 <p className="text-xs text-gray-500 font-medium mb-2">Resultado</p>
-                <div className="aspect-square rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center overflow-hidden">
+                <div className="aspect-[16/9] rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center overflow-hidden">
                   {arteResultado ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={arteResultado} alt="resultado com arte" className="w-full h-full object-contain" />
