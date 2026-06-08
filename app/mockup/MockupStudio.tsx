@@ -136,8 +136,10 @@ export default function MockupStudio() {
   function onMove(e: React.PointerEvent) {
     if (!dragRef.current.ativo) return;
     const p = evNorm(e);
-    setPos((o) => ({ x: Math.min(1, Math.max(0, o.x + (p.x - dragRef.current.px))), y: Math.min(1, Math.max(0, o.y + (p.y - dragRef.current.py))) }));
+    const dx = p.x - dragRef.current.px;
+    const dy = p.y - dragRef.current.py;
     dragRef.current.px = p.x; dragRef.current.py = p.y;
+    setPos((o) => ({ x: Math.min(1, Math.max(0, o.x + dx)), y: Math.min(1, Math.max(0, o.y + dy)) }));
   }
   function onUp() { dragRef.current.ativo = false; }
 
