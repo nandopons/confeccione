@@ -21,9 +21,8 @@ export default function MockupPage() {
             Monte seu mockup com a nossa IA
           </h1>
           <p className="text-gray-400 text-sm md:text-base leading-relaxed mt-3 max-w-2xl">
-            Envie sua logomarca ou arte, converse com o assistente pra escolher a peça,
-            a cor e onde a arte vai — e veja o mockup ganhar forma. Quando gostar, é só
-            transformar em pedido.
+            Escolha uma peça da nossa biblioteca, envie sua logomarca e veja o mockup na hora.
+            Ajuste tamanho, posição e cor da arte — e quando gostar, transforme em pedido.
           </p>
         </div>
       </section>
