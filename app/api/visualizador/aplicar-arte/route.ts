@@ -64,15 +64,15 @@ export async function POST(req: Request) {
   const ctx = body.data.contexto?.trim()
   const instr = body.data.instrucoes?.trim()
   const prompt = [
-    'A PRIMEIRA imagem é o mockup base de um produto liso.',
+    'A PRIMEIRA imagem é o mockup base: uma foto panorâmica com a MESMA peça em três ângulos lado a lado — FRENTE (esquerda), LATERAL (centro) e COSTAS (direita).',
     artes.length > 1
       ? `As ${artes.length} imagens seguintes são artes/estampas do cliente.`
       : 'A imagem seguinte é a arte/estampa do cliente.',
-    'Aplique a(s) arte(s) sobre o produto de forma realista, acompanhando as dobras, perspectiva e iluminação do tecido.',
-    'NÃO altere o modelo, a cor nem o ângulo do produto base — apenas adicione a estampa.',
+    'Aplique a(s) arte(s) sobre a peça de forma realista, acompanhando dobras, perspectiva e iluminação do tecido, COERENTE nas três vistas: o que vai na frente aparece na vista de frente; o que vai nas costas aparece na vista de costas; a vista lateral mostra o que estiver no lado correspondente.',
+    'MANTENHA exatamente o mesmo layout panorâmico de três ângulos, o mesmo modelo, a mesma cor e os mesmos enquadramentos do base — apenas adicione a estampa.',
     ctx ? `Contexto do produto: ${ctx}.` : '',
-    instr ? `Instruções do cliente sobre como aplicar: ${instr}.` : 'Posicione a arte de forma centralizada e proporcional, com bom senso.',
-    'Devolva apenas a imagem final do produto com a arte aplicada.',
+    instr ? `Instruções do cliente sobre como aplicar: ${instr}.` : 'Se não houver instrução específica, posicione a arte de forma centralizada e proporcional no peito, com bom senso.',
+    'Devolva apenas a imagem final (panorâmica, três ângulos) com a arte aplicada.',
   ].filter(Boolean).join(' ')
 
   const r = await gerarImagem({ prompt, imagens: [base, ...artes] })
