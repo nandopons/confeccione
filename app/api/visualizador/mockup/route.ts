@@ -15,6 +15,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { gerarImagem } from '@/app/lib/mockup-image'
+import { chaveMockup, normMockup } from '@/app/lib/mockup-cache'
 
 export const runtime = 'nodejs'
 
@@ -32,24 +33,12 @@ const BodySchema = z.object({
   forcar: z.boolean().optional(), // ignora o cache e regenera
 })
 
-function norm(s?: string | null): string {
-  return (s ?? '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, ' ')
-}
-
-// chave de cache: modelo|cor|material (normalizados). Descrição NÃO entra — é o
-// que permite reusar entre produtos "similares" (mesma peça/cor/tecido).
-function chaveDe(b: z.infer<typeof BodySchema>): string {
-  return [norm(b.modelo), norm(b.cor), norm(b.material)].join('|')
-}
-
+// chave de cache vem do lib compartilhado (mesma usada pelo painel admin):
+// modelo|cor|material normalizado. Descrição NÃO entra — permite reuso entre
+// produtos "similares".
 function cacheavel(b: z.infer<typeof BodySchema>): boolean {
   // só cacheia quando há identidade mínima (modelo + cor)
-  return norm(b.modelo).length > 0 && norm(b.cor).length > 0
+  return normMockup(b.modelo).length > 0 && normMockup(b.cor).length > 0
 }
 
 function montarPrompt(b: z.infer<typeof BodySchema>): string {
@@ -84,7 +73,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Formato inválido.' }, { status: 400 })
   }
 
-  const chave = chaveDe(body.data)
+  const chave = chaveMockup(body.data.modelo, body.data.cor, body.data.material)
   const podeCachear = cacheavel(body.data)
 
   // 1) tenta o cache (a menos que forcar)
@@ -120,9 +109,9 @@ export async function POST(req: Request) {
       await supabase.from('mockups_lisos').upsert(
         {
           chave,
-          modelo: norm(body.data.modelo) || null,
-          cor: norm(body.data.cor) || null,
-          material: norm(body.data.material) || null,
+          modelo: normMockup(body.data.modelo) || null,
+          cor: normMockup(body.data.cor) || null,
+          material: normMockup(body.data.material) || null,
           imagem_data_url: imagemDataUrl,
           criado_em: new Date().toISOString(),
         },
