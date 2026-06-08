@@ -64,8 +64,9 @@ export default function PedidoAssistente() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [turnos, enviando]);
 
-  async function salvarPedido(p: Pedido) {
-    if (salvoRef.current || salvando) return;
+  async function salvarPedido(p: Pedido): Promise<string | null> {
+    if (salvoRef.current) return protocolo;
+    if (salvando) return null;
     setSalvando(true);
     try {
       const res = await fetch("/api/pedido/assistente/criar", {
@@ -75,8 +76,9 @@ export default function PedidoAssistente() {
       });
       const data = await res.json().catch(() => null);
       if (res.ok && data?.ok) {
+        const novoId = String(data.protocolo ?? data.id ?? "");
         salvoRef.current = true;
-        setProtocolo(String(data.protocolo ?? data.id ?? ""));
+        setProtocolo(novoId);
         try {
           const w = window as unknown as { dataLayer?: Record<string, unknown>[] };
           w.dataLayer = w.dataLayer || [];
@@ -91,9 +93,12 @@ export default function PedidoAssistente() {
         } catch {
           // analytics nunca quebra o fluxo
         }
+        return novoId;
       }
+      return null;
     } catch {
       // silencioso: o cliente ainda pode prosseguir; tentamos salvar de novo no botão
+      return null;
     } finally {
       setSalvando(false);
     }
@@ -140,7 +145,11 @@ export default function PedidoAssistente() {
   }
 
   async function prosseguir() {
-    if (!salvoRef.current) await salvarPedido(pedido);
+    const id = salvoRef.current ? protocolo : await salvarPedido(pedido);
+    if (id) {
+      window.location.href = `/visualizador/${id}`;
+      return;
+    }
     setMostrarEmBreve(true);
   }
 
