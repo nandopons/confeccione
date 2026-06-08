@@ -69,6 +69,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [confirmErro, setConfirmErro] = useState<string | null>(null);
   const [pixResult, setPixResult] = useState<{ copiaCola: string | null; invoiceUrl: string; valorCentavos: number } | null>(null);
   const [copiado, setCopiado] = useState(false);
+  const [pago, setPago] = useState(false);
+  const [numImagensSalvas, setNumImagensSalvas] = useState(0);
+  const [checandoPago, setChecandoPago] = useState(false);
 
   // orçamento (estimativa) + opções de estampa cadastradas
   const [orcamento, setOrcamento] = useState<Orcamento>(null);
@@ -299,6 +302,27 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     }
   }
 
+  async function checkStatus() {
+    setChecandoPago(true);
+    try {
+      const r = await fetch(`/api/pedido/assistente/${pedido.id}/status`).then((x) => x.json());
+      if (r?.ok) { setPago(!!r.pago); setNumImagensSalvas(r.numImagens || 0); }
+    } catch {
+      // silencioso
+    } finally {
+      setChecandoPago(false);
+    }
+  }
+
+  // enquanto aguarda pagamento, faz polling do status (e libera o download)
+  useEffect(() => {
+    if (confirmStep !== "feito" || pago) return;
+    void checkStatus();
+    const t = setInterval(() => { void checkStatus(); }, 12000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [confirmStep, pago]);
+
   const podeConfirmar = linhas.length > 0 && !!orcamento && orcamento.completo && orcamento.total_centavos > 0;
   const totalPecas = linhas.reduce((acc, l) => acc + (l.total ?? 0), 0);
 
@@ -453,6 +477,27 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   <a href={pixResult.invoiceUrl} target="_blank" rel="noopener noreferrer" className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-xs px-3 py-1.5 rounded-lg">Abrir página de pagamento</a>
                 </div>
               </div>
+            </div>
+            <div className="mt-4 pt-3 border-t border-[#1D9E75]/20">
+              {pago ? (
+                <div>
+                  <p className="text-sm text-[#0F6E56] font-medium mb-2">Pagamento confirmado! ✅ Baixe seus visualizadores:</p>
+                  {numImagensSalvas > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {Array.from({ length: numImagensSalvas }).map((_, i) => (
+                        <a key={i} href={`/api/pedido/assistente/${pedido.id}/imagem?i=${i}`} download={`confeccione-produto-${i + 1}.jpg`} className="border border-[#1D9E75] text-[#0F6E56] text-xs px-3 py-1.5 rounded-lg hover:bg-white">Baixar produto {i + 1}</a>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[#0F6E56]/80">Seus visualizadores também foram pro seu e-mail.</p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-gray-500">Aguardando confirmação do pagamento — o download libera assim que o PIX cair.</span>
+                  <button type="button" onClick={() => void checkStatus()} disabled={checandoPago} className="text-xs text-[#0F6E56] underline disabled:opacity-50">{checandoPago ? "verificando…" : "Já paguei? Atualizar"}</button>
+                </div>
+              )}
             </div>
           </div>
         ) : confirmStep === "form" ? (
