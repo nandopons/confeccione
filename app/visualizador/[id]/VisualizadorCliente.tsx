@@ -244,21 +244,19 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           return (
             <div key={i} className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
               {/* VISUALIZADOR — imagem panorâmica (frente · lateral · costas) */}
-              <div className="relative bg-gray-50 border-b border-gray-100">
-                <div className="w-full aspect-[16/7] flex items-center justify-center overflow-hidden">
-                  {urlMostrar ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={urlMostrar} alt={`${l.modelo ?? "produto"} ${l.cor ?? ""}`} className="w-full h-full object-contain" />
-                  ) : st.loading ? (
-                    <span className="text-xs text-gray-400">gerando prévia… (frente · lateral · costas)</span>
-                  ) : (
-                    <div className="text-center px-4">
-                      <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-gray-100 flex items-center justify-center text-gray-300 text-xl">👕</div>
-                      <p className="text-[11px] text-gray-400 leading-snug max-w-xs mx-auto">{st.motivo || "Prévia ainda não gerada."}</p>
-                      <button type="button" onClick={() => void gerarMockup(i, true)} className="mt-2 text-[11px] text-[#0F6E56] hover:underline">Tentar gerar</button>
-                    </div>
-                  )}
-                </div>
+              <div className="relative bg-gray-50 border-b border-gray-100 flex items-center justify-center p-3 min-h-[320px]">
+                {urlMostrar ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={urlMostrar} alt={`${l.modelo ?? "produto"} ${l.cor ?? ""}`} className="max-h-[560px] w-auto max-w-full object-contain rounded-lg" />
+                ) : st.loading ? (
+                  <span className="text-xs text-gray-400">gerando prévia… (frente · lateral · costas)</span>
+                ) : (
+                  <div className="text-center px-4">
+                    <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-gray-100 flex items-center justify-center text-gray-300 text-xl">👕</div>
+                    <p className="text-[11px] text-gray-400 leading-snug max-w-xs mx-auto">{st.motivo || "Prévia ainda não gerada."}</p>
+                    <button type="button" onClick={() => void gerarMockup(i, true)} className="mt-2 text-[11px] text-[#0F6E56] hover:underline">Tentar gerar</button>
+                  </div>
+                )}
                 {st.aplicado && (
                   <div className="absolute top-2 left-2 flex gap-1">
                     <button type="button" onClick={() => setVerArte((m) => ({ ...m, [i]: false }))}
