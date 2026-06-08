@@ -94,7 +94,7 @@ export async function POST(req: Request) {
         .from('mockups_lisos')
         .select('imagem_data_url')
         .eq('chave', chave)
-        .single()
+        .maybeSingle()
       if (data?.imagem_data_url) {
         return NextResponse.json({ disponivel: true, imagemDataUrl: data.imagem_data_url, cache: true })
       }
@@ -113,11 +113,11 @@ export async function POST(req: Request) {
 
   const imagemDataUrl = `data:${r.mime};base64,${r.imagemBase64}`
 
-  // 3) grava no cache (upsert), sem bloquear a resposta
+  // 3) grava no cache (upsert). PRECISA ser awaited: em serverless a função é
+  // congelada ao retornar, então um write "fire-and-forget" não completaria.
   if (podeCachear) {
-    void supabase
-      .from('mockups_lisos')
-      .upsert(
+    try {
+      await supabase.from('mockups_lisos').upsert(
         {
           chave,
           modelo: norm(body.data.modelo) || null,
@@ -128,8 +128,9 @@ export async function POST(req: Request) {
         },
         { onConflict: 'chave' }
       )
-      .then(() => {})
-      .then(undefined, () => {})
+    } catch {
+      // falha de cache não pode quebrar a resposta
+    }
   }
 
   return NextResponse.json({ disponivel: true, imagemDataUrl, cache: false })
