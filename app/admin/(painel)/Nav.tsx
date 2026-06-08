@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 const ITENS: Array<{ href: string; label: string }> = [
   { href: '/admin', label: 'Dashboard' },
   { href: '/admin/pedidos', label: 'Pedidos' },
+  { href: '/admin/pedidos-pagos', label: 'Pedidos pagos' },
   { href: '/admin/fornecedores', label: 'Fornecedores' },
   { href: '/admin/captacao', label: 'Captação' },
   { href: '/admin/mockups', label: 'Mockups' },
@@ -20,10 +21,11 @@ export function AdminNav() {
       {ITENS.map((item) => {
         // '/admin' precisa de match exato — startsWith pegaria todas
         // as outras rotas (/admin/pedidos, /admin/orfaos, etc).
+        // match por segmento: '/admin/pedidos' NÃO casa '/admin/pedidos-pagos'
         const ativo =
           item.href === '/admin'
             ? pathname === '/admin'
-            : pathname.startsWith(item.href)
+            : pathname === item.href || pathname.startsWith(item.href + '/')
         return (
           <Link
             key={item.href}
