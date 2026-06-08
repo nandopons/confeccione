@@ -1,28 +1,34 @@
 // app/lib/mockup-image.ts
 // ============================================================================
-// Adaptador PLUGÁVEL de geração de imagem do mockup.
+// Adaptador PLUGÁVEL de geração de imagem.
 //
-// A página /mockup e a rota /api/mockup/gerar não conhecem o provedor: elas só
-// chamam gerarMockup(). Trocar/ligar um provedor é mudar APENAS este arquivo +
-// variáveis de ambiente.
+// As rotas não conhecem o provedor: chamam gerarImagem({prompt, imagens}).
+// `imagens` pode ter 0..N entradas:
+//   - 0 imagens   -> geração só por texto (ex.: mockup de produto liso)
+//   - 1+ imagens  -> edição/composição (ex.: base do mockup + artes do cliente)
 //
 // Seleção por env:
-//   MOCKUP_IMAGE_PROVIDER = 'gemini'   -> usa GEMINI_API_KEY (Gemini 2.5 Flash Image)
-//   (ausente / outro)                  -> indisponível (a UI mostra o prompt + a
-//                                          logo como prévia, sem renderizar)
+//   MOCKUP_IMAGE_PROVIDER = 'gemini'  -> usa GEMINI_API_KEY (Gemini image)
+//   (ausente / outro)                 -> indisponível (UI cai em placeholder)
 //
-// Para adicionar OpenAI (gpt-image-1) ou fal/Replicate (FLUX Kontext), basta
-// criar outra função provider* e referenciá-la no switch.
+// Trocar/ligar provedor = mudar APENAS este arquivo + env.
 // ============================================================================
 
-export type ResultadoMockup =
+export interface ImagemEntrada {
+  base64: string // base64 puro (sem prefixo data:)
+  mime: string // ex.: 'image/png'
+}
+
+export type ResultadoImagem =
   | { disponivel: false; motivo: string }
   | { disponivel: true; imagemBase64: string; mime: string }
 
+// Retrocompat com a página /mockup antiga
+export type ResultadoMockup = ResultadoImagem
 export interface OpcoesMockup {
   prompt: string
-  logoBase64: string // base64 puro (sem prefixo data:)
-  logoMime: string // ex.: 'image/png'
+  logoBase64: string
+  logoMime: string
 }
 
 export function provedorConfigurado(): string | null {
@@ -32,38 +38,44 @@ export function provedorConfigurado(): string | null {
   return null
 }
 
-export async function gerarMockup(opts: OpcoesMockup): Promise<ResultadoMockup> {
+export async function gerarImagem(opts: {
+  prompt: string
+  imagens?: ImagemEntrada[]
+}): Promise<ResultadoImagem> {
   const provedor = provedorConfigurado()
   if (!provedor) {
     return {
       disponivel: false,
       motivo:
-        'Provedor de imagem ainda não configurado. Defina MOCKUP_IMAGE_PROVIDER e a API key correspondente.',
+        'Provedor de imagem ainda não configurado. Defina MOCKUP_IMAGE_PROVIDER=gemini e GEMINI_API_KEY.',
     }
   }
-  if (provedor === 'gemini') return gerarComGemini(opts)
+  if (provedor === 'gemini') return gerarComGemini(opts.prompt, opts.imagens ?? [])
   return { disponivel: false, motivo: `Provedor desconhecido: ${provedor}` }
 }
 
+// Retrocompat: a rota /api/mockup/gerar continua chamando gerarMockup.
+export async function gerarMockup(opts: OpcoesMockup): Promise<ResultadoImagem> {
+  return gerarImagem({
+    prompt: opts.prompt,
+    imagens: [{ base64: opts.logoBase64, mime: opts.logoMime }],
+  })
+}
+
 // ----------------------------------------------------------------------------
-// Gemini 2.5 Flash Image (aceita imagem de entrada — ideal pra manter a logo)
+// Gemini (aceita imagens de entrada — ideal pra manter base do mockup + artes)
 // ----------------------------------------------------------------------------
-async function gerarComGemini(opts: OpcoesMockup): Promise<ResultadoMockup> {
+async function gerarComGemini(prompt: string, imagens: ImagemEntrada[]): Promise<ResultadoImagem> {
   const key = process.env.GEMINI_API_KEY as string
   const modelo = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image'
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${key}`
 
-  const body = {
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          { text: opts.prompt },
-          { inline_data: { mime_type: opts.logoMime, data: opts.logoBase64 } },
-        ],
-      },
-    ],
+  const parts: Array<Record<string, unknown>> = [{ text: prompt }]
+  for (const img of imagens) {
+    parts.push({ inline_data: { mime_type: img.mime, data: img.base64 } })
   }
+
+  const body = { contents: [{ role: 'user', parts }] }
 
   let resp: Response
   try {
@@ -90,10 +102,10 @@ async function gerarComGemini(opts: OpcoesMockup): Promise<ResultadoMockup> {
     return { disponivel: false, motivo: 'Resposta inválida do provedor.' }
   }
 
-  // Procura o primeiro inline_data (imagem) nas partes da resposta.
-  const parts =
-    (data as any)?.candidates?.[0]?.content?.parts ?? ([] as any[])
-  for (const p of parts) {
+  const respParts =
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (data as any)?.candidates?.[0]?.content?.parts ?? ([] as unknown[])
+  for (const p of respParts) {
     const inline = p?.inline_data ?? p?.inlineData
     if (inline?.data) {
       return {
