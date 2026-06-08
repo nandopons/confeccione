@@ -1,199 +1,169 @@
 // app/api/mockup/chat/route.ts
 // ============================================================================
-// POST /api/mockup/chat — conversa de IA (Claude) que ajuda o cliente a montar
-// o mockup e VAI CONSTRUINDO o prompt de geração de imagem.
-//
-// Stateless: o histórico inteiro vem no body. O modelo responde SOMENTE com
-// JSON (contrato abaixo). Parse defensivo com zod; em falha, devolve uma
-// pergunta de fallback. NÃO gera imagem (isso é /api/mockup/gerar) e NÃO
-// persiste nada.
+// POST /api/mockup/chat — o Claude é o "operador" do estúdio de mockup.
+// Conversa em pt-BR e devolve AÇÕES (ops) pra aplicar no preview: trocar peça,
+// vista (frente/costas/lateral), cor da logo, remover fundo, posição (zona) e
+// tamanho. Stateless; contrato JSON; parse defensivo.
 // ============================================================================
 
-import Anthropic from '@anthropic-ai/sdk'
-import { NextResponse } from 'next/server'
-import { z } from 'zod'
+import Anthropic from "@anthropic-ai/sdk";
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { MOCKUPS, CATEGORIAS } from "@/app/lib/mockups";
 
-export const runtime = 'nodejs'
+export const runtime = "nodejs";
 
-const MODELO = 'claude-sonnet-4-6'
-const MAX_TOKENS = 800
-const TEMPERATURE = 0.5
-const MAX_MENSAGENS = 30
+const MODELO = "claude-sonnet-4-6";
+const MAX_TOKENS = 700;
+const TEMPERATURE = 0.4;
+const MAX_MENSAGENS = 30;
 
-type Brief = {
-  peca: string | null
-  cor: string | null
-  posicao_arte: string | null
-  tamanho_arte: string | null
-  estilo_foto: string | null
-  observacoes: string | null
-}
-
-const BRIEF_VAZIO: Brief = {
-  peca: null,
-  cor: null,
-  posicao_arte: null,
-  tamanho_arte: null,
-  estilo_foto: null,
-  observacoes: null,
-}
-
-const PERGUNTA_FALLBACK =
-  'Desculpa, me perdi aqui. Me conta de novo: qual peça você quer ver com a sua arte?'
+const PECA_IDS = new Set(MOCKUPS.map((m) => m.id));
 
 const MensagemSchema = z.object({
-  role: z.enum(['user', 'assistant']),
+  role: z.enum(["user", "assistant"]),
   content: z.string(),
-})
-
+});
+const EstadoSchema = z
+  .object({
+    pecaId: z.string().nullable().optional(),
+    vista: z.string().nullable().optional(),
+    corLogo: z.string().nullable().optional(),
+    removerFundo: z.boolean().nullable().optional(),
+    posicao: z.string().nullable().optional(),
+    tamanho: z.number().nullable().optional(),
+    temLogo: z.boolean().optional(),
+  })
+  .partial();
 const BodySchema = z.object({
   messages: z.array(MensagemSchema),
-  // o cliente já anexou uma logo/arte? ajuda o modelo a saber se pode finalizar.
-  temLogo: z.boolean().optional().default(false),
-})
+  estado: EstadoSchema.optional(),
+});
 
-const BriefSchema = z
+const OpsSchema = z
   .object({
-    peca: z.string().nullable().catch(null),
-    cor: z.string().nullable().catch(null),
-    posicao_arte: z.string().nullable().catch(null),
-    tamanho_arte: z.string().nullable().catch(null),
-    estilo_foto: z.string().nullable().catch(null),
-    observacoes: z.string().nullable().catch(null),
+    pecaId: z.string().nullable().catch(null),
+    vista: z.enum(["frente", "costas", "lateral"]).nullable().catch(null),
+    corLogo: z.enum(["original", "preto", "branco"]).nullable().catch(null),
+    removerFundo: z.boolean().nullable().catch(null),
+    posicao: z
+      .enum(["peito_esquerdo", "peito_centro", "costas_centro", "centro"])
+      .nullable()
+      .catch(null),
+    tamanho: z
+      .preprocess((v) => {
+        if (v === null || v === undefined || v === "") return null;
+        const n = typeof v === "number" ? v : Number(v);
+        return Number.isFinite(n) ? n : null;
+      }, z.number().nullable())
+      .catch(null),
   })
-  .catch({ ...BRIEF_VAZIO })
+  .catch({ pecaId: null, vista: null, corLogo: null, removerFundo: null, posicao: null, tamanho: null });
 
 const RespostaModeloSchema = z.object({
   mensagem: z.string().min(1),
-  brief: BriefSchema.default({ ...BRIEF_VAZIO }),
-  prompt_imagem: z.string().nullable().catch(null),
-  pronto: z.boolean().catch(false),
-})
+  ops: OpsSchema.default({
+    pecaId: null, vista: null, corLogo: null, removerFundo: null, posicao: null, tamanho: null,
+  }),
+});
 
-const SYSTEM_PROMPT = `Você é o assistente do "Monte seu mockup" da Confeccione, plataforma que conecta quem precisa fabricar roupa a confecções. Seu papel é ajudar o cliente a visualizar a arte/logomarca dele numa peça (qualquer item: camiseta, moletom, boné, bolsa, mochila, ecobag, etc.) e, conversando, MONTAR um bom prompt para um modelo de geração de imagem.
+// Catálogo resumido pro modelo
+const CATALOGO = MOCKUPS.map((m) => {
+  const cat = CATEGORIAS.find((c) => c.id === m.categoria)?.nome ?? m.categoria;
+  const vistas = Object.entries(m.vistas)
+    .map(([v, info]) => `${v} [zonas: ${Object.keys(info!.zonas).join(", ")}]`)
+    .join("; ");
+  return `- ${m.nome} (id: ${m.id}, categoria: ${cat}) — vistas: ${vistas}`;
+}).join("\n");
 
-Converse em português do Brasil, de forma calorosa e objetiva, UMA pergunta por vez. Baliza a conversa para descobrir, aos poucos: (1) qual peça, (2) cor da peça, (3) onde a arte/logo vai (ex.: peito esquerdo, centro do peito, nas costas, bolso, frente do boné), (4) tamanho da arte (pequena/média/grande), (5) estilo da foto (estúdio fundo neutro, lifestyle/pessoa usando, ou flat-lay). Aceite QUALQUER peça que o cliente pedir. Se faltar a arte/logo, lembre gentilmente que ele pode anexar o arquivo no botão de upload.
+const SYSTEM_PROMPT = `Você é o operador do estúdio "Monte seu mockup" da Confeccione. O cliente já tem um preview onde a logo dele é aplicada num mockup de peça. Você conduz tudo pela conversa: trocar a peça, mudar a vista (frente/costas/lateral), a cor da logo, remover o fundo da arte, a posição e o tamanho.
 
-Quando tiver o suficiente (pelo menos peça + cor + posição) E o cliente já tiver anexado a arte, defina "pronto": true e escreva um "prompt_imagem" EXCELENTE, em INGLÊS, descrevendo um mockup fotorrealista de produto: a peça, cor, material/textura, a arte/logo aplicada na posição e tamanho combinados, o estilo de foto, fundo, iluminação e enquadramento. SEMPRE inclua a instrução de preservar a logo/arte EXATAMENTE como foi enviada, sem redesenhar nem distorcer (ex.: "place the user's provided logo exactly as given, do not redraw or alter it"). Antes de estar pronto, mantenha "pronto": false e "prompt_imagem": null.
+Fale em português do Brasil, caloroso e objetivo, uma coisa por vez. Quando o cliente pedir algo, devolva as AÇÕES correspondentes em "ops" (só os campos que mudam; o resto null). Convenções importantes:
+- "peito" / "peito esquerdo" = posicao "peito_esquerdo" (peito esquerdo de quem veste). "peito centro"/"no meio" = "peito_centro". Nas costas, "costas_centro". Em peças sem peito, "centro".
+- Se a logo estiver clara demais ou escura demais pra peça, sugira corLogo "preto" ou "branco". 
+- Se a arte tiver fundo, mantenha removerFundo true (padrão).
+- "tamanho" é fração de 0.3 a 1.3 (1.0 = cheio na zona).
+- Só use ids/vistas/zonas que existem no catálogo abaixo. Se faltar a logo, lembre o cliente de anexar.
 
-Não fale de assuntos fora do mockup/produção de roupa. Não peça nome, telefone nem e-mail.
+Catálogo disponível:
+${CATALOGO}
 
-A cada resposta, devolva SOMENTE um JSON válido (sem markdown, sem cercas de código, sem texto fora dele) neste formato exato:
-{"mensagem": string, "brief": {"peca": string|null, "cor": string|null, "posicao_arte": string|null, "tamanho_arte": string|null, "estilo_foto": string|null, "observacoes": string|null}, "prompt_imagem": string|null, "pronto": boolean}
-
-Regras:
-- "mensagem" é o que você fala com o cliente (próxima pergunta, sugestão, ou confirmação de que dá pra gerar).
-- "brief" acumula o que já foi definido (mantenha os valores anteriores e só atualize o que mudou).
-- "prompt_imagem" só é preenchido quando "pronto" for true.`
+A cada resposta devolva SOMENTE um JSON válido (sem markdown, sem cercas) neste formato exato:
+{"mensagem": string, "ops": {"pecaId": string|null, "vista": "frente"|"costas"|"lateral"|null, "corLogo": "original"|"preto"|"branco"|null, "removerFundo": boolean|null, "posicao": "peito_esquerdo"|"peito_centro"|"costas_centro"|"centro"|null, "tamanho": number|null}}`;
 
 function extrairJson(bruto: string): string {
-  let s = bruto.trim()
-  s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
-  const ini = s.indexOf('{')
-  const fim = s.lastIndexOf('}')
-  if (ini !== -1 && fim !== -1 && fim > ini) s = s.slice(ini, fim + 1)
-  return s
+  let s = bruto.trim();
+  s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const i = s.indexOf("{"), f = s.lastIndexOf("}");
+  if (i !== -1 && f !== -1 && f > i) s = s.slice(i, f + 1);
+  return s;
 }
-
 function textoDaResposta(content: Anthropic.Messages.ContentBlock[]): string {
   return content
-    .filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text')
+    .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
     .map((b) => b.text)
-    .join('')
+    .join("");
 }
 
-function briefAnterior(messages: Array<{ role: string; content: string }>): Brief {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]
-    if (m.role !== 'assistant') continue
-    try {
-      const obj = JSON.parse(extrairJson(m.content))
-      const r = RespostaModeloSchema.safeParse(obj)
-      if (r.success) return r.data.brief
-    } catch {
-      // ignora
-    }
-  }
-  return { ...BRIEF_VAZIO }
+// valida ops contra o catálogo (peça/vista/zona coerentes)
+function validarOps(ops: z.infer<typeof OpsSchema>) {
+  const out = { ...ops };
+  if (out.pecaId && !PECA_IDS.has(out.pecaId)) out.pecaId = null;
+  if (out.tamanho != null) out.tamanho = Math.min(1.3, Math.max(0.3, out.tamanho));
+  return out;
 }
 
 export async function POST(req: Request) {
-  let bodyBruto: unknown
-  try {
-    bodyBruto = await req.json()
-  } catch {
-    return NextResponse.json({ error: 'JSON inválido no corpo.' }, { status: 400 })
+  let bruto: unknown;
+  try { bruto = await req.json(); } catch {
+    return NextResponse.json({ error: "JSON inválido." }, { status: 400 });
   }
-
-  const body = BodySchema.safeParse(bodyBruto)
+  const body = BodySchema.safeParse(bruto);
   if (!body.success) {
-    return NextResponse.json(
-      { error: 'Formato esperado: { messages: [{ role, content }], temLogo? }' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: "Formato esperado: { messages, estado? }" }, { status: 400 });
   }
-
-  const { messages, temLogo } = body.data
+  const { messages, estado } = body.data;
   if (messages.length > MAX_MENSAGENS) {
-    return NextResponse.json(
-      { error: `Histórico longo demais (máx. ${MAX_MENSAGENS} mensagens).` },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: `Histórico longo demais (máx. ${MAX_MENSAGENS}).` }, { status: 400 });
   }
-
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    console.error('[mockup/chat] ANTHROPIC_API_KEY ausente no ambiente')
-    return NextResponse.json({ error: 'Serviço de chat indisponível no momento.' }, { status: 500 })
+    return NextResponse.json({ error: "Serviço de chat indisponível." }, { status: 500 });
   }
 
-  const anterior = briefAnterior(messages)
-  const systemSuffix = temLogo
-    ? '\n\nContexto atual: o cliente JÁ anexou a arte/logo.'
-    : '\n\nContexto atual: o cliente ainda NÃO anexou a arte/logo — lembre-o de anexar antes de gerar.'
+  const ctx = `Estado atual do preview: ${JSON.stringify(estado ?? {})}.`;
 
-  let texto: string
+  let texto: string;
   try {
-    const client = new Anthropic({ apiKey })
-    const resposta = await client.messages.create({
+    const client = new Anthropic({ apiKey });
+    const r = await client.messages.create({
       model: MODELO,
       max_tokens: MAX_TOKENS,
       temperature: TEMPERATURE,
       system: [
-        { type: 'text', text: SYSTEM_PROMPT + systemSuffix, cache_control: { type: 'ephemeral' } },
+        { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+        { type: "text", text: ctx },
       ],
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    })
-    texto = textoDaResposta(resposta.content)
+    });
+    texto = textoDaResposta(r.content);
   } catch (err) {
-    console.error('[mockup/chat] falha na chamada ao modelo:', err)
-    return NextResponse.json({ error: 'Não consegui responder agora. Tente de novo.' }, { status: 502 })
+    console.error("[mockup/chat] modelo:", err);
+    return NextResponse.json({ error: "Não consegui responder agora." }, { status: 502 });
   }
 
-  let parsed: z.infer<typeof RespostaModeloSchema> | null = null
+  let parsed: z.infer<typeof RespostaModeloSchema> | null = null;
   try {
-    const obj = JSON.parse(extrairJson(texto))
-    const r = RespostaModeloSchema.safeParse(obj)
-    if (r.success) parsed = r.data
-  } catch {
-    parsed = null
-  }
+    const r = RespostaModeloSchema.safeParse(JSON.parse(extrairJson(texto)));
+    if (r.success) parsed = r.data;
+  } catch { parsed = null; }
 
   if (!parsed) {
     return NextResponse.json({
-      mensagem: PERGUNTA_FALLBACK,
-      brief: anterior,
-      prompt_imagem: null,
-      pronto: false,
-    })
+      mensagem: "Pode me dizer de novo como você quer o mockup? (peça, vista, posição da logo, cor…)",
+      ops: { pecaId: null, vista: null, corLogo: null, removerFundo: null, posicao: null, tamanho: null },
+    });
   }
 
-  // Só pode estar "pronto" se houver logo anexada de fato.
-  const pronto = Boolean(parsed.pronto && temLogo && parsed.prompt_imagem)
-  return NextResponse.json({
-    mensagem: parsed.mensagem,
-    brief: parsed.brief,
-    prompt_imagem: pronto ? parsed.prompt_imagem : null,
-    pronto,
-  })
+  return NextResponse.json({ mensagem: parsed.mensagem, ops: validarOps(parsed.ops) });
 }
