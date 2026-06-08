@@ -13,14 +13,23 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 export type Tamanho = { tamanho: string; qtd: number | null };
+export type Estampa = { posicao: string; tamanho: string };
 export type Linha = {
   modelo: string | null;
   cor: string | null;
   material: string | null;
   total: number | null;
   tamanhos: Tamanho[];
+  estampas: Estampa[];
   descricao: string | null;
 };
+
+type LinhaOrc = { unit_centavos: number | null; total_centavos: number; faltando: string[] };
+type Orcamento = { linhas: LinhaOrc[]; total_centavos: number; completo: boolean } | null;
+
+function brl(c: number): string {
+  return (c / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
 export type PedidoVis = {
   id: string;
   linhas: Linha[];
@@ -34,7 +43,7 @@ export type PedidoVis = {
 
 type ImgEstado = { loading?: boolean; url?: string; motivo?: string; aplicado?: string };
 
-const linhaVazia: Linha = { modelo: "", cor: "", material: "", total: null, tamanhos: [], descricao: "" };
+const linhaVazia: Linha = { modelo: "", cor: "", material: "", total: null, tamanhos: [], estampas: [], descricao: "" };
 
 async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -46,11 +55,18 @@ async function fileToDataUrl(file: File): Promise<string> {
 }
 
 export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
-  const [linhas, setLinhas] = useState<Linha[]>(pedido.linhas ?? []);
+  const [linhas, setLinhas] = useState<Linha[]>(
+    (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [] }))
+  );
   const [imgs, setImgs] = useState<Record<number, ImgEstado>>({});
   const [verArte, setVerArte] = useState<Record<number, boolean>>({});
   const [salvando, setSalvando] = useState(false);
   const [avancou, setAvancou] = useState(false);
+
+  // orçamento (estimativa) + opções de estampa cadastradas
+  const [orcamento, setOrcamento] = useState<Orcamento>(null);
+  const [semTabela, setSemTabela] = useState(false);
+  const [opcoes, setOpcoes] = useState<{ posicoes: string[]; tamanhos: string[] }>({ posicoes: [], tamanhos: [] });
 
   // edição / adição
   const [editOpen, setEditOpen] = useState(false);
@@ -98,6 +114,23 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // opções de estampa cadastradas (pros selects do modal)
+  useEffect(() => {
+    fetch("/api/precos/opcoes")
+      .then((r) => r.json())
+      .then((d) => { if (d?.ok) setOpcoes({ posicoes: d.posicoes ?? [], tamanhos: d.tamanhos ?? [] }); })
+      .catch(() => {});
+  }, []);
+
+  // recalcula o orçamento (estimativa) sempre que as linhas mudam
+  useEffect(() => {
+    const body = { linhas: linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas ?? [] })) };
+    fetch("/api/orcamento", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then((r) => r.json())
+      .then((d) => { if (d?.ok) { setOrcamento(d.orcamento); setSemTabela(!!d.semTabela); } })
+      .catch(() => {});
+  }, [linhas]);
+
   async function persistir(novas: Linha[]) {
     setSalvando(true);
     try {
@@ -131,6 +164,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       material: draft.material?.trim() || null,
       total: draft.total && draft.total > 0 ? Math.round(draft.total) : null,
       tamanhos: (draft.tamanhos || []).map((t) => ({ tamanho: t.tamanho.trim(), qtd: t.qtd && t.qtd > 0 ? Math.round(t.qtd) : null })).filter((t) => t.tamanho),
+      estampas: (draft.estampas || []).map((e) => ({ posicao: (e.posicao || "").trim(), tamanho: (e.tamanho || "").trim() })).filter((e) => e.posicao && e.tamanho),
       descricao: draft.descricao?.trim() || null,
     };
     if (!limpa.modelo && !limpa.cor && !limpa.total) return;
@@ -241,6 +275,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           const st = imgs[i] || {};
           const mostrandoArte = !!verArte[i] && !!st.aplicado;
           const urlMostrar = mostrandoArte ? st.aplicado : st.url;
+          const orc = orcamento?.linhas?.[i];
           return (
             <div key={i} className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
               {/* VISUALIZADOR — imagem panorâmica (frente · lateral · costas) */}
@@ -286,7 +321,20 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     ))}
                   </div>
                 )}
+                {l.estampas && l.estampas.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {l.estampas.map((e, j) => (
+                      <span key={j} className="bg-[#E1F5EE] text-[#0F6E56] text-xs px-2 py-0.5 rounded-md capitalize">estampa: {e.posicao} · {e.tamanho}</span>
+                    ))}
+                  </div>
+                )}
                 {l.descricao && <p className="text-sm text-gray-500 mt-3 leading-relaxed">{l.descricao}</p>}
+
+                {orc && orc.unit_centavos !== null && (
+                  <p className="text-sm text-gray-700 mt-3">
+                    Estimativa: <strong>{brl(orc.total_centavos)}</strong> <span className="text-gray-400">({brl(orc.unit_centavos)}/un)</span>
+                  </p>
+                )}
 
                 <div className="flex flex-wrap gap-2 mt-4">
                   <button type="button" onClick={() => abrirArte(i)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-3.5 py-1.5 rounded-lg">+ Aplicar minha arte</button>
@@ -304,6 +352,23 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           + Adicionar produto
         </button>
       </div>
+
+      {/* ESTIMATIVA DE ORÇAMENTO */}
+      {orcamento && orcamento.total_centavos > 0 && (
+        <div className="mt-6 bg-white border border-gray-200 rounded-2xl shadow-sm p-5">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-gray-900">Estimativa de orçamento</p>
+            <p className="text-xl font-semibold text-[#0F6E56]">{brl(orcamento.total_centavos)}</p>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">Estimativa, sujeita a confirmação. Já inclui a taxa de serviço da Confeccione (3%).</p>
+          {!orcamento.completo && (
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-snug">Alguns itens ainda não têm preço/estampa cadastrados — o valor final pode mudar.</p>
+          )}
+        </div>
+      )}
+      {semTabela && (
+        <p className="mt-6 text-xs text-gray-400">Tabela de preços ainda não configurada no admin — a estimativa aparece aqui assim que os preços forem cadastrados.</p>
+      )}
 
       {/* CONTATO + AVANÇAR */}
       <div className="mt-8 bg-white border border-gray-200 rounded-2xl shadow-sm p-5">
@@ -354,7 +419,21 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   <button type="button" onClick={() => setDraft({ ...draft, tamanhos: [...(draft.tamanhos || []), { tamanho: "", qtd: null }] })} className="text-xs text-[#0F6E56] hover:underline">+ adicionar tamanho</button>
                 </div>
               </Campo>
-              <Campo label="Detalhes (estampa, posição da arte…)">
+              <Campo label="Estampas (posição + tamanho — entram no orçamento)">
+                <div className="space-y-2">
+                  {(draft.estampas || []).map((e, j) => (
+                    <div key={j} className="flex items-center gap-2">
+                      <input list="opc-posicoes" value={e.posicao} onChange={(ev) => setDraft({ ...draft, estampas: (draft.estampas || []).map((x, k) => k === j ? { ...x, posicao: ev.target.value } : x) })} className={inputCls + " flex-1"} placeholder="posição (frente, costas…)" />
+                      <input list="opc-tamanhos" value={e.tamanho} onChange={(ev) => setDraft({ ...draft, estampas: (draft.estampas || []).map((x, k) => k === j ? { ...x, tamanho: ev.target.value } : x) })} className={inputCls + " w-28"} placeholder="tamanho (até a4…)" />
+                      <button type="button" onClick={() => setDraft({ ...draft, estampas: (draft.estampas || []).filter((_, k) => k !== j) })} className="text-gray-400 hover:text-red-600 text-sm px-1">✕</button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setDraft({ ...draft, estampas: [...(draft.estampas || []), { posicao: "", tamanho: "" }] })} className="text-xs text-[#0F6E56] hover:underline">+ adicionar estampa</button>
+                  <datalist id="opc-posicoes">{opcoes.posicoes.map((p) => <option key={p} value={p} />)}</datalist>
+                  <datalist id="opc-tamanhos">{opcoes.tamanhos.map((t) => <option key={t} value={t} />)}</datalist>
+                </div>
+              </Campo>
+              <Campo label="Detalhes (observações, instruções…)">
                 <textarea rows={2} value={draft.descricao ?? ""} onChange={(e) => setDraft({ ...draft, descricao: e.target.value })} className={inputCls + " resize-none"} placeholder="estampa na frente, arte própria" />
               </Campo>
             </div>
