@@ -266,18 +266,23 @@ export default function PedidoAssistente() {
           </div>
         )}
 
-        {/* CTA: só aparece quando o pedido está completo (Etapa 2 = placeholder) */}
-        {fase === "completo" && (
+        {/* CTA: aparece assim que há produtos, mas só habilita após o contato.
+            Ao confirmar, salva e avança pra próxima etapa (Etapa 2 = placeholder). */}
+        {pedido.linhas.length > 0 && (
           <div className="mt-5">
             <button
               type="button"
               onClick={() => void prosseguir()}
-              disabled={salvando}
-              className="w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-4 py-3 rounded-xl transition-colors"
+              disabled={fase !== "completo" || salvando}
+              className="w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-3 rounded-xl transition-colors"
             >
-              {salvando ? "Salvando…" : "Prosseguir para visualizadores →"}
+              {salvando ? "Salvando…" : "Confirmar pedido →"}
             </button>
-            <p className="text-[11px] text-gray-400 text-center mt-2">Veja uma pré-visualização dos seus produtos.</p>
+            <p className="text-[11px] text-gray-400 text-center mt-2">
+              {fase === "completo"
+                ? "Avançar para a pré-visualização dos seus produtos."
+                : "Disponível depois que você informar seus dados de contato no chat."}
+            </p>
 
             {mostrarEmBreve && (
               <div className="mt-3 bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-3 text-center">
