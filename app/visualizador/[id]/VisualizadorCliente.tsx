@@ -1,0 +1,488 @@
+"use client";
+
+// app/visualizador/[id]/VisualizadorCliente.tsx
+// ============================================================================
+// Etapa 2 — Visualizadores. Lista as linhas do pedido como cards: à esquerda o
+// mockup liso do produto (vistas frente/costas/lateral, geradas via Gemini —
+// placeholder enquanto a API não está configurada); à direita os detalhes e as
+// ações (editar, excluir, aplicar minha arte). Permite adicionar produtos e
+// avançar. A aplicação de arte abre um pop-up (estilo Nano Banana) com upload
+// de múltiplas artes + caixa de texto.
+// ============================================================================
+
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
+
+type Vista = "frente" | "costas" | "lateral";
+const VISTAS: Vista[] = ["frente", "costas", "lateral"];
+const VISTA_LABEL: Record<Vista, string> = { frente: "Frente", costas: "Costas", lateral: "Lateral" };
+
+export type Tamanho = { tamanho: string; qtd: number | null };
+export type Linha = {
+  modelo: string | null;
+  cor: string | null;
+  material: string | null;
+  total: number | null;
+  tamanhos: Tamanho[];
+  descricao: string | null;
+};
+export type PedidoVis = {
+  id: string;
+  linhas: Linha[];
+  nome: string | null;
+  telefone: string | null;
+  email: string | null;
+  cep: string | null;
+  complemento: string | null;
+  status: string | null;
+};
+
+type ImgEstado = { loading: boolean; url?: string; motivo?: string };
+type ImgsLinha = { frente?: ImgEstado; costas?: ImgEstado; lateral?: ImgEstado; aplicado?: string };
+
+const linhaVazia: Linha = { modelo: "", cor: "", material: "", total: null, tamanhos: [], descricao: "" };
+
+async function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result));
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
+  const [linhas, setLinhas] = useState<Linha[]>(pedido.linhas ?? []);
+  const [imgs, setImgs] = useState<Record<number, ImgsLinha>>({});
+  const [vistas, setVistas] = useState<Record<number, Vista>>({});
+  const [verArte, setVerArte] = useState<Record<number, boolean>>({});
+  const [salvando, setSalvando] = useState(false);
+  const [avancou, setAvancou] = useState(false);
+
+  // edição / adição
+  const [editOpen, setEditOpen] = useState(false);
+  const [editIndex, setEditIndex] = useState<number | null>(null);
+  const [draft, setDraft] = useState<Linha>({ ...linhaVazia });
+
+  // aplicar arte
+  const [arteOpen, setArteOpen] = useState(false);
+  const [arteIndex, setArteIndex] = useState<number | null>(null);
+  const [artes, setArtes] = useState<string[]>([]);
+  const [instrucoes, setInstrucoes] = useState("");
+  const [gerandoArte, setGerandoArte] = useState(false);
+  const [arteResultado, setArteResultado] = useState<string | null>(null);
+  const [arteMotivo, setArteMotivo] = useState<string | null>(null);
+  const arteFileRef = useRef<HTMLInputElement>(null);
+
+  const geradasRef = useRef<Set<string>>(new Set());
+
+  async function gerarVista(i: number, vista: Vista, forcar = false) {
+    const chave = `${i}:${vista}`;
+    if (!forcar && geradasRef.current.has(chave)) return;
+    geradasRef.current.add(chave);
+    const l = linhas[i];
+    if (!l) return;
+    setImgs((m) => ({ ...m, [i]: { ...m[i], [vista]: { loading: true } } }));
+    try {
+      const res = await fetch("/api/visualizador/mockup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelo: l.modelo, cor: l.cor, material: l.material, descricao: l.descricao, vista }),
+      });
+      const data = await res.json().catch(() => null);
+      setImgs((m) => ({
+        ...m,
+        [i]: {
+          ...m[i],
+          [vista]: data?.disponivel
+            ? { loading: false, url: data.imagemDataUrl }
+            : { loading: false, motivo: data?.motivo || "Não foi possível gerar agora." },
+        },
+      }));
+    } catch {
+      setImgs((m) => ({ ...m, [i]: { ...m[i], [vista]: { loading: false, motivo: "Erro de conexão." } } }));
+    }
+  }
+
+  // gera a frente de cada linha ao montar
+  useEffect(() => {
+    linhas.forEach((_, i) => void gerarVista(i, "frente"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function trocarVista(i: number, vista: Vista) {
+    setVistas((m) => ({ ...m, [i]: vista }));
+    setVerArte((m) => ({ ...m, [i]: false }));
+    void gerarVista(i, vista);
+  }
+
+  async function persistir(novas: Linha[]) {
+    setSalvando(true);
+    try {
+      await fetch(`/api/pedido/assistente/${pedido.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ linhas: novas }),
+      });
+    } catch {
+      // silencioso
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  function abrirEdicao(i: number | null) {
+    if (i === null) {
+      setDraft({ ...linhaVazia, tamanhos: [] });
+      setEditIndex(null);
+    } else {
+      setDraft(JSON.parse(JSON.stringify(linhas[i])));
+      setEditIndex(i);
+    }
+    setEditOpen(true);
+  }
+
+  function salvarEdicao() {
+    const limpa: Linha = {
+      modelo: draft.modelo?.trim() || null,
+      cor: draft.cor?.trim() || null,
+      material: draft.material?.trim() || null,
+      total: draft.total && draft.total > 0 ? Math.round(draft.total) : null,
+      tamanhos: (draft.tamanhos || []).map((t) => ({ tamanho: t.tamanho.trim(), qtd: t.qtd && t.qtd > 0 ? Math.round(t.qtd) : null })).filter((t) => t.tamanho),
+      descricao: draft.descricao?.trim() || null,
+    };
+    if (!limpa.modelo && !limpa.cor && !limpa.total) return;
+    let novas: Linha[];
+    let alvo: number;
+    if (editIndex === null) {
+      novas = [...linhas, limpa];
+      alvo = novas.length - 1;
+    } else {
+      novas = linhas.map((l, idx) => (idx === editIndex ? limpa : l));
+      alvo = editIndex;
+    }
+    setLinhas(novas);
+    setEditOpen(false);
+    void persistir(novas);
+    // regenera o mockup da linha alterada
+    setImgs((m) => ({ ...m, [alvo]: {} }));
+    setVerArte((m) => ({ ...m, [alvo]: false }));
+    geradasRef.current.delete(`${alvo}:frente`);
+    geradasRef.current.delete(`${alvo}:costas`);
+    geradasRef.current.delete(`${alvo}:lateral`);
+    setTimeout(() => void gerarVista(alvo, vistas[alvo] || "frente", true), 0);
+  }
+
+  function excluir(i: number) {
+    if (!confirm("Remover este produto do pedido?")) return;
+    const novas = linhas.filter((_, idx) => idx !== i);
+    setLinhas(novas);
+    setImgs({});
+    setVistas({});
+    setVerArte({});
+    geradasRef.current = new Set();
+    void persistir(novas);
+    setTimeout(() => novas.forEach((_, idx) => void gerarVista(idx, "frente", true)), 0);
+  }
+
+  // ---- aplicar arte ----
+  function abrirArte(i: number) {
+    setArteIndex(i);
+    setArtes([]);
+    setInstrucoes("");
+    setArteResultado(null);
+    setArteMotivo(null);
+    setArteOpen(true);
+  }
+
+  async function onUploadArtes(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    const urls: string[] = [];
+    for (const f of files.slice(0, 8)) {
+      if (f.size > 6 * 1024 * 1024) continue;
+      urls.push(await fileToDataUrl(f));
+    }
+    setArtes((a) => [...a, ...urls].slice(0, 8));
+    if (arteFileRef.current) arteFileRef.current.value = "";
+  }
+
+  async function gerarArte() {
+    if (arteIndex === null || artes.length === 0 || gerandoArte) return;
+    const v = vistas[arteIndex] || "frente";
+    const base = imgs[arteIndex]?.[v]?.url;
+    if (!base) {
+      setArteMotivo("Gere a prévia do produto primeiro (precisa da geração de imagem configurada).");
+      return;
+    }
+    const l = linhas[arteIndex];
+    setGerandoArte(true);
+    setArteMotivo(null);
+    setArteResultado(null);
+    try {
+      const res = await fetch("/api/visualizador/aplicar-arte", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseDataUrl: base,
+          artes,
+          instrucoes,
+          contexto: [l?.modelo, l?.cor, l?.material].filter(Boolean).join(", "),
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.disponivel) setArteResultado(data.imagemDataUrl);
+      else setArteMotivo(data?.motivo || data?.error || "Não foi possível gerar agora.");
+    } catch {
+      setArteMotivo("Erro de conexão.");
+    } finally {
+      setGerandoArte(false);
+    }
+  }
+
+  function usarArte() {
+    if (arteIndex === null || !arteResultado) return;
+    setImgs((m) => ({ ...m, [arteIndex]: { ...m[arteIndex], aplicado: arteResultado } }));
+    setVerArte((m) => ({ ...m, [arteIndex]: true }));
+    setArteOpen(false);
+  }
+
+  const totalPecas = linhas.reduce((acc, l) => acc + (l.total ?? 0), 0);
+
+  return (
+    <div className="flex-1 w-full max-w-6xl mx-auto px-6 pt-8 pb-16">
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <Link href="/#pedido" className="text-sm text-gray-500 hover:text-gray-800">← Voltar</Link>
+        {salvando && <span className="text-xs text-gray-400">salvando…</span>}
+      </div>
+      <h1 className="text-gray-900 text-2xl font-semibold mt-2">Pré-visualização dos seus produtos</h1>
+      <p className="text-gray-500 text-sm mt-1 mb-6">
+        Veja cada produto liso, ajuste o que precisar e aplique suas artes. {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
+      </p>
+
+      <div className="space-y-5">
+        {linhas.map((l, i) => {
+          const v = vistas[i] || "frente";
+          const mostrandoArte = !!verArte[i] && !!imgs[i]?.aplicado;
+          const cur = imgs[i]?.[v];
+          const urlMostrar = mostrandoArte ? imgs[i]?.aplicado : cur?.url;
+          return (
+            <div key={i} className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden grid md:grid-cols-[300px_1fr]">
+              {/* VISUALIZADOR */}
+              <div className="border-b md:border-b-0 md:border-r border-gray-100 p-4 flex flex-col">
+                <div className="flex gap-1 mb-3">
+                  {VISTAS.map((vv) => (
+                    <button key={vv} type="button" onClick={() => trocarVista(i, vv)}
+                      className={"px-2.5 py-1 rounded-lg text-xs border transition-colors " + (v === vv && !mostrandoArte ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 text-gray-500 hover:bg-gray-50")}>
+                      {VISTA_LABEL[vv]}
+                    </button>
+                  ))}
+                  {imgs[i]?.aplicado && (
+                    <button type="button" onClick={() => setVerArte((m) => ({ ...m, [i]: !m[i] }))}
+                      className={"ml-auto px-2.5 py-1 rounded-lg text-xs border transition-colors " + (mostrandoArte ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 text-gray-500 hover:bg-gray-50")}>
+                      {mostrandoArte ? "Com arte" : "Ver arte"}
+                    </button>
+                  )}
+                </div>
+                <div className="flex-1 aspect-square rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center overflow-hidden relative">
+                  {urlMostrar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={urlMostrar} alt={`${l.modelo ?? "produto"} ${v}`} className="w-full h-full object-contain" />
+                  ) : cur?.loading ? (
+                    <span className="text-xs text-gray-400">gerando prévia…</span>
+                  ) : (
+                    <div className="text-center px-4">
+                      <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-gray-100 flex items-center justify-center text-gray-300 text-xl">👕</div>
+                      <p className="text-[11px] text-gray-400 leading-snug">{cur?.motivo || "Prévia ainda não gerada."}</p>
+                      <button type="button" onClick={() => void gerarVista(i, v, true)} className="mt-2 text-[11px] text-[#0F6E56] hover:underline">Tentar gerar</button>
+                    </div>
+                  )}
+                  {mostrandoArte && (
+                    <span className="absolute top-2 left-2 bg-[#0F6E56] text-white text-[10px] px-2 py-0.5 rounded-full">com sua arte</span>
+                  )}
+                </div>
+                <button type="button" onClick={() => abrirArte(i)}
+                  className="mt-3 w-full border border-[#1D9E75] text-[#0F6E56] hover:bg-[#E1F5EE] text-sm font-medium px-3 py-2 rounded-xl transition-colors">
+                  + Aplicar minha arte
+                </button>
+              </div>
+
+              {/* DETALHES */}
+              <div className="p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-gray-900 font-medium capitalize">{[l.modelo, l.cor].filter(Boolean).join(" · ") || "Produto"}</p>
+                    {l.material && <p className="text-sm text-gray-500 mt-0.5">Material: {l.material}</p>}
+                  </div>
+                  {l.total ? <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full shrink-0">{l.total} un.</span> : null}
+                </div>
+
+                {l.tamanhos.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-3">
+                    {l.tamanhos.map((t, j) => (
+                      <span key={j} className="bg-gray-50 border border-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-md">
+                        {t.tamanho.toUpperCase()}{t.qtd ? ` · ${t.qtd}` : ""}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {l.descricao && <p className="text-sm text-gray-500 mt-3 leading-relaxed">{l.descricao}</p>}
+
+                <div className="flex flex-wrap gap-2 mt-4">
+                  <button type="button" onClick={() => abrirEdicao(i)} className="border border-gray-200 text-gray-700 hover:bg-gray-50 text-sm px-3 py-1.5 rounded-lg">Editar</button>
+                  <button type="button" onClick={() => excluir(i)} className="border border-gray-200 text-red-600 hover:bg-red-50 text-sm px-3 py-1.5 rounded-lg">Excluir</button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-3">
+        <button type="button" onClick={() => abrirEdicao(null)} className="border-2 border-dashed border-gray-300 text-gray-600 hover:border-[#1D9E75] hover:text-[#0F6E56] text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">
+          + Adicionar produto
+        </button>
+      </div>
+
+      {/* CONTATO + AVANÇAR */}
+      <div className="mt-8 bg-white border border-gray-200 rounded-2xl shadow-sm p-5">
+        {(pedido.nome || pedido.email) && (
+          <div className="mb-4">
+            <p className="text-xs text-gray-400 font-medium mb-1">Contato</p>
+            <p className="text-sm text-gray-700">{pedido.nome}{pedido.telefone ? ` · ${pedido.telefone}` : ""}{pedido.email ? ` · ${pedido.email}` : ""}</p>
+            {(pedido.cep || pedido.complemento) && <p className="text-sm text-gray-500">{[pedido.cep, pedido.complemento].filter(Boolean).join(" · ")}</p>}
+          </div>
+        )}
+        <button type="button" onClick={() => setAvancou(true)} disabled={linhas.length === 0}
+          className="w-full sm:w-auto bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-6 py-3 rounded-xl transition-colors">
+          Confirmar pedido →
+        </button>
+        {avancou && (
+          <div className="mt-3 bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-3">
+            <p className="text-sm text-[#0F6E56] font-medium">Quase lá! 🚧</p>
+            <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">A confirmação final do pedido chega na próxima etapa. Suas alterações e artes já ficam salvas aqui.</p>
+          </div>
+        )}
+      </div>
+
+      {/* ---------- MODAL EDITAR / ADICIONAR ---------- */}
+      {editOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setEditOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+            <p className="text-gray-900 font-medium mb-4">{editIndex === null ? "Adicionar produto" : "Editar produto"}</p>
+            <div className="space-y-3">
+              <Campo label="Modelo (tshirt, oversized, polo, boné…)">
+                <input value={draft.modelo ?? ""} onChange={(e) => setDraft({ ...draft, modelo: e.target.value })} className={inputCls} placeholder="oversized" />
+              </Campo>
+              <div className="grid grid-cols-2 gap-3">
+                <Campo label="Cor"><input value={draft.cor ?? ""} onChange={(e) => setDraft({ ...draft, cor: e.target.value })} className={inputCls} placeholder="preta" /></Campo>
+                <Campo label="Material"><input value={draft.material ?? ""} onChange={(e) => setDraft({ ...draft, material: e.target.value })} className={inputCls} placeholder="algodão" /></Campo>
+              </div>
+              <Campo label="Quantidade total">
+                <input type="number" min={1} value={draft.total ?? ""} onChange={(e) => setDraft({ ...draft, total: parseInt(e.target.value) || null })} className={inputCls} placeholder="10" />
+              </Campo>
+              <Campo label="Tamanhos">
+                <div className="space-y-2">
+                  {(draft.tamanhos || []).map((t, j) => (
+                    <div key={j} className="flex items-center gap-2">
+                      <input value={t.tamanho} onChange={(e) => setDraft({ ...draft, tamanhos: draft.tamanhos.map((x, k) => k === j ? { ...x, tamanho: e.target.value } : x) })} className={inputCls + " w-20"} placeholder="M" />
+                      <input type="number" min={1} value={t.qtd ?? ""} onChange={(e) => setDraft({ ...draft, tamanhos: draft.tamanhos.map((x, k) => k === j ? { ...x, qtd: parseInt(e.target.value) || null } : x) })} className={inputCls + " w-24"} placeholder="qtd" />
+                      <button type="button" onClick={() => setDraft({ ...draft, tamanhos: draft.tamanhos.filter((_, k) => k !== j) })} className="text-gray-400 hover:text-red-600 text-sm px-1">✕</button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setDraft({ ...draft, tamanhos: [...(draft.tamanhos || []), { tamanho: "", qtd: null }] })} className="text-xs text-[#0F6E56] hover:underline">+ adicionar tamanho</button>
+                </div>
+              </Campo>
+              <Campo label="Detalhes (estampa, posição da arte…)">
+                <textarea rows={2} value={draft.descricao ?? ""} onChange={(e) => setDraft({ ...draft, descricao: e.target.value })} className={inputCls + " resize-none"} placeholder="estampa na frente, arte própria" />
+              </Campo>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button type="button" onClick={() => setEditOpen(false)} className="border border-gray-200 text-gray-500 px-4 py-2 rounded-xl text-sm hover:bg-gray-50">Cancelar</button>
+              <button type="button" onClick={salvarEdicao} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-4 py-2 rounded-xl text-sm font-medium">Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------- MODAL APLICAR ARTE (estilo Nano Banana) ---------- */}
+      {arteOpen && arteIndex !== null && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setArteOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <p className="text-gray-900 font-medium">Aplicar arte no produto</p>
+                <p className="text-xs text-gray-400 capitalize">{[linhas[arteIndex]?.modelo, linhas[arteIndex]?.cor].filter(Boolean).join(" · ")}</p>
+              </div>
+              <button type="button" onClick={() => setArteOpen(false)} className="text-gray-400 hover:text-gray-700 text-lg">✕</button>
+            </div>
+
+            <div className="p-5 grid sm:grid-cols-2 gap-5">
+              {/* esquerda: artes + instruções */}
+              <div>
+                <p className="text-xs text-gray-500 font-medium mb-2">Suas artes ({artes.length}/8)</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {artes.map((a, j) => (
+                    <div key={j} className="relative aspect-square rounded-lg border border-gray-200 overflow-hidden bg-gray-50">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={a} alt={`arte ${j + 1}`} className="w-full h-full object-contain" />
+                      <button type="button" onClick={() => setArtes((arr) => arr.filter((_, k) => k !== j))} className="absolute top-0.5 right-0.5 bg-white/90 rounded-full w-5 h-5 text-xs text-gray-600 hover:text-red-600">✕</button>
+                    </div>
+                  ))}
+                  {artes.length < 8 && (
+                    <button type="button" onClick={() => arteFileRef.current?.click()} className="aspect-square rounded-lg border-2 border-dashed border-gray-300 hover:border-[#1D9E75] text-gray-400 hover:text-[#0F6E56] flex flex-col items-center justify-center text-xs">
+                      <span className="text-lg leading-none">+</span>
+                      arte
+                    </button>
+                  )}
+                </div>
+                <input ref={arteFileRef} type="file" accept="image/*" multiple className="hidden" onChange={onUploadArtes} />
+
+                <p className="text-xs text-gray-500 font-medium mt-4 mb-1">Como aplicar?</p>
+                <textarea rows={4} value={instrucoes} onChange={(e) => setInstrucoes(e.target.value)}
+                  placeholder="Ex.: logo pequena no peito esquerdo + arte grande nas costas; cor da arte em branco…"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:border-[#1D9E75]" />
+
+                <button type="button" onClick={() => void gerarArte()} disabled={artes.length === 0 || gerandoArte}
+                  className="mt-3 w-full bg-[#111] text-white text-sm font-medium px-4 py-2.5 rounded-xl hover:opacity-85 disabled:opacity-40">
+                  {gerandoArte ? "Gerando…" : "Gerar com a arte"}
+                </button>
+                {arteMotivo && <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-snug">{arteMotivo}</p>}
+              </div>
+
+              {/* direita: resultado / base */}
+              <div>
+                <p className="text-xs text-gray-500 font-medium mb-2">Resultado</p>
+                <div className="aspect-square rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center overflow-hidden">
+                  {arteResultado ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={arteResultado} alt="resultado com arte" className="w-full h-full object-contain" />
+                  ) : gerandoArte ? (
+                    <span className="text-xs text-gray-400">aplicando sua arte…</span>
+                  ) : (
+                    <span className="text-xs text-gray-400 text-center px-6">A prévia com sua arte aparece aqui.</span>
+                  )}
+                </div>
+                {arteResultado && (
+                  <button type="button" onClick={usarArte} className="mt-3 w-full bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2.5 rounded-xl">
+                    Usar essa versão
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const inputCls = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]";
+
+function Campo({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="text-xs text-gray-400 mb-1 block">{label}</span>
+      {children}
+    </label>
+  );
+}
