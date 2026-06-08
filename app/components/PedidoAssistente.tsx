@@ -54,11 +54,14 @@ export default function PedidoAssistente() {
   const [salvando, setSalvando] = useState(false);
   const [mostrarEmBreve, setMostrarEmBreve] = useState(false);
   const salvoRef = useRef(false);
-  const fimRef = useRef<HTMLDivElement>(null);
+  const listaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Rola apenas o container de mensagens (nunca a janela) — evita o "pulo" da
+  // página ao enviar. scrollIntoView mexeria no scroll do documento inteiro.
   useEffect(() => {
-    fimRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const el = listaRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [turnos, enviando]);
 
   async function salvarPedido(p: Pedido) {
@@ -156,7 +159,7 @@ export default function PedidoAssistente() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <div ref={listaRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
           {turnos.map((t, i) => (
             <div key={i} className={t.role === "user" ? "flex justify-end" : "flex justify-start"}>
               <div
@@ -176,7 +179,6 @@ export default function PedidoAssistente() {
               <div className="bg-gray-100 text-gray-400 rounded-2xl rounded-bl-sm px-3.5 py-2.5 text-sm">digitando…</div>
             </div>
           )}
-          <div ref={fimRef} />
         </div>
 
         {erro && <div className="px-5 pb-1 text-red-600 text-xs">{erro}</div>}
