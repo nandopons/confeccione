@@ -9,6 +9,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { gerarImagem, type ImagemEntrada } from '@/app/lib/mockup-image'
+import { normalizarMockup } from '@/app/lib/imagem-normalizar'
 
 export const runtime = 'nodejs'
 
@@ -76,13 +77,13 @@ export async function POST(req: Request) {
     'Devolva apenas a imagem final (panorâmica larga, as três vistas inteiras) com a arte aplicada.',
   ].filter(Boolean).join(' ')
 
-  const r = await gerarImagem({ prompt, imagens: [base, ...artes] })
+  const r = await gerarImagem({ prompt, imagens: [base, ...artes], aspectRatio: '21:9', imageSize: '2K' })
 
   if (!r.disponivel) {
     return NextResponse.json({ disponivel: false, motivo: r.motivo })
   }
   return NextResponse.json({
     disponivel: true,
-    imagemDataUrl: `data:${r.mime};base64,${r.imagemBase64}`,
+    imagemDataUrl: await normalizarMockup(`data:${r.mime};base64,${r.imagemBase64}`),
   })
 }
