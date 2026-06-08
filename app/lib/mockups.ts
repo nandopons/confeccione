@@ -53,7 +53,7 @@ export const MOCKUPS: MockupTemplate[] = [
         zonaPadrao: "peito_esquerdo",
         zonas: {
           // peito esquerdo de quem veste = lado direito da imagem
-          peito_esquerdo: { x: 0.54, y: 0.26, w: 0.16, h: 0.12 },
+          peito_esquerdo: { x: 0.60, y: 0.225, w: 0.135, h: 0.105 },
           peito_centro: { x: 0.33, y: 0.27, w: 0.34, h: 0.26 },
         },
       },
