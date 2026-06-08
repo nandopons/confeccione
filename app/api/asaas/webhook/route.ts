@@ -112,6 +112,9 @@ export async function POST(req: Request) {
       event === 'PAYMENT_REFUNDED' ||
       event === 'PAYMENT_UPDATED'
     ) {
+      if (event === 'PAYMENT_CONFIRMED' || event === 'PAYMENT_RECEIVED') {
+        await marcarPedidoAssistentePago(payment)
+      }
       await atualizarStatusEAplicarEfeito(event, payment)
     } else if (event.startsWith('SUBSCRIPTION_')) {
       // Próxima sprint
@@ -341,5 +344,24 @@ async function aplicarEfeitoPagamento(params: {
     }
 
     return
+  }
+}
+
+
+// ============================================================
+// Handler extra: marca o PEDIDO de cliente (pedidos_assistente) como pago.
+// O PIX do pedido tem externalReference = id do pedido e asaas_payment_id no
+// nosso registro. Independente do fluxo de billing do fornecedor.
+// ============================================================
+async function marcarPedidoAssistentePago(
+  payment: NonNullable<AsaasWebhookPayload['payment']>
+): Promise<void> {
+  try {
+    await supabase
+      .from('pedidos_assistente')
+      .update({ pagamento_status: 'pago', atualizado_em: new Date().toISOString() })
+      .eq('asaas_payment_id', payment.id)
+  } catch (err) {
+    console.error('[asaas-webhook] marcar pedido pago falhou:', err)
   }
 }
