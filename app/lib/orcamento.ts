@@ -1,9 +1,10 @@
 // app/lib/orcamento.ts
 // ============================================================================
-// Motor de cálculo do orçamento (estimativa). Puro: recebe as linhas do pedido
-// e as tabelas de preço, devolve o detalhamento. Comissão da Confeccione = 3%,
-// EMBUTIDA: o total mostrado ao cliente é o preço cheio; internamente 3% é a
-// margem da Confeccione e 97% o repasse ao fornecedor.
+// Motor de cálculo do orçamento (estimativa) — modelo UNIFICADO.
+// Cada produto é precificado por (modelo + material + variante liso/estampado),
+// com uma curva de preço unitário por faixa de quantidade (tabela
+// pesquisas_preco). A linha é "estampada" se tiver ao menos uma estampa.
+// Comissão da Confeccione = 3%, EMBUTIDA (total = preço; 3% é a margem).
 // ============================================================================
 
 import { normMockup } from '@/app/lib/mockup-cache'
@@ -11,8 +12,7 @@ import { normMockup } from '@/app/lib/mockup-cache'
 export const COMISSAO_PCT = 0.03
 
 export type Faixa = { qtd_min: number; preco_centavos: number }
-export type PrecoProduto = { chave: string; faixas: Faixa[] }
-export type PrecoEstampa = { chave: string; preco_centavos: number }
+export type PesquisaPreco = { chave: string; faixas: Faixa[] }
 
 export type EstampaLinha = { posicao: string; tamanho: string }
 export type LinhaOrcamento = {
@@ -25,11 +25,10 @@ export type LinhaOrcamento = {
 export type LinhaResultado = {
   label: string
   qtd: number
-  unit_base_centavos: number | null
-  unit_estampas_centavos: number
+  estampado: boolean
   unit_centavos: number | null
   total_centavos: number
-  faltando: string[] // o que não tem preço cadastrado
+  faltando: string[]
 }
 
 export type Orcamento = {
@@ -37,35 +36,24 @@ export type Orcamento = {
   total_centavos: number
   comissao_centavos: number
   repasse_centavos: number
-  completo: boolean // true se TODOS os itens têm preço
+  completo: boolean
 }
 
-function chaveProduto(modelo: string | null, material: string | null): string {
-  return `${normMockup(modelo)}|${normMockup(material)}`
-}
-function chaveEstampa(posicao: string, tamanho: string): string {
-  return `${normMockup(posicao)}|${normMockup(tamanho)}`
+export function chavePesquisa(modelo: string | null, material: string | null, estampado: boolean): string {
+  return `${normMockup(modelo)}|${normMockup(material)}|${estampado ? 'estampado' : 'liso'}`
 }
 
-/** Escolhe o preço unitário da maior faixa cujo qtd_min <= quantidade. */
+/** Maior faixa cujo qtd_min <= quantidade (ou a menor faixa se qtd abaixo). */
 function precoDaFaixa(faixas: Faixa[], qtd: number): number | null {
-  const ordenadas = [...faixas].sort((a, b) => a.qtd_min - b.qtd_min)
+  const ord = [...faixas].sort((a, b) => a.qtd_min - b.qtd_min)
   let escolhido: number | null = null
-  for (const f of ordenadas) {
-    if (qtd >= f.qtd_min) escolhido = f.preco_centavos
-  }
-  // se a qtd for menor que a menor faixa, usa a menor faixa como base
-  if (escolhido === null && ordenadas.length > 0) escolhido = ordenadas[0].preco_centavos
+  for (const f of ord) if (qtd >= f.qtd_min) escolhido = f.preco_centavos
+  if (escolhido === null && ord.length > 0) escolhido = ord[0].preco_centavos
   return escolhido
 }
 
-export function calcularOrcamento(
-  linhas: LinhaOrcamento[],
-  produtos: PrecoProduto[],
-  estampas: PrecoEstampa[]
-): Orcamento {
-  const mapProd = new Map(produtos.map((p) => [p.chave, p]))
-  const mapEst = new Map(estampas.map((e) => [e.chave, e]))
+export function calcularOrcamento(linhas: LinhaOrcamento[], pesquisas: PesquisaPreco[]): Orcamento {
+  const map = new Map(pesquisas.map((p) => [p.chave, p]))
 
   const resultado: LinhaResultado[] = []
   let total = 0
@@ -73,30 +61,22 @@ export function calcularOrcamento(
 
   for (const l of linhas) {
     const qtd = l.total && l.total > 0 ? l.total : 0
-    const label = [l.modelo, l.material].filter(Boolean).join(' · ') || 'Produto'
+    const estampado = (l.estampas?.length ?? 0) > 0
+    const label = ([l.modelo, l.material].filter(Boolean).join(' · ') || 'Produto') + (estampado ? ' (estampado)' : '')
     const faltando: string[] = []
 
-    const prod = mapProd.get(chaveProduto(l.modelo, l.material))
-    const unitBase = prod ? precoDaFaixa(prod.faixas, qtd || 1) : null
-    if (unitBase === null) faltando.push('preço do produto')
+    const pesq = map.get(chavePesquisa(l.modelo, l.material, estampado))
+    const unit = pesq ? precoDaFaixa(pesq.faixas, qtd || 1) : null
+    if (unit === null) faltando.push(estampado ? 'preço (estampado)' : 'preço (liso)')
 
-    let unitEstampas = 0
-    for (const est of l.estampas ?? []) {
-      const pe = mapEst.get(chaveEstampa(est.posicao, est.tamanho))
-      if (pe) unitEstampas += pe.preco_centavos
-      else faltando.push(`estampa ${est.posicao}/${est.tamanho}`)
-    }
-
-    const unit = unitBase === null ? null : unitBase + unitEstampas
     const totalLinha = unit === null ? 0 : unit * qtd
     if (faltando.length > 0) completo = false
     total += totalLinha
 
     resultado.push({
-      label,
+      label: String(label),
       qtd,
-      unit_base_centavos: unitBase,
-      unit_estampas_centavos: unitEstampas,
+      estampado,
       unit_centavos: unit,
       total_centavos: totalLinha,
       faltando,

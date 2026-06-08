@@ -1,11 +1,11 @@
 // app/api/orcamento/route.ts
 // POST { linhas: [{modelo, material, total, estampas:[{posicao,tamanho}]}] }
-// Calcula a estimativa lendo as tabelas de preço. Público (só expõe totais
-// calculados das linhas enviadas — preços não são segredo).
+// Calcula a estimativa lendo a tabela unificada pesquisas_preco (modelo+
+// material+liso/estampado). Público (só devolve totais das linhas enviadas).
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { createClient } from '@supabase/supabase-js'
-import { calcularOrcamento, type PrecoProduto, type PrecoEstampa } from '@/app/lib/orcamento'
+import { calcularOrcamento, type PesquisaPreco } from '@/app/lib/orcamento'
 
 export const runtime = 'nodejs'
 
@@ -29,13 +29,8 @@ export async function POST(req: Request) {
   const p = BodySchema.safeParse(bruto)
   if (!p.success) return NextResponse.json({ erro: 'Formato inválido' }, { status: 400 })
 
-  const [prod, est] = await Promise.all([
-    supabase.from('precos_produtos').select('chave, faixas'),
-    supabase.from('precos_estampas').select('chave, preco_centavos'),
-  ])
-
-  const produtos = (prod.data ?? []) as PrecoProduto[]
-  const estampas = (est.data ?? []) as PrecoEstampa[]
+  const { data } = await supabase.from('pesquisas_preco').select('chave, faixas')
+  const pesquisas = (data ?? []) as PesquisaPreco[]
 
   const orcamento = calcularOrcamento(
     p.data.linhas.map((l) => ({
@@ -44,11 +39,8 @@ export async function POST(req: Request) {
       total: l.total ?? null,
       estampas: l.estampas ?? [],
     })),
-    produtos,
-    estampas
+    pesquisas
   )
 
-  // sem nenhuma tabela de preço cadastrada → não dá pra estimar
-  const semTabela = produtos.length === 0
-  return NextResponse.json({ ok: true, orcamento, semTabela })
+  return NextResponse.json({ ok: true, orcamento, semTabela: pesquisas.length === 0 })
 }
