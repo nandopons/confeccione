@@ -20,12 +20,14 @@ const TamanhoSchema = z.object({
   tamanho: z.string().min(1),
   qtd: z.number().int().positive().nullable(),
 })
+const EstampaSchema = z.object({ posicao: z.string(), tamanho: z.string() })
 const LinhaSchema = z.object({
   modelo: z.string().nullable(),
   cor: z.string().nullable(),
   material: z.string().nullable(),
   total: z.number().int().positive().nullable(),
   tamanhos: z.array(TamanhoSchema).default([]),
+  estampas: z.array(EstampaSchema).default([]),
   descricao: z.string().nullable(),
 })
 const PatchSchema = z.object({
