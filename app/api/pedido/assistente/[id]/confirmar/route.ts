@@ -9,7 +9,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { calcularOrcamento, type PrecoProduto, type PrecoEstampa } from '@/app/lib/orcamento'
+import { calcularOrcamento, type PesquisaPreco } from '@/app/lib/orcamento'
 import { criarCobrancaPixPedido } from '@/app/lib/pedido-pagamento'
 import { enviarEmailPedidoPix } from '@/app/lib/email-pedido'
 import { apenasDigitos } from '@/app/lib/cpf-cnpj'
@@ -77,14 +77,10 @@ export async function POST(req: Request, ctx: Ctx) {
   }
 
   // recalcula o total no servidor (não confia no cliente)
-  const [prodRes, estRes] = await Promise.all([
-    supabase.from('precos_produtos').select('chave, faixas'),
-    supabase.from('precos_estampas').select('chave, preco_centavos'),
-  ])
+  const { data: pesqData } = await supabase.from('pesquisas_preco').select('chave, faixas')
   const orcamento = calcularOrcamento(
     p.data.linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas })),
-    (prodRes.data ?? []) as PrecoProduto[],
-    (estRes.data ?? []) as PrecoEstampa[]
+    (pesqData ?? []) as PesquisaPreco[]
   )
   if (!orcamento.completo || orcamento.total_centavos <= 0) {
     return NextResponse.json({ erro: 'Estimativa incompleta — há itens sem preço cadastrado. Não é possível gerar o PIX.' }, { status: 409 })
