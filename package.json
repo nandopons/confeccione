@@ -21,6 +21,7 @@
     "remark": "^15.0.1",
     "remark-gfm": "^4.0.1",
     "remark-html": "^16.0.1",
+    "sharp": "^0.34.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
