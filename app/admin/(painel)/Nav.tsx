@@ -9,6 +9,7 @@ const ITENS: Array<{ href: string; label: string }> = [
   { href: '/admin/fornecedores', label: 'Fornecedores' },
   { href: '/admin/captacao', label: 'Captação' },
   { href: '/admin/mockups', label: 'Mockups' },
+  { href: '/admin/precos', label: 'Preços' },
 ]
 
 export function AdminNav() {
