@@ -41,6 +41,8 @@ export function provedorConfigurado(): string | null {
 export async function gerarImagem(opts: {
   prompt: string
   imagens?: ImagemEntrada[]
+  aspectRatio?: string // ex.: '21:9'
+  imageSize?: string // '1K' | '2K' | '4K'
 }): Promise<ResultadoImagem> {
   const provedor = provedorConfigurado()
   if (!provedor) {
@@ -50,7 +52,8 @@ export async function gerarImagem(opts: {
         'Provedor de imagem ainda não configurado. Defina MOCKUP_IMAGE_PROVIDER=gemini e GEMINI_API_KEY.',
     }
   }
-  if (provedor === 'gemini') return gerarComGemini(opts.prompt, opts.imagens ?? [])
+  if (provedor === 'gemini')
+    return gerarComGemini(opts.prompt, opts.imagens ?? [], opts.aspectRatio, opts.imageSize)
   return { disponivel: false, motivo: `Provedor desconhecido: ${provedor}` }
 }
 
@@ -65,7 +68,12 @@ export async function gerarMockup(opts: OpcoesMockup): Promise<ResultadoImagem> 
 // ----------------------------------------------------------------------------
 // Gemini (aceita imagens de entrada — ideal pra manter base do mockup + artes)
 // ----------------------------------------------------------------------------
-async function gerarComGemini(prompt: string, imagens: ImagemEntrada[]): Promise<ResultadoImagem> {
+async function gerarComGemini(
+  prompt: string,
+  imagens: ImagemEntrada[],
+  aspectRatio?: string,
+  imageSize?: string
+): Promise<ResultadoImagem> {
   const key = process.env.GEMINI_API_KEY as string
   const modelo = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image'
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${key}`
@@ -75,17 +83,35 @@ async function gerarComGemini(prompt: string, imagens: ImagemEntrada[]): Promise
     parts.push({ inline_data: { mime_type: img.mime, data: img.base64 } })
   }
 
-  const body = { contents: [{ role: 'user', parts }] }
+  const baseBody: Record<string, unknown> = { contents: [{ role: 'user', parts }] }
+  const imageConfig: Record<string, string> = {}
+  if (aspectRatio) imageConfig.aspectRatio = aspectRatio
+  if (imageSize) imageConfig.imageSize = imageSize
+  const bodyComCfg =
+    Object.keys(imageConfig).length > 0
+      ? { ...baseBody, generationConfig: { imageConfig } }
+      : baseBody
 
-  let resp: Response
-  try {
-    resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-  } catch (err) {
-    console.error('[mockup-image/gemini] erro de rede:', err)
+  async function post(b: Record<string, unknown>): Promise<Response | null> {
+    try {
+      return await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(b),
+      })
+    } catch (err) {
+      console.error('[mockup-image/gemini] erro de rede:', err)
+      return null
+    }
+  }
+
+  let resp = await post(bodyComCfg)
+  // Se a config de imagem (aspectRatio/imageSize) não for aceita, tenta sem ela.
+  if (resp && !resp.ok && bodyComCfg !== baseBody && (resp.status === 400 || resp.status === 404)) {
+    console.warn('[mockup-image/gemini] imageConfig rejeitado, repetindo sem config')
+    resp = await post(baseBody)
+  }
+  if (!resp) {
     return { disponivel: false, motivo: 'Falha de rede ao gerar a imagem.' }
   }
 
