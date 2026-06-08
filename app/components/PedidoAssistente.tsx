@@ -179,7 +179,6 @@ export default function PedidoAssistente() {
               <div className="bg-gray-100 text-gray-400 rounded-2xl rounded-bl-sm px-3.5 py-2.5 text-sm">digitando…</div>
             </div>
           )}
-          <div ref={fimRef} />
         </div>
 
         {erro && <div className="px-5 pb-1 text-red-600 text-xs">{erro}</div>}
