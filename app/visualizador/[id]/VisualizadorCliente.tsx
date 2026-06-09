@@ -21,6 +21,7 @@ export type Linha = {
   total: number | null;
   tamanhos: Tamanho[];
   estampas: Estampa[];
+  estampado: boolean | null;
   descricao: string | null;
 };
 
@@ -43,7 +44,7 @@ export type PedidoVis = {
 
 type ImgEstado = { loading?: boolean; url?: string; motivo?: string; aplicado?: string };
 
-const linhaVazia: Linha = { modelo: "", cor: "", material: "", total: null, tamanhos: [], estampas: [], descricao: "" };
+const linhaVazia: Linha = { modelo: "", cor: "", material: "", total: null, tamanhos: [], estampas: [], estampado: null, descricao: "" };
 
 async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -56,7 +57,7 @@ async function fileToDataUrl(file: File): Promise<string> {
 
 export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [linhas, setLinhas] = useState<Linha[]>(
-    (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [] }))
+    (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [], estampado: l.estampado ?? null }))
   );
   const [imgs, setImgs] = useState<Record<number, ImgEstado>>({});
   const [verArte, setVerArte] = useState<Record<number, boolean>>({});
@@ -77,7 +78,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [orcamento, setOrcamento] = useState<Orcamento>(null);
   const [semTabela, setSemTabela] = useState(false);
   const [estimandoPrecos, setEstimandoPrecos] = useState(false);
-  const [opcoes, setOpcoes] = useState<{ posicoes: string[]; tamanhos: string[] }>({ posicoes: [], tamanhos: [] });
   const orcMountRef = useRef(false);
 
   // edição / adição
@@ -126,20 +126,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // opções de estampa cadastradas (pros selects do modal)
-  useEffect(() => {
-    fetch("/api/precos/opcoes")
-      .then((r) => r.json())
-      .then((d) => { if (d?.ok) setOpcoes({ posicoes: d.posicoes ?? [], tamanhos: d.tamanhos ?? [] }); })
-      .catch(() => {});
-  }, []);
-
   // orçamento: no 1º carregamento, pesquisa automaticamente os preços que
   // faltam (IA) enquanto o cliente finaliza; nas edições seguintes só recalcula.
   useEffect(() => {
     const primeira = !orcMountRef.current;
     orcMountRef.current = true;
-    const body = { linhas: linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas ?? [] })) };
+    const body = { linhas: linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas ?? [], estampado: l.estampado ?? ((l.estampas?.length ?? 0) > 0) })) };
     const url = primeira ? "/api/orcamento/pesquisar-faltantes" : "/api/orcamento";
     if (primeira) setEstimandoPrecos(true);
     fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
@@ -183,6 +175,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       total: draft.total && draft.total > 0 ? Math.round(draft.total) : null,
       tamanhos: (draft.tamanhos || []).map((t) => ({ tamanho: t.tamanho.trim(), qtd: t.qtd && t.qtd > 0 ? Math.round(t.qtd) : null })).filter((t) => t.tamanho),
       estampas: (draft.estampas || []).map((e) => ({ posicao: (e.posicao || "").trim(), tamanho: (e.tamanho || "").trim() })).filter((e) => e.posicao && e.tamanho),
+      estampado: draft.estampado ?? null,
       descricao: draft.descricao?.trim() || null,
     };
     if (!limpa.modelo && !limpa.cor && !limpa.total) return;
@@ -388,11 +381,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     ))}
                   </div>
                 )}
-                {l.estampas && l.estampas.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {l.estampas.map((e, j) => (
-                      <span key={j} className="bg-[#E1F5EE] text-[#0F6E56] text-xs px-2 py-0.5 rounded-md capitalize">estampa: {e.posicao} · {e.tamanho}</span>
-                    ))}
+                {(l.estampado === true || (l.estampas?.length ?? 0) > 0) && (
+                  <div className="mt-2">
+                    <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs px-2 py-0.5 rounded-md">Estampado / bordado</span>
                   </div>
                 )}
                 {l.descricao && <p className="text-sm text-gray-500 mt-3 leading-relaxed">{l.descricao}</p>}
@@ -554,18 +545,16 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   <button type="button" onClick={() => setDraft({ ...draft, tamanhos: [...(draft.tamanhos || []), { tamanho: "", qtd: null }] })} className="text-xs text-[#0F6E56] hover:underline">+ adicionar tamanho</button>
                 </div>
               </Campo>
-              <Campo label="Estampas (posição + tamanho — entram no orçamento)">
-                <div className="space-y-2">
-                  {(draft.estampas || []).map((e, j) => (
-                    <div key={j} className="flex items-center gap-2">
-                      <input list="opc-posicoes" value={e.posicao} onChange={(ev) => setDraft({ ...draft, estampas: (draft.estampas || []).map((x, k) => k === j ? { ...x, posicao: ev.target.value } : x) })} className={inputCls + " flex-1"} placeholder="posição (frente, costas…)" />
-                      <input list="opc-tamanhos" value={e.tamanho} onChange={(ev) => setDraft({ ...draft, estampas: (draft.estampas || []).map((x, k) => k === j ? { ...x, tamanho: ev.target.value } : x) })} className={inputCls + " w-28"} placeholder="tamanho (até a4…)" />
-                      <button type="button" onClick={() => setDraft({ ...draft, estampas: (draft.estampas || []).filter((_, k) => k !== j) })} className="text-gray-400 hover:text-red-600 text-sm px-1">✕</button>
-                    </div>
-                  ))}
-                  <button type="button" onClick={() => setDraft({ ...draft, estampas: [...(draft.estampas || []), { posicao: "", tamanho: "" }] })} className="text-xs text-[#0F6E56] hover:underline">+ adicionar estampa</button>
-                  <datalist id="opc-posicoes">{opcoes.posicoes.map((p) => <option key={p} value={p} />)}</datalist>
-                  <datalist id="opc-tamanhos">{opcoes.tamanhos.map((t) => <option key={t} value={t} />)}</datalist>
+              <Campo label="Acabamento (entra no orçamento)">
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setDraft({ ...draft, estampado: false })}
+                    className={"px-3 py-1.5 rounded-lg text-sm border transition-colors " + (draft.estampado !== true ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50")}>
+                    Lisa
+                  </button>
+                  <button type="button" onClick={() => setDraft({ ...draft, estampado: true })}
+                    className={"px-3 py-1.5 rounded-lg text-sm border transition-colors " + (draft.estampado === true ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50")}>
+                    Estampada / bordada
+                  </button>
                 </div>
               </Campo>
               <Campo label="Detalhes (observações, instruções…)">

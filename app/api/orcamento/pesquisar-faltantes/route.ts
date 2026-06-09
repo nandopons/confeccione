@@ -30,6 +30,7 @@ const LinhaSchema = z.object({
   material: z.string().nullable().optional(),
   total: z.number().int().positive().nullable().optional(),
   estampas: z.array(EstampaSchema).optional(),
+  estampado: z.boolean().nullable().optional(),
 })
 const BodySchema = z.object({ linhas: z.array(LinhaSchema) })
 
@@ -43,7 +44,7 @@ export async function POST(req: Request) {
   const combos = new Map<string, { modelo: string; material: string | null; estampado: boolean }>()
   for (const l of p.data.linhas) {
     if (!l.modelo || !l.modelo.trim()) continue
-    const estampado = (l.estampas?.length ?? 0) > 0
+    const estampado = l.estampado === true || (l.estampas?.length ?? 0) > 0
     const chave = chavePesquisa(l.modelo, l.material ?? null, estampado)
     if (!combos.has(chave)) combos.set(chave, { modelo: l.modelo, material: l.material ?? null, estampado })
   }
@@ -76,7 +77,7 @@ export async function POST(req: Request) {
   const { data: pesqData } = await supabase.from('pesquisas_preco').select('chave, faixas')
   const pesquisas = (pesqData ?? []) as PesquisaPreco[]
   const orcamento = calcularOrcamento(
-    p.data.linhas.map((l) => ({ modelo: l.modelo ?? null, material: l.material ?? null, total: l.total ?? null, estampas: l.estampas ?? [] })),
+    p.data.linhas.map((l) => ({ modelo: l.modelo ?? null, material: l.material ?? null, total: l.total ?? null, estampas: l.estampas ?? [], estampado: l.estampado ?? null })),
     pesquisas
   )
 

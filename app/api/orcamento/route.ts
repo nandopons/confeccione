@@ -20,6 +20,7 @@ const LinhaSchema = z.object({
   material: z.string().nullable().optional(),
   total: z.number().int().positive().nullable().optional(),
   estampas: z.array(EstampaSchema).optional(),
+  estampado: z.boolean().nullable().optional(),
 })
 const BodySchema = z.object({ linhas: z.array(LinhaSchema) })
 
@@ -38,6 +39,7 @@ export async function POST(req: Request) {
       material: l.material ?? null,
       total: l.total ?? null,
       estampas: l.estampas ?? [],
+      estampado: l.estampado ?? null,
     })),
     pesquisas
   )

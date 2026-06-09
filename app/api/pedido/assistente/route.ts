@@ -26,7 +26,7 @@ export const runtime = 'nodejs'
 const MODELO = 'claude-sonnet-4-6'
 const MAX_TOKENS = 1300
 const TEMPERATURE = 0.4
-const MAX_MENSAGENS = 40
+const JANELA_MODELO = 60 // últimas N mensagens enviadas ao modelo (chat ilimitado p/ o cliente)
 
 // ----------------------------------------------------------------------------
 // Tipos do contrato
@@ -38,6 +38,7 @@ type Linha = {
   material: string | null
   total: number | null
   tamanhos: Tamanho[]
+  estampado: boolean | null
   descricao: string | null
 }
 type Contato = {
@@ -79,8 +80,9 @@ const LinhaSchema = z.object({
   material: z.string().nullable().catch(null),
   total: numTolerante,
   tamanhos: z.array(TamanhoSchema).catch([]),
+  estampado: z.boolean().nullable().catch(null),
   descricao: z.string().nullable().catch(null),
-}).catch({ modelo: null, cor: null, material: null, total: null, tamanhos: [], descricao: null })
+}).catch({ modelo: null, cor: null, material: null, total: null, tamanhos: [], estampado: null, descricao: null })
 
 const ContatoSchema = z.object({
   nome: z.string().nullable().catch(null),
@@ -116,7 +118,7 @@ VOCÊ É A BALIZA. O cliente quase nunca dá todos os detalhes sozinho. Ex.: "qu
 
 ESTRUTURA POR LINHA DE PRODUTO. Cada "linha" é um produto homogêneo: mesmo modelo, mesma cor, mesmo material. Regras:
 - Se o cliente quer a MESMA peça em CORES diferentes, isso vira LINHAS diferentes (ex.: 10 pretas + 10 azuis = 2 linhas).
-- Para cada linha, descubra: modelo, cor, material, quantidade total e a divisão por tamanho.
+- Para cada linha, descubra: modelo, cor, material, quantidade total, a divisão por tamanho e SE A PEÇA É LISA, ESTAMPADA OU BORDADA. Pergunte isso com naturalidade ("Essa peça vai ser lisa, estampada ou bordada?") — é importante porque MUDA O PREÇO. Preencha "estampado": true quando for estampada OU bordada, e false quando for lisa. Guarde em "descricao" os detalhes (estampa ou bordado, posição: frente/costas/manga, arte própria etc.).
 - Para os tamanhos: pergunte primeiro QUANTAS peças no total dessa linha, depois quantas de cada tamanho (P, M, G, GG, etc.). Confira se a soma dos tamanhos bate com o total; se não bater, avise gentil e ajuste.
 - Quando uma linha ficar completa, pergunte se ele quer adicionar outro produto/cor ou se o pedido está completo.
 
@@ -131,13 +133,14 @@ REGRAS DE CONFIABILIDADE DO CONTATO:
 Quando tudo estiver coletado (linhas + contato), faça uma confirmação curta e simpática do resumo e diga que ele já pode prosseguir para ver a pré-visualização dos produtos.
 
 A cada resposta, devolva SOMENTE um JSON válido (sem markdown, sem cercas de código, sem texto fora dele), com o PEDIDO INTEIRO e atualizado neste formato exato:
-{"mensagem": string, "pedido": {"linhas": [{"modelo": string|null, "cor": string|null, "material": string|null, "total": number|null, "tamanhos": [{"tamanho": string, "qtd": number|null}], "descricao": string|null}], "contato": {"nome": string|null, "telefone": string|null, "email": string|null, "cep": string|null, "complemento": string|null}}}
+{"mensagem": string, "pedido": {"linhas": [{"modelo": string|null, "cor": string|null, "material": string|null, "total": number|null, "tamanhos": [{"tamanho": string, "qtd": number|null}], "estampado": boolean|null, "descricao": string|null}], "contato": {"nome": string|null, "telefone": string|null, "email": string|null, "cep": string|null, "complemento": string|null}}}
 
 Regras do JSON:
 - "mensagem" é só o que você fala com o cliente (a próxima pergunta ou a confirmação). Nunca coloque JSON dentro da mensagem.
 - Devolva SEMPRE o pedido completo com TODAS as linhas já coletadas (não só a última) e o contato preenchido até aqui.
 - "modelo" em texto livre e minúsculo (ex.: "tshirt", "oversized", "polo", "boné"). "cor" e "material" em texto livre.
 - "total" é a quantidade de peças daquela linha. "tamanhos" é a divisão (cada item {tamanho, qtd}); se ainda não sabe, deixe [].
+- "estampado" é booleano: true se a peça é estampada ou bordada, false se lisa, null se ainda não perguntou. Isso define a faixa de preço (liso vs estampado).
 - "descricao" guarda detalhes úteis da linha: estampa/bordado, posição da arte (frente/costas/manga), observações.
 - Campos que você ainda não perguntou ficam null. Não preencha contato com placeholders.`
 
@@ -170,6 +173,7 @@ function normalizarPedido(p: Pedido): Pedido {
       tamanhos: (l.tamanhos ?? [])
         .map((t) => ({ tamanho: (t.tamanho ?? '').trim(), qtd: typeof t.qtd === 'number' && t.qtd > 0 ? Math.round(t.qtd) : null }))
         .filter((t) => t.tamanho.length > 0),
+      estampado: typeof l.estampado === 'boolean' ? l.estampado : null,
       descricao: l.descricao ? l.descricao.trim() || null : null,
     }))
     .filter((l) => l.modelo || l.cor || l.material || l.total || l.tamanhos.length > 0 || l.descricao)
@@ -279,12 +283,13 @@ export async function POST(req: Request) {
   }
 
   const { messages } = body.data
-  if (messages.length > MAX_MENSAGENS) {
-    return NextResponse.json(
-      { error: `Histórico longo demais (máx. ${MAX_MENSAGENS} mensagens).` },
-      { status: 400 }
-    )
-  }
+
+  // Chat ilimitado pro cliente: em vez de barrar históricos longos, mandamos só
+  // as últimas JANELA_MODELO mensagens ao modelo (o pedido inteiro é
+  // reconstruído do último JSON do assistente, então não perdemos estado).
+  // Garante que a janela comece num turno de 'user' (exigência da API).
+  const janela = messages.slice(-JANELA_MODELO)
+  while (janela.length && janela[0].role === 'assistant') janela.shift()
 
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
@@ -302,7 +307,7 @@ export async function POST(req: Request) {
       max_tokens: MAX_TOKENS,
       temperature: TEMPERATURE,
       system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: janela.map((m) => ({ role: m.role, content: m.content })),
     })
     texto = textoDaResposta(resposta.content)
   } catch (err) {

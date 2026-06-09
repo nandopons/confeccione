@@ -19,6 +19,7 @@ type Linha = {
   material: string | null;
   total: number | null;
   tamanhos: Tamanho[];
+  estampado?: boolean | null;
   descricao: string | null;
 };
 type Contato = {
