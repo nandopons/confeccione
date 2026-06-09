@@ -2,6 +2,9 @@
 // Admin: lista e detalha os pedidos do fluxo de chat (pedidos_assistente),
 // com foco nos NÃO concluídos (não pagos), pra revisar conversa + mockups/artes.
 import { supabaseAdmin } from './supabase-server'
+import { enviarMensagem } from './zapi'
+import { SITE_URL } from './url'
+import { emailLembretePedido, emailFeedbackMockup } from './email'
 
 type LinhaJson = {
   modelo?: string | null; cor?: string | null; material?: string | null
@@ -101,4 +104,45 @@ export async function imagemMockup(id: string, linha: number, tipo: 'liso' | 'ar
   const m = /^data:([^;,]+);base64,(.+)$/.exec(dataUrl)
   if (!m) return null
   return { mime: m[1], bytes: Buffer.from(m[2], 'base64') }
+}
+
+// ---------------------------------------------------------------------------
+// Ações do admin sobre um pedido do chat: excluir, lembrete, pedir feedback.
+// ---------------------------------------------------------------------------
+export type AcaoPedidoChat = 'excluir' | 'lembrete' | 'feedback'
+
+export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<{ ok: boolean; erro?: string; whats?: boolean; email?: boolean }> {
+  const { data: p } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, nome, telefone, email')
+    .eq('id', id)
+    .maybeSingle<{ id: string; nome: string | null; telefone: string | null; email: string | null }>()
+  if (!p) return { ok: false, erro: 'Pedido não encontrado' }
+
+  if (acao === 'excluir') {
+    const { error } = await supabaseAdmin.from('pedidos_assistente').delete().eq('id', id)
+    if (error) return { ok: false, erro: error.message }
+    return { ok: true }
+  }
+
+  const link = `${SITE_URL}/visualizador/${id}`
+  let whats = false
+  let email = false
+
+  const msg =
+    acao === 'lembrete'
+      ? `Oi${p.nome ? ' ' + p.nome.split(' ')[0] : ''}! 👕 Aqui é da Confeccione. Você começou um pedido com a gente e ainda não finalizou — seus mockups estão prontos pra revisar. É rapidinho pra concluir:\n${link}`
+      : `Oi${p.nome ? ' ' + p.nome.split(' ')[0] : ''}! 👀 O mockup ficou como você queria? Dá uma olhada e, se precisar mudar algo (posição da arte, tamanho, cor…), use o botão "Ajustar detalhe" na peça que a gente atualiza na hora:\n${link}`
+
+  if (p.telefone) {
+    try { whats = await enviarMensagem(p.telefone, msg) } catch { whats = false }
+  }
+  if (p.email) {
+    try {
+      if (acao === 'lembrete') await emailLembretePedido({ email: p.email, nome: p.nome, link })
+      else await emailFeedbackMockup({ email: p.email, nome: p.nome, link })
+      email = true
+    } catch { email = false }
+  }
+  return { ok: true, whats, email }
 }
