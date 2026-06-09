@@ -92,7 +92,7 @@ export default function PedidoAssistente() {
       const res = await fetch("/api/pedido/assistente/criar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ linhas: p.linhas, contato: p.contato }),
+        body: JSON.stringify({ linhas: p.linhas, contato: p.contato, conversa: turnos.map((t) => ({ role: t.role, texto: t.display })) }),
       });
       const data = await res.json().catch(() => null);
       if (res.ok && data?.ok) {
