@@ -22,3 +22,7 @@ export function painelClientePedidoUrl(pedidoId: string): string {
 export function loginComEmailUrl(email: string): string {
   return `${SITE_URL}/cliente/login?email=${encodeURIComponent(email)}`
 }
+
+export function ofertaFornecedorUrl(ofertaId: string): string {
+  return `${SITE_URL}/fornecedor/oferta/${ofertaId}`
+}
