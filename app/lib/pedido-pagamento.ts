@@ -8,6 +8,16 @@
 import { asaasFetch, centavosParaReais } from './asaas'
 import { apenasDigitos } from './cpf-cnpj'
 
+// ASAAS espera telefone BR sem DDI (DDD + número, 10-11 dígitos). O telefone é
+// guardado como 55+DDD+número (E.164) — aqui tiramos o 55 pra não bugar a
+// validação do ASAAS.
+function telefoneAsaas(w: string | null | undefined): string | undefined {
+  if (!w) return undefined
+  let d = apenasDigitos(w)
+  if (d.startsWith('55') && d.length >= 12) d = d.slice(2)
+  return d.length >= 10 && d.length <= 11 ? d : undefined
+}
+
 async function criarOuObterCustomer(input: {
   nome: string
   email: string | null
@@ -32,7 +42,7 @@ async function criarOuObterCustomer(input: {
     body: {
       name: input.nome,
       email: input.email || undefined,
-      mobilePhone: input.whatsapp ? apenasDigitos(input.whatsapp) : undefined,
+      mobilePhone: telefoneAsaas(input.whatsapp),
       cpfCnpj: cpf,
       personType,
       notificationDisabled: true,

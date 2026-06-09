@@ -40,6 +40,10 @@ export type PedidoVis = {
   email: string | null;
   cep: string | null;
   complemento: string | null;
+  logradouro?: string | null;
+  bairro?: string | null;
+  cidade?: string | null;
+  uf?: string | null;
   status: string | null;
   mockups?: Record<string, { liso?: string; arte?: string }> | null;
   prazo_dias?: number | null;
@@ -61,6 +65,14 @@ async function fileToDataUrl(file: File): Promise<string> {
 function corHex(s: string | null | undefined): string | null {
   const m = /#([0-9a-fA-F]{6})\b/.exec(s || "");
   return m ? "#" + m[1] : null;
+}
+function telBR(s: string | null | undefined): string {
+  if (!s) return "";
+  let d = s.replace(/\D/g, "");
+  if (d.startsWith("55") && d.length >= 12) d = d.slice(2);
+  if (d.length === 11) return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
+  return s;
 }
 function corLabel(s: string | null | undefined): string {
   return (s || "").replace(/\s*\(#?[0-9a-fA-F]{6}\)\s*/g, " ").replace(/#[0-9a-fA-F]{6}/g, "").replace(/\s{2,}/g, " ").trim();
@@ -118,6 +130,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [gerandoArte, setGerandoArte] = useState(false);
   const [arteResultado, setArteResultado] = useState<string | null>(null);
   const [arteMotivo, setArteMotivo] = useState<string | null>(null);
+  const [ajusteIndex, setAjusteIndex] = useState<number | null>(null);
+  const [ajusteTexto, setAjusteTexto] = useState("");
+  const [ajustandoIdx, setAjustandoIdx] = useState<number | null>(null);
+  const [ajusteErro, setAjusteErro] = useState<string | null>(null);
   const arteFileRef = useRef<HTMLInputElement>(null);
 
   const geradasRef = useRef<Set<number>>(new Set(
@@ -254,6 +270,40 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     setImgs((m) => ({ ...m, [i]: { ...m[i], aplicado: undefined } }));
     setVerArte((m) => ({ ...m, [i]: false }));
     void salvarMockup({ index: i, arte: null });
+  }
+
+  function abrirAjuste(i: number) {
+    setAjusteIndex(ajusteIndex === i ? null : i);
+    setAjusteTexto("");
+    setAjusteErro(null);
+  }
+
+  async function aplicarAjuste(i: number) {
+    const st = imgs[i] || {};
+    const base = st.aplicado || st.url;
+    const txt = ajusteTexto.trim();
+    if (!base || !txt) { setAjusteErro("Descreva o ajuste."); return; }
+    setAjustandoIdx(i);
+    setAjusteErro(null);
+    try {
+      const l = linhas[i];
+      const res = await fetch("/api/visualizador/ajustar-detalhe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseDataUrl: base, instrucoes: txt, contexto: [l?.modelo, l?.cor, l?.material].filter(Boolean).join(" ") }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!d?.disponivel) { setAjusteErro(d?.motivo || d?.error || "Não consegui ajustar agora."); return; }
+      setImgs((m) => ({ ...m, [i]: { ...m[i], aplicado: d.imagemDataUrl } }));
+      setVerArte((m) => ({ ...m, [i]: true }));
+      void salvarMockup({ index: i, arte: d.imagemDataUrl });
+      setAjusteIndex(null);
+      setAjusteTexto("");
+    } catch {
+      setAjusteErro("Erro de conexão.");
+    } finally {
+      setAjustandoIdx(null);
+    }
   }
 
   function abrirArte(i: number) {
@@ -448,9 +498,32 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   {st.aplicado && (
                     <button type="button" onClick={() => limparArte(i)} className="border border-gray-200 text-gray-600 hover:bg-gray-50 text-sm px-3 py-1.5 rounded-lg">Limpar arte</button>
                   )}
+                  {st.url && (
+                    <button type="button" onClick={() => abrirAjuste(i)} className="border border-gray-200 text-gray-700 hover:bg-gray-50 text-sm px-3 py-1.5 rounded-lg">Ajustar detalhe</button>
+                  )}
                   <button type="button" onClick={() => abrirEdicao(i)} className="border border-gray-200 text-gray-700 hover:bg-gray-50 text-sm px-3 py-1.5 rounded-lg">Editar</button>
                   <button type="button" onClick={() => excluir(i)} className="border border-gray-200 text-red-600 hover:bg-red-50 text-sm px-3 py-1.5 rounded-lg">Excluir</button>
                 </div>
+
+                {ajusteIndex === i && (
+                  <div className="mt-3 rounded-xl border border-[#1D9E75]/30 bg-[#E1F5EE]/40 p-3">
+                    <p className="text-xs text-gray-600 mb-2">Descreva o ajuste — a IA muda só esse detalhe e mantém o resto (ex.: <em>&ldquo;sobe a logo da manga pro ombro&rdquo;</em>, <em>&ldquo;deixa o bordado das costas menor&rdquo;</em>).</p>
+                    <textarea
+                      value={ajusteTexto}
+                      onChange={(e) => setAjusteTexto(e.target.value)}
+                      rows={2}
+                      placeholder="o que você quer mudar nessa imagem?"
+                      className="w-full resize-none border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]"
+                    />
+                    {ajusteErro && <p className="text-xs text-red-600 mt-1">{ajusteErro}</p>}
+                    <div className="flex gap-2 mt-2">
+                      <button type="button" onClick={() => void aplicarAjuste(i)} disabled={ajustandoIdx === i || !ajusteTexto.trim()} className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-4 py-1.5 rounded-lg">
+                        {ajustandoIdx === i ? "Ajustando…" : "Aplicar ajuste"}
+                      </button>
+                      <button type="button" onClick={() => { setAjusteIndex(null); setAjusteErro(null); }} className="text-sm text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-100">Cancelar</button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -501,8 +574,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         {(pedido.nome || pedido.email) && (
           <div className="mb-4">
             <p className="text-xs text-gray-400 font-medium mb-1">Contato</p>
-            <p className="text-sm text-gray-700">{pedido.nome}{pedido.telefone ? ` · ${pedido.telefone}` : ""}{pedido.email ? ` · ${pedido.email}` : ""}</p>
-            {(pedido.cep || pedido.complemento) && <p className="text-sm text-gray-500">{[pedido.cep, pedido.complemento].filter(Boolean).join(" · ")}</p>}
+            <p className="text-sm text-gray-700">{pedido.nome}{pedido.telefone ? ` · ${telBR(pedido.telefone)}` : ""}{pedido.email ? ` · ${pedido.email}` : ""}</p>
+            {(pedido.logradouro || pedido.cidade) && (
+              <p className="text-sm text-gray-500">{[pedido.logradouro, pedido.bairro, [pedido.cidade, pedido.uf].filter(Boolean).join("/")].filter(Boolean).join(", ")}</p>
+            )}
+            {(pedido.cep || pedido.complemento) && <p className="text-sm text-gray-500">{[pedido.cep, pedido.complemento && `nº/compl.: ${pedido.complemento}`].filter(Boolean).join(" · ")}</p>}
           </div>
         )}
         {confirmStep === "feito" && pixResult ? (
