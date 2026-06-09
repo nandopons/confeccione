@@ -10,6 +10,7 @@ import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 import { corStatus, labelStatus } from '@/app/lib/cliente-status'
+import { pedidosAssistenteDoCliente, type PedidoClienteAssistente } from '@/app/lib/cliente-pedidos'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,6 +52,9 @@ export default async function PainelClientePage({
 
   const pedidos = (pedidosRaw ?? []) as PedidoLinha[]
 
+  // Pedidos do fluxo novo (chat -> visualizador), casados pelo e-mail.
+  const pedidosNovos = await pedidosAssistenteDoCliente(conta.email)
+
   return (
     <section className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       {criado && (
@@ -61,23 +65,19 @@ export default async function PainelClientePage({
 
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold text-gray-900">Seus pedidos</h2>
-        {pedidos.length > 0 && (
-          <Link
-            href="/cliente/pedido/novo"
-            className="inline-flex items-center gap-1 px-4 py-2 rounded-md bg-[#1D9E75] text-white text-sm font-medium hover:bg-[#178761]"
-          >
-            + Novo pedido
-          </Link>
-        )}
+        <Link
+          href="/#pedido"
+          className="inline-flex items-center gap-1 px-4 py-2 rounded-md bg-[#1D9E75] text-white text-sm font-medium hover:bg-[#178761]"
+        >
+          + Novo pedido
+        </Link>
       </div>
 
-      {pedidos.length === 0 ? (
+      {pedidosNovos.length === 0 && pedidos.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-2xl p-12 text-center">
-          <p className="text-sm text-gray-600 mb-4">
-            Você ainda não tem pedidos.
-          </p>
+          <p className="text-sm text-gray-600 mb-4">Você ainda não tem pedidos.</p>
           <Link
-            href="/cliente/pedido/novo"
+            href="/#pedido"
             className="inline-block px-5 py-2.5 rounded-md bg-[#1D9E75] text-white text-sm font-medium hover:bg-[#178761]"
           >
             Fazer pedido
@@ -85,12 +85,66 @@ export default async function PainelClientePage({
         </div>
       ) : (
         <ul className="space-y-3">
-          {pedidos.map((p) => (
-            <LinhaPedido key={p.id} pedido={p} />
+          {pedidosNovos.map((p) => (
+            <LinhaPedidoNovo key={p.id} pedido={p} />
           ))}
         </ul>
       )}
+
+      {pedidos.length > 0 && (
+        <div className="mt-10">
+          <h2 className="text-sm font-semibold text-gray-500 mb-3">Pedidos anteriores</h2>
+          <ul className="space-y-3">
+            {pedidos.map((p) => (
+              <LinhaPedido key={p.id} pedido={p} />
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
+  )
+}
+
+function statusNovo(p: PedidoClienteAssistente): { label: string; cor: string } {
+  if (p.pagamentoStatus === 'pago') return { label: 'Pago', cor: 'bg-green-100 text-green-800' }
+  if (p.status === 'confirmado' && p.pagamentoStatus === 'gerado') return { label: 'Aguardando pagamento', cor: 'bg-amber-100 text-amber-800' }
+  return { label: 'Em montagem', cor: 'bg-gray-100 text-gray-600' }
+}
+
+function brlc(c: number | null): string {
+  if (c == null) return ''
+  return (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+
+function LinhaPedidoNovo({ pedido }: { pedido: PedidoClienteAssistente }) {
+  const st = statusNovo(pedido)
+  const dataHora = formatarDataHora(pedido.criadoEm)
+  return (
+    <li>
+      <Link
+        href={`/visualizador/${pedido.id}`}
+        className="block bg-white border border-gray-200 rounded-2xl p-4 hover:border-gray-300 transition-colors group"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-gray-900 font-medium">{pedido.totalPecas} peças</span>
+              {pedido.valorCentavos != null && (
+                <span className="text-gray-500 text-sm">· {brlc(pedido.valorCentavos)}</span>
+              )}
+            </div>
+            <div className="text-xs text-gray-500 mt-1 truncate">{pedido.resumo.replace(/\n/g, ' · ')}</div>
+            <div className="text-xs text-gray-400 mt-1">Criado em {dataHora}</div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${st.cor}`}>
+              {st.label}
+            </span>
+            <span aria-hidden="true" className="text-gray-400 group-hover:text-gray-600 transition-colors text-lg leading-none">›</span>
+          </div>
+        </div>
+      </Link>
+    </li>
   )
 }
 
