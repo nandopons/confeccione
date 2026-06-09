@@ -292,7 +292,8 @@ function calcularFase(p: Pedido): 'produto' | 'contato' | 'completo' {
   const temLinha = p.linhas.length > 0 && p.linhas.some(linhaCompleta)
   if (!temLinha) return 'produto'
   const c = p.contato
-  const contatoOk = Boolean(c.nome && telefoneValido(c.telefone) && c.email && c.cep)
+  // Exige complemento (número/apto) — não fechar só com o CEP resolvido.
+  const contatoOk = Boolean(c.nome && telefoneValido(c.telefone) && c.email && c.cep && c.complemento)
   return contatoOk ? 'completo' : 'contato'
 }
 
