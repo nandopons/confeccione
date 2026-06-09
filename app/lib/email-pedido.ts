@@ -65,8 +65,11 @@ export async function enviarEmailPedidoPix(p: {
     ? `<table width="100%" style="margin-top:8px;"><tr><td align="center">
         <img src="${SITE}/api/pedido/assistente/${p.id}/pix-qr" alt="QR Code PIX" width="200" height="200" style="border:1px solid #eee;border-radius:8px;" />
        </td></tr>
-       <tr><td style="padding-top:10px;font-size:12px;color:#666;">PIX copia e cola:</td></tr>
-       <tr><td><div style="word-break:break-all;background:#f6f6f6;border:1px solid #eee;border-radius:8px;padding:10px;font-family:monospace;font-size:12px;color:#333;">${p.copiaCola}</div></td></tr></table>`
+       <tr><td style="padding:14px 0 6px;font-size:13px;color:#111;font-weight:bold;">Código PIX copia e cola</td></tr>
+       <tr><td style="font-size:12px;color:#888;padding-bottom:6px;">Selecione (ou toque e segure no celular) o código abaixo para copiar:</td></tr>
+       <tr><td>
+         <div style="-webkit-user-select:all;user-select:all;word-break:break-all;background:#f6f6f6;border:1px dashed #1D9E75;border-radius:8px;padding:14px;font-family:'Courier New',monospace;font-size:14px;line-height:1.5;color:#111;letter-spacing:.2px;">${p.copiaCola}</div>
+       </td></tr></table>`
     : ''
 
   const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
