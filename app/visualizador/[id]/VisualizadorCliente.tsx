@@ -27,7 +27,7 @@ export type Linha = {
 };
 
 type LinhaOrc = { unit_centavos: number | null; total_centavos: number; faltando: string[] };
-type Orcamento = { linhas: LinhaOrc[]; total_centavos: number; completo: boolean } | null;
+type Orcamento = { linhas: LinhaOrc[]; subtotal_centavos: number; desconto_qtd_centavos: number; total_centavos: number; pix_centavos: number; total_pecas: number; frete_gratis: boolean; completo: boolean } | null;
 
 function brl(c: number): string {
   return (c / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -543,16 +543,37 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             <p className="text-xl font-semibold text-[#0F6E56]">{brl(orcamento.total_centavos)}</p>
           </div>
           <p className="text-[11px] text-gray-400 mt-1">Estimativa, sujeita a confirmação.</p>
+
+          {orcamento.desconto_qtd_centavos > 0 && (
+            <div className="mt-3 text-sm space-y-1">
+              <div className="flex justify-between text-gray-500"><span>Subtotal</span><span>{brl(orcamento.subtotal_centavos)}</span></div>
+              <div className="flex justify-between text-[#0F6E56]"><span>Desconto quantidade (5%)</span><span>− {brl(orcamento.desconto_qtd_centavos)}</span></div>
+              <div className="flex justify-between text-gray-900 font-medium border-t border-gray-100 pt-1"><span>Total</span><span>{brl(orcamento.total_centavos)}</span></div>
+            </div>
+          )}
+
+          <div className="mt-3 rounded-lg bg-[#E1F5EE]/50 border border-[#1D9E75]/20 px-3 py-2">
+            <p className="text-sm text-[#0F6E56] font-medium">💸 No PIX: {brl(orcamento.pix_centavos)} <span className="text-xs font-normal text-[#0F6E56]/80">(3% de desconto à vista)</span></p>
+            <p className="text-[11px] text-gray-500 mt-0.5">No cartão: {brl(orcamento.total_centavos)} (em até 12x, conforme a operadora).</p>
+          </div>
+
           {pedido.prazo_dias ? (
             <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#E1F5EE]/50 border border-[#1D9E75]/20 px-3 py-2">
               <span className="text-base leading-none">⏱️</span>
               <p className="text-[11px] text-gray-600 leading-relaxed">Prazo de produção: <strong>{pedido.prazo_dias} dias</strong> — contados a partir da confirmação do pagamento.</p>
             </div>
           ) : null}
-          <div className="mt-3 flex items-start gap-2 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
-            <span className="text-base leading-none">🚚</span>
-            <p className="text-[11px] text-gray-500 leading-relaxed">O frete é à parte. Assim que a produção ficar pronta, enviamos as opções de transporte e prazos — você escolhe a que preferir e paga o frete na hora do envio.</p>
-          </div>
+          {orcamento.frete_gratis ? (
+            <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#E1F5EE] border border-[#1D9E75]/30 px-3 py-2">
+              <span className="text-base leading-none">🎉</span>
+              <p className="text-[11px] text-[#0F6E56] leading-relaxed"><strong>Frete grátis neste pedido!</strong> Pedidos acima de R$ 200 têm frete por nossa conta — enviamos quando a produção ficar pronta.</p>
+            </div>
+          ) : (
+            <div className="mt-3 flex items-start gap-2 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+              <span className="text-base leading-none">🚚</span>
+              <p className="text-[11px] text-gray-500 leading-relaxed">O frete é à parte (frete grátis acima de R$ 200). Assim que a produção ficar pronta, enviamos as opções de transporte e prazos — você escolhe a que preferir e paga o frete na hora do envio.</p>
+            </div>
+          )}
           {estimandoPrecos && <p className="text-[11px] text-gray-400 mt-1">Atualizando preços de mercado…</p>}
           {!orcamento.completo && !estimandoPrecos && (
             <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-snug">Alguns itens ainda estão sendo precificados. Se persistir, nosso time ajusta antes de fechar.</p>
