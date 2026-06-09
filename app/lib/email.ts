@@ -625,3 +625,62 @@ export async function emailCaptacaoFornecedor(params: {
     return false
   }
 }
+
+// ─── Oferta de pedido PAGO (modelo novo, pedidos_assistente) ─────────────
+export async function emailOfertaPedidoAssistente(params: {
+  email: string
+  nomeFornecedor: string | null
+  totalPecas: number
+  linhasHtml: string // já escapado/montado pelo chamador
+  linhasTexto: string
+  repasseTexto: string
+  linkOferta: string
+  numImagens: number
+}): Promise<void> {
+  const nomeEsc = escapeHtml(params.nomeFornecedor || 'fornecedor')
+  const subject = `Pedido disponível: ${params.totalPecas} peças — repasse ${params.repasseTexto}`
+  const preheader = 'Um pedido já pago está disponível para produção. Veja os mockups e detalhes.'
+
+  const imgLinha = params.numImagens > 0
+    ? `<p style="margin:0 0 16px;color:#666;font-size:14px;">🖼️ ${params.numImagens} mockup(s) disponível(is) na página da oferta.</p>`
+    : ''
+
+  const html = layout(
+    `
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">Pedido disponível, ${nomeEsc}!</h1>
+    <p style="margin:0 0 20px;color:#666;">Um pedido <strong>já pago</strong> está disponível para produção. Confira os mockups e detalhes completos na página da oferta.</p>
+    <div style="background:#fafafa;border:1px solid #eeeeee;padding:14px 16px;margin:8px 0 16px;border-radius:6px;font-size:14px;color:#1f2937;">
+      <strong style="color:#666;display:block;margin-bottom:8px;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">Itens do pedido (${params.totalPecas} peças)</strong>
+      ${params.linhasHtml}
+    </div>
+    ${imgLinha}
+    <div style="background:#ecfdf5;border-left:3px solid #10b981;padding:14px 18px;margin:16px 0;border-radius:6px;">
+      <strong style="color:#065f46;">Seu repasse: ${escapeHtml(params.repasseTexto)}</strong>
+      <p style="margin:6px 0 0;color:#1f2937;font-size:14px;line-height:1.5;">Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.</p>
+    </div>
+    <div style="text-align:center;margin:28px 0;">
+      <a href="${params.linkOferta}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:600;font-size:15px;">Ver mockups e assumir pedido</a>
+    </div>
+    <p style="margin:16px 0 0;color:#666;font-size:13px;">Ou copie o link: <a href="${params.linkOferta}" style="color:#2563eb;">${params.linkOferta}</a></p>
+    `,
+    preheader
+  )
+
+  const text = `Pedido disponível, ${params.nomeFornecedor || 'fornecedor'}!
+
+Um pedido já pago está disponível para produção.
+
+Itens (${params.totalPecas} peças):
+${params.linhasTexto}
+
+Seu repasse: ${params.repasseTexto}
+Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.
+
+Ver mockups e assumir o pedido:
+${params.linkOferta}
+
+Confeccione
+${SITE_URL}`
+
+  await enviarEmail({ to: params.email, subject, html, text })
+}

@@ -14,6 +14,8 @@
 
 import { supabaseAdmin } from './supabase-server'
 import { enviarMensagem } from './zapi'
+import { ofertaFornecedorUrl } from './url'
+import { emailOfertaPedidoAssistente } from './email'
 
 export const COMISSAO_PCT = 0.03
 
@@ -100,6 +102,29 @@ export function resumirLinhas(linhas: LinhaPedido[]): { totalPecas: number; text
   return { totalPecas, texto: partes.join('\n') }
 }
 
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+// Mesmo resumo, em HTML (pro e-mail) e texto puro.
+export function resumirLinhasEmail(linhas: LinhaPedido[]): { totalPecas: number; html: string; texto: string } {
+  let totalPecas = 0
+  const htmlPartes: string[] = []
+  const txtPartes: string[] = []
+  for (const l of linhas || []) {
+    const qtd = typeof l.total === 'number' ? l.total : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0)
+    totalPecas += qtd || 0
+    const tamanhos = (l.tamanhos || []).filter((t) => t.tamanho).map((t) => `${t.tamanho}:${t.qtd ?? '?'}`).join(' ')
+    const estampado = (l.estampas?.length ?? 0) > 0 ? ' (estampado)' : ''
+    const cor = l.cor ? ` ${l.cor}` : ''
+    const material = l.material ? ` · ${l.material}` : ''
+    const base = `${qtd || '?'}× ${l.modelo ?? 'peça'}${cor}${material}${estampado}`
+    htmlPartes.push(`<div style=\"padding:4px 0;border-bottom:1px solid #f0f0f0;\">${escHtml(base)}${tamanhos ? `<br><span style=\"color:#888;font-size:13px;\">tamanhos: ${escHtml(tamanhos)}</span>` : ''}</div>`)
+    txtPartes.push(`- ${base}${tamanhos ? ` (${tamanhos})` : ''}`)
+  }
+  return { totalPecas, html: htmlPartes.join(''), texto: txtPartes.join('\n') }
+}
+
 // ---------------------------------------------------------------------------
 // Listagem: pedidos pagos + ofertas + fornecedores disponíveis pro seletor.
 // ---------------------------------------------------------------------------
@@ -170,7 +195,7 @@ export async function ofertarPedido(
 ): Promise<{ ok: boolean; criadas: number; notificadas: number; erro?: string }> {
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, pagamento_status, valor_centavos, linhas, cep')
+    .select('id, pagamento_status, valor_centavos, linhas, cep, imagens')
     .eq('id', pedidoId)
     .maybeSingle<{
       id: string
@@ -178,6 +203,7 @@ export async function ofertarPedido(
       valor_centavos: number | null
       linhas: LinhaPedido[]
       cep: string | null
+      imagens: unknown[] | null
     }>()
 
   if (!pedido) return { ok: false, criadas: 0, notificadas: 0, erro: 'Pedido não encontrado' }
@@ -188,10 +214,13 @@ export async function ofertarPedido(
   const repasse = repasseFornecedor(pedido.valor_centavos)
   const linhas = Array.isArray(pedido.linhas) ? pedido.linhas : []
   const { totalPecas, texto } = resumirLinhas(linhas)
+  const emailLinhas = resumirLinhasEmail(linhas)
+  const numImagens = Array.isArray(pedido.imagens) ? pedido.imagens.length : 0
+  const repasseTexto = brl(repasse)
 
   const { data: forns } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('id, nome, whatsapp')
+    .select('id, nome, whatsapp, email')
     .in('id', fornecedorIds)
 
   const fornById = new Map((forns ?? []).map((f: any) => [f.id, f]))
@@ -216,6 +245,7 @@ export async function ofertarPedido(
       continue
     }
 
+    let ofertaId: string
     if (existente) {
       // reabre (estava recusada/cancelada/aceita) -> volta a ofertada
       const { error } = await supabaseAdmin
@@ -223,16 +253,24 @@ export async function ofertarPedido(
         .update({ status: 'ofertada', valor_repasse_centavos: repasse, respondido_em: null })
         .eq('id', existente.id)
       if (error) continue
+      ofertaId = existente.id
     } else {
-      const { error } = await supabaseAdmin.from('ofertas_pedido_assistente').insert({
-        pedido_id: pedidoId,
-        fornecedor_id: fid,
-        status: 'ofertada',
-        valor_repasse_centavos: repasse,
-      })
-      if (error) continue
+      const { data: nova, error } = await supabaseAdmin
+        .from('ofertas_pedido_assistente')
+        .insert({
+          pedido_id: pedidoId,
+          fornecedor_id: fid,
+          status: 'ofertada',
+          valor_repasse_centavos: repasse,
+        })
+        .select('id')
+        .single()
+      if (error || !nova) continue
+      ofertaId = nova.id
     }
     criadas++
+
+    const link = ofertaFornecedorUrl(ofertaId)
 
     // WhatsApp ao fornecedor — sem contato do cliente.
     if (forn.whatsapp) {
@@ -241,10 +279,28 @@ export async function ofertarPedido(
         `Um pedido *já pago* está disponível para produção:\n\n` +
         `${texto}\n\n` +
         `Total: *${totalPecas} peças*\n` +
-        `Seu repasse: *${brl(repasse)}* (pagamento garantido pela Confeccione, liberado após a entrega em conformidade)\n\n` +
-        `Quer assumir este pedido? Responda *SIM* por aqui que a gente te passa os detalhes e o contato.`
+        `Seu repasse: *${repasseTexto}* (pagamento garantido pela Confeccione, liberado após a entrega em conformidade)\n\n` +
+        `👉 Veja os mockups e detalhes e assuma o pedido aqui:\n${link}`
       const enviado = await enviarMensagem(forn.whatsapp, mensagem)
       if (enviado) notificadas++
+    }
+
+    // E-mail de oferta (best-effort; não bloqueia o fluxo)
+    if (forn.email) {
+      try {
+        await emailOfertaPedidoAssistente({
+          email: forn.email,
+          nomeFornecedor: forn.nome ?? null,
+          totalPecas: emailLinhas.totalPecas,
+          linhasHtml: emailLinhas.html,
+          linhasTexto: emailLinhas.texto,
+          repasseTexto,
+          linkOferta: link,
+          numImagens,
+        })
+      } catch (e) {
+        console.error('[oferta] e-mail falhou', fid, e)
+      }
     }
   }
 
@@ -284,4 +340,72 @@ export async function definirStatusOferta(
   }
 
   return { ok: true }
+}
+
+// ---------------------------------------------------------------------------
+// Carrega a oferta pra a PÁGINA DO FORNECEDOR (sem contato do cliente).
+// Acesso pela URL com o id da oferta (uuid não-adivinhável).
+// ---------------------------------------------------------------------------
+export type OfertaDetalheFornecedor = {
+  ofertaId: string
+  pedidoId: string
+  status: StatusOferta
+  fornecedorNome: string | null
+  totalPecas: number
+  linhas: LinhaPedido[]
+  numImagens: number
+  valorRepasseCentavos: number | null
+}
+
+export async function carregarOfertaParaFornecedor(
+  ofertaId: string
+): Promise<OfertaDetalheFornecedor | null> {
+  const { data: oferta } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id, pedido_id, status, valor_repasse_centavos, leads_fornecedores(nome)')
+    .eq('id', ofertaId)
+    .maybeSingle<any>()
+  if (!oferta) return null
+
+  const { data: pedido } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, linhas, imagens, pagamento_status')
+    .eq('id', oferta.pedido_id)
+    .maybeSingle<{ id: string; linhas: LinhaPedido[]; imagens: unknown[] | null; pagamento_status: string | null }>()
+  if (!pedido) return null
+
+  const linhas = Array.isArray(pedido.linhas) ? pedido.linhas : []
+  const { totalPecas } = resumirLinhas(linhas)
+
+  return {
+    ofertaId: oferta.id,
+    pedidoId: pedido.id,
+    status: oferta.status,
+    fornecedorNome: oferta.leads_fornecedores?.nome ?? null,
+    totalPecas,
+    linhas,
+    numImagens: Array.isArray(pedido.imagens) ? pedido.imagens.length : 0,
+    valorRepasseCentavos: oferta.valor_repasse_centavos,
+  }
+}
+
+// Resposta do fornecedor pela página pública (aceitar/recusar). Só atua se a
+// oferta ainda estiver 'ofertada'.
+export async function responderOfertaFornecedor(
+  ofertaId: string,
+  acao: 'aceitar' | 'recusar'
+): Promise<{ ok: boolean; status?: StatusOferta; erro?: string }> {
+  const { data: oferta } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id, status')
+    .eq('id', ofertaId)
+    .maybeSingle<{ id: string; status: StatusOferta }>()
+  if (!oferta) return { ok: false, erro: 'Oferta não encontrada' }
+  if (oferta.status !== 'ofertada') {
+    return { ok: false, status: oferta.status, erro: 'Esta oferta já foi respondida.' }
+  }
+  const novo = acao === 'aceitar' ? 'aceita' : 'recusada'
+  const r = await definirStatusOferta(ofertaId, novo)
+  if (!r.ok) return { ok: false, erro: r.erro }
+  return { ok: true, status: novo }
 }
