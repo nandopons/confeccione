@@ -85,7 +85,6 @@ export async function enviarEmailPedidoPix(p: {
         <td style="font-size:15px;color:#111;font-weight:bold;">Total</td>
         <td align="right" style="font-size:18px;color:#0F6E56;font-weight:bold;">${brl(p.totalCentavos)}</td>
       </tr></table>
-      <p style="font-size:11px;color:#999;margin:2px 0 0;">Taxa de serviço da Confeccione (3%) já incluída.</p>
 
       ${p.numImagens > 0 ? `<p style="font-size:13px;color:#888;text-transform:uppercase;letter-spacing:.04em;margin:22px 0 6px;">Prévia dos produtos</p><table width="100%" cellpadding="0" cellspacing="0">${imagensHtml}</table>` : ''}
 
@@ -101,7 +100,7 @@ export async function enviarEmailPedidoPix(p: {
   <p style="font-size:11px;color:#aaa;margin:16px 0 0;">Confeccione — confeccione.com.br</p>
   </td></tr></table></body></html>`
 
-  const text = `Pedido #${id8} confirmado!\n\nTotal: ${brl(p.totalCentavos)} (taxa de 3% incluída)\n\nPagar via PIX:\n${p.copiaCola ?? p.invoiceUrl}\n\nPágina de pagamento: ${p.invoiceUrl}\n\nConfeccione`
+  const text = `Pedido #${id8} confirmado!\n\nTotal: ${brl(p.totalCentavos)}\n\nPagar via PIX:\n${p.copiaCola ?? p.invoiceUrl}\n\nPágina de pagamento: ${p.invoiceUrl}\n\nConfeccione`
 
   try {
     const resp = await fetch(RESEND_ENDPOINT, {

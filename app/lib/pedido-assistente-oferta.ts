@@ -279,7 +279,7 @@ export async function ofertarPedido(
         `Um pedido *já pago* está disponível para produção:\n\n` +
         `${texto}\n\n` +
         `Total: *${totalPecas} peças*\n` +
-        `Seu repasse: *${repasseTexto}* (pagamento garantido pela Confeccione, liberado após a entrega em conformidade)\n\n` +
+        `Valor total do pedido: *${repasseTexto}* (pagamento garantido pela Confeccione, liberado após a entrega em conformidade)\n\n` +
         `👉 Veja os mockups e detalhes e assuma o pedido aqui:\n${link}`
       const enviado = await enviarMensagem(forn.whatsapp, mensagem)
       if (enviado) notificadas++

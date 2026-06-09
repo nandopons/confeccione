@@ -101,7 +101,7 @@ export default function CarteiraCliente({ carteira, dados }: { carteira: Carteir
 
       {/* Dados de repasse */}
       <div className="rounded-2xl border border-gray-200 bg-white p-5">
-        <h2 className="text-sm font-semibold text-gray-700 mb-1">Dados pra repasse</h2>
+        <h2 className="text-sm font-semibold text-gray-700 mb-1">Dados para pagamento</h2>
         <p className="text-xs text-gray-400 mb-4">É pra cá que a Confeccione envia o valor dos pedidos que você produz. O frete é cobrado à parte.</p>
 
         <div className="space-y-3">

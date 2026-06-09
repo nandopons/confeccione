@@ -90,11 +90,11 @@ export default function PedidosFornecedor({ pendentes, aceitos }: { pendentes: O
             <div className="flex items-start justify-between gap-3 mb-2">
               <div>
                 <div className="text-xs text-gray-400">{data(o.criadoEm)}</div>
-                <div className="font-semibold text-gray-900">{o.totalPecas} peças · repasse {brl(o.valorRepasseCentavos)}</div>
+                <div className="font-semibold text-gray-900">{o.totalPecas} peças · {brl(o.valorRepasseCentavos)}</div>
               </div>
               {tab === 'aceitos' && (
                 <span className={'text-xs px-2 py-1 rounded-full ' + (o.repasseStatus === 'pago' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800')}>
-                  {o.repasseStatus === 'pago' ? 'repasse pago' : 'a receber'}
+                  {o.repasseStatus === 'pago' ? 'pago' : 'a receber'}
                 </span>
               )}
             </div>
