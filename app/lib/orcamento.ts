@@ -10,6 +10,10 @@
 import { normMockup } from '@/app/lib/mockup-cache'
 
 export const COMISSAO_PCT = 0.03
+export const DESC_QTD_PCT = 0.05          // desconto por quantidade
+export const QTD_MIN_DESC = 10            // acima de 10 peças
+export const DESC_PIX_PCT = 0.03          // desconto pagamento via PIX
+export const FRETE_GRATIS_MIN_CENTAVOS = 20000 // frete grátis a partir de R$ 200
 
 export type Faixa = { qtd_min: number; preco_centavos: number }
 export type PesquisaPreco = { chave: string; faixas: Faixa[] }
@@ -34,7 +38,12 @@ export type LinhaResultado = {
 
 export type Orcamento = {
   linhas: LinhaResultado[]
-  total_centavos: number
+  subtotal_centavos: number        // soma das linhas (antes dos descontos)
+  desconto_qtd_centavos: number    // desconto por quantidade (>10 un)
+  total_centavos: number           // subtotal - desconto qtd (valor do pedido / preço no cartão)
+  pix_centavos: number             // total com o desconto de 3% do PIX
+  total_pecas: number
+  frete_gratis: boolean            // total >= R$ 200
   comissao_centavos: number
   repasse_centavos: number
   completo: boolean
@@ -68,10 +77,12 @@ export function calcularOrcamento(linhas: LinhaOrcamento[], pesquisas: PesquisaP
 
   const resultado: LinhaResultado[] = []
   let total = 0
+  let totalPecas = 0
   let completo = true
 
   for (const l of linhas) {
     const qtd = l.total && l.total > 0 ? l.total : 0
+    totalPecas += qtd
     const estampado = l.estampado === true || (l.estampas?.length ?? 0) > 0
     const label = ([l.modelo, l.material].filter(Boolean).join(' · ') || 'Produto') + (estampado ? ' (estampado)' : '')
     const faltando: string[] = []
@@ -96,12 +107,21 @@ export function calcularOrcamento(linhas: LinhaOrcamento[], pesquisas: PesquisaP
     })
   }
 
-  const comissao = Math.round(total * COMISSAO_PCT)
+  const subtotal = total
+  const descontoQtd = totalPecas > QTD_MIN_DESC ? Math.round(subtotal * DESC_QTD_PCT) : 0
+  const totalFinal = subtotal - descontoQtd          // valor do pedido (cartão paga isso)
+  const pix = Math.round(totalFinal * (1 - DESC_PIX_PCT)) // PIX paga isso (−3%)
+  const comissao = Math.round(totalFinal * COMISSAO_PCT)
   return {
     linhas: resultado,
-    total_centavos: total,
+    subtotal_centavos: subtotal,
+    desconto_qtd_centavos: descontoQtd,
+    total_centavos: totalFinal,
+    pix_centavos: pix,
+    total_pecas: totalPecas,
+    frete_gratis: totalFinal >= FRETE_GRATIS_MIN_CENTAVOS,
     comissao_centavos: comissao,
-    repasse_centavos: total - comissao,
+    repasse_centavos: totalFinal - comissao,
     completo,
   }
 }
