@@ -25,6 +25,7 @@ const LinhaSchema = z.object({
   modelo: z.string().nullable(),
   cor: z.string().nullable(),
   material: z.string().nullable(),
+  publico: z.string().nullable().optional(),
   total: z.number().int().positive().nullable(),
   tamanhos: z.array(TamanhoSchema).default([]),
   estampas: z.array(EstampaSchema).default([]),

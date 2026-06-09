@@ -30,6 +30,7 @@ const LinhaSchema = z.object({
   modelo: z.string().nullable(),
   cor: z.string().nullable(),
   material: z.string().nullable(),
+  publico: z.string().nullable().optional(),
   total: z.number().int().positive().nullable(),
   tamanhos: z.array(TamanhoSchema).default([]),
   estampas: z.array(EstampaSchema).default([]),
@@ -48,10 +49,12 @@ const ContatoSchema = z.object({
   uf: z.string().nullable().optional(),
   prazoDias: z.number().int().positive().nullable().optional(),
 })
+const ConversaItemSchema = z.object({ role: z.enum(['user', 'assistant']), texto: z.string().max(8000) })
 const BodySchema = z.object({
   linhas: z.array(LinhaSchema),
   contato: ContatoSchema,
   observacoes: z.string().nullable().optional(),
+  conversa: z.array(ConversaItemSchema).max(200).optional(),
 })
 
 export async function POST(req: Request) {
@@ -113,6 +116,7 @@ export async function POST(req: Request) {
       uf: contato.uf ?? null,
       prazo_dias: contato.prazoDias ?? null,
       observacoes: parsed.data.observacoes ?? null,
+      conversa: parsed.data.conversa ?? null,
       status: 'completo',
       origem: 'home_chat',
       conta_id: contaId,

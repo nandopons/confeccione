@@ -18,7 +18,11 @@ export function normMockup(s?: string | null): string {
 export function chaveMockup(
   modelo?: string | null,
   cor?: string | null,
-  material?: string | null
+  material?: string | null,
+  publico?: string | null
 ): string {
-  return [normMockup(modelo), normMockup(cor), normMockup(material)].join('|')
+  const base = [normMockup(modelo), normMockup(cor), normMockup(material)].join('|')
+  const pub = normMockup(publico)
+  // só segmenta quando há gênero específico — mantém as chaves 'unissex' antigas.
+  return pub && pub !== 'unissex' ? base + '|' + pub : base
 }

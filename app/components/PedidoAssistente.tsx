@@ -92,7 +92,7 @@ export default function PedidoAssistente() {
       const res = await fetch("/api/pedido/assistente/criar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ linhas: p.linhas, contato: p.contato }),
+        body: JSON.stringify({ linhas: p.linhas, contato: p.contato, conversa: turnos.map((t) => ({ role: t.role, texto: t.display })) }),
       });
       const data = await res.json().catch(() => null);
       if (res.ok && data?.ok) {
@@ -252,6 +252,10 @@ export default function PedidoAssistente() {
           <div>
             <p className="text-sm font-medium text-gray-900 leading-tight">Assistente Confeccione</p>
             <p className="text-[11px] text-gray-400 leading-tight">Monta seu pedido com você, passo a passo</p>
+            <p className="text-[10px] text-gray-400 leading-tight mt-0.5 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#1D9E75] inline-block" />
+              Conversa acompanhada por Luigi, da Confeccione
+            </p>
           </div>
         </div>
 
