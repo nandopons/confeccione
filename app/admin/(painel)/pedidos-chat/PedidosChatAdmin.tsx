@@ -35,6 +35,23 @@ export default function PedidosChatAdmin() {
   const [carregando, setCarregando] = useState(true)
   const [aberto, setAberto] = useState<string | null>(null)
   const [det, setDet] = useState<Record<string, Detalhe>>({})
+  const [acaoMsg, setAcaoMsg] = useState<string | null>(null)
+  const [agindo, setAgindo] = useState<string | null>(null)
+
+  async function acao(id: string, ac: 'excluir' | 'lembrete' | 'feedback') {
+    if (ac === 'excluir' && !confirm('Excluir este pedido? Não dá pra desfazer.')) return
+    setAgindo(id + ac); setAcaoMsg(null)
+    try {
+      const r = await fetch(`/api/admin/pedidos-assistente/${id}/acao`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ acao: ac }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.erro || 'Falha')
+      if (ac === 'excluir') { setPedidos((ps) => ps.filter((x) => x.id !== id)); setAcaoMsg('Pedido excluído.') }
+      else setAcaoMsg(`${ac === 'lembrete' ? 'Lembrete' : 'Pedido de feedback'} enviado` + (j.whats || j.email ? ` (${[j.whats ? 'WhatsApp' : null, j.email ? 'e-mail' : null].filter(Boolean).join(' + ')}).` : ', mas nenhum canal disponível.'))
+    } catch (e: any) { setAcaoMsg(e.message || 'Erro') }
+    finally { setAgindo(null) }
+  }
 
   async function carregar() {
     setCarregando(true)
@@ -72,6 +89,7 @@ export default function PedidosChatAdmin() {
         </div>
       </div>
 
+      {acaoMsg && <div className="mb-4 text-sm rounded-md bg-blue-50 text-blue-800 px-3 py-2">{acaoMsg}</div>}
       {carregando && <p className="text-sm text-gray-500">Carregando…</p>}
       {!carregando && pedidos.length === 0 && <p className="text-sm text-gray-400">Nenhum pedido.</p>}
 
@@ -153,7 +171,12 @@ export default function PedidosChatAdmin() {
                         )}
                       </div>
 
-                      <a href={`/visualizador/${p.id}`} target="_blank" rel="noopener noreferrer" className="inline-block text-sm text-[#0F6E56] underline">Abrir visualizador do cliente ↗</a>
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
+                        <a href={`/visualizador/${p.id}`} target="_blank" rel="noopener noreferrer" className="text-sm text-[#0F6E56] underline mr-auto">Abrir visualizador do cliente ↗</a>
+                        <button type="button" onClick={() => acao(p.id, 'lembrete')} disabled={agindo === p.id + 'lembrete'} className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50">{agindo === p.id + 'lembrete' ? '…' : 'Lembrar de continuar'}</button>
+                        <button type="button" onClick={() => acao(p.id, 'feedback')} disabled={agindo === p.id + 'feedback'} className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50">{agindo === p.id + 'feedback' ? '…' : 'Pedir feedback do mockup'}</button>
+                        <button type="button" onClick={() => acao(p.id, 'excluir')} disabled={agindo === p.id + 'excluir'} className="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">Excluir</button>
+                      </div>
                     </>
                   )}
                 </div>

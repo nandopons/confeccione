@@ -684,3 +684,41 @@ ${SITE_URL}`
 
   await enviarEmail({ to: params.email, subject, html, text })
 }
+
+// ─── Lembrete pra continuar/pagar o pedido (admin -> cliente) ────────────
+export async function emailLembretePedido(params: { email: string; nome: string | null; link: string }): Promise<void> {
+  const nome = escapeHtml(params.nome || 'tudo bem?')
+  const subject = 'Seu pedido na Confeccione está te esperando 👕'
+  const html = layout(
+    `
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">Oi, ${nome}</h1>
+    <p style="margin:0 0 16px;color:#555;line-height:1.5;">Vimos que você começou um pedido com a gente e ainda não finalizou. Seus mockups estão prontos pra revisar — é rapidinho pra concluir e a produção já começa.</p>
+    <div style="text-align:center;margin:24px 0;">
+      <a href="${params.link}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;padding:14px 28px;border-radius:10px;font-weight:bold;">Continuar meu pedido</a>
+    </div>
+    <p style="margin:8px 0 0;color:#888;font-size:13px;">Qualquer dúvida, é só responder este e-mail ou chamar no WhatsApp (81) 99578-2077.</p>
+    `,
+    'Seu pedido está quase lá — finalize em 1 minuto.'
+  )
+  const text = `Oi, ${params.nome || ''}\n\nVocê começou um pedido na Confeccione e ainda não finalizou. Continue aqui:\n${params.link}\n\nDúvidas? WhatsApp (81) 99578-2077.\nConfeccione`
+  await enviarEmail({ to: params.email, subject, html, text })
+}
+
+// ─── Pedir feedback do mockup/arte (admin -> cliente) ────────────────────
+export async function emailFeedbackMockup(params: { email: string; nome: string | null; link: string }): Promise<void> {
+  const nome = escapeHtml(params.nome || 'tudo bem?')
+  const subject = 'O mockup ficou como você queria?'
+  const html = layout(
+    `
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">Oi, ${nome}</h1>
+    <p style="margin:0 0 16px;color:#555;line-height:1.5;">Queremos garantir que a arte e o mockup ficaram do jeitinho que você imaginou. Dá uma olhada e, se precisar mudar algo (posição da arte, tamanho, cor…), é só usar o botão <strong>“Ajustar detalhe”</strong> ali na peça — a gente atualiza na hora.</p>
+    <div style="text-align:center;margin:24px 0;">
+      <a href="${params.link}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;padding:14px 28px;border-radius:10px;font-weight:bold;">Ver e ajustar meu mockup</a>
+    </div>
+    <p style="margin:8px 0 0;color:#888;font-size:13px;">Tá perfeito? Então é só concluir o pedido. Qualquer coisa, responda este e-mail.</p>
+    `,
+    'Ficou como você queria? Revise seu mockup.'
+  )
+  const text = `Oi, ${params.nome || ''}\n\nO mockup ficou como você queria? Revise e ajuste o que precisar:\n${params.link}\n\nConfeccione`
+  await enviarEmail({ to: params.email, subject, html, text })
+}
