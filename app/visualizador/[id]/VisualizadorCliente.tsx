@@ -32,6 +32,12 @@ type Orcamento = { linhas: LinhaOrc[]; subtotal_centavos: number; desconto_qtd_c
 function brl(c: number): string {
   return (c / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
+/** Estimativa de frete só pra exibição (cortada quando o pedido tem frete grátis). */
+function freteEstimadoCentavos(pecas: number): number {
+  const bruto = 9900 + pecas * 120;
+  const limitado = Math.max(9900, Math.min(16900, bruto));
+  return Math.round(limitado / 100) * 100;
+}
 export type PedidoVis = {
   id: string;
   linhas: Linha[];
@@ -102,6 +108,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
   // confirmação / pagamento
   const [confirmStep, setConfirmStep] = useState<"idle" | "form" | "feito">("idle");
+  const [metodoPag, setMetodoPag] = useState<"pix" | "cartao">("pix");
   const [cpf, setCpf] = useState("");
   const [confirmando, setConfirmando] = useState(false);
   const [confirmErro, setConfirmErro] = useState<string | null>(null);
@@ -536,50 +543,92 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           Pesquisando preços de mercado pros seus produtos…
         </div>
       )}
-      {orcamento && orcamento.total_centavos > 0 && (
-        <div className="mt-6 bg-white border border-gray-200 rounded-2xl shadow-sm p-5">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-gray-900">Estimativa de orçamento</p>
-            <p className="text-xl font-semibold text-[#0F6E56]">{brl(orcamento.total_centavos)}</p>
+      {orcamento && orcamento.total_centavos > 0 && (() => {
+        const pix = metodoPag === "pix";
+        const descontoPix = orcamento.total_centavos - orcamento.pix_centavos;
+        const totalPagar = pix ? orcamento.pix_centavos : orcamento.total_centavos;
+        const frete = freteEstimadoCentavos(orcamento.total_pecas);
+        return (
+        <div className="mt-6 bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="p-5 pb-0">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-sm font-semibold text-gray-900">Resumo do pedido</p>
+              <span className="text-[11px] text-gray-400">Estimativa, sujeita a confirmação</span>
+            </div>
+
+            {/* método de pagamento (PIX pré-selecionado) */}
+            <div className="mt-3 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Forma de pagamento">
+              <button type="button" role="radio" aria-checked={pix} onClick={() => setMetodoPag("pix")}
+                className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${pix ? "border-[#1D9E75] bg-[#E1F5EE]/60 ring-1 ring-[#1D9E75]" : "border-gray-200 hover:border-gray-300"}`}>
+                <span className="flex items-center gap-1.5 text-sm font-medium text-gray-900">⚡ PIX <span className="text-[10px] font-semibold text-white bg-[#1D9E75] rounded-full px-1.5 py-0.5">−3%</span></span>
+                <span className="block text-[11px] text-gray-500 mt-0.5">À vista · aprovação na hora</span>
+              </button>
+              <button type="button" role="radio" aria-checked={!pix} onClick={() => setMetodoPag("cartao")}
+                className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${!pix ? "border-[#1D9E75] bg-[#E1F5EE]/60 ring-1 ring-[#1D9E75]" : "border-gray-200 hover:border-gray-300"}`}>
+                <span className="block text-sm font-medium text-gray-900">💳 Cartão de crédito</span>
+                <span className="block text-[11px] text-gray-500 mt-0.5">Em até 12x, conforme a operadora</span>
+              </button>
+            </div>
+
+            {/* extrato */}
+            <div className="mt-4 text-sm space-y-1.5">
+              <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{brl(orcamento.subtotal_centavos)}</span></div>
+              {orcamento.desconto_qtd_centavos > 0 && (
+                <div className="flex justify-between text-[#0F6E56]"><span>Desconto quantidade (5%)</span><span>− {brl(orcamento.desconto_qtd_centavos)}</span></div>
+              )}
+              <div className="flex justify-between items-center text-gray-600">
+                <span>Frete</span>
+                {orcamento.frete_gratis ? (
+                  <span className="flex items-center gap-2"><s className="text-gray-400">{brl(frete)}</s><span className="text-[#0F6E56] font-semibold">Grátis 🎉</span></span>
+                ) : (
+                  <span className="text-gray-400 text-xs">calculado no envio*</span>
+                )}
+              </div>
+              {pix && descontoPix > 0 && (
+                <div className="flex justify-between text-[#0F6E56]"><span>Desconto PIX (3%)</span><span>− {brl(descontoPix)}</span></div>
+              )}
+            </div>
+
+            {/* total */}
+            <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between gap-3">
+              <p className="text-sm font-medium text-gray-900">Total {pix ? "no PIX" : "no cartão"}</p>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-[#0F6E56] leading-tight">{brl(totalPagar)}</p>
+                <p className="text-[11px] text-gray-400">{pix ? `no cartão: ${brl(orcamento.total_centavos)} em até 12x` : `no PIX sai por ${brl(orcamento.pix_centavos)} (−3%)`}</p>
+              </div>
+            </div>
+            {!orcamento.frete_gratis && (
+              <p className="text-[10px] text-gray-400 mt-1">*Frete à parte (grátis acima de R$ 200) — opções de envio após a produção.</p>
+            )}
           </div>
-          <p className="text-[11px] text-gray-400 mt-1">Estimativa, sujeita a confirmação.</p>
 
-          {orcamento.desconto_qtd_centavos > 0 && (
-            <div className="mt-3 text-sm space-y-1">
-              <div className="flex justify-between text-gray-500"><span>Subtotal</span><span>{brl(orcamento.subtotal_centavos)}</span></div>
-              <div className="flex justify-between text-[#0F6E56]"><span>Desconto quantidade (5%)</span><span>− {brl(orcamento.desconto_qtd_centavos)}</span></div>
-              <div className="flex justify-between text-gray-900 font-medium border-t border-gray-100 pt-1"><span>Total</span><span>{brl(orcamento.total_centavos)}</span></div>
-            </div>
-          )}
-
-          <div className="mt-3 rounded-lg bg-[#E1F5EE]/50 border border-[#1D9E75]/20 px-3 py-2">
-            <p className="text-sm text-[#0F6E56] font-medium">💸 No PIX: {brl(orcamento.pix_centavos)} <span className="text-xs font-normal text-[#0F6E56]/80">(3% de desconto à vista)</span></p>
-            <p className="text-[11px] text-gray-500 mt-0.5">No cartão: {brl(orcamento.total_centavos)} (em até 12x, conforme a operadora).</p>
+          {/* CTA */}
+          <div className="p-5 pt-4">
+            <button type="button" disabled={!podeConfirmar}
+              onClick={() => { setConfirmStep("form"); setConfirmErro(null); setTimeout(() => document.getElementById("pagar-agora-form")?.scrollIntoView({ behavior: "smooth", block: "center" }), 60); }}
+              className="w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 disabled:cursor-not-allowed text-white text-base font-semibold px-6 py-3.5 rounded-xl transition-colors shadow-sm">
+              Pagar agora →
+            </button>
+            <p className="text-[11px] text-gray-400 text-center mt-2">Com o pagamento confirmado, seu pedido entra em produção.</p>
+            {estimandoPrecos && <p className="text-[11px] text-gray-400 mt-1 text-center">Atualizando preços de mercado…</p>}
+            {!orcamento.completo && !estimandoPrecos && (
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-snug">Alguns itens ainda estão sendo precificados. Se persistir, nosso time ajusta antes de fechar.</p>
+            )}
           </div>
-
-          {pedido.prazo_dias ? (
-            <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#E1F5EE]/50 border border-[#1D9E75]/20 px-3 py-2">
-              <span className="text-base leading-none">⏱️</span>
-              <p className="text-[11px] text-gray-600 leading-relaxed">Prazo de produção: <strong>{pedido.prazo_dias} dias</strong> — contados a partir da confirmação do pagamento.</p>
-            </div>
-          ) : null}
-          {orcamento.frete_gratis ? (
-            <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#E1F5EE] border border-[#1D9E75]/30 px-3 py-2">
-              <span className="text-base leading-none">🎉</span>
-              <p className="text-[11px] text-[#0F6E56] leading-relaxed"><strong>Frete grátis neste pedido!</strong> Pedidos acima de R$ 200 têm frete por nossa conta — enviamos quando a produção ficar pronta.</p>
-            </div>
-          ) : (
-            <div className="mt-3 flex items-start gap-2 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
-              <span className="text-base leading-none">🚚</span>
-              <p className="text-[11px] text-gray-500 leading-relaxed">O frete é à parte (frete grátis acima de R$ 200). Assim que a produção ficar pronta, enviamos as opções de transporte e prazos — você escolhe a que preferir e paga o frete na hora do envio.</p>
-            </div>
-          )}
-          {estimandoPrecos && <p className="text-[11px] text-gray-400 mt-1">Atualizando preços de mercado…</p>}
-          {!orcamento.completo && !estimandoPrecos && (
-            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-snug">Alguns itens ainda estão sendo precificados. Se persistir, nosso time ajusta antes de fechar.</p>
-          )}
         </div>
-      )}
+        );
+      })()}
+
+      {/* PRAZO DE PRODUÇÃO */}
+      {pedido.prazo_dias && orcamento && orcamento.total_centavos > 0 ? (
+        <div className="mt-3 bg-white border border-gray-200 rounded-2xl shadow-sm p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-[#E1F5EE] flex items-center justify-center text-lg shrink-0" aria-hidden>⏱️</div>
+          <div>
+            <p className="text-sm font-medium text-gray-900">Prazo de produção: <span className="text-[#0F6E56] font-semibold">{pedido.prazo_dias} dias</span></p>
+            <p className="text-[11px] text-gray-500">Contados a partir da confirmação do pagamento — o envio acontece assim que a produção fica pronta.</p>
+          </div>
+        </div>
+      ) : null}
 
       {/* GARANTIA CONFECCIONE */}
       <div className="mt-3 bg-[#E1F5EE]/60 border border-[#1D9E75]/20 rounded-xl p-3 flex items-start gap-2">
@@ -604,16 +653,29 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         {confirmStep === "feito" && pixResult ? (
           <div className="bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-4">
             <p className="text-sm text-[#0F6E56] font-medium">Pedido confirmado! ✅</p>
-            <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">Enviamos o resumo pro seu e-mail. Pague no <strong>cartão de crédito</strong> (botão abaixo) ou no <strong>PIX</strong> — assim que o pagamento cair, seu pedido entra em produção e você poderá baixar os visualizadores. O valor fica garantido pela Confeccione até você receber tudo certinho.</p>
-            <div className="mt-3">
-              <a href={pixResult.invoiceUrl} target="_blank" rel="noopener noreferrer" className="inline-block bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-5 py-2.5 rounded-xl">💳 Pagar com cartão de crédito</a>
-            </div>
-            {pixResult.copiaCola && (
+            <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">Enviamos o resumo pro seu e-mail. {metodoPag === "pix" ? <>Pague no <strong>PIX</strong> abaixo (3% de desconto já aplicado)</> : <>Pague no <strong>cartão de crédito</strong> pelo botão abaixo</>} — assim que o pagamento cair, seu pedido entra em produção e você poderá baixar os visualizadores. O valor fica garantido pela Confeccione até você receber tudo certinho.</p>
+            {metodoPag === "pix" && pixResult.copiaCola && (
               <div className="mt-4 flex flex-col sm:flex-row gap-4 items-start">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={`/api/pedido/assistente/${pedido.id}/pix-qr`} alt="QR Code PIX" className="w-40 h-40 rounded-lg border border-[#1D9E75]/30 bg-white shrink-0" />
                 <div className="flex-1 w-full min-w-0">
-                  <p className="text-xs text-gray-500 mb-1">Ou pague no PIX (copia e cola):</p>
+                  <p className="text-xs text-gray-500 mb-1">Escaneie o QR Code ou use o copia e cola:</p>
+                  <code className="block break-all bg-white border border-gray-200 rounded-lg px-3 py-2 text-[11px] text-gray-700">{pixResult.copiaCola}</code>
+                  <div className="flex gap-2 mt-2">
+                    <button type="button" onClick={() => { navigator.clipboard?.writeText(pixResult.copiaCola!); setCopiado(true); setTimeout(() => setCopiado(false), 2000); }} className="border border-[#1D9E75] text-[#0F6E56] text-xs px-3 py-1.5 rounded-lg hover:bg-white">{copiado ? "Copiado!" : "Copiar código PIX"}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="mt-3">
+              <a href={pixResult.invoiceUrl} target="_blank" rel="noopener noreferrer" className={metodoPag === "cartao" ? "inline-block bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-5 py-2.5 rounded-xl" : "inline-block border border-[#1D9E75]/40 text-[#0F6E56] hover:bg-white text-xs font-medium px-4 py-2 rounded-xl"}>💳 {metodoPag === "cartao" ? "Pagar com cartão de crédito" : "Prefere cartão? Pagar com cartão"}</a>
+            </div>
+            {metodoPag === "cartao" && pixResult.copiaCola && (
+              <div className="mt-4 flex flex-col sm:flex-row gap-4 items-start">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={`/api/pedido/assistente/${pedido.id}/pix-qr`} alt="QR Code PIX" className="w-40 h-40 rounded-lg border border-[#1D9E75]/30 bg-white shrink-0" />
+                <div className="flex-1 w-full min-w-0">
+                  <p className="text-xs text-gray-500 mb-1">Ou pague no PIX (3% de desconto):</p>
                   <code className="block break-all bg-white border border-gray-200 rounded-lg px-3 py-2 text-[11px] text-gray-700">{pixResult.copiaCola}</code>
                   <div className="flex gap-2 mt-2">
                     <button type="button" onClick={() => { navigator.clipboard?.writeText(pixResult.copiaCola!); setCopiado(true); setTimeout(() => setCopiado(false), 2000); }} className="border border-[#1D9E75] text-[#0F6E56] text-xs px-3 py-1.5 rounded-lg hover:bg-white">{copiado ? "Copiado!" : "Copiar código PIX"}</button>
@@ -644,28 +706,20 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             </div>
           </div>
         ) : confirmStep === "form" ? (
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-            <p className="text-sm font-medium text-gray-900 mb-1">Confirmar pedido e pagar</p>
-            <p className="text-xs text-gray-500 mb-3">Informe seu CPF (ou CNPJ) pra gerar a cobrança (PIX ou cartão). Total: <strong>{orcamento ? brl(orcamento.total_centavos) : ""}</strong>.</p>
+          <div id="pagar-agora-form" className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+            <p className="text-sm font-medium text-gray-900 mb-1">Quase lá — confirme pra pagar</p>
+            <p className="text-xs text-gray-500 mb-3">Informe seu CPF (ou CNPJ) pra gerar a cobrança. Total: <strong>{orcamento ? brl(metodoPag === "pix" ? orcamento.pix_centavos : orcamento.total_centavos) : ""}</strong> {metodoPag === "pix" ? "no PIX" : "no cartão (em até 12x)"}.</p>
             <input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="CPF ou CNPJ" inputMode="numeric"
               className="w-full sm:w-64 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
             <div className="flex gap-2 mt-3">
               <button type="button" onClick={() => void confirmarPedido()} disabled={confirmando}
-                className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-xl">{confirmando ? "Gerando…" : "Confirmar e ir para o pagamento"}</button>
+                className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-xl">{confirmando ? "Gerando…" : "Gerar pagamento →"}</button>
               <button type="button" onClick={() => { setConfirmStep("idle"); setConfirmErro(null); }} className="text-sm text-gray-500 px-3 py-2.5 rounded-xl hover:bg-gray-100">Cancelar</button>
             </div>
             {confirmErro && <p className="text-xs text-red-600 mt-2">{confirmErro}</p>}
           </div>
         ) : (
-          <>
-            <button type="button" onClick={() => setConfirmStep("form")} disabled={!podeConfirmar}
-              className="w-full sm:w-auto bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-6 py-3 rounded-xl transition-colors">
-              Confirmar pedido →
-            </button>
-            {!podeConfirmar && linhas.length > 0 && (
-              <p className="text-[11px] text-gray-400 mt-2">Pra confirmar, todos os itens precisam ter preço cadastrado (estimativa completa).</p>
-            )}
-          </>
+          <p className="text-xs text-gray-400">Revise os produtos e o resumo acima e clique em <strong className="text-gray-600">Pagar agora</strong> pra fechar o pedido.</p>
         )}
       </div>
 
