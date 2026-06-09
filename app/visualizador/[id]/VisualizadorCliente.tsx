@@ -69,7 +69,13 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     }
     return init;
   });
-  const [verArte, setVerArte] = useState<Record<number, boolean>>({});
+  const [verArte, setVerArte] = useState<Record<number, boolean>>(() => {
+    // Pré-seleciona "Com arte" nas linhas que já têm arte salva.
+    const m = pedido.mockups || {};
+    const init: Record<number, boolean> = {};
+    for (const k of Object.keys(m)) if (m[k]?.arte) init[Number(k)] = true;
+    return init;
+  });
   const [salvando, setSalvando] = useState(false);
 
   // confirmação / pagamento
