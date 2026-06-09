@@ -231,36 +231,56 @@ function telefoneValido(t: string | null): boolean {
   return Boolean(t && validarWhatsApp(t))
 }
 
-// Enriquece o endereço a partir do CEP (ViaCEP). Idempotente: roda sempre que
-// houver CEP de 8 dígitos; sobrescreve logradouro/bairro/cidade/uf com a fonte
-// oficial. Não toca em complemento (número/apto, que é do cliente).
-async function enriquecerEndereco(p: Pedido): Promise<Pedido> {
-  const cep = p.contato.cep
-  if (!cep) return p
+type EnderecoCep = { logradouro: string | null; bairro: string | null; cidade: string | null; uf: string | null }
+
+// Busca o endereço de um CEP na fonte oficial (ViaCEP). Retorna null se inválido.
+async function buscarCep(cep: string | null | undefined): Promise<EnderecoCep | null> {
+  if (!cep) return null
   const digs = cep.replace(/\D/g, '')
-  if (digs.length !== 8) return p
+  if (digs.length !== 8) return null
   try {
     const r = await fetch(`https://viacep.com.br/ws/${digs}/json/`, {
       headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(4000),
     })
-    if (!r.ok) return p
-    const j = (await r.json()) as {
-      erro?: boolean
-      logradouro?: string
-      bairro?: string
-      localidade?: string
-      uf?: string
+    if (!r.ok) return null
+    const j = (await r.json()) as { erro?: boolean; logradouro?: string; bairro?: string; localidade?: string; uf?: string }
+    if (j.erro) return null
+    return {
+      logradouro: j.logradouro?.trim() || null,
+      bairro: j.bairro?.trim() || null,
+      cidade: j.localidade?.trim() || null,
+      uf: j.uf?.trim() || null,
     }
-    if (j.erro) return p
+  } catch {
+    return null
+  }
+}
+
+// Extrai um CEP (8 dígitos) do texto mais recente do cliente.
+function extrairCepDasMensagens(messages: Array<{ role: string; content: string }>): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== 'user') continue
+    const m = /\b(\d{5})-?\s?(\d{3})\b/.exec(messages[i].content)
+    if (m) return m[1] + m[2]
+  }
+  return null
+}
+
+// Enriquece o endereço a partir do CEP (ViaCEP). Sobrescreve
+// logradouro/bairro/cidade/uf com a fonte oficial. Não toca em complemento.
+async function enriquecerEndereco(p: Pedido): Promise<Pedido> {
+  const end = await buscarCep(p.contato.cep)
+  if (!end) return p
+  try {
     return {
       ...p,
       contato: {
         ...p.contato,
-        logradouro: j.logradouro?.trim() || p.contato.logradouro,
-        bairro: j.bairro?.trim() || p.contato.bairro,
-        cidade: j.localidade?.trim() || p.contato.cidade,
-        uf: j.uf?.trim() || p.contato.uf,
+        logradouro: end.logradouro || p.contato.logradouro,
+        bairro: end.bairro || p.contato.bairro,
+        cidade: end.cidade || p.contato.cidade,
+        uf: end.uf || p.contato.uf,
       },
     }
   } catch {
@@ -327,6 +347,22 @@ export async function POST(req: Request) {
 
   const anterior = pedidoAnterior(messages)
 
+  // CEP -> endereço oficial ANTES de chamar o modelo, pra ele confirmar a rua
+  // CERTA (em vez de inventar de memória). Usa o CEP do estado anterior ou o
+  // que o cliente acabou de digitar na última mensagem.
+  const cepAtual = anterior.contato.cep || extrairCepDasMensagens(janela)
+  const enderecoCep = await buscarCep(cepAtual)
+  const systemBlocks: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> = [
+    { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+  ]
+  if (enderecoCep && cepAtual) {
+    const partes = [enderecoCep.logradouro, enderecoCep.bairro, [enderecoCep.cidade, enderecoCep.uf].filter(Boolean).join('/')].filter(Boolean).join(', ')
+    systemBlocks.push({
+      type: 'text',
+      text: `ENDEREÇO OFICIAL DO CEP ${cepAtual} (fonte ViaCEP — use EXATAMENTE este, NUNCA invente rua/bairro/cidade): ${partes}. Ao confirmar o endereço com o cliente, use estes dados literais e peça só o número e complemento.`,
+    })
+  }
+
   let texto: string
   try {
     const client = new Anthropic({ apiKey })
@@ -334,7 +370,7 @@ export async function POST(req: Request) {
       model: MODELO,
       max_tokens: MAX_TOKENS,
       temperature: TEMPERATURE,
-      system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+      system: systemBlocks,
       messages: janela.map((m) => ({ role: m.role, content: m.content })),
     })
     texto = textoDaResposta(resposta.content)
