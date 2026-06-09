@@ -26,7 +26,7 @@ export const runtime = 'nodejs'
 const MODELO = 'claude-sonnet-4-6'
 const MAX_TOKENS = 1300
 const TEMPERATURE = 0.4
-const MAX_MENSAGENS = 40
+const JANELA_MODELO = 60 // últimas N mensagens enviadas ao modelo (chat ilimitado p/ o cliente)
 
 // ----------------------------------------------------------------------------
 // Tipos do contrato
@@ -283,12 +283,13 @@ export async function POST(req: Request) {
   }
 
   const { messages } = body.data
-  if (messages.length > MAX_MENSAGENS) {
-    return NextResponse.json(
-      { error: `Histórico longo demais (máx. ${MAX_MENSAGENS} mensagens).` },
-      { status: 400 }
-    )
-  }
+
+  // Chat ilimitado pro cliente: em vez de barrar históricos longos, mandamos só
+  // as últimas JANELA_MODELO mensagens ao modelo (o pedido inteiro é
+  // reconstruído do último JSON do assistente, então não perdemos estado).
+  // Garante que a janela comece num turno de 'user' (exigência da API).
+  const janela = messages.slice(-JANELA_MODELO)
+  while (janela.length && janela[0].role === 'assistant') janela.shift()
 
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
@@ -306,7 +307,7 @@ export async function POST(req: Request) {
       max_tokens: MAX_TOKENS,
       temperature: TEMPERATURE,
       system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: janela.map((m) => ({ role: m.role, content: m.content })),
     })
     texto = textoDaResposta(resposta.content)
   } catch (err) {
