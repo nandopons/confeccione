@@ -63,6 +63,11 @@ export default function PedidoAssistente() {
   const [pedido, setPedido] = useState<Pedido>(PEDIDO_VAZIO);
   const [fase, setFase] = useState<Fase>("produto");
   const [coresSugeridas, setCoresSugeridas] = useState<{ termo: string; opcoes: { nome: string; hex: string }[] } | null>(null);
+  const [gravando, setGravando] = useState(false);
+  const [transcrevendo, setTranscrevendo] = useState(false);
+  const mediaRecRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const [protocolo, setProtocolo] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
@@ -116,6 +121,71 @@ export default function PedidoAssistente() {
     } finally {
       setSalvando(false);
     }
+  }
+
+  function escolherMime(): string {
+    const cands = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+    if (typeof MediaRecorder === "undefined") return "";
+    for (const m of cands) { try { if (MediaRecorder.isTypeSupported(m)) return m; } catch { /* */ } }
+    return "";
+  }
+
+  async function transcrever(blob: Blob, mime: string) {
+    setTranscrevendo(true);
+    setErro(null);
+    try {
+      const dataUrl: string = await new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(String(fr.result));
+        fr.onerror = rej;
+        fr.readAsDataURL(blob);
+      });
+      const base64 = dataUrl.split(",")[1] || "";
+      const r = await fetch("/api/pedido/assistente/transcrever", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audioBase64: base64, mime }),
+      });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d?.texto) { setErro(d?.erro || "Não consegui transcrever o áudio."); return; }
+      setInput((prev) => (prev.trim() ? prev.trim() + " " + d.texto : d.texto));
+      inputRef.current?.focus();
+    } catch {
+      setErro("Falha ao transcrever o áudio.");
+    } finally {
+      setTranscrevendo(false);
+    }
+  }
+
+  async function iniciarGravacao() {
+    if (gravando || transcrevendo) return;
+    const mime = escolherMime();
+    if (!navigator.mediaDevices?.getUserMedia || !mime) { setErro("Seu navegador não suporta gravação de áudio."); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+      const rec = new MediaRecorder(stream, { mimeType: mime });
+      rec.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      rec.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: mime });
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        if (blob.size > 0) void transcrever(blob, mime);
+      };
+      mediaRecRef.current = rec;
+      rec.start();
+      setGravando(true);
+      setErro(null);
+    } catch {
+      setErro("Não consegui acessar o microfone. Verifique a permissão.");
+    }
+  }
+
+  function pararGravacao() {
+    if (!gravando) return;
+    setGravando(false);
+    try { mediaRecRef.current?.stop(); } catch { /* */ }
   }
 
   async function enviar(textoForcado?: string) {
@@ -256,6 +326,18 @@ export default function PedidoAssistente() {
             placeholder="Escreva aqui…"
             className="flex-1 resize-none border border-gray-200 rounded-xl px-3 py-2 text-base sm:text-sm text-gray-800 max-h-28 focus:outline-none focus:border-[#1D9E75]"
           />
+          <button
+            type="button"
+            onClick={() => (gravando ? pararGravacao() : void iniciarGravacao())}
+            disabled={transcrevendo || enviando}
+            title={gravando ? "Parar e transcrever" : "Gravar áudio"}
+            aria-label={gravando ? "Parar gravação" : "Gravar áudio"}
+            className={"px-3 py-2 rounded-xl text-sm font-medium disabled:opacity-40 border transition-colors " + (gravando ? "bg-red-500 text-white border-red-500 animate-pulse" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50")}
+          >
+            {transcrevendo ? "…" : gravando ? "⏹" : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            )}
+          </button>
           <button
             type="button"
             onClick={() => void enviar()}
