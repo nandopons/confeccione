@@ -33,6 +33,7 @@ const LinhaSchema = z.object({
   total: z.number().int().positive().nullable(),
   tamanhos: z.array(TamanhoSchema).default([]),
   estampas: z.array(EstampaSchema).default([]),
+  estampado: z.boolean().nullable().optional(),
   descricao: z.string().nullable().optional(),
 })
 const BodySchema = z.object({
@@ -79,7 +80,7 @@ export async function POST(req: Request, ctx: Ctx) {
   // recalcula o total no servidor (não confia no cliente)
   const { data: pesqData } = await supabase.from('pesquisas_preco').select('chave, faixas')
   const orcamento = calcularOrcamento(
-    p.data.linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas })),
+    p.data.linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas, estampado: l.estampado ?? null })),
     (pesqData ?? []) as PesquisaPreco[]
   )
   if (!orcamento.completo || orcamento.total_centavos <= 0) {
