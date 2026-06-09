@@ -101,8 +101,19 @@ const PedidoModeloSchema = z.object({
   contato: ContatoSchema.default({ ...CONTATO_VAZIO }),
 }).catch({ ...PEDIDO_VAZIO })
 
+const CorOpcaoSchema = z.object({
+  nome: z.string().catch(''),
+  hex: z.string().catch(''),
+}).catch({ nome: '', hex: '' })
+
+const CoresSchema = z.object({
+  termo: z.string().catch(''),
+  opcoes: z.array(CorOpcaoSchema).catch([]),
+}).nullable().catch(null)
+
 const RespostaModeloSchema = z.object({
   mensagem: z.string().min(1),
+  cores: CoresSchema.optional(),
   pedido: PedidoModeloSchema.default({ ...PEDIDO_VAZIO }),
 })
 
@@ -119,6 +130,7 @@ VOCÊ É A BALIZA. O cliente quase nunca dá todos os detalhes sozinho. Ex.: "qu
 ESTRUTURA POR LINHA DE PRODUTO. Cada "linha" é um produto homogêneo: mesmo modelo, mesma cor, mesmo material. Regras:
 - Se o cliente quer a MESMA peça em CORES diferentes, isso vira LINHAS diferentes (ex.: 10 pretas + 10 azuis = 2 linhas).
 - Para cada linha, descubra: modelo, cor, material, quantidade total, a divisão por tamanho e SE A PEÇA É LISA, ESTAMPADA OU BORDADA. Pergunte isso com naturalidade ("Essa peça vai ser lisa, estampada ou bordada?") — é importante porque MUDA O PREÇO. Preencha "estampado": true quando for estampada OU bordada, e false quando for lisa. Guarde em "descricao" os detalhes (estampa ou bordado, posição: frente/costas/manga, arte própria etc.).
+- COR / TONALIDADE: quando o cliente mencionar uma cor que NÃO seja exatamente preto ou branco (ex.: vermelho, azul, verde, rosa, cinza…), NÃO assuma o tom — confecção é cheia de variação (pediu vermelho e vem vinho). Ofereça 5 TONALIDADES bem espaçadas, do mais claro ao mais escuro, preenchendo o campo "cores": {"termo": "<a cor que ele falou>", "opcoes": [5x {"nome": "<nome curto do tom>", "hex": "#RRGGBB"}]}. Use hexes REAIS e bem distribuídos na escala daquela cor (não tons quase iguais). Na "mensagem", peça pra ele escolher um tom (ou descrever melhor). Quando ele escolher (ou disser o tom), registre em "cor" da linha o nome do tom + o hex, ex.: "vermelho carmim (#9B1B30)". Use "cores" SOMENTE no turno em que está oferecendo a escolha de tom; nos demais turnos deixe null.
 - Para os tamanhos: pergunte primeiro QUANTAS peças no total dessa linha, depois quantas de cada tamanho (P, M, G, GG, etc.). Confira se a soma dos tamanhos bate com o total; se não bater, avise gentil e ajuste.
 - Quando uma linha ficar completa, pergunte se ele quer adicionar outro produto/cor ou se o pedido está completo.
 
@@ -133,7 +145,7 @@ REGRAS DE CONFIABILIDADE DO CONTATO:
 Quando tudo estiver coletado (linhas + contato), faça uma confirmação curta e simpática do resumo e diga que ele já pode prosseguir para ver a pré-visualização dos produtos.
 
 A cada resposta, devolva SOMENTE um JSON válido (sem markdown, sem cercas de código, sem texto fora dele), com o PEDIDO INTEIRO e atualizado neste formato exato:
-{"mensagem": string, "pedido": {"linhas": [{"modelo": string|null, "cor": string|null, "material": string|null, "total": number|null, "tamanhos": [{"tamanho": string, "qtd": number|null}], "estampado": boolean|null, "descricao": string|null}], "contato": {"nome": string|null, "telefone": string|null, "email": string|null, "cep": string|null, "complemento": string|null}}}
+{"mensagem": string, "cores": {"termo": string, "opcoes": [{"nome": string, "hex": string}]} | null, "pedido": {"linhas": [{"modelo": string|null, "cor": string|null, "material": string|null, "total": number|null, "tamanhos": [{"tamanho": string, "qtd": number|null}], "estampado": boolean|null, "descricao": string|null}], "contato": {"nome": string|null, "telefone": string|null, "email": string|null, "cep": string|null, "complemento": string|null}}}
 
 Regras do JSON:
 - "mensagem" é só o que você fala com o cliente (a próxima pergunta ou a confirmação). Nunca coloque JSON dentro da mensagem.
@@ -141,6 +153,7 @@ Regras do JSON:
 - "modelo" em texto livre e minúsculo (ex.: "tshirt", "oversized", "polo", "boné"). "cor" e "material" em texto livre.
 - "total" é a quantidade de peças daquela linha. "tamanhos" é a divisão (cada item {tamanho, qtd}); se ainda não sabe, deixe [].
 - "estampado" é booleano: true se a peça é estampada ou bordada, false se lisa, null se ainda não perguntou. Isso define a faixa de preço (liso vs estampado).
+- "cores": só preencha quando estiver oferecendo 5 tonalidades de uma cor (hexes #RRGGBB reais, claro→escuro); nos outros turnos é null. A escolha final vai pro campo "cor" da linha (nome do tom + hex).
 - "descricao" guarda detalhes úteis da linha: estampa/bordado, posição da arte (frente/costas/manga), observações.
 - Campos que você ainda não perguntou ficam null. Não preencha contato com placeholders.`
 
@@ -161,6 +174,21 @@ function textoDaResposta(content: Anthropic.Messages.ContentBlock[]): string {
     .filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text')
     .map((b) => b.text)
     .join('')
+}
+
+type Cores = { termo: string; opcoes: Array<{ nome: string; hex: string }> } | null
+
+function sanitizarCores(c: unknown): Cores {
+  const obj = c as { termo?: unknown; opcoes?: unknown } | null | undefined
+  if (!obj || !Array.isArray(obj.opcoes)) return null
+  const hexRe = /^#[0-9a-fA-F]{6}$/
+  const opcoes = (obj.opcoes as Array<{ nome?: unknown; hex?: unknown }>)
+    .map((o) => ({ nome: String(o?.nome ?? '').trim(), hex: String(o?.hex ?? '').trim() }))
+    .filter((o) => hexRe.test(o.hex))
+    .slice(0, 5)
+    .map((o) => ({ nome: o.nome || o.hex, hex: o.hex }))
+  if (opcoes.length < 2) return null
+  return { termo: String(obj.termo ?? '').trim(), opcoes }
 }
 
 function normalizarPedido(p: Pedido): Pedido {
@@ -329,6 +357,7 @@ export async function POST(req: Request) {
     const faseAnt = calcularFase(anteriorEnriq)
     return NextResponse.json({
       mensagem: PERGUNTA_FALLBACK,
+      cores: null,
       pedido: anteriorEnriq,
       fase: faseAnt,
       completo: faseAnt === 'completo',
@@ -339,6 +368,7 @@ export async function POST(req: Request) {
   const fase = calcularFase(pedido)
   return NextResponse.json({
     mensagem: parsed.mensagem,
+    cores: sanitizarCores(parsed.cores),
     pedido,
     fase,
     completo: fase === 'completo',

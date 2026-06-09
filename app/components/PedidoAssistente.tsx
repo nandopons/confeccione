@@ -54,6 +54,7 @@ export default function PedidoAssistente() {
 
   const [pedido, setPedido] = useState<Pedido>(PEDIDO_VAZIO);
   const [fase, setFase] = useState<Fase>("produto");
+  const [coresSugeridas, setCoresSugeridas] = useState<{ termo: string; opcoes: { nome: string; hex: string }[] } | null>(null);
 
   const [protocolo, setProtocolo] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
@@ -109,14 +110,15 @@ export default function PedidoAssistente() {
     }
   }
 
-  async function enviar() {
-    const texto = input.trim();
+  async function enviar(textoForcado?: string) {
+    const texto = (textoForcado ?? input).trim();
     if (!texto || enviando) return;
     setErro(null);
+    setCoresSugeridas(null);
 
     const novos: Turno[] = [...turnos, { role: "user", display: texto, raw: texto }];
     setTurnos(novos);
-    setInput("");
+    if (textoForcado === undefined) setInput("");
     setEnviando(true);
 
     // histórico p/ API: começa no 1º turno de usuário (Anthropic exige role user primeiro)
@@ -141,6 +143,7 @@ export default function PedidoAssistente() {
       setTurnos((t) => [...t, { role: "assistant", display: data.mensagem, raw }]);
       setPedido(novoPedido);
       setFase(novaFase);
+      setCoresSugeridas(data.cores ?? null);
       setEnviando(false);
       if (novaFase === "completo") void salvarPedido(novoPedido);
     } catch {
@@ -191,6 +194,27 @@ export default function PedidoAssistente() {
           {enviando && (
             <div className="flex justify-start">
               <div className="bg-gray-100 text-gray-400 rounded-2xl rounded-bl-sm px-3.5 py-2.5 text-sm">digitando…</div>
+            </div>
+          )}
+          {coresSugeridas && !enviando && (
+            <div className="flex justify-start">
+              <div className="max-w-[85%] w-full">
+                <p className="text-xs text-gray-400 mb-1.5">Toque na tonalidade de {coresSugeridas.termo || "cor"}:</p>
+                <div className="flex flex-wrap gap-2">
+                  {coresSugeridas.opcoes.map((o, k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => void enviar(`Quero o tom ${o.nome} (${o.hex})`)}
+                      className="flex items-center gap-1.5 border border-gray-200 rounded-xl pl-1.5 pr-2.5 py-1 hover:border-[#1D9E75] hover:bg-gray-50 transition-colors"
+                      title={o.hex}
+                    >
+                      <span className="w-6 h-6 rounded-md border border-black/10" style={{ backgroundColor: o.hex }} />
+                      <span className="text-xs text-gray-700">{o.nome}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
           {fase === "completo" && !enviando && (

@@ -209,6 +209,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   }
 
   // ---- aplicar arte ----
+  function limparArte(i: number) {
+    setImgs((m) => ({ ...m, [i]: { ...m[i], aplicado: undefined } }));
+    setVerArte((m) => ({ ...m, [i]: false }));
+  }
+
   function abrirArte(i: number) {
     setArteIndex(i);
     setArtes([]);
@@ -395,7 +400,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 )}
 
                 <div className="flex flex-wrap gap-2 mt-4">
-                  <button type="button" onClick={() => abrirArte(i)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-3.5 py-1.5 rounded-lg">+ Aplicar minha arte</button>
+                  <button type="button" onClick={() => abrirArte(i)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-3.5 py-1.5 rounded-lg">{st.aplicado ? "Trocar arte" : "+ Aplicar minha arte"}</button>
+                  {st.aplicado && (
+                    <button type="button" onClick={() => limparArte(i)} className="border border-gray-200 text-gray-600 hover:bg-gray-50 text-sm px-3 py-1.5 rounded-lg">Limpar arte</button>
+                  )}
                   <button type="button" onClick={() => abrirEdicao(i)} className="border border-gray-200 text-gray-700 hover:bg-gray-50 text-sm px-3 py-1.5 rounded-lg">Editar</button>
                   <button type="button" onClick={() => excluir(i)} className="border border-gray-200 text-red-600 hover:bg-red-50 text-sm px-3 py-1.5 rounded-lg">Excluir</button>
                 </div>
