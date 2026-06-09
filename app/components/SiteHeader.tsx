@@ -10,6 +10,23 @@ export default function SiteHeader({ transparent = false }: { transparent?: bool
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
+
+  // Mesmo scroll do botão do banner (offset calculado) — centraliza a seção #pedido.
+  const irParaPedido = (e: React.MouseEvent) => {
+    e.preventDefault();
+    close();
+    const scroll = () => {
+      const el = document.getElementById('pedido');
+      if (!el) { router.push('/#pedido'); return; }
+      const isMobile = window.innerWidth < 768;
+      const vh = window.innerHeight;
+      const offset = isMobile ? -Math.round(vh * 0.02) : -80 + Math.round(vh * 0.07);
+      const y = el.getBoundingClientRect().top + window.scrollY - offset;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+    };
+    if (window.location.pathname !== '/') { router.push('/'); setTimeout(scroll, 450); }
+    else { setTimeout(scroll, 60); }
+  };
   const [statusSessao, setStatusSessao] = useState<StatusSessao>("desconhecido");
   const [modalAberto, setModalAberto] = useState(false);
 
@@ -116,9 +133,9 @@ export default function SiteHeader({ transparent = false }: { transparent?: bool
           </div>
 
           <nav className="flex flex-col px-6 py-2 gap-1 text-gray-300">
-            <Link href="/#pedido" onClick={close} className="py-3 border-b border-white/5 hover:text-white transition-colors">
+            <button type="button" onClick={irParaPedido} className="text-left py-3 border-b border-white/5 hover:text-white transition-colors">
               Fazer meu pedido
-            </Link>
+            </button>
             <Link href="/sobre" onClick={close} className="py-3 border-b border-white/5 hover:text-white transition-colors">
               Sobre
             </Link>
