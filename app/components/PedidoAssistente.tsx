@@ -27,13 +27,17 @@ type Contato = {
   email: string | null;
   cep: string | null;
   complemento: string | null;
+  logradouro?: string | null;
+  bairro?: string | null;
+  cidade?: string | null;
+  uf?: string | null;
 };
 type Pedido = { linhas: Linha[]; contato: Contato };
 type Fase = "produto" | "contato" | "completo";
 
 type Turno = { role: "user" | "assistant"; display: string; raw: string };
 
-const CONTATO_VAZIO: Contato = { nome: null, telefone: null, email: null, cep: null, complemento: null };
+const CONTATO_VAZIO: Contato = { nome: null, telefone: null, email: null, cep: null, complemento: null, logradouro: null, bairro: null, cidade: null, uf: null };
 const PEDIDO_VAZIO: Pedido = { linhas: [], contato: { ...CONTATO_VAZIO } };
 
 const SAUDACAO =
@@ -159,7 +163,7 @@ export default function PedidoAssistente() {
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_minmax(300px,380px)] items-start">
       {/* ----------------------------- CHAT ----------------------------- */}
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col h-[560px] overflow-hidden">
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col h-[440px] sm:h-[560px] overflow-hidden">
         <div className="px-5 py-3.5 border-b border-gray-100 flex items-center gap-2">
           <span className="w-8 h-8 rounded-full bg-[#E1F5EE] flex items-center justify-center text-[#0F6E56] text-sm font-semibold">C</span>
           <div>
@@ -205,7 +209,7 @@ export default function PedidoAssistente() {
               }
             }}
             placeholder="Escreva aqui…"
-            className="flex-1 resize-none border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 max-h-28 focus:outline-none focus:border-[#1D9E75]"
+            className="flex-1 resize-none border border-gray-200 rounded-xl px-3 py-2 text-base sm:text-sm text-gray-800 max-h-28 focus:outline-none focus:border-[#1D9E75]"
           />
           <button
             type="button"
@@ -270,6 +274,9 @@ export default function PedidoAssistente() {
               {pedido.contato.email && <div className="text-gray-500">{pedido.contato.email}</div>}
               {(pedido.contato.cep || pedido.contato.complemento) && (
                 <div className="text-gray-500">{[pedido.contato.cep, pedido.contato.complemento].filter(Boolean).join(" · ")}</div>
+              )}
+              {(pedido.contato.logradouro || pedido.contato.cidade) && (
+                <div className="text-gray-500">{[pedido.contato.logradouro, pedido.contato.bairro, [pedido.contato.cidade, pedido.contato.uf].filter(Boolean).join("/")].filter(Boolean).join(", ")}</div>
               )}
             </div>
           </div>

@@ -19,6 +19,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
+import { validarWhatsApp, normalizarWhatsApp } from '@/app/lib/phone'
 
 export const runtime = 'nodejs'
 
@@ -45,10 +46,14 @@ type Contato = {
   email: string | null
   cep: string | null
   complemento: string | null
+  logradouro: string | null
+  bairro: string | null
+  cidade: string | null
+  uf: string | null
 }
 type Pedido = { linhas: Linha[]; contato: Contato }
 
-const CONTATO_VAZIO: Contato = { nome: null, telefone: null, email: null, cep: null, complemento: null }
+const CONTATO_VAZIO: Contato = { nome: null, telefone: null, email: null, cep: null, complemento: null, logradouro: null, bairro: null, cidade: null, uf: null }
 const PEDIDO_VAZIO: Pedido = { linhas: [], contato: { ...CONTATO_VAZIO } }
 
 const PERGUNTA_FALLBACK =
@@ -83,6 +88,10 @@ const ContatoSchema = z.object({
   email: z.string().nullable().catch(null),
   cep: z.string().nullable().catch(null),
   complemento: z.string().nullable().catch(null),
+  logradouro: z.string().nullable().catch(null),
+  bairro: z.string().nullable().catch(null),
+  cidade: z.string().nullable().catch(null),
+  uf: z.string().nullable().catch(null),
 }).catch({ ...CONTATO_VAZIO })
 
 const PedidoModeloSchema = z.object({
@@ -114,6 +123,10 @@ ESTRUTURA POR LINHA DE PRODUTO. Cada "linha" é um produto homogêneo: mesmo mod
 FLUXO EM DUAS FASES:
 1) PRODUTO: monte as linhas até o cliente dizer que terminou de descrever os produtos.
 2) CONTATO: só depois das linhas, colete os dados de contato, UMA pergunta por vez, NESTA ordem: nome, telefone (WhatsApp), e-mail, CEP, complemento (número/apto/referência). Não peça contato antes de ter pelo menos uma linha minimamente completa.
+
+REGRAS DE CONFIABILIDADE DO CONTATO:
+- TELEFONE (WhatsApp): exija SEMPRE com DDD. Se o cliente mandar um número curto/sem DDD ou claramente incompleto, NÃO aceite — peça com gentileza o WhatsApp COM DDD (ex.: (81) 99999-9999) e só avance quando tiver DDD. Confirme repetindo o número formatado.
+- CEP: peça só o CEP (8 dígitos). O sistema preenche o endereço automaticamente (rua, bairro, cidade/UF) — você NÃO precisa perguntar rua/bairro/cidade. Quando o endereço aparecer no resumo, confirme rapidinho ("É na [rua], [bairro], [cidade]/[UF]?") e pergunte só o NÚMERO e complemento (apto/referência). Se o CEP não trouxer endereço, peça o CEP de novo ou o endereço manualmente.
 
 Quando tudo estiver coletado (linhas + contato), faça uma confirmação curta e simpática do resumo e diga que ele já pode prosseguir para ver a pré-visualização dos produtos.
 
@@ -168,6 +181,10 @@ function normalizarPedido(p: Pedido): Pedido {
     email: norm(c.email),
     cep: norm(c.cep),
     complemento: norm(c.complemento),
+    logradouro: norm(c.logradouro),
+    bairro: norm(c.bairro),
+    cidade: norm(c.cidade),
+    uf: norm(c.uf),
   }
   return { linhas, contato }
 }
@@ -176,11 +193,54 @@ function linhaCompleta(l: Linha): boolean {
   return Boolean(l.modelo && l.cor && l.total)
 }
 
+function telefoneValido(t: string | null): boolean {
+  // Exige WhatsApp brasileiro com DDD (celular). validarWhatsApp normaliza pra
+  // 55+DDD+9+8díg; número sem DDD não passa.
+  return Boolean(t && validarWhatsApp(t))
+}
+
+// Enriquece o endereço a partir do CEP (ViaCEP). Idempotente: roda sempre que
+// houver CEP de 8 dígitos; sobrescreve logradouro/bairro/cidade/uf com a fonte
+// oficial. Não toca em complemento (número/apto, que é do cliente).
+async function enriquecerEndereco(p: Pedido): Promise<Pedido> {
+  const cep = p.contato.cep
+  if (!cep) return p
+  const digs = cep.replace(/\D/g, '')
+  if (digs.length !== 8) return p
+  try {
+    const r = await fetch(`https://viacep.com.br/ws/${digs}/json/`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!r.ok) return p
+    const j = (await r.json()) as {
+      erro?: boolean
+      logradouro?: string
+      bairro?: string
+      localidade?: string
+      uf?: string
+    }
+    if (j.erro) return p
+    return {
+      ...p,
+      contato: {
+        ...p.contato,
+        logradouro: j.logradouro?.trim() || p.contato.logradouro,
+        bairro: j.bairro?.trim() || p.contato.bairro,
+        cidade: j.localidade?.trim() || p.contato.cidade,
+        uf: j.uf?.trim() || p.contato.uf,
+      },
+    }
+  } catch {
+    return p
+  }
+}
+
 function calcularFase(p: Pedido): 'produto' | 'contato' | 'completo' {
   const temLinha = p.linhas.length > 0 && p.linhas.some(linhaCompleta)
   if (!temLinha) return 'produto'
   const c = p.contato
-  const contatoOk = Boolean(c.nome && c.telefone && c.email && c.cep)
+  const contatoOk = Boolean(c.nome && telefoneValido(c.telefone) && c.email && c.cep)
   return contatoOk ? 'completo' : 'contato'
 }
 
@@ -260,16 +320,17 @@ export async function POST(req: Request) {
   }
 
   if (!parsed) {
-    const faseAnt = calcularFase(anterior)
+    const anteriorEnriq = await enriquecerEndereco(anterior)
+    const faseAnt = calcularFase(anteriorEnriq)
     return NextResponse.json({
       mensagem: PERGUNTA_FALLBACK,
-      pedido: anterior,
+      pedido: anteriorEnriq,
       fase: faseAnt,
       completo: faseAnt === 'completo',
     })
   }
 
-  const pedido = normalizarPedido(parsed.pedido)
+  const pedido = await enriquecerEndereco(normalizarPedido(parsed.pedido))
   const fase = calcularFase(pedido)
   return NextResponse.json({
     mensagem: parsed.mensagem,

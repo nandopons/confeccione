@@ -12,6 +12,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getContaAtual } from '@/app/lib/cliente-auth'
+import { normalizarWhatsApp } from '@/app/lib/phone'
 
 export const runtime = 'nodejs'
 
@@ -40,6 +41,10 @@ const ContatoSchema = z.object({
   email: z.string().nullable(),
   cep: z.string().nullable(),
   complemento: z.string().nullable(),
+  logradouro: z.string().nullable().optional(),
+  bairro: z.string().nullable().optional(),
+  cidade: z.string().nullable().optional(),
+  uf: z.string().nullable().optional(),
 })
 const BodySchema = z.object({
   linhas: z.array(LinhaSchema),
@@ -96,10 +101,14 @@ export async function POST(req: Request) {
     .insert({
       linhas: linhasValidas,
       nome: contato.nome,
-      telefone: contato.telefone,
+      telefone: contato.telefone ? normalizarWhatsApp(contato.telefone) : null,
       email: contato.email,
       cep: contato.cep,
       complemento: contato.complemento,
+      logradouro: contato.logradouro ?? null,
+      bairro: contato.bairro ?? null,
+      cidade: contato.cidade ?? null,
+      uf: contato.uf ?? null,
       observacoes: parsed.data.observacoes ?? null,
       status: 'completo',
       origem: 'home_chat',
