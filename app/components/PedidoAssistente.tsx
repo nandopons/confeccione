@@ -44,6 +44,14 @@ const PEDIDO_VAZIO: Pedido = { linhas: [], contato: { ...CONTATO_VAZIO } };
 const SAUDACAO =
   "Oi! 👋 Vou te ajudar a montar seu pedido aqui mesmo. Me conta: o que você quer produzir? (ex.: “camisetas oversized pretas”, “bonés bordados”, “uniforme da minha equipe”)";
 
+function corHex(s: string | null | undefined): string | null {
+  const m = /#([0-9a-fA-F]{6})\b/.exec(s || "");
+  return m ? "#" + m[1] : null;
+}
+function corLabel(s: string | null | undefined): string {
+  return (s || "").replace(/\s*\(#?[0-9a-fA-F]{6}\)\s*/g, " ").replace(/#[0-9a-fA-F]{6}/g, "").replace(/\s{2,}/g, " ").trim();
+}
+
 export default function PedidoAssistente() {
   const [turnos, setTurnos] = useState<Turno[]>([
     { role: "assistant", display: SAUDACAO, raw: JSON.stringify({ mensagem: SAUDACAO, pedido: PEDIDO_VAZIO }) },
@@ -281,8 +289,9 @@ export default function PedidoAssistente() {
             {pedido.linhas.map((l, i) => (
               <div key={i} className="border border-gray-100 rounded-xl p-3 bg-gray-50/60">
                 <div className="flex items-center justify-between gap-2 mb-1">
-                  <p className="text-sm font-medium text-gray-900 capitalize">
-                    {[l.modelo, l.cor].filter(Boolean).join(" · ") || "Produto"}
+                  <p className="text-sm font-medium text-gray-900 capitalize flex items-center gap-1.5">
+                    {corHex(l.cor) && <span className="w-3 h-3 rounded-full border border-black/10 inline-block shrink-0" style={{ backgroundColor: corHex(l.cor) as string }} />}
+                    {[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ") || "Produto"}
                   </p>
                   {l.total ? <span className="text-xs text-gray-500 shrink-0">{l.total} un.</span> : null}
                 </div>
