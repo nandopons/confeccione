@@ -193,6 +193,18 @@ export default function PedidoAssistente() {
               <div className="bg-gray-100 text-gray-400 rounded-2xl rounded-bl-sm px-3.5 py-2.5 text-sm">digitando…</div>
             </div>
           )}
+          {fase === "completo" && !enviando && (
+            <div className="flex justify-start">
+              <button
+                type="button"
+                onClick={() => void prosseguir()}
+                disabled={salvando}
+                className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors shadow-sm"
+              >
+                {salvando ? "Salvando…" : "Prosseguir para visualizadores →"}
+              </button>
+            </div>
+          )}
         </div>
 
         {erro && <div className="px-5 pb-1 text-red-600 text-xs">{erro}</div>}
