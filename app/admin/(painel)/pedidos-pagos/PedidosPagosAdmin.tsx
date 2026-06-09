@@ -29,6 +29,7 @@ type Pedido = {
   nome: string | null
   cep: string | null
   valor_centavos: number | null
+  prazo_dias?: number | null
   linhas: Linha[]
   ofertas: Oferta[]
 }
@@ -166,6 +167,7 @@ export default function PedidosPagosAdmin() {
                 <div>
                   <div className="text-sm text-gray-500">{data(p.criado_em)} · {p.cep || 'sem CEP'}</div>
                   <div className="font-medium text-gray-900">{totalPecas} peças · cliente pagou {brl(p.valor_centavos)} · fornecedor recebe {brl(repasse97(p.valor_centavos))}</div>
+                  {p.prazo_dias ? <div className="text-sm text-[#0F6E56]">⏱️ Prazo: {p.prazo_dias} dias (a partir do pagamento)</div> : null}
                 </div>
                 {aceita && (
                   <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">
