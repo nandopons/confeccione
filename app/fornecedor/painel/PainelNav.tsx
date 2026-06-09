@@ -40,13 +40,25 @@ const items: Item[] = [
     ),
   },
   {
-    href: "/fornecedor/painel/plano",
-    label: "Plano",
+    href: "/fornecedor/painel/carteira",
+    label: "Carteira",
     icon: (active) => (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? "#1D9E75" : "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 7L12 3 4 7v10l8 4 8-4z" />
-        <path d="M12 11v6" />
-        <path d="M9 13l3-2 3 2" />
+        <path d="M2 7a2 2 0 0 1 2-2h15a1 1 0 0 1 1 1v3" />
+        <path d="M2 7v10a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-3" />
+        <path d="M16 12h6v4h-6a2 2 0 0 1 0-4z" />
+      </svg>
+    ),
+  },
+  {
+    href: "/fornecedor/painel/envio",
+    label: "Envio",
+    icon: (active) => (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={active ? "#1D9E75" : "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M1 3h15v13H1z" />
+        <path d="M16 8h4l3 3v5h-7z" />
+        <circle cx="5.5" cy="18.5" r="2.5" />
+        <circle cx="18.5" cy="18.5" r="2.5" />
       </svg>
     ),
   },
@@ -141,7 +153,7 @@ export default function PainelNav({ nomeFornecedor }: { nomeFornecedor: string }
       </aside>
 
       {/* BOTTOM NAV MOBILE */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 grid grid-cols-5 z-40">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 grid grid-cols-6 z-40">
         {items.map((item) => {
           const active = isActive(pathname, item.href);
           return (
