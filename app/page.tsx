@@ -12,27 +12,27 @@ export default function Home() {
     <main className="min-h-screen bg-white font-sans">
 
       <section className="relative h-[88vh] min-h-[600px] overflow-hidden bg-[#0a0a0a]">
-        {/* Foto contida na metade direita (desktop) / fundo (mobile) — tamanho ~nativo, sem esticar */}
-        <div className="absolute inset-0 z-0 md:left-auto md:w-[60%]">
+        {/* Foto em tela cheia (desktop e mobile) */}
+        <div className="absolute inset-0 z-0">
           <Image
-            src="/hero/hero-manequim.jpg"
-            alt="Manequim de costura com fita métrica — ateliê de confecção"
+            src="/hero/hero-costura.jpg"
+            alt="Costureira trabalhando em máquina de costura industrial — confecção profissional"
             fill
             preload
             quality={85}
-            sizes="(min-width: 768px) 60vw, 100vw"
-            className="object-cover object-[60%_50%]"
+            sizes="100vw"
+            className="object-cover object-[50%_55%]"
           />
         </div>
 
-        {/* Mescla desktop: dissolve a foto no preto sólido, sem borda dura */}
+        {/* Máscara desktop: degradê leve só para legibilidade do texto, sem bloco preto */}
         <div
           className="hidden md:block absolute inset-0 z-[1]"
           style={{
             background: [
-              "linear-gradient(90deg, #0a0a0a 0%, #0a0a0a 52%, rgba(10,10,10,0.6) 68%, rgba(10,10,10,0.25) 85%, rgba(10,10,10,0) 100%)",
-              "linear-gradient(180deg, rgba(10,10,10,0.5) 0%, rgba(10,10,10,0) 25%, rgba(10,10,10,0) 75%, rgba(10,10,10,0.3) 90%, #0a0a0a 100%)",
-              "linear-gradient(270deg, rgba(10,10,10,0.5) 0%, rgba(10,10,10,0) 12%)",
+              "linear-gradient(90deg, rgba(10,10,10,0.88) 0%, rgba(10,10,10,0.55) 30%, rgba(10,10,10,0.18) 55%, rgba(10,10,10,0) 75%)",
+              "linear-gradient(180deg, rgba(10,10,10,0.45) 0%, rgba(10,10,10,0) 17%)",
+              "linear-gradient(180deg, rgba(10,10,10,0) 88%, #0a0a0a 100%)",
             ].join(", "),
           }}
         />
