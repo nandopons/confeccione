@@ -56,6 +56,14 @@ async function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+function corHex(s: string | null | undefined): string | null {
+  const m = /#([0-9a-fA-F]{6})\b/.exec(s || "");
+  return m ? "#" + m[1] : null;
+}
+function corLabel(s: string | null | undefined): string {
+  return (s || "").replace(/\s*\(#?[0-9a-fA-F]{6}\)\s*/g, " ").replace(/#[0-9a-fA-F]{6}/g, "").replace(/\s{2,}/g, " ").trim();
+}
+
 export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [linhas, setLinhas] = useState<Linha[]>(
     (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [], estampado: l.estampado ?? null }))
@@ -404,7 +412,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
               <div className="p-5">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-gray-900 font-medium capitalize">{[l.modelo, l.cor].filter(Boolean).join(" · ") || "Produto"}</p>
+                    <p className="text-gray-900 font-medium capitalize flex items-center gap-1.5">{corHex(l.cor) && <span className="w-3.5 h-3.5 rounded-full border border-black/10 inline-block shrink-0" style={{ backgroundColor: corHex(l.cor) as string }} />}{[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ") || "Produto"}</p>
                     {l.material && <p className="text-sm text-gray-500 mt-0.5">Material: {l.material}</p>}
                   </div>
                   {l.total ? <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full shrink-0">{l.total} un.</span> : null}
