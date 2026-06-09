@@ -22,6 +22,7 @@ type Oferta = {
   linhas: Linha[]
   numImagens: number
   valorRepasseCentavos: number | null
+  prazoDias: number | null
 }
 
 function brl(c: number | null | undefined): string {
@@ -63,8 +64,11 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
       <div className="px-6 pt-6 pb-4 border-b border-gray-100">
         <div className="text-xs uppercase tracking-wide text-emerald-700 font-semibold">Confeccione · oferta de pedido</div>
         <h1 className="text-2xl font-bold text-gray-900 mt-1">
-          {oferta.totalPecas} peças · repasse {brl(oferta.valorRepasseCentavos)}
+          {oferta.totalPecas} peças · {brl(oferta.valorRepasseCentavos)}
         </h1>
+        {oferta.prazoDias ? (
+          <p className="text-sm text-[#0F6E56] font-medium mt-1">⏱️ Prazo de produção: {oferta.prazoDias} dias — a partir da confirmação do pagamento.</p>
+        ) : null}
         <p className="text-sm text-gray-500 mt-1">
           Pedido já pago. Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.
         </p>

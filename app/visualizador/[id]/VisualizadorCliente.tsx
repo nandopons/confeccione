@@ -562,6 +562,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             <p className="text-xl font-semibold text-[#0F6E56]">{brl(orcamento.total_centavos)}</p>
           </div>
           <p className="text-[11px] text-gray-400 mt-1">Estimativa, sujeita a confirmação.</p>
+          {pedido.prazo_dias ? (
+            <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#E1F5EE]/50 border border-[#1D9E75]/20 px-3 py-2">
+              <span className="text-base leading-none">⏱️</span>
+              <p className="text-[11px] text-gray-600 leading-relaxed">Prazo de produção: <strong>{pedido.prazo_dias} dias</strong> — contados a partir da confirmação do pagamento.</p>
+            </div>
+          ) : null}
           <div className="mt-3 flex items-start gap-2 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
             <span className="text-base leading-none">🚚</span>
             <p className="text-[11px] text-gray-500 leading-relaxed">O frete é à parte. Assim que a produção ficar pronta, enviamos as opções de transporte e prazos — você escolhe a que preferir e paga o frete na hora do envio.</p>

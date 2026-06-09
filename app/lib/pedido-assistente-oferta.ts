@@ -38,6 +38,7 @@ export type PedidoPago = {
   cep: string | null
   valor_centavos: number | null
   pagamento_status: string | null
+  prazo_dias: number | null
   linhas: LinhaPedido[]
   ofertas: OfertaResumo[]
 }
@@ -134,7 +135,7 @@ export async function listarPedidosPagos(): Promise<{
 }> {
   const { data: pedidosRaw } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, criado_em, nome, cep, valor_centavos, pagamento_status, linhas')
+    .select('id, criado_em, nome, cep, valor_centavos, pagamento_status, prazo_dias, linhas')
     .eq('pagamento_status', 'pago')
     .order('criado_em', { ascending: false })
 
@@ -195,7 +196,7 @@ export async function ofertarPedido(
 ): Promise<{ ok: boolean; criadas: number; notificadas: number; erro?: string }> {
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, pagamento_status, valor_centavos, linhas, cep, imagens')
+    .select('id, pagamento_status, valor_centavos, linhas, cep, imagens, prazo_dias')
     .eq('id', pedidoId)
     .maybeSingle<{
       id: string
@@ -204,6 +205,7 @@ export async function ofertarPedido(
       linhas: LinhaPedido[]
       cep: string | null
       imagens: unknown[] | null
+      prazo_dias: number | null
     }>()
 
   if (!pedido) return { ok: false, criadas: 0, notificadas: 0, erro: 'Pedido não encontrado' }
@@ -279,6 +281,7 @@ export async function ofertarPedido(
         `Um pedido *já pago* está disponível para produção:\n\n` +
         `${texto}\n\n` +
         `Total: *${totalPecas} peças*\n` +
+        (pedido.prazo_dias ? `Prazo de produção: *${pedido.prazo_dias} dias* (a partir da confirmação do pagamento)\n` : '') +
         `Valor total do pedido: *${repasseTexto}* (pagamento garantido pela Confeccione, liberado após a entrega em conformidade)\n\n` +
         `👉 Veja os mockups e detalhes e assuma o pedido aqui:\n${link}`
       const enviado = await enviarMensagem(forn.whatsapp, mensagem)
@@ -297,6 +300,7 @@ export async function ofertarPedido(
           repasseTexto,
           linkOferta: link,
           numImagens,
+          prazoDias: pedido.prazo_dias ?? null,
         })
       } catch (e) {
         console.error('[oferta] e-mail falhou', fid, e)
@@ -355,6 +359,7 @@ export type OfertaDetalheFornecedor = {
   linhas: LinhaPedido[]
   numImagens: number
   valorRepasseCentavos: number | null
+  prazoDias: number | null
 }
 
 export async function carregarOfertaParaFornecedor(
@@ -369,9 +374,9 @@ export async function carregarOfertaParaFornecedor(
 
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, linhas, imagens, pagamento_status')
+    .select('id, linhas, imagens, pagamento_status, prazo_dias')
     .eq('id', oferta.pedido_id)
-    .maybeSingle<{ id: string; linhas: LinhaPedido[]; imagens: unknown[] | null; pagamento_status: string | null }>()
+    .maybeSingle<{ id: string; linhas: LinhaPedido[]; imagens: unknown[] | null; pagamento_status: string | null; prazo_dias: number | null }>()
   if (!pedido) return null
 
   const linhas = Array.isArray(pedido.linhas) ? pedido.linhas : []
@@ -386,6 +391,7 @@ export async function carregarOfertaParaFornecedor(
     linhas,
     numImagens: Array.isArray(pedido.imagens) ? pedido.imagens.length : 0,
     valorRepasseCentavos: oferta.valor_repasse_centavos,
+    prazoDias: pedido.prazo_dias ?? null,
   }
 }
 
