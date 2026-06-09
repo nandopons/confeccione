@@ -20,6 +20,7 @@ export type LinhaOrcamento = {
   material: string | null
   total: number | null
   estampas?: EstampaLinha[]
+  estampado?: boolean | null
 }
 
 export type LinhaResultado = {
@@ -61,7 +62,7 @@ export function calcularOrcamento(linhas: LinhaOrcamento[], pesquisas: PesquisaP
 
   for (const l of linhas) {
     const qtd = l.total && l.total > 0 ? l.total : 0
-    const estampado = (l.estampas?.length ?? 0) > 0
+    const estampado = l.estampado === true || (l.estampas?.length ?? 0) > 0
     const label = ([l.modelo, l.material].filter(Boolean).join(' · ') || 'Produto') + (estampado ? ' (estampado)' : '')
     const faltando: string[] = []
 
