@@ -493,23 +493,27 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   </p>
                 )}
 
-                <div className="mt-4 flex flex-wrap items-stretch gap-3">
+                <div className="mt-4 flex flex-col sm:flex-row sm:items-start gap-2.5">
                   {/* Grupo ARTE */}
-                  <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[#1D9E75]/30 bg-[#E1F5EE]/30 p-2">
-                    <span className="text-[10px] uppercase tracking-wide text-[#0F6E56] font-semibold px-1">Arte</span>
-                    <button type="button" onClick={() => abrirArte(i)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-3.5 py-1.5 rounded-lg">{st.aplicado ? "Trocar arte" : "+ Aplicar minha arte"}</button>
-                    {st.aplicado && (
-                      <button type="button" onClick={() => limparArte(i)} className="border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-1.5 rounded-lg">Limpar arte</button>
-                    )}
-                    {st.url && (
-                      <button type="button" onClick={() => abrirAjuste(i)} className="border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 text-sm px-3 py-1.5 rounded-lg">Ajustar detalhe</button>
-                    )}
+                  <div className="rounded-xl border border-[#1D9E75]/30 bg-[#E1F5EE]/30 p-2.5">
+                    <div className="text-[10px] uppercase tracking-wide text-[#0F6E56] font-semibold mb-1.5">Arte</div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => abrirArte(i)} className="flex-1 sm:flex-none min-w-[130px] text-center bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-3.5 py-2 rounded-lg">{st.aplicado ? "Trocar arte" : "+ Aplicar arte"}</button>
+                      {st.aplicado && (
+                        <button type="button" onClick={() => limparArte(i)} className="flex-1 sm:flex-none text-center border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg">Limpar arte</button>
+                      )}
+                      {st.url && (
+                        <button type="button" onClick={() => abrirAjuste(i)} className="flex-1 sm:flex-none text-center border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg">Ajustar detalhe</button>
+                      )}
+                    </div>
                   </div>
                   {/* Grupo PRODUTO */}
-                  <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 p-2">
-                    <span className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold px-1">Produto</span>
-                    <button type="button" onClick={() => abrirEdicao(i)} className="border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 text-sm px-3 py-1.5 rounded-lg">Editar</button>
-                    <button type="button" onClick={() => excluir(i)} className="border border-gray-200 bg-white text-red-600 hover:bg-red-50 text-sm px-3 py-1.5 rounded-lg">Excluir</button>
+                  <div className="rounded-xl border border-gray-200 p-2.5">
+                    <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-1.5">Produto</div>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => abrirEdicao(i)} className="flex-1 sm:flex-none text-center border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 text-sm px-4 py-2 rounded-lg">Editar</button>
+                      <button type="button" onClick={() => excluir(i)} className="flex-1 sm:flex-none text-center border border-gray-200 bg-white text-red-600 hover:bg-red-50 text-sm px-4 py-2 rounded-lg">Excluir</button>
+                    </div>
                   </div>
                 </div>
 
