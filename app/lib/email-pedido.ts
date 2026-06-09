@@ -97,7 +97,8 @@ export async function enviarEmailPedidoPix(p: {
         <a href="${p.invoiceUrl}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;font-size:15px;font-weight:bold;padding:12px 28px;border-radius:10px;">Pagar (PIX ou cartão)</a>
       </td></tr></table>
 
-      <p style="font-size:12px;color:#999;margin:22px 0 0;line-height:1.5;">Dúvidas? Responda este e-mail ou fale no WhatsApp (81) 99578-2077.</p>
+      <p style="font-size:12px;color:#555;margin:20px 0 0;line-height:1.5;">🚚 <strong>Frete à parte:</strong> assim que a produção ficar pronta, enviamos as opções de transporte e prazos — você escolhe a que preferir e paga o frete na hora do envio.</p>
+      <p style="font-size:12px;color:#999;margin:14px 0 0;line-height:1.5;">Dúvidas? Responda este e-mail ou fale no WhatsApp (81) 99578-2077.</p>
     </td></tr>
   </table>
   <p style="font-size:11px;color:#aaa;margin:16px 0 0;">Confeccione — confeccione.com.br</p>

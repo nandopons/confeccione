@@ -32,13 +32,14 @@ type Contato = {
   bairro?: string | null;
   cidade?: string | null;
   uf?: string | null;
+  prazoDias?: number | null;
 };
 type Pedido = { linhas: Linha[]; contato: Contato };
 type Fase = "produto" | "contato" | "completo";
 
 type Turno = { role: "user" | "assistant"; display: string; raw: string };
 
-const CONTATO_VAZIO: Contato = { nome: null, telefone: null, email: null, cep: null, complemento: null, logradouro: null, bairro: null, cidade: null, uf: null };
+const CONTATO_VAZIO: Contato = { nome: null, telefone: null, email: null, cep: null, complemento: null, logradouro: null, bairro: null, cidade: null, uf: null, prazoDias: null };
 const PEDIDO_VAZIO: Pedido = { linhas: [], contato: { ...CONTATO_VAZIO } };
 
 const SAUDACAO =
@@ -406,6 +407,9 @@ export default function PedidoAssistente() {
               {(pedido.contato.logradouro || pedido.contato.cidade) && (
                 <div className="text-gray-500">{[pedido.contato.logradouro, pedido.contato.bairro, [pedido.contato.cidade, pedido.contato.uf].filter(Boolean).join("/")].filter(Boolean).join(", ")}</div>
               )}
+              {pedido.contato.prazoDias ? (
+                <div className="text-gray-500">Prazo: {pedido.contato.prazoDias} dias</div>
+              ) : null}
             </div>
           </div>
         )}
