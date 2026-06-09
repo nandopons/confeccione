@@ -61,7 +61,7 @@ export async function POST(req: Request, ctx: Ctx) {
   // pedido
   const { data: pedido, error: errPedido } = await supabase
     .from('pedidos_assistente')
-    .select('id, nome, email, telefone, asaas_payment_id, pix_copia_cola, pix_link, valor_centavos, pagamento_status')
+    .select('id, nome, email, telefone, asaas_payment_id, pix_copia_cola, pix_link, valor_centavos, pagamento_status, prazo_dias')
     .eq('id', id)
     .maybeSingle()
   if (errPedido || !pedido) return NextResponse.json({ erro: 'Pedido não encontrado.' }, { status: 404 })
@@ -81,7 +81,8 @@ export async function POST(req: Request, ctx: Ctx) {
   const { data: pesqData } = await supabase.from('pesquisas_preco').select('chave, faixas')
   const orcamento = calcularOrcamento(
     p.data.linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas, estampado: l.estampado ?? null })),
-    (pesqData ?? []) as PesquisaPreco[]
+    (pesqData ?? []) as PesquisaPreco[],
+    (pedido as { prazo_dias?: number | null }).prazo_dias ?? null
   )
   if (!orcamento.completo || orcamento.total_centavos <= 0) {
     return NextResponse.json({ erro: 'Estimativa incompleta — há itens sem preço cadastrado. Não é possível gerar o PIX.' }, { status: 409 })

@@ -41,6 +41,7 @@ export type PedidoVis = {
   complemento: string | null;
   status: string | null;
   mockups?: Record<string, { liso?: string; arte?: string }> | null;
+  prazo_dias?: number | null;
 };
 
 type ImgEstado = { loading?: boolean; url?: string; motivo?: string; aplicado?: string };
@@ -167,7 +168,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   useEffect(() => {
     const primeira = !orcMountRef.current;
     orcMountRef.current = true;
-    const body = { linhas: linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas ?? [], estampado: l.estampado ?? ((l.estampas?.length ?? 0) > 0) })) };
+    const body = { linhas: linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas ?? [], estampado: l.estampado ?? ((l.estampas?.length ?? 0) > 0) })), prazoDias: pedido.prazo_dias ?? null };
     const url = primeira ? "/api/orcamento/pesquisar-faltantes" : "/api/orcamento";
     if (primeira) setEstimandoPrecos(true);
     fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
@@ -474,6 +475,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             <p className="text-xl font-semibold text-[#0F6E56]">{brl(orcamento.total_centavos)}</p>
           </div>
           <p className="text-[11px] text-gray-400 mt-1">Estimativa, sujeita a confirmação.</p>
+          <div className="mt-3 flex items-start gap-2 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+            <span className="text-base leading-none">🚚</span>
+            <p className="text-[11px] text-gray-500 leading-relaxed">O frete é à parte. Assim que a produção ficar pronta, enviamos as opções de transporte e prazos — você escolhe a que preferir e paga o frete na hora do envio.</p>
+          </div>
           {estimandoPrecos && <p className="text-[11px] text-gray-400 mt-1">Atualizando preços de mercado…</p>}
           {!orcamento.completo && !estimandoPrecos && (
             <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-snug">Alguns itens ainda estão sendo precificados. Se persistir, nosso time ajusta antes de fechar.</p>

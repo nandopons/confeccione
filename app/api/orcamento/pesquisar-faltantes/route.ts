@@ -32,7 +32,7 @@ const LinhaSchema = z.object({
   estampas: z.array(EstampaSchema).optional(),
   estampado: z.boolean().nullable().optional(),
 })
-const BodySchema = z.object({ linhas: z.array(LinhaSchema) })
+const BodySchema = z.object({ linhas: z.array(LinhaSchema), prazoDias: z.number().int().nullable().optional() })
 
 export async function POST(req: Request) {
   let bruto: unknown
@@ -78,7 +78,8 @@ export async function POST(req: Request) {
   const pesquisas = (pesqData ?? []) as PesquisaPreco[]
   const orcamento = calcularOrcamento(
     p.data.linhas.map((l) => ({ modelo: l.modelo ?? null, material: l.material ?? null, total: l.total ?? null, estampas: l.estampas ?? [], estampado: l.estampado ?? null })),
-    pesquisas
+    pesquisas,
+    p.data.prazoDias ?? null
   )
 
   return NextResponse.json({ ok: true, orcamento, pesquisou, semTabela: pesquisas.length === 0 })

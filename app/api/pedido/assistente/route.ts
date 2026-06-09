@@ -51,10 +51,11 @@ type Contato = {
   bairro: string | null
   cidade: string | null
   uf: string | null
+  prazoDias: number | null
 }
 type Pedido = { linhas: Linha[]; contato: Contato }
 
-const CONTATO_VAZIO: Contato = { nome: null, telefone: null, email: null, cep: null, complemento: null, logradouro: null, bairro: null, cidade: null, uf: null }
+const CONTATO_VAZIO: Contato = { nome: null, telefone: null, email: null, cep: null, complemento: null, logradouro: null, bairro: null, cidade: null, uf: null, prazoDias: null }
 const PEDIDO_VAZIO: Pedido = { linhas: [], contato: { ...CONTATO_VAZIO } }
 
 const PERGUNTA_FALLBACK =
@@ -94,6 +95,7 @@ const ContatoSchema = z.object({
   bairro: z.string().nullable().catch(null),
   cidade: z.string().nullable().catch(null),
   uf: z.string().nullable().catch(null),
+  prazoDias: numTolerante,
 }).catch({ ...CONTATO_VAZIO })
 
 const PedidoModeloSchema = z.object({
@@ -136,7 +138,11 @@ ESTRUTURA POR LINHA DE PRODUTO. Cada "linha" é um produto homogêneo: mesmo mod
 
 FLUXO EM DUAS FASES:
 1) PRODUTO: monte as linhas até o cliente dizer que terminou de descrever os produtos.
-2) CONTATO: só depois das linhas, colete os dados de contato, UMA pergunta por vez, NESTA ordem: nome, telefone (WhatsApp), e-mail, CEP, complemento (número/apto/referência). Não peça contato antes de ter pelo menos uma linha minimamente completa.
+2) CONTATO: só depois das linhas, colete UMA pergunta por vez, NESTA ordem: PRAZO de produção, nome, telefone (WhatsApp), e-mail, CEP, complemento (número/apto/referência). Não peça contato antes de ter pelo menos uma linha minimamente completa.
+
+PRAZO: pergunte "Para quando você precisa das peças prontas?" e registre em "prazoDias" o número de dias até a data desejada (estime a partir da resposta — ex.: "semana que vem" ≈ 7, "uns 10 dias" = 10, "fim do mês" calcule). NÃO comente nada sobre preço/adicional por prazo — é interno. Se o cliente der uma data, converta pra dias a partir de hoje.
+
+FRETE: o frete NÃO entra no pedido agora. Quando o cliente perguntar (ou ao finalizar), explique de forma simples: "O frete é à parte — assim que a produção ficar pronta, a gente te envia as opções de transporte e prazos, você escolhe a que preferir e paga o frete na hora do envio."
 
 REGRAS DE CONFIABILIDADE DO CONTATO:
 - TELEFONE (WhatsApp): exija SEMPRE com DDD. Se o cliente mandar um número curto/sem DDD ou claramente incompleto, NÃO aceite — peça com gentileza o WhatsApp COM DDD (ex.: (81) 99999-9999) e só avance quando tiver DDD. Confirme repetindo o número formatado.
@@ -145,7 +151,7 @@ REGRAS DE CONFIABILIDADE DO CONTATO:
 Quando tudo estiver coletado (linhas + contato), faça uma confirmação curta e simpática do resumo e diga que ele já pode prosseguir para ver a pré-visualização dos produtos.
 
 A cada resposta, devolva SOMENTE um JSON válido (sem markdown, sem cercas de código, sem texto fora dele), com o PEDIDO INTEIRO e atualizado neste formato exato:
-{"mensagem": string, "cores": {"termo": string, "opcoes": [{"nome": string, "hex": string}]} | null, "pedido": {"linhas": [{"modelo": string|null, "cor": string|null, "material": string|null, "total": number|null, "tamanhos": [{"tamanho": string, "qtd": number|null}], "estampado": boolean|null, "descricao": string|null}], "contato": {"nome": string|null, "telefone": string|null, "email": string|null, "cep": string|null, "complemento": string|null}}}
+{"mensagem": string, "cores": {"termo": string, "opcoes": [{"nome": string, "hex": string}]} | null, "pedido": {"linhas": [{"modelo": string|null, "cor": string|null, "material": string|null, "total": number|null, "tamanhos": [{"tamanho": string, "qtd": number|null}], "estampado": boolean|null, "descricao": string|null}], "contato": {"nome": string|null, "telefone": string|null, "email": string|null, "cep": string|null, "complemento": string|null, "prazoDias": number|null}}}
 
 Regras do JSON:
 - "mensagem" é só o que você fala com o cliente (a próxima pergunta ou a confirmação). Nunca coloque JSON dentro da mensagem.
@@ -154,6 +160,7 @@ Regras do JSON:
 - "total" é a quantidade de peças daquela linha. "tamanhos" é a divisão (cada item {tamanho, qtd}); se ainda não sabe, deixe [].
 - "estampado" é booleano: true se a peça é estampada ou bordada, false se lisa, null se ainda não perguntou. Isso define a faixa de preço (liso vs estampado).
 - "cores": só preencha quando estiver oferecendo 5 tonalidades de uma cor (hexes #RRGGBB reais, claro→escuro); nos outros turnos é null. A escolha final vai pro campo "cor" da linha (nome do tom + hex).
+- "prazoDias" (dentro de contato): número de dias de produção que o cliente precisa; null se ainda não perguntou.
 - "descricao" guarda detalhes úteis da linha: estampa/bordado, posição da arte (frente/costas/manga), observações.
 - Campos que você ainda não perguntou ficam null. Não preencha contato com placeholders.`
 
@@ -217,6 +224,7 @@ function normalizarPedido(p: Pedido): Pedido {
     bairro: norm(c.bairro),
     cidade: norm(c.cidade),
     uf: norm(c.uf),
+    prazoDias: typeof c.prazoDias === 'number' && c.prazoDias > 0 ? Math.round(c.prazoDias) : null,
   }
   return { linhas, contato }
 }
@@ -293,7 +301,7 @@ function calcularFase(p: Pedido): 'produto' | 'contato' | 'completo' {
   if (!temLinha) return 'produto'
   const c = p.contato
   // Exige complemento (número/apto) — não fechar só com o CEP resolvido.
-  const contatoOk = Boolean(c.nome && telefoneValido(c.telefone) && c.email && c.cep && c.complemento)
+  const contatoOk = Boolean(c.nome && telefoneValido(c.telefone) && c.email && c.cep && c.complemento && c.prazoDias)
   return contatoOk ? 'completo' : 'contato'
 }
 

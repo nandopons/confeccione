@@ -46,6 +46,7 @@ const ContatoSchema = z.object({
   bairro: z.string().nullable().optional(),
   cidade: z.string().nullable().optional(),
   uf: z.string().nullable().optional(),
+  prazoDias: z.number().int().positive().nullable().optional(),
 })
 const BodySchema = z.object({
   linhas: z.array(LinhaSchema),
@@ -110,6 +111,7 @@ export async function POST(req: Request) {
       bairro: contato.bairro ?? null,
       cidade: contato.cidade ?? null,
       uf: contato.uf ?? null,
+      prazo_dias: contato.prazoDias ?? null,
       observacoes: parsed.data.observacoes ?? null,
       status: 'completo',
       origem: 'home_chat',

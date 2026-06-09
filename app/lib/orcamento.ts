@@ -40,6 +40,15 @@ export type Orcamento = {
   completo: boolean
 }
 
+// Adicional OCULTO por urgência do prazo de produção (não explicitado ao cliente).
+// <=5 dias: +20% · 6-20 dias: +10% · >=21 dias: sem adicional.
+export function prazoMultiplicador(prazoDias: number | null | undefined): number {
+  if (prazoDias == null || !Number.isFinite(prazoDias)) return 1
+  if (prazoDias <= 5) return 1.2
+  if (prazoDias <= 20) return 1.1
+  return 1
+}
+
 export function chavePesquisa(modelo: string | null, material: string | null, estampado: boolean): string {
   return `${normMockup(modelo)}|${normMockup(material)}|${estampado ? 'estampado' : 'liso'}`
 }
@@ -53,7 +62,8 @@ function precoDaFaixa(faixas: Faixa[], qtd: number): number | null {
   return escolhido
 }
 
-export function calcularOrcamento(linhas: LinhaOrcamento[], pesquisas: PesquisaPreco[]): Orcamento {
+export function calcularOrcamento(linhas: LinhaOrcamento[], pesquisas: PesquisaPreco[], prazoDias?: number | null): Orcamento {
+  const mult = prazoMultiplicador(prazoDias)
   const map = new Map(pesquisas.map((p) => [p.chave, p]))
 
   const resultado: LinhaResultado[] = []
@@ -67,8 +77,10 @@ export function calcularOrcamento(linhas: LinhaOrcamento[], pesquisas: PesquisaP
     const faltando: string[] = []
 
     const pesq = map.get(chavePesquisa(l.modelo, l.material, estampado))
-    const unit = pesq ? precoDaFaixa(pesq.faixas, qtd || 1) : null
-    if (unit === null) faltando.push(estampado ? 'preço (estampado)' : 'preço (liso)')
+    const unitBase = pesq ? precoDaFaixa(pesq.faixas, qtd || 1) : null
+    if (unitBase === null) faltando.push(estampado ? 'preço (estampado)' : 'preço (liso)')
+    // adicional de urgência embutido no unitário (oculto)
+    const unit = unitBase === null ? null : Math.round(unitBase * mult)
 
     const totalLinha = unit === null ? 0 : unit * qtd
     if (faltando.length > 0) completo = false
