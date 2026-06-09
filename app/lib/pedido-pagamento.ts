@@ -68,7 +68,7 @@ export async function criarCobrancaPixPedido(input: {
     method: 'POST',
     body: {
       customer: customerId,
-      billingType: 'PIX',
+      billingType: 'UNDEFINED', // deixa o cliente escolher PIX ou cartão no checkout ASAAS
       value: centavosParaReais(input.valorCentavos),
       dueDate: vencimento,
       description: `Pedido Confeccione ${input.pedidoId.slice(0, 8)}`,

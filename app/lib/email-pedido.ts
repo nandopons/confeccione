@@ -76,7 +76,7 @@ export async function enviarEmailPedidoPix(p: {
     <tr><td style="background:#0a0a0a;padding:18px 24px;color:#fff;font-size:18px;font-weight:bold;">CONFECCIONE</td></tr>
     <tr><td style="padding:24px;">
       <p style="font-size:16px;color:#111;margin:0 0 4px;">Olá${p.nome ? `, ${p.nome.split(' ')[0]}` : ''}! 👋</p>
-      <p style="font-size:14px;color:#555;margin:0 0 16px;line-height:1.5;">Seu pedido <strong>#${id8}</strong> foi confirmado. Abaixo o resumo, a prévia dos produtos e o PIX para pagamento. Assim que o pagamento for confirmado, seu pedido entra em produção.</p>
+      <p style="font-size:14px;color:#555;margin:0 0 16px;line-height:1.5;">Seu pedido <strong>#${id8}</strong> foi confirmado. Abaixo o resumo, a prévia dos produtos e o link de pagamento (PIX ou cartão). Assim que o pagamento for confirmado, seu pedido entra em produção.</p>
 
       <p style="font-size:13px;color:#888;text-transform:uppercase;letter-spacing:.04em;margin:18px 0 6px;">Resumo</p>
       <table width="100%" cellpadding="0" cellspacing="0">${linhasHtml}</table>
@@ -88,10 +88,10 @@ export async function enviarEmailPedidoPix(p: {
 
       ${p.numImagens > 0 ? `<p style="font-size:13px;color:#888;text-transform:uppercase;letter-spacing:.04em;margin:22px 0 6px;">Prévia dos produtos</p><table width="100%" cellpadding="0" cellspacing="0">${imagensHtml}</table>` : ''}
 
-      <p style="font-size:13px;color:#888;text-transform:uppercase;letter-spacing:.04em;margin:22px 0 6px;">Pagamento via PIX</p>
+      <p style="font-size:13px;color:#888;text-transform:uppercase;letter-spacing:.04em;margin:22px 0 6px;">Pagamento (PIX ou cartão)</p>
       ${pixBloco}
       <table width="100%" style="margin-top:16px;"><tr><td align="center">
-        <a href="${p.invoiceUrl}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;font-size:15px;font-weight:bold;padding:12px 28px;border-radius:10px;">Abrir página de pagamento</a>
+        <a href="${p.invoiceUrl}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;font-size:15px;font-weight:bold;padding:12px 28px;border-radius:10px;">Pagar (PIX ou cartão)</a>
       </td></tr></table>
 
       <p style="font-size:12px;color:#999;margin:22px 0 0;line-height:1.5;">Dúvidas? Responda este e-mail ou fale no WhatsApp (81) 99578-2077.</p>

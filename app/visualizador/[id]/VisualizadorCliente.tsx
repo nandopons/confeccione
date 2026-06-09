@@ -501,23 +501,23 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         {confirmStep === "feito" && pixResult ? (
           <div className="bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-4">
             <p className="text-sm text-[#0F6E56] font-medium">Pedido confirmado! ✅</p>
-            <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">Enviamos o resumo e o PIX pro seu e-mail. Pague pelo PIX abaixo — assim que o pagamento cair, seu pedido entra em produção e você poderá baixar os visualizadores dos produtos. O valor fica garantido pela Confeccione até você receber tudo certinho.</p>
-            <div className="mt-3 flex flex-col sm:flex-row gap-4 items-start">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`/api/pedido/assistente/${pedido.id}/pix-qr`} alt="QR Code PIX" className="w-40 h-40 rounded-lg border border-[#1D9E75]/30 bg-white shrink-0" />
-              <div className="flex-1 w-full min-w-0">
-                <p className="text-xs text-gray-500 mb-1">PIX copia e cola:</p>
-                {pixResult.copiaCola && (
+            <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">Enviamos o resumo pro seu e-mail. Pague no <strong>cartão de crédito</strong> (botão abaixo) ou no <strong>PIX</strong> — assim que o pagamento cair, seu pedido entra em produção e você poderá baixar os visualizadores. O valor fica garantido pela Confeccione até você receber tudo certinho.</p>
+            <div className="mt-3">
+              <a href={pixResult.invoiceUrl} target="_blank" rel="noopener noreferrer" className="inline-block bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-5 py-2.5 rounded-xl">💳 Pagar com cartão de crédito</a>
+            </div>
+            {pixResult.copiaCola && (
+              <div className="mt-4 flex flex-col sm:flex-row gap-4 items-start">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={`/api/pedido/assistente/${pedido.id}/pix-qr`} alt="QR Code PIX" className="w-40 h-40 rounded-lg border border-[#1D9E75]/30 bg-white shrink-0" />
+                <div className="flex-1 w-full min-w-0">
+                  <p className="text-xs text-gray-500 mb-1">Ou pague no PIX (copia e cola):</p>
                   <code className="block break-all bg-white border border-gray-200 rounded-lg px-3 py-2 text-[11px] text-gray-700">{pixResult.copiaCola}</code>
-                )}
-                <div className="flex gap-2 mt-2">
-                  {pixResult.copiaCola && (
-                    <button type="button" onClick={() => { navigator.clipboard?.writeText(pixResult.copiaCola!); setCopiado(true); setTimeout(() => setCopiado(false), 2000); }} className="border border-[#1D9E75] text-[#0F6E56] text-xs px-3 py-1.5 rounded-lg hover:bg-white">{copiado ? "Copiado!" : "Copiar código"}</button>
-                  )}
-                  <a href={pixResult.invoiceUrl} target="_blank" rel="noopener noreferrer" className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-xs px-3 py-1.5 rounded-lg">Abrir página de pagamento</a>
+                  <div className="flex gap-2 mt-2">
+                    <button type="button" onClick={() => { navigator.clipboard?.writeText(pixResult.copiaCola!); setCopiado(true); setTimeout(() => setCopiado(false), 2000); }} className="border border-[#1D9E75] text-[#0F6E56] text-xs px-3 py-1.5 rounded-lg hover:bg-white">{copiado ? "Copiado!" : "Copiar código PIX"}</button>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
             <div className="mt-4 pt-3 border-t border-[#1D9E75]/20">
               {pago ? (
                 <div>
@@ -534,7 +534,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 </div>
               ) : (
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs text-gray-500">Aguardando confirmação do pagamento — o download libera assim que o PIX cair.</span>
+                  <span className="text-xs text-gray-500">Aguardando confirmação do pagamento — o download libera assim que o pagamento cair.</span>
                   <button type="button" onClick={() => void checkStatus()} disabled={checandoPago} className="text-xs text-[#0F6E56] underline disabled:opacity-50">{checandoPago ? "verificando…" : "Já paguei? Atualizar"}</button>
                 </div>
               )}
@@ -542,13 +542,13 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           </div>
         ) : confirmStep === "form" ? (
           <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-            <p className="text-sm font-medium text-gray-900 mb-1">Confirmar e gerar PIX</p>
-            <p className="text-xs text-gray-500 mb-3">Informe seu CPF (ou CNPJ) pra gerar a cobrança. Total: <strong>{orcamento ? brl(orcamento.total_centavos) : ""}</strong>.</p>
+            <p className="text-sm font-medium text-gray-900 mb-1">Confirmar pedido e pagar</p>
+            <p className="text-xs text-gray-500 mb-3">Informe seu CPF (ou CNPJ) pra gerar a cobrança (PIX ou cartão). Total: <strong>{orcamento ? brl(orcamento.total_centavos) : ""}</strong>.</p>
             <input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="CPF ou CNPJ" inputMode="numeric"
               className="w-full sm:w-64 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
             <div className="flex gap-2 mt-3">
               <button type="button" onClick={() => void confirmarPedido()} disabled={confirmando}
-                className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-xl">{confirmando ? "Gerando PIX…" : "Gerar PIX e enviar por e-mail"}</button>
+                className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-xl">{confirmando ? "Gerando…" : "Confirmar e ir para o pagamento"}</button>
               <button type="button" onClick={() => { setConfirmStep("idle"); setConfirmErro(null); }} className="text-sm text-gray-500 px-3 py-2.5 rounded-xl hover:bg-gray-100">Cancelar</button>
             </div>
             {confirmErro && <p className="text-xs text-red-600 mt-2">{confirmErro}</p>}
@@ -560,7 +560,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
               Confirmar pedido →
             </button>
             {!podeConfirmar && linhas.length > 0 && (
-              <p className="text-[11px] text-gray-400 mt-2">Pra confirmar e gerar o PIX, todos os itens precisam ter preço cadastrado (estimativa completa).</p>
+              <p className="text-[11px] text-gray-400 mt-2">Pra confirmar, todos os itens precisam ter preço cadastrado (estimativa completa).</p>
             )}
           </>
         )}
