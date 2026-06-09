@@ -473,7 +473,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             <p className="text-sm font-medium text-gray-900">Estimativa de orçamento</p>
             <p className="text-xl font-semibold text-[#0F6E56]">{brl(orcamento.total_centavos)}</p>
           </div>
-          <p className="text-[11px] text-gray-400 mt-1">Estimativa, sujeita a confirmação. Já inclui a taxa de serviço da Confeccione (3%).</p>
+          <p className="text-[11px] text-gray-400 mt-1">Estimativa, sujeita a confirmação.</p>
           {estimandoPrecos && <p className="text-[11px] text-gray-400 mt-1">Atualizando preços de mercado…</p>}
           {!orcamento.completo && !estimandoPrecos && (
             <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-snug">Alguns itens ainda estão sendo precificados. Se persistir, nosso time ajusta antes de fechar.</p>

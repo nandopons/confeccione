@@ -638,7 +638,7 @@ export async function emailOfertaPedidoAssistente(params: {
   numImagens: number
 }): Promise<void> {
   const nomeEsc = escapeHtml(params.nomeFornecedor || 'fornecedor')
-  const subject = `Pedido disponível: ${params.totalPecas} peças — repasse ${params.repasseTexto}`
+  const subject = `Pedido disponível: ${params.totalPecas} peças — ${params.repasseTexto}`
   const preheader = 'Um pedido já pago está disponível para produção. Veja os mockups e detalhes.'
 
   const imgLinha = params.numImagens > 0
@@ -655,7 +655,7 @@ export async function emailOfertaPedidoAssistente(params: {
     </div>
     ${imgLinha}
     <div style="background:#ecfdf5;border-left:3px solid #10b981;padding:14px 18px;margin:16px 0;border-radius:6px;">
-      <strong style="color:#065f46;">Seu repasse: ${escapeHtml(params.repasseTexto)}</strong>
+      <strong style="color:#065f46;">Valor total do pedido: ${escapeHtml(params.repasseTexto)}</strong>
       <p style="margin:6px 0 0;color:#1f2937;font-size:14px;line-height:1.5;">Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.</p>
     </div>
     <div style="text-align:center;margin:28px 0;">
@@ -673,7 +673,7 @@ Um pedido já pago está disponível para produção.
 Itens (${params.totalPecas} peças):
 ${params.linhasTexto}
 
-Seu repasse: ${params.repasseTexto}
+Valor total do pedido: ${params.repasseTexto}
 Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.
 
 Ver mockups e assumir o pedido:

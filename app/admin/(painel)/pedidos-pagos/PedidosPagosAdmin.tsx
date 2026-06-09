@@ -140,7 +140,7 @@ export default function PedidosPagosAdmin() {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Pedidos pagos</h1>
-          <p className="text-sm text-gray-500">Pedidos já pagos pelo cliente. Escolha os fornecedores e oferte — eles recebem o resumo e o repasse (97%) por WhatsApp.</p>
+          <p className="text-sm text-gray-500">Pedidos já pagos pelo cliente. Escolha os fornecedores e oferte — eles recebem o resumo e o valor do pedido por WhatsApp.</p>
         </div>
         <button onClick={carregar} className="text-sm px-3 py-1.5 rounded-md border border-gray-300 hover:bg-gray-50">Atualizar</button>
       </div>
@@ -165,7 +165,7 @@ export default function PedidosPagosAdmin() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="text-sm text-gray-500">{data(p.criado_em)} · {p.cep || 'sem CEP'}</div>
-                  <div className="font-medium text-gray-900">{totalPecas} peças · total {brl(p.valor_centavos)} · repasse {brl(repasse97(p.valor_centavos))}</div>
+                  <div className="font-medium text-gray-900">{totalPecas} peças · cliente pagou {brl(p.valor_centavos)} · fornecedor recebe {brl(repasse97(p.valor_centavos))}</div>
                 </div>
                 {aceita && (
                   <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">
@@ -249,7 +249,7 @@ export default function PedidosPagosAdmin() {
                     >
                       {enviando === p.id ? 'Ofertando…' : `Ofertar (${sel.size})`}
                     </button>
-                    <span className="text-xs text-gray-400">Envia WhatsApp com o resumo + repasse, sem o contato do cliente.</span>
+                    <span className="text-xs text-gray-400">Envia WhatsApp com o resumo + valor, sem o contato do cliente.</span>
                   </div>
                 </div>
               )}
