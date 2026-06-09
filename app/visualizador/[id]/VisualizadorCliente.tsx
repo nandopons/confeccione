@@ -40,6 +40,7 @@ export type PedidoVis = {
   cep: string | null;
   complemento: string | null;
   status: string | null;
+  mockups?: Record<string, { liso?: string; arte?: string }> | null;
 };
 
 type ImgEstado = { loading?: boolean; url?: string; motivo?: string; aplicado?: string };
@@ -59,7 +60,15 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [linhas, setLinhas] = useState<Linha[]>(
     (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [], estampado: l.estampado ?? null }))
   );
-  const [imgs, setImgs] = useState<Record<number, ImgEstado>>({});
+  const [imgs, setImgs] = useState<Record<number, ImgEstado>>(() => {
+    const m = pedido.mockups || {};
+    const init: Record<number, ImgEstado> = {};
+    for (const k of Object.keys(m)) {
+      const v = m[k] || {};
+      if (v.liso || v.arte) init[Number(k)] = { url: v.liso, aplicado: v.arte };
+    }
+    return init;
+  });
   const [verArte, setVerArte] = useState<Record<number, boolean>>({});
   const [salvando, setSalvando] = useState(false);
 
@@ -95,7 +104,19 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [arteMotivo, setArteMotivo] = useState<string | null>(null);
   const arteFileRef = useRef<HTMLInputElement>(null);
 
-  const geradasRef = useRef<Set<number>>(new Set());
+  const geradasRef = useRef<Set<number>>(new Set(
+    Object.keys(pedido.mockups || {}).filter((k) => (pedido.mockups || {})[k]?.liso).map(Number)
+  ));
+
+  async function salvarMockup(payload: { index?: number; liso?: string | null; arte?: string | null; resetAll?: boolean }) {
+    try {
+      await fetch(`/api/pedido/assistente/${pedido.id}/mockup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch { /* silencioso */ }
+  }
 
   async function gerarMockup(i: number, forcar = false) {
     if (!forcar && geradasRef.current.has(i)) return;
@@ -116,13 +137,14 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           ? { ...m[i], loading: false, url: data.imagemDataUrl, motivo: undefined }
           : { ...m[i], loading: false, motivo: data?.motivo || "Não foi possível gerar agora." },
       }));
+      if (data?.disponivel && data.imagemDataUrl) void salvarMockup({ index: i, liso: data.imagemDataUrl });
     } catch {
       setImgs((m) => ({ ...m, [i]: { ...m[i], loading: false, motivo: "Erro de conexão." } }));
     }
   }
 
   useEffect(() => {
-    linhas.forEach((_, i) => void gerarMockup(i));
+    linhas.forEach((_, i) => { if (!imgs[i]?.url) void gerarMockup(i); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -194,6 +216,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     setImgs((m) => ({ ...m, [alvo]: {} }));
     setVerArte((m) => ({ ...m, [alvo]: false }));
     geradasRef.current.delete(alvo);
+    void salvarMockup({ index: alvo, liso: null, arte: null });
     setTimeout(() => void gerarMockup(alvo, true), 0);
   }
 
@@ -205,6 +228,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     setVerArte({});
     geradasRef.current = new Set();
     void persistir(novas);
+    void salvarMockup({ resetAll: true });
     setTimeout(() => novas.forEach((_, idx) => void gerarMockup(idx, true)), 0);
   }
 
@@ -212,6 +236,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   function limparArte(i: number) {
     setImgs((m) => ({ ...m, [i]: { ...m[i], aplicado: undefined } }));
     setVerArte((m) => ({ ...m, [i]: false }));
+    void salvarMockup({ index: i, arte: null });
   }
 
   function abrirArte(i: number) {
@@ -268,9 +293,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
   function usarArte() {
     if (arteIndex === null || !arteResultado) return;
-    setImgs((m) => ({ ...m, [arteIndex]: { ...m[arteIndex], aplicado: arteResultado } }));
-    setVerArte((m) => ({ ...m, [arteIndex]: true }));
+    const idx = arteIndex;
+    setImgs((m) => ({ ...m, [idx]: { ...m[idx], aplicado: arteResultado } }));
+    setVerArte((m) => ({ ...m, [idx]: true }));
     setArteOpen(false);
+    void salvarMockup({ index: idx, arte: arteResultado });
   }
 
   async function confirmarPedido() {
