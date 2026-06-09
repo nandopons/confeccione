@@ -273,7 +273,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   }
 
   function abrirAjuste(i: number) {
-    setAjusteIndex(ajusteIndex === i ? null : i);
+    setAjusteIndex(i);
     setAjusteTexto("");
     setAjusteErro(null);
   }
@@ -517,25 +517,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   </div>
                 </div>
 
-                {ajusteIndex === i && (
-                  <div className="mt-3 rounded-xl border border-[#1D9E75]/30 bg-[#E1F5EE]/40 p-3">
-                    <p className="text-xs text-gray-600 mb-2">Descreva o ajuste — a IA muda só esse detalhe e mantém o resto (ex.: <em>&ldquo;sobe a logo da manga pro ombro&rdquo;</em>, <em>&ldquo;deixa o bordado das costas menor&rdquo;</em>).</p>
-                    <textarea
-                      value={ajusteTexto}
-                      onChange={(e) => setAjusteTexto(e.target.value)}
-                      rows={2}
-                      placeholder="o que você quer mudar nessa imagem?"
-                      className="w-full resize-none border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]"
-                    />
-                    {ajusteErro && <p className="text-xs text-red-600 mt-1">{ajusteErro}</p>}
-                    <div className="flex gap-2 mt-2">
-                      <button type="button" onClick={() => void aplicarAjuste(i)} disabled={ajustandoIdx === i || !ajusteTexto.trim()} className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-4 py-1.5 rounded-lg">
-                        {ajustandoIdx === i ? "Ajustando…" : "Aplicar ajuste"}
-                      </button>
-                      <button type="button" onClick={() => { setAjusteIndex(null); setAjusteErro(null); }} className="text-sm text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-100">Cancelar</button>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           );
@@ -668,6 +649,37 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       </div>
 
       {/* ---------- MODAL EDITAR / ADICIONAR ---------- */}
+      {ajusteIndex !== null && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => { if (ajustandoIdx === null) { setAjusteIndex(null); setAjusteErro(null); } }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-gray-900 font-medium">Ajustar detalhe</p>
+              <button type="button" onClick={() => { setAjusteIndex(null); setAjusteErro(null); }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">A IA muda só esse detalhe e mantém o resto. Ex.: <em>&ldquo;sobe a logo da manga pro ombro&rdquo;</em>, <em>&ldquo;deixa o bordado das costas menor&rdquo;</em>.</p>
+            {(imgs[ajusteIndex]?.aplicado || imgs[ajusteIndex]?.url) && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={imgs[ajusteIndex]?.aplicado || imgs[ajusteIndex]?.url} alt="prévia atual" className="w-full rounded-lg border border-gray-200 mb-3" />
+            )}
+            <textarea
+              value={ajusteTexto}
+              onChange={(e) => setAjusteTexto(e.target.value)}
+              rows={3}
+              autoFocus
+              placeholder="o que você quer mudar nessa imagem?"
+              className="w-full resize-none border border-gray-200 rounded-lg px-3 py-2 text-base sm:text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]"
+            />
+            {ajusteErro && <p className="text-xs text-red-600 mt-1">{ajusteErro}</p>}
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => { setAjusteIndex(null); setAjusteErro(null); }} className="text-sm text-gray-500 px-4 py-2 rounded-xl hover:bg-gray-100">Cancelar</button>
+              <button type="button" onClick={() => void aplicarAjuste(ajusteIndex)} disabled={ajustandoIdx !== null || !ajusteTexto.trim()} className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-5 py-2 rounded-xl">
+                {ajustandoIdx !== null ? "Ajustando…" : "Aplicar ajuste"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {editOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setEditOpen(false)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
