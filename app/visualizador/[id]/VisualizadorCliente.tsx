@@ -18,6 +18,7 @@ export type Linha = {
   modelo: string | null;
   cor: string | null;
   material: string | null;
+  publico?: string | null;
   total: number | null;
   tamanhos: Tamanho[];
   estampas: Estampa[];
@@ -46,7 +47,7 @@ export type PedidoVis = {
 
 type ImgEstado = { loading?: boolean; url?: string; motivo?: string; aplicado?: string };
 
-const linhaVazia: Linha = { modelo: "", cor: "", material: "", total: null, tamanhos: [], estampas: [], estampado: null, descricao: "" };
+const linhaVazia: Linha = { modelo: "", cor: "", material: "", publico: null, total: null, tamanhos: [], estampas: [], estampado: null, descricao: "" };
 
 async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -143,7 +144,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       const res = await fetch("/api/visualizador/mockup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelo: l.modelo, cor: l.cor, material: l.material, descricao: l.descricao }),
+        body: JSON.stringify({ modelo: l.modelo, cor: l.cor, material: l.material, publico: l.publico ?? null, descricao: l.descricao }),
       });
       const data = await res.json().catch(() => null);
       setImgs((m) => ({
@@ -212,6 +213,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       total: draft.total && draft.total > 0 ? Math.round(draft.total) : null,
       tamanhos: (draft.tamanhos || []).map((t) => ({ tamanho: t.tamanho.trim(), qtd: t.qtd && t.qtd > 0 ? Math.round(t.qtd) : null })).filter((t) => t.tamanho),
       estampas: (draft.estampas || []).map((e) => ({ posicao: (e.posicao || "").trim(), tamanho: (e.tamanho || "").trim() })).filter((e) => e.posicao && e.tamanho),
+      publico: draft.publico ?? null,
       estampado: draft.estampado ?? null,
       descricao: draft.descricao?.trim() || null,
     };
@@ -597,6 +599,16 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     </div>
                   ))}
                   <button type="button" onClick={() => setDraft({ ...draft, tamanhos: [...(draft.tamanhos || []), { tamanho: "", qtd: null }] })} className="text-xs text-[#0F6E56] hover:underline">+ adicionar tamanho</button>
+                </div>
+              </Campo>
+              <Campo label="Público">
+                <div className="flex flex-wrap gap-2">
+                  {([["feminino","Feminino"],["masculino","Masculino"],["infantil","Infantil"],["unissex","Unissex"]] as const).map(([val,label]) => (
+                    <button key={val} type="button" onClick={() => setDraft({ ...draft, publico: val })}
+                      className={"px-3 py-1.5 rounded-lg text-sm border transition-colors " + (draft.publico === val ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50")}>
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </Campo>
               <Campo label="Acabamento (entra no orçamento)">

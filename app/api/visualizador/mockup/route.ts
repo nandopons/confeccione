@@ -29,6 +29,7 @@ const BodySchema = z.object({
   modelo: z.string().nullable().optional(),
   cor: z.string().nullable().optional(),
   material: z.string().nullable().optional(),
+  publico: z.string().nullable().optional(), // feminino | masculino | infantil | unissex
   descricao: z.string().nullable().optional(),
   vista: z.string().optional(), // retrocompat, ignorado
   forcar: z.boolean().optional(), // ignora o cache e regenera
@@ -46,8 +47,14 @@ function montarPrompt(b: z.infer<typeof BodySchema>): string {
   const modelo = b.modelo?.trim() || 'camiseta'
   const cor = b.cor?.trim() || 'branca'
   const material = b.material?.trim()
+  const pub = (b.publico || '').toLowerCase().trim()
+  const pubFrase =
+    pub === 'feminino' ? ' do segmento FEMININO (modelagem e caimento femininos, vestida por uma modelo mulher)'
+    : pub === 'masculino' ? ' do segmento MASCULINO (modelagem masculina, vestida por um modelo homem)'
+    : pub === 'infantil' ? ' INFANTIL (modelagem e tamanho de criança, vestida por uma criança)'
+    : ''
   let prompt =
-    `Foto de catálogo de e-commerce mostrando A MESMA ${modelo} na cor ${cor}` +
+    `Foto de catálogo de e-commerce mostrando A MESMA ${modelo}${pubFrase} na cor ${cor}` +
     (material ? `, em ${material}` : '') +
     `, LISA — sem nenhuma estampa, sem logo e sem texto. ` +
     `Gere UMA ÚNICA imagem panorâmica (orientação paisagem, proporção aproximada 16:7) com TRÊS ângulos da peça lado a lado, na ordem: ` +
@@ -74,7 +81,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Formato inválido.' }, { status: 400 })
   }
 
-  const chave = chaveMockup(body.data.modelo, body.data.cor, body.data.material)
+  const chave = chaveMockup(body.data.modelo, body.data.cor, body.data.material, body.data.publico)
   const podeCachear = cacheavel(body.data)
 
   // 1) tenta o cache (a menos que forcar)
