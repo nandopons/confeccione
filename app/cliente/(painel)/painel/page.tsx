@@ -11,6 +11,7 @@ import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 import { corStatus, labelStatus } from '@/app/lib/cliente-status'
 import { pedidosAssistenteDoCliente, type PedidoClienteAssistente } from '@/app/lib/cliente-pedidos'
+import MockupThumb from './MockupThumb'
 
 export const dynamic = 'force-dynamic'
 
@@ -126,6 +127,7 @@ function LinhaPedidoNovo({ pedido }: { pedido: PedidoClienteAssistente }) {
         className="block bg-white border border-gray-200 rounded-2xl p-4 hover:border-gray-300 transition-colors group"
       >
         <div className="flex items-center justify-between gap-3">
+          <MockupThumb id={pedido.id} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-gray-900 font-medium">{pedido.totalPecas} peças</span>
