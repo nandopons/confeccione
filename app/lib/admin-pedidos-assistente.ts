@@ -4,7 +4,7 @@
 import { supabaseAdmin } from './supabase-server'
 import { enviarMensagem } from './zapi'
 import { SITE_URL } from './url'
-import { emailLembretePedido, emailFeedbackMockup } from './email'
+import { emailFeedbackMockup } from './email'
 
 type LinhaJson = {
   modelo?: string | null; cor?: string | null; material?: string | null
@@ -129,18 +129,19 @@ export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<
   let whats = false
   let email = false
 
+  // Lembrete = mensagem SIMPLES de reativação, sem link (o link vai manualmente
+  // depois que o cliente responder). Feedback continua com link.
   const msg =
     acao === 'lembrete'
-      ? `Oi${p.nome ? ' ' + p.nome.split(' ')[0] : ''}! 👕 Aqui é da Confeccione. Você começou um pedido com a gente e ainda não finalizou — seus mockups estão prontos pra revisar. É rapidinho pra concluir:\n${link}`
+      ? `Oi${p.nome ? ', ' + p.nome.split(' ')[0] : ''}! Vi que você realizou um pedido em nosso site. Gostaria de ajuda para finalizar? 😊`
       : `Oi${p.nome ? ' ' + p.nome.split(' ')[0] : ''}! 👀 O mockup ficou como você queria? Dá uma olhada e, se precisar mudar algo (posição da arte, tamanho, cor…), use o botão "Ajustar detalhe" na peça que a gente atualiza na hora:\n${link}`
 
   if (p.telefone) {
     try { whats = await enviarMensagem(p.telefone, msg) } catch { whats = false }
   }
-  if (p.email) {
+  if (p.email && acao === 'feedback') {
     try {
-      if (acao === 'lembrete') await emailLembretePedido({ email: p.email, nome: p.nome, link })
-      else await emailFeedbackMockup({ email: p.email, nome: p.nome, link })
+      await emailFeedbackMockup({ email: p.email, nome: p.nome, link })
       email = true
     } catch { email = false }
   }
