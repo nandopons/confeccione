@@ -10,7 +10,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { calcularOrcamento, type PesquisaPreco } from '@/app/lib/orcamento'
-import { criarCobrancaPixPedido } from '@/app/lib/pedido-pagamento'
+import { criarCobrancaPixPedido, atualizarValorCobrancaPix } from '@/app/lib/pedido-pagamento'
 import { enviarEmailPedidoPix } from '@/app/lib/email-pedido'
 import { apenasDigitos } from '@/app/lib/cpf-cnpj'
 
@@ -66,8 +66,50 @@ export async function POST(req: Request, ctx: Ctx) {
     .maybeSingle()
   if (errPedido || !pedido) return NextResponse.json({ erro: 'Pedido não encontrado.' }, { status: 404 })
 
-  // idempotência: já tem PIX gerado → devolve o existente
+  // recalcula o total no servidor (não confia no cliente)
+  const { data: pesqData } = await supabase.from('pesquisas_preco').select('chave, faixas')
+  const orcamento = calcularOrcamento(
+    p.data.linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas, estampado: l.estampado ?? null })),
+    (pesqData ?? []) as PesquisaPreco[],
+    (pedido as { prazo_dias?: number | null }).prazo_dias ?? null
+  )
+
+  // idempotência: já tem PIX gerado → devolve o existente. MAS se o orçamento
+  // recalculado divergir do valor da cobrança (ex.: desconto novo entrou depois)
+  // e ainda não foi paga, ATUALIZA o valor no ASAAS antes de devolver.
   if (pedido.asaas_payment_id && pedido.pix_copia_cola) {
+    const divergiu =
+      pedido.pagamento_status !== 'pago' &&
+      orcamento.completo &&
+      orcamento.total_centavos > 0 &&
+      pedido.valor_centavos !== orcamento.total_centavos
+    if (divergiu) {
+      try {
+        const upd = await atualizarValorCobrancaPix(pedido.asaas_payment_id, orcamento.total_centavos)
+        await supabase
+          .from('pedidos_assistente')
+          .update({
+            valor_centavos: orcamento.total_centavos,
+            pix_copia_cola: upd.copiaCola,
+            pix_qr_imagem: upd.qrImagem,
+            pix_link: upd.invoiceUrl,
+            linhas: p.data.linhas,
+            atualizado_em: new Date().toISOString(),
+          })
+          .eq('id', id)
+        return NextResponse.json({
+          ok: true,
+          jaExistia: true,
+          valorAtualizado: true,
+          copiaCola: upd.copiaCola,
+          invoiceUrl: upd.invoiceUrl,
+          valorCentavos: orcamento.total_centavos,
+        })
+      } catch (err) {
+        console.error('[confirmar] falha ao atualizar valor da cobrança no ASAAS:', err)
+        // segue devolvendo a cobrança existente (valor antigo) pra não travar o cliente
+      }
+    }
     return NextResponse.json({
       ok: true,
       jaExistia: true,
@@ -77,13 +119,6 @@ export async function POST(req: Request, ctx: Ctx) {
     })
   }
 
-  // recalcula o total no servidor (não confia no cliente)
-  const { data: pesqData } = await supabase.from('pesquisas_preco').select('chave, faixas')
-  const orcamento = calcularOrcamento(
-    p.data.linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas, estampado: l.estampado ?? null })),
-    (pesqData ?? []) as PesquisaPreco[],
-    (pedido as { prazo_dias?: number | null }).prazo_dias ?? null
-  )
   if (!orcamento.completo || orcamento.total_centavos <= 0) {
     return NextResponse.json({ erro: 'Estimativa incompleta — há itens sem preço cadastrado. Não é possível gerar o PIX.' }, { status: 409 })
   }

@@ -102,3 +102,30 @@ export async function criarCobrancaPixPedido(input: {
 
   return { customerId, paymentId: payment.id, invoiceUrl: payment.invoiceUrl, copiaCola, qrImagem, vencimento }
 }
+
+/** Atualiza o VALOR de uma cobrança ainda não paga no ASAAS e rebusca o QR PIX.
+ *  Usado quando o orçamento recalculado diverge da cobrança gerada antes
+ *  (ex.: desconto novo entrou depois da confirmação). */
+export async function atualizarValorCobrancaPix(
+  paymentId: string,
+  valorCentavos: number
+): Promise<{ invoiceUrl: string; copiaCola: string | null; qrImagem: string | null }> {
+  const payment = await asaasFetch<{ id: string; invoiceUrl: string }>(`/payments/${paymentId}`, {
+    method: 'PUT',
+    body: { value: centavosParaReais(valorCentavos) },
+  })
+
+  let copiaCola: string | null = null
+  let qrImagem: string | null = null
+  try {
+    const pix = await asaasFetch<{ payload: string; encodedImage: string }>(
+      `/payments/${paymentId}/pixQrCode`
+    )
+    copiaCola = pix.payload
+    qrImagem = pix.encodedImage
+  } catch (err) {
+    console.error('[pedido-pagamento] busca QR pix (update) falhou:', err)
+  }
+
+  return { invoiceUrl: payment.invoiceUrl, copiaCola, qrImagem }
+}
