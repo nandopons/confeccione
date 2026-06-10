@@ -512,7 +512,7 @@ export default function PedidoAssistente() {
             autoCorrect="on"
             spellCheck
             aria-label="Mensagem para o assistente"
-            className="flex-1 resize-none border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 max-h-28 focus:outline-none focus:border-[#1D9E75] focus:ring-2 focus:ring-[#1D9E75]/15"
+            className="flex-1 resize-none border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 max-h-28 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden focus:outline-none focus:border-[#1D9E75] focus:ring-2 focus:ring-[#1D9E75]/15"
           />
           <button
             type="button"
