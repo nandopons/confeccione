@@ -79,6 +79,11 @@ export default function PedidoAssistente() {
   const cardRef = useRef<HTMLDivElement>(null);
   // Altura do card quando o teclado virtual está aberto (mobile). null = padrão.
   const [alturaTeclado, setAlturaTeclado] = useState<number | null>(null);
+  // Resumo no mobile: bottom sheet + chip com pulso quando o pedido atualiza.
+  const [sheetAberto, setSheetAberto] = useState(false);
+  const [sheetVisivel, setSheetVisivel] = useState(false);
+  const [pulso, setPulso] = useState(0);
+  const assinaturaResumoRef = useRef("");
 
   // Rola apenas o container de mensagens (nunca a janela) — evita o "pulo" da
   // página ao enviar. scrollIntoView mexeria no scroll do documento inteiro.
@@ -129,6 +134,24 @@ export default function PedidoAssistente() {
     if (!el) return;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 112) + "px";
+  }
+
+  // Pulso no chip do resumo (mobile) sempre que produtos/quantidades mudam.
+  useEffect(() => {
+    const assinatura = JSON.stringify(pedido.linhas);
+    if (assinaturaResumoRef.current && assinaturaResumoRef.current !== assinatura && pedido.linhas.length > 0) {
+      setPulso((p) => p + 1);
+    }
+    assinaturaResumoRef.current = assinatura;
+  }, [pedido.linhas]);
+
+  function abrirSheet() {
+    setSheetAberto(true);
+    requestAnimationFrame(() => requestAnimationFrame(() => setSheetVisivel(true)));
+  }
+  function fecharSheet() {
+    setSheetVisivel(false);
+    setTimeout(() => setSheetAberto(false), 220);
   }
 
   async function salvarPedido(p: Pedido): Promise<string | null> {
@@ -297,6 +320,91 @@ export default function PedidoAssistente() {
   const totalPecas = pedido.linhas.reduce((acc, l) => acc + (l.total ?? 0), 0);
   const temResumo = pedido.linhas.length > 0 || Object.values(pedido.contato).some(Boolean);
 
+  // Miolo do resumo — compartilhado entre a coluna lateral (desktop) e o
+  // bottom sheet (mobile). Chamada direta (não <Componente/>) pra não remontar.
+  function resumoMiolo() {
+    return (
+      <>
+        {!temResumo && (
+          <p className="text-sm text-gray-400 leading-relaxed">
+            Conforme você for descrevendo no chat, seu pedido vai aparecendo aqui — produto por produto.
+          </p>
+        )}
+
+        {pedido.linhas.length > 0 && (
+          <div className="space-y-3">
+            {pedido.linhas.map((l, i) => (
+              <div key={i} className="border border-gray-100 rounded-xl p-3 bg-gray-50/60">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <p className="text-sm font-medium text-gray-900 capitalize flex items-center gap-1.5">
+                    {corHex(l.cor) && <span className="w-3 h-3 rounded-full border border-black/10 inline-block shrink-0" style={{ backgroundColor: corHex(l.cor) as string }} />}
+                    {[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ") || "Produto"}
+                  </p>
+                  {l.total ? <span className="text-xs text-gray-500 shrink-0">{l.total} un.</span> : null}
+                </div>
+                {l.material && <p className="text-xs text-gray-500 mb-1">Material: {l.material}</p>}
+                {l.tamanhos.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5">
+                    {l.tamanhos.map((t, j) => (
+                      <span key={j} className="bg-white border border-gray-200 text-gray-700 text-[11px] px-2 py-0.5 rounded-md">
+                        {t.tamanho.toUpperCase()}{t.qtd ? ` · ${t.qtd}` : ""}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {l.descricao && <p className="text-[11px] text-gray-400 mt-2 leading-snug">{l.descricao}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {Object.values(pedido.contato).some(Boolean) && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <p className="text-xs text-gray-400 font-medium mb-2">Contato</p>
+            <div className="space-y-1 text-sm text-gray-700">
+              {pedido.contato.nome && <div>{pedido.contato.nome}</div>}
+              {pedido.contato.telefone && <div className="text-gray-500">{pedido.contato.telefone}</div>}
+              {pedido.contato.email && <div className="text-gray-500">{pedido.contato.email}</div>}
+              {(pedido.contato.cep || pedido.contato.complemento) && (
+                <div className="text-gray-500">{[pedido.contato.cep, pedido.contato.complemento].filter(Boolean).join(" · ")}</div>
+              )}
+              {(pedido.contato.logradouro || pedido.contato.cidade) && (
+                <div className="text-gray-500">{[pedido.contato.logradouro, pedido.contato.bairro, [pedido.contato.cidade, pedido.contato.uf].filter(Boolean).join("/")].filter(Boolean).join(", ")}</div>
+              )}
+              {pedido.contato.prazoDias ? (
+                <div className="text-gray-500">Prazo: {pedido.contato.prazoDias} dias</div>
+              ) : null}
+            </div>
+          </div>
+        )}
+
+        {/* CTA: só aparece quando o pedido está completo */}
+        {fase === "completo" && (
+          <div className="mt-5">
+            <button
+              type="button"
+              onClick={() => void prosseguir()}
+              disabled={salvando}
+              className="w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-4 py-3 rounded-xl transition-colors"
+            >
+              {salvando ? "Salvando…" : "Prosseguir para visualizadores →"}
+            </button>
+            <p className="text-[11px] text-gray-400 text-center mt-2">Veja uma pré-visualização dos seus produtos.</p>
+
+            {mostrarEmBreve && (
+              <div className="mt-3 bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-3 text-center">
+                <p className="text-sm text-[#0F6E56] font-medium">Pré-visualização chega em breve 🚧</p>
+                <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">
+                  Seu pedido foi salvo{protocolo ? <> — protocolo <strong>#{protocolo.slice(0, 8)}</strong></> : ""}. Em breve você vai poder ver cada produto em frente, costas e lateral, e aplicar suas artes.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_minmax(300px,380px)] items-start">
       {/* ----------------------------- CHAT ----------------------------- */}
@@ -311,6 +419,18 @@ export default function PedidoAssistente() {
               Conversa acompanhada por Luigi, da Confeccione
             </p>
           </div>
+          {temResumo && (
+            <button
+              key={pulso}
+              type="button"
+              onClick={abrirSheet}
+              aria-label="Abrir resumo do pedido"
+              className={"lg:hidden ml-auto shrink-0 flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-1.5 text-xs font-medium transition-colors motion-safe:animate-[pulse_0.7s_ease-in-out_1] " + (fase === "completo" ? "bg-[#1D9E75] text-white" : "bg-[#E1F5EE] text-[#0F6E56] border border-[#1D9E75]/25")}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" /><path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" /></svg>
+              {fase === "completo" ? "Resumo ✓" : totalPecas > 0 ? `${totalPecas} ${totalPecas === 1 ? "peça" : "peças"}` : "Resumo"}
+            </button>
+          )}
         </div>
 
         <div ref={listaRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
@@ -417,8 +537,8 @@ export default function PedidoAssistente() {
         </div>
       </div>
 
-      {/* --------------------------- RESUMO ---------------------------- */}
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-5 lg:sticky lg:top-28">
+      {/* --------------------------- RESUMO (desktop: coluna lateral) --- */}
+      <div className="hidden lg:block bg-white border border-gray-200 rounded-2xl shadow-sm p-5 lg:sticky lg:top-28">
         <div className="flex items-center justify-between mb-3">
           <p className="text-sm font-medium text-gray-900">Resumo do pedido</p>
           {totalPecas > 0 && (
@@ -427,84 +547,39 @@ export default function PedidoAssistente() {
             </span>
           )}
         </div>
+        {resumoMiolo()}
+      </div>
 
-        {!temResumo && (
-          <p className="text-sm text-gray-400 leading-relaxed">
-            Conforme você for descrevendo no chat, seu pedido vai aparecendo aqui — produto por produto.
-          </p>
-        )}
-
-        {pedido.linhas.length > 0 && (
-          <div className="space-y-3">
-            {pedido.linhas.map((l, i) => (
-              <div key={i} className="border border-gray-100 rounded-xl p-3 bg-gray-50/60">
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <p className="text-sm font-medium text-gray-900 capitalize flex items-center gap-1.5">
-                    {corHex(l.cor) && <span className="w-3 h-3 rounded-full border border-black/10 inline-block shrink-0" style={{ backgroundColor: corHex(l.cor) as string }} />}
-                    {[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ") || "Produto"}
-                  </p>
-                  {l.total ? <span className="text-xs text-gray-500 shrink-0">{l.total} un.</span> : null}
-                </div>
-                {l.material && <p className="text-xs text-gray-500 mb-1">Material: {l.material}</p>}
-                {l.tamanhos.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-1.5">
-                    {l.tamanhos.map((t, j) => (
-                      <span key={j} className="bg-white border border-gray-200 text-gray-700 text-[11px] px-2 py-0.5 rounded-md">
-                        {t.tamanho.toUpperCase()}{t.qtd ? ` · ${t.qtd}` : ""}
-                      </span>
-                    ))}
-                  </div>
+      {/* ---------------- RESUMO (mobile: bottom sheet) ----------------- */}
+      {sheetAberto && (
+        <div className="lg:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Resumo do pedido">
+          <div
+            className={"absolute inset-0 bg-black/40 transition-opacity duration-200 " + (sheetVisivel ? "opacity-100" : "opacity-0")}
+            onClick={fecharSheet}
+          />
+          <div
+            className={"absolute inset-x-0 bottom-0 bg-white rounded-t-2xl shadow-2xl max-h-[72dvh] flex flex-col transition-transform duration-200 ease-out " + (sheetVisivel ? "translate-y-0" : "translate-y-full")}
+          >
+            <div className="pt-2.5 pb-1 flex justify-center" aria-hidden>
+              <span className="w-10 h-1.5 rounded-full bg-gray-200" />
+            </div>
+            <div className="px-5 pb-2.5 flex items-center justify-between border-b border-gray-100">
+              <p className="text-sm font-semibold text-gray-900">Resumo do pedido</p>
+              <div className="flex items-center gap-2">
+                {totalPecas > 0 && (
+                  <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">
+                    {totalPecas} {totalPecas === 1 ? "peça" : "peças"}
+                  </span>
                 )}
-                {l.descricao && <p className="text-[11px] text-gray-400 mt-2 leading-snug">{l.descricao}</p>}
+                <button type="button" onClick={fecharSheet} aria-label="Fechar resumo" className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-50 text-xl leading-none">×</button>
               </div>
-            ))}
-          </div>
-        )}
-
-        {Object.values(pedido.contato).some(Boolean) && (
-          <div className="mt-4 pt-4 border-t border-gray-100">
-            <p className="text-xs text-gray-400 font-medium mb-2">Contato</p>
-            <div className="space-y-1 text-sm text-gray-700">
-              {pedido.contato.nome && <div>{pedido.contato.nome}</div>}
-              {pedido.contato.telefone && <div className="text-gray-500">{pedido.contato.telefone}</div>}
-              {pedido.contato.email && <div className="text-gray-500">{pedido.contato.email}</div>}
-              {(pedido.contato.cep || pedido.contato.complemento) && (
-                <div className="text-gray-500">{[pedido.contato.cep, pedido.contato.complemento].filter(Boolean).join(" · ")}</div>
-              )}
-              {(pedido.contato.logradouro || pedido.contato.cidade) && (
-                <div className="text-gray-500">{[pedido.contato.logradouro, pedido.contato.bairro, [pedido.contato.cidade, pedido.contato.uf].filter(Boolean).join("/")].filter(Boolean).join(", ")}</div>
-              )}
-              {pedido.contato.prazoDias ? (
-                <div className="text-gray-500">Prazo: {pedido.contato.prazoDias} dias</div>
-              ) : null}
+            </div>
+            <div className="px-5 pt-4 overflow-y-auto" style={{ paddingBottom: "calc(1.75rem + env(safe-area-inset-bottom))" }}>
+              {resumoMiolo()}
             </div>
           </div>
-        )}
-
-        {/* CTA: só aparece quando o pedido está completo (Etapa 2 = placeholder) */}
-        {fase === "completo" && (
-          <div className="mt-5">
-            <button
-              type="button"
-              onClick={() => void prosseguir()}
-              disabled={salvando}
-              className="w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-4 py-3 rounded-xl transition-colors"
-            >
-              {salvando ? "Salvando…" : "Prosseguir para visualizadores →"}
-            </button>
-            <p className="text-[11px] text-gray-400 text-center mt-2">Veja uma pré-visualização dos seus produtos.</p>
-
-            {mostrarEmBreve && (
-              <div className="mt-3 bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-3 text-center">
-                <p className="text-sm text-[#0F6E56] font-medium">Pré-visualização chega em breve 🚧</p>
-                <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">
-                  Seu pedido foi salvo{protocolo ? <> — protocolo <strong>#{protocolo.slice(0, 8)}</strong></> : ""}. Em breve você vai poder ver cada produto em frente, costas e lateral, e aplicar suas artes.
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
