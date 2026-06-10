@@ -8,6 +8,7 @@ const ITENS: Array<{ href: string; label: string }> = [
   { href: '/admin/pedidos', label: 'Pedidos' },
   { href: '/admin/pedidos-pagos', label: 'Pedidos pagos' },
   { href: '/admin/pedidos-chat', label: 'Pedidos do chat' },
+  { href: '/admin/marketing', label: 'Marketing' },
   { href: '/admin/fornecedores', label: 'Fornecedores' },
   { href: '/admin/captacao', label: 'Captação' },
   { href: '/admin/mockups', label: 'Mockups' },
