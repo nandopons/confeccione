@@ -413,11 +413,12 @@ export default function PedidoAssistente() {
           <span className="w-8 h-8 rounded-full bg-[#E1F5EE] flex items-center justify-center text-[#0F6E56] text-sm font-semibold">C</span>
           <div>
             <p className="text-sm font-medium text-gray-900 leading-tight">Assistente Confeccione</p>
-            <p className="text-[11px] text-gray-400 leading-tight">Monta seu pedido com você, passo a passo</p>
-            <p className="text-[10px] text-gray-400 leading-tight mt-0.5 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#1D9E75] inline-block" />
-              Conversa acompanhada por Luigi, da Confeccione
-            </p>
+            {!alturaTeclado && (
+              <p className="text-[11px] text-gray-400 leading-tight mt-0.5 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#1D9E75] inline-block" />
+                Online · Luigi acompanha a conversa
+              </p>
+            )}
           </div>
           {temResumo && (
             <button
