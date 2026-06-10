@@ -12,11 +12,14 @@
 //   3. cada page filha               → eAdminLogado() de novo (defesa em
 //                                      profundidade; cobre edge cases de
 //                                      streaming do Next.js Server Components)
+//
+// A moldura visual (sidebar escura desktop + topbar/drawer mobile) vive no
+// client component AdminShell (./Nav.tsx).
 // ============================================================================
 
 import { redirect } from 'next/navigation'
 import { eAdminLogado } from '@/app/lib/admin-auth'
-import { AdminNav } from './Nav'
+import { AdminShell } from './Nav'
 
 export default async function AdminPainelLayout({
   children,
@@ -27,20 +30,5 @@ export default async function AdminPainelLayout({
     redirect('/admin/login')
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="mb-3">
-            <h1 className="text-xl font-bold text-gray-900">
-              Confeccione · admin
-            </h1>
-          </div>
-          <AdminNav />
-        </div>
-      </header>
-
-      <main>{children}</main>
-    </div>
-  )
+  return <AdminShell>{children}</AdminShell>
 }
