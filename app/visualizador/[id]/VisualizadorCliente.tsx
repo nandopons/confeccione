@@ -80,6 +80,10 @@ function telBR(s: string | null | undefined): string {
   if (d.length === 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
   return s;
 }
+function cepBR(s: string | null | undefined): string {
+  const d = (s || "").replace(/\D/g, "");
+  return d.length === 8 ? `${d.slice(0, 5)}-${d.slice(5)}` : (s || "");
+}
 function corLabel(s: string | null | undefined): string {
   return (s || "").replace(/\s*\(#?[0-9a-fA-F]{6}\)\s*/g, " ").replace(/#[0-9a-fA-F]{6}/g, "").replace(/\s{2,}/g, " ").trim();
 }
@@ -109,6 +113,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   // confirmação / pagamento
   const [confirmStep, setConfirmStep] = useState<"idle" | "form" | "feito">("idle");
   const [metodoPag, setMetodoPag] = useState<"pix" | "cartao">("pix");
+  const [contato, setContato] = useState({ nome: pedido.nome, telefone: pedido.telefone, email: pedido.email, cep: pedido.cep, complemento: pedido.complemento, logradouro: pedido.logradouro ?? null, bairro: pedido.bairro ?? null, cidade: pedido.cidade ?? null, uf: pedido.uf ?? null });
+  const [contatoOpen, setContatoOpen] = useState(false);
+  const [contatoDraft, setContatoDraft] = useState({ nome: "", telefone: "", email: "", cep: "", complemento: "" });
+  const [salvandoContato, setSalvandoContato] = useState(false);
+  const [contatoErro, setContatoErro] = useState<string | null>(null);
   const [cpf, setCpf] = useState("");
   const [confirmando, setConfirmando] = useState(false);
   const [confirmErro, setConfirmErro] = useState<string | null>(null);
@@ -422,6 +431,37 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [confirmStep, pago]);
 
+  function abrirContato() {
+    setContatoDraft({ nome: contato.nome ?? "", telefone: contato.telefone ?? "", email: contato.email ?? "", cep: contato.cep ?? "", complemento: contato.complemento ?? "" });
+    setContatoErro(null);
+    setContatoOpen(true);
+  }
+
+  async function salvarContato() {
+    if (salvandoContato) return;
+    if (!contatoDraft.nome.trim()) { setContatoErro("Informe o nome."); return; }
+    const cepDigs = contatoDraft.cep.replace(/\D/g, "");
+    if (cepDigs && cepDigs.length !== 8) { setContatoErro("CEP deve ter 8 dígitos."); return; }
+    setSalvandoContato(true);
+    setContatoErro(null);
+    try {
+      const res = await fetch(`/api/pedido/assistente/${pedido.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contato: { nome: contatoDraft.nome.trim(), telefone: contatoDraft.telefone.trim() || null, email: contatoDraft.email.trim() || null, cep: cepDigs || null, complemento: contatoDraft.complemento.trim() || null } }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error || "Não foi possível salvar.");
+      const p = d.pedido ?? {};
+      setContato({ nome: p.nome ?? contatoDraft.nome, telefone: p.telefone ?? null, email: p.email ?? null, cep: p.cep ?? null, complemento: p.complemento ?? null, logradouro: p.logradouro ?? null, bairro: p.bairro ?? null, cidade: p.cidade ?? null, uf: p.uf ?? null });
+      setContatoOpen(false);
+    } catch (e) {
+      setContatoErro(e instanceof Error ? e.message : "Erro ao salvar.");
+    } finally {
+      setSalvandoContato(false);
+    }
+  }
+
   const podeConfirmar = linhas.length > 0 && !!orcamento && orcamento.completo && orcamento.total_centavos > 0;
   const totalPecas = linhas.reduce((acc, l) => acc + (l.total ?? 0), 0);
 
@@ -638,14 +678,37 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
       {/* CONTATO + AVANÇAR */}
       <div className="mt-8 bg-white border border-gray-200 rounded-2xl shadow-sm p-5">
-        {(pedido.nome || pedido.email) && (
+        {(contato.nome || contato.email) && (
           <div className="mb-4">
-            <p className="text-xs text-gray-400 font-medium mb-1">Contato</p>
-            <p className="text-sm text-gray-700">{pedido.nome}{pedido.telefone ? ` · ${telBR(pedido.telefone)}` : ""}{pedido.email ? ` · ${pedido.email}` : ""}</p>
-            {(pedido.logradouro || pedido.cidade) && (
-              <p className="text-sm text-gray-500">{[pedido.logradouro, pedido.bairro, [pedido.cidade, pedido.uf].filter(Boolean).join("/")].filter(Boolean).join(", ")}</p>
-            )}
-            {(pedido.cep || pedido.complemento) && <p className="text-sm text-gray-500">{[pedido.cep, pedido.complemento && `nº/compl.: ${pedido.complemento}`].filter(Boolean).join(" · ")}</p>}
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold text-gray-900">Entrega e contato</p>
+              <button type="button" onClick={abrirContato} className="inline-flex items-center gap-1.5 text-[#0F6E56] hover:bg-[#E1F5EE]/60 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                Editar
+              </button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3.5">
+                <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-1.5">📦 Endereço de entrega</p>
+                <p className="text-[11px] text-[#0F6E56] mb-1">Seu lote será enviado para:</p>
+                {contato.logradouro || contato.cidade ? (
+                  <>
+                    <p className="text-sm text-gray-800 leading-snug">{[contato.logradouro, contato.complemento].filter(Boolean).join(", ")}</p>
+                    <p className="text-sm text-gray-600 leading-snug">{[contato.bairro, [contato.cidade, contato.uf].filter(Boolean).join("/")].filter(Boolean).join(" — ")}</p>
+                    {contato.cep && <p className="text-xs text-gray-500 mt-1">CEP {cepBR(contato.cep)}</p>}
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500">{contato.cep ? `CEP ${cepBR(contato.cep)}${contato.complemento ? ` · ${contato.complemento}` : ""}` : "Endereço ainda não informado — clique em Editar."}</p>
+                )}
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-3.5">
+                <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-1.5">👤 Contato</p>
+                <p className="text-sm text-gray-800">{contato.nome}</p>
+                {contato.telefone && <p className="text-sm text-gray-600">{telBR(contato.telefone)}</p>}
+                {contato.email && <p className="text-sm text-gray-600 break-all">{contato.email}</p>}
+                <p className="text-[11px] text-gray-400 mt-1.5">Usamos esses dados pra te avisar sobre produção e envio.</p>
+              </div>
+            </div>
           </div>
         )}
         {confirmStep === "feito" && pixResult ? (
@@ -720,6 +783,48 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           <p className="text-xs text-gray-400">Revise os produtos e o resumo acima e clique em <strong className="text-gray-600">Pagar agora</strong> pra fechar o pedido.</p>
         )}
       </div>
+
+      {/* ---------- MODAL EDITAR ENTREGA/CONTATO ---------- */}
+      {contatoOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => { if (!salvandoContato) setContatoOpen(false); }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-gray-900 font-medium">Editar entrega e contato</p>
+              <button type="button" onClick={() => setContatoOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">Rua, bairro e cidade são preenchidos automaticamente pelo CEP.</p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Nome</label>
+                <input value={contatoDraft.nome} onChange={(e) => setContatoDraft((d) => ({ ...d, nome: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">WhatsApp / telefone</label>
+                  <input value={contatoDraft.telefone} onChange={(e) => setContatoDraft((d) => ({ ...d, telefone: e.target.value }))} inputMode="tel" placeholder="(11) 99999-9999" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">CEP</label>
+                  <input value={contatoDraft.cep} onChange={(e) => setContatoDraft((d) => ({ ...d, cep: e.target.value }))} inputMode="numeric" placeholder="00000-000" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">E-mail</label>
+                <input value={contatoDraft.email} onChange={(e) => setContatoDraft((d) => ({ ...d, email: e.target.value }))} inputMode="email" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Número e complemento</label>
+                <input value={contatoDraft.complemento} onChange={(e) => setContatoDraft((d) => ({ ...d, complemento: e.target.value }))} placeholder="ex.: 121, loja 2" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
+              </div>
+            </div>
+            {contatoErro && <p className="text-xs text-red-600 mt-3">{contatoErro}</p>}
+            <div className="flex gap-2 mt-4">
+              <button type="button" onClick={() => void salvarContato()} disabled={salvandoContato} className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-xl">{salvandoContato ? "Salvando…" : "Salvar"}</button>
+              <button type="button" onClick={() => setContatoOpen(false)} disabled={salvandoContato} className="text-sm text-gray-500 px-3 py-2.5 rounded-xl hover:bg-gray-100">Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ---------- MODAL EDITAR / ADICIONAR ---------- */}
       {ajusteIndex !== null && (
