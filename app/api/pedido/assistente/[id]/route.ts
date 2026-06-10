@@ -32,10 +32,42 @@ const LinhaSchema = z.object({
   estampado: z.boolean().nullable().optional(),
   descricao: z.string().nullable(),
 })
+const ContatoSchema = z.object({
+  nome: z.string().trim().min(1).max(120),
+  telefone: z.string().trim().max(20).nullable(),
+  email: z.string().trim().email().max(160).nullable(),
+  cep: z.string().trim().max(10).nullable(),
+  complemento: z.string().trim().max(120).nullable(),
+})
 const PatchSchema = z.object({
   linhas: z.array(LinhaSchema).optional(),
   status: z.enum(['completo', 'em_visualizacao', 'confirmado']).optional(),
+  contato: ContatoSchema.optional(),
 })
+
+// Resolve logradouro/bairro/cidade/uf pelo CEP (ViaCEP). Null se inválido.
+async function buscarCep(cep: string | null): Promise<{ logradouro: string | null; bairro: string | null; cidade: string | null; uf: string | null } | null> {
+  if (!cep) return null
+  const digs = cep.replace(/\D/g, '')
+  if (digs.length !== 8) return null
+  try {
+    const r = await fetch(`https://viacep.com.br/ws/${digs}/json/`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!r.ok) return null
+    const j = (await r.json()) as { erro?: boolean; logradouro?: string; bairro?: string; localidade?: string; uf?: string }
+    if (j.erro) return null
+    return {
+      logradouro: j.logradouro?.trim() || null,
+      bairro: j.bairro?.trim() || null,
+      cidade: j.localidade?.trim() || null,
+      uf: j.uf?.trim() || null,
+    }
+  } catch {
+    return null
+  }
+}
 
 type Ctx = { params: Promise<{ id: string }> }
 
@@ -63,12 +95,30 @@ export async function PATCH(req: Request, ctx: Ctx) {
     patch.linhas = linhasValidas
   }
   if (parsed.data.status) patch.status = parsed.data.status
+  if (parsed.data.contato) {
+    const c = parsed.data.contato
+    patch.nome = c.nome
+    patch.telefone = c.telefone ? c.telefone.replace(/\D/g, '') || null : null
+    patch.email = c.email
+    const cepDigs = c.cep ? c.cep.replace(/\D/g, '') : ''
+    patch.cep = cepDigs || null
+    patch.complemento = c.complemento
+    if (cepDigs.length === 8) {
+      const end = await buscarCep(cepDigs)
+      if (end) {
+        patch.logradouro = end.logradouro
+        patch.bairro = end.bairro
+        patch.cidade = end.cidade
+        patch.uf = end.uf
+      }
+    }
+  }
 
   const { data, error } = await supabase
     .from('pedidos_assistente')
     .update(patch)
     .eq('id', id)
-    .select('id, linhas, status')
+    .select('id, linhas, status, nome, telefone, email, cep, complemento, logradouro, bairro, cidade, uf')
     .single()
 
   if (error || !data) {
