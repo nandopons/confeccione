@@ -500,28 +500,26 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   </p>
                 )}
 
-                <div className="mt-4 flex flex-col sm:flex-row sm:items-start gap-2.5">
-                  {/* Grupo ARTE */}
-                  <div className="rounded-xl border border-[#1D9E75]/30 bg-[#E1F5EE]/30 p-2.5">
-                    <div className="text-[10px] uppercase tracking-wide text-[#0F6E56] font-semibold mb-1.5">Arte</div>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => abrirArte(i)} className="flex-1 sm:flex-none min-w-[130px] text-center bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-3.5 py-2 rounded-lg">{st.aplicado ? "Trocar arte" : "+ Aplicar arte"}</button>
-                      {st.aplicado && (
-                        <button type="button" onClick={() => limparArte(i)} className="flex-1 sm:flex-none text-center border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg">Limpar arte</button>
-                      )}
-                      {st.url && (
-                        <button type="button" onClick={() => abrirAjuste(i)} className="flex-1 sm:flex-none text-center border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg">Ajustar detalhe</button>
-                      )}
-                    </div>
-                  </div>
-                  {/* Grupo PRODUTO */}
-                  <div className="rounded-xl border border-gray-200 p-2.5">
-                    <div className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-1.5">Produto</div>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => abrirEdicao(i)} className="flex-1 sm:flex-none text-center border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 text-sm px-4 py-2 rounded-lg">Editar</button>
-                      <button type="button" onClick={() => excluir(i)} className="flex-1 sm:flex-none text-center border border-gray-200 bg-white text-red-600 hover:bg-red-50 text-sm px-4 py-2 rounded-lg">Excluir</button>
-                    </div>
-                  </div>
+                {/* AÇÕES — toolbar única: arte à esquerda, produto à direita */}
+                <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={() => abrirArte(i)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                    {st.aplicado ? "✦ Trocar arte" : "✦ Aplicar minha arte"}
+                  </button>
+                  {st.aplicado && (
+                    <button type="button" onClick={() => limparArte(i)} className="border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">Limpar arte</button>
+                  )}
+                  {st.url && (
+                    <button type="button" onClick={() => abrirAjuste(i)} className="border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">Ajustar detalhe</button>
+                  )}
+                  <span className="flex-1 min-w-2" aria-hidden />
+                  <button type="button" onClick={() => abrirEdicao(i)} title="Editar produto" className="inline-flex items-center gap-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                    Editar
+                  </button>
+                  <button type="button" onClick={() => excluir(i)} title="Excluir produto" className="inline-flex items-center gap-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 text-sm px-3 py-2 rounded-lg transition-colors">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                    Excluir
+                  </button>
                 </div>
 
               </div>
