@@ -76,13 +76,60 @@ export default function PedidoAssistente() {
   const salvoRef = useRef(false);
   const listaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  // Altura do card quando o teclado virtual está aberto (mobile). null = padrão.
+  const [alturaTeclado, setAlturaTeclado] = useState<number | null>(null);
 
   // Rola apenas o container de mensagens (nunca a janela) — evita o "pulo" da
   // página ao enviar. scrollIntoView mexeria no scroll do documento inteiro.
   useEffect(() => {
     const el = listaRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [turnos, enviando]);
+
+  // Teclado virtual (mobile): encolhe o card pra caber exatamente no espaço
+  // visível acima do teclado, mantendo o input sempre à vista — sensação de app.
+  useEffect(() => {
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    if (!vv) return;
+    const ajustar = () => {
+      const tecladoAberto = vv.height < window.innerHeight - 120;
+      if (tecladoAberto && document.activeElement === inputRef.current && cardRef.current) {
+        const rect = cardRef.current.getBoundingClientRect();
+        const disponivel = vv.height + vv.offsetTop - rect.top - 10;
+        setAlturaTeclado(Math.max(240, Math.min(Math.round(disponivel), 560)));
+        requestAnimationFrame(() => {
+          const el = listaRef.current;
+          if (el) el.scrollTop = el.scrollHeight;
+        });
+      } else {
+        setAlturaTeclado(null);
+      }
+    };
+    vv.addEventListener("resize", ajustar);
+    vv.addEventListener("scroll", ajustar);
+    return () => {
+      vv.removeEventListener("resize", ajustar);
+      vv.removeEventListener("scroll", ajustar);
+    };
+  }, []);
+
+  // Ao focar o input no mobile, alinha o chat com o topo da tela (deixa o
+  // máximo de espaço útil acima do teclado que vai abrir).
+  function aoFocarInput() {
+    if (typeof window === "undefined" || window.innerWidth >= 1024) return;
+    setTimeout(() => {
+      cardRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }, 350);
+  }
+
+  // Textarea cresce com o conteúdo (até ~4 linhas) e volta ao normal ao limpar.
+  function autoSize() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 112) + "px";
+  }
 
   async function salvarPedido(p: Pedido): Promise<string | null> {
     if (salvoRef.current) return protocolo;
@@ -197,7 +244,14 @@ export default function PedidoAssistente() {
 
     const novos: Turno[] = [...turnos, { role: "user", display: texto, raw: texto }];
     setTurnos(novos);
-    if (textoForcado === undefined) setInput("");
+    if (textoForcado === undefined) {
+      setInput("");
+      const el = inputRef.current;
+      if (el) {
+        el.style.height = "auto";
+        el.focus(); // mantém o teclado aberto no mobile — sem retoque a cada mensagem
+      }
+    }
     setEnviando(true);
 
     // histórico p/ API: começa no 1º turno de usuário (Anthropic exige role user primeiro)
@@ -246,8 +300,8 @@ export default function PedidoAssistente() {
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_minmax(300px,380px)] items-start">
       {/* ----------------------------- CHAT ----------------------------- */}
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col h-[440px] sm:h-[560px] overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-gray-100 flex items-center gap-2">
+      <div ref={cardRef} style={alturaTeclado ? { height: alturaTeclado } : undefined} className="bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col h-[440px] sm:h-[560px] overflow-hidden scroll-mt-2">
+        <div className={"px-5 border-b border-gray-100 flex items-center gap-2 " + (alturaTeclado ? "py-2" : "py-3.5")}>
           <span className="w-8 h-8 rounded-full bg-[#E1F5EE] flex items-center justify-center text-[#0F6E56] text-sm font-semibold">C</span>
           <div>
             <p className="text-sm font-medium text-gray-900 leading-tight">Assistente Confeccione</p>
@@ -316,12 +370,13 @@ export default function PedidoAssistente() {
 
         {erro && <div className="px-5 pb-1 text-red-600 text-xs">{erro}</div>}
 
-        <div className="border-t border-gray-100 p-3 flex items-end gap-2">
+        <div className="border-t border-gray-100 p-2.5 sm:p-3 flex items-end gap-2">
           <textarea
             ref={inputRef}
             rows={1}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => { setInput(e.target.value); autoSize(); }}
+            onFocus={aoFocarInput}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -329,15 +384,21 @@ export default function PedidoAssistente() {
               }
             }}
             placeholder="Escreva aqui…"
-            className="flex-1 resize-none border border-gray-200 rounded-xl px-3 py-2 text-base sm:text-sm text-gray-800 max-h-28 focus:outline-none focus:border-[#1D9E75]"
+            enterKeyHint="send"
+            autoCapitalize="sentences"
+            autoCorrect="on"
+            spellCheck
+            aria-label="Mensagem para o assistente"
+            className="flex-1 resize-none border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 max-h-28 focus:outline-none focus:border-[#1D9E75] focus:ring-2 focus:ring-[#1D9E75]/15"
           />
           <button
             type="button"
+            onPointerDown={(e) => e.preventDefault()}
             onClick={() => (gravando ? pararGravacao() : void iniciarGravacao())}
             disabled={transcrevendo || enviando}
             title={gravando ? "Parar e transcrever" : "Gravar áudio"}
             aria-label={gravando ? "Parar gravação" : "Gravar áudio"}
-            className={"px-3 py-2 rounded-xl text-sm font-medium disabled:opacity-40 border transition-colors " + (gravando ? "bg-red-500 text-white border-red-500 animate-pulse" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50")}
+            className={"w-11 h-11 shrink-0 rounded-xl flex items-center justify-center text-sm font-medium disabled:opacity-40 border transition-colors " + (gravando ? "bg-red-500 text-white border-red-500 animate-pulse" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50")}
           >
             {transcrevendo ? "…" : gravando ? "⏹" : (
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
@@ -345,11 +406,13 @@ export default function PedidoAssistente() {
           </button>
           <button
             type="button"
+            onPointerDown={(e) => e.preventDefault()}
             onClick={() => void enviar()}
             disabled={enviando || !input.trim()}
-            className="bg-[#111] text-white px-4 py-2 rounded-xl text-sm font-medium hover:opacity-85 disabled:opacity-40"
+            aria-label="Enviar mensagem"
+            className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white w-11 h-11 shrink-0 rounded-xl flex items-center justify-center disabled:opacity-40 transition-colors"
           >
-            Enviar
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.4 20.4 20.85 12 3.4 3.6l-.01 6.53L15 12 3.39 13.87z" /></svg>
           </button>
         </div>
       </div>
