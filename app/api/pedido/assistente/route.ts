@@ -17,6 +17,7 @@
 // ============================================================================
 
 import Anthropic from '@anthropic-ai/sdk'
+import { buscarEnderecoCep, type EnderecoCep } from '@/app/lib/cep'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { validarWhatsApp, normalizarWhatsApp } from '@/app/lib/phone'
@@ -243,30 +244,9 @@ function telefoneValido(t: string | null): boolean {
   return Boolean(t && validarWhatsApp(t))
 }
 
-type EnderecoCep = { logradouro: string | null; bairro: string | null; cidade: string | null; uf: string | null }
-
-// Busca o endereço de um CEP na fonte oficial (ViaCEP). Retorna null se inválido.
+// Busca o endereço de um CEP (ViaCEP -> fallback BrasilAPI). Null se inválido.
 async function buscarCep(cep: string | null | undefined): Promise<EnderecoCep | null> {
-  if (!cep) return null
-  const digs = cep.replace(/\D/g, '')
-  if (digs.length !== 8) return null
-  try {
-    const r = await fetch(`https://viacep.com.br/ws/${digs}/json/`, {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(4000),
-    })
-    if (!r.ok) return null
-    const j = (await r.json()) as { erro?: boolean; logradouro?: string; bairro?: string; localidade?: string; uf?: string }
-    if (j.erro) return null
-    return {
-      logradouro: j.logradouro?.trim() || null,
-      bairro: j.bairro?.trim() || null,
-      cidade: j.localidade?.trim() || null,
-      uf: j.uf?.trim() || null,
-    }
-  } catch {
-    return null
-  }
+  return buscarEnderecoCep(cep)
 }
 
 // Extrai um CEP (8 dígitos) do texto mais recente do cliente.
@@ -370,10 +350,10 @@ export async function POST(req: Request) {
   ]
   if (enderecoCep && cepAtual) {
     const partes = [enderecoCep.logradouro, enderecoCep.bairro, [enderecoCep.cidade, enderecoCep.uf].filter(Boolean).join('/')].filter(Boolean).join(', ')
-    systemBlocks.push({
-      type: 'text',
-      text: `ENDEREÇO OFICIAL DO CEP ${cepAtual} (fonte ViaCEP — use EXATAMENTE este, NUNCA invente rua/bairro/cidade): ${partes}. Ao confirmar o endereço com o cliente, use estes dados literais e peça só o número e complemento.`,
-    })
+    const textoCep = enderecoCep.logradouro
+      ? `ENDEREÇO OFICIAL DO CEP ${cepAtual} (fonte oficial — use EXATAMENTE este, NUNCA invente rua/bairro/cidade): ${partes}. Ao confirmar o endereço com o cliente, use estes dados literais e peça só o número e complemento.`
+      : `O CEP ${cepAtual} é um CEP ÚNICO da cidade ${partes} — não existe rua cadastrada por CEP nessa cidade. Confirme a cidade com o cliente e peça o ENDEREÇO COMPLETO num só passo: rua/avenida, número e complemento ou ponto de referência (grave tudo em complemento).`
+    systemBlocks.push({ type: 'text', text: textoCep })
   }
 
   let texto: string

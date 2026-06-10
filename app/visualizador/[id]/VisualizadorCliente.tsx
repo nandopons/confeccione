@@ -32,11 +32,9 @@ type Orcamento = { linhas: LinhaOrc[]; subtotal_centavos: number; desconto_qtd_c
 function brl(c: number): string {
   return (c / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
-/** Estimativa de frete só pra exibição (cortada quando o pedido tem frete grátis). */
+/** Estimativa de frete só pra exibição: R$ 4,90 por peça, mínimo R$ 21,80. */
 function freteEstimadoCentavos(pecas: number): number {
-  const bruto = 9900 + pecas * 120;
-  const limitado = Math.max(9900, Math.min(16900, bruto));
-  return Math.round(limitado / 100) * 100;
+  return Math.max(2180, pecas * 490);
 }
 export type PedidoVis = {
   id: string;

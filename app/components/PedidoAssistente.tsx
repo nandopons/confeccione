@@ -154,7 +154,7 @@ export default function PedidoAssistente() {
     setTimeout(() => setSheetAberto(false), 220);
   }
 
-  async function salvarPedido(p: Pedido): Promise<string | null> {
+  async function salvarPedido(p: Pedido, conversaTurnos?: Turno[]): Promise<string | null> {
     if (salvoRef.current) return protocolo;
     if (salvando) return null;
     setSalvando(true);
@@ -162,7 +162,7 @@ export default function PedidoAssistente() {
       const res = await fetch("/api/pedido/assistente/criar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ linhas: p.linhas, contato: p.contato, conversa: turnos.map((t) => ({ role: t.role, texto: t.display })) }),
+        body: JSON.stringify({ linhas: p.linhas, contato: p.contato, conversa: (conversaTurnos ?? turnos).map((t) => ({ role: t.role, texto: t.display })) }),
       });
       const data = await res.json().catch(() => null);
       if (res.ok && data?.ok) {
@@ -301,7 +301,9 @@ export default function PedidoAssistente() {
       setFase(novaFase);
       setCoresSugeridas(data.cores ?? null);
       setEnviando(false);
-      if (novaFase === "completo") void salvarPedido(novoPedido);
+      // Conversa COMPLETA (inclui a última msg do cliente e a resposta final) —
+      // o state `turnos` deste closure está defasado em 2 mensagens.
+      if (novaFase === "completo") void salvarPedido(novoPedido, [...novos, { role: "assistant", display: data.mensagem, raw }]);
     } catch {
       setErro("Erro de conexão. Verifique sua internet e tente de novo.");
       setEnviando(false);
@@ -510,7 +512,7 @@ export default function PedidoAssistente() {
             autoCorrect="on"
             spellCheck
             aria-label="Mensagem para o assistente"
-            className="flex-1 resize-none border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 max-h-28 focus:outline-none focus:border-[#1D9E75] focus:ring-2 focus:ring-[#1D9E75]/15"
+            className="flex-1 resize-none border border-gray-200 rounded-xl px-3 py-2.5 text-base sm:text-sm text-gray-800 max-h-28 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden focus:outline-none focus:border-[#1D9E75] focus:ring-2 focus:ring-[#1D9E75]/15"
           />
           <button
             type="button"
