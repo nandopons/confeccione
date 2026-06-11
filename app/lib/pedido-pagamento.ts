@@ -83,8 +83,8 @@ export async function criarCobrancaPixPedido(input: {
       dueDate: vencimento,
       description: `Pedido Confeccione ${input.pedidoId.slice(0, 8)}`,
       externalReference: input.pedidoId,
-      // desconto de 3% pra pagamento via PIX/boleto (cartão paga o valor cheio)
-      discount: { value: 3, dueDateLimitDays: 0, type: 'PERCENTAGE' },
+      // sem desconto automático: o valor é o ORÇAMENTO FINAL definido pelo
+      // fornecedor (modelo jun/2026) — PIX e cartão pagam o mesmo total.
     },
   })
 
