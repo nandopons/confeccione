@@ -2,11 +2,11 @@
 
 // app/visualizador/[id]/VisualizadorCliente.tsx
 // ============================================================================
-// Etapa 2 — Visualizadores. Cada linha do pedido vira um card com UMA imagem
-// panorâmica do produto liso (frente · lateral · costas lado a lado, gerada via
-// Gemini — placeholder enquanto indisponível), os detalhes e as ações: editar,
-// excluir, adicionar produto e "Aplicar minha arte" (pop-up estilo Nano Banana
-// com upload de múltiplas artes + caixa de texto).
+// Etapa 2 — Visualizadores. Cada linha do pedido vira um card; o cliente
+// ESCOLHE entre subir o próprio visualizador (se já tem pronto) ou criar com
+// IA (imagem panorâmica frente · lateral · costas via Gemini). Nada é gerado
+// automaticamente. Ações: aplicar/trocar arte (IA), ajustar detalhe,
+// trocar/remover imagem enviada, editar/excluir/adicionar produto.
 // ============================================================================
 
 import { useEffect, useRef, useState } from "react";
@@ -150,9 +150,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [ajusteErro, setAjusteErro] = useState<string | null>(null);
   const arteFileRef = useRef<HTMLInputElement>(null);
 
-  const geradasRef = useRef<Set<number>>(new Set(
-    Object.keys(pedido.mockups || {}).filter((k) => (pedido.mockups || {})[k]?.liso).map(Number)
-  ));
+  // subir o próprio visualizador
+  const subirRef = useRef<HTMLInputElement>(null);
+  const [subirIndex, setSubirIndex] = useState<number | null>(null);
+  const [subindoIdx, setSubindoIdx] = useState<number | null>(null);
 
   async function salvarMockup(payload: { index?: number; liso?: string | null; arte?: string | null; resetAll?: boolean }) {
     try {
@@ -164,9 +165,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     } catch { /* silencioso */ }
   }
 
-  async function gerarMockup(i: number, forcar = false) {
-    if (!forcar && geradasRef.current.has(i)) return;
-    geradasRef.current.add(i);
+  async function gerarMockup(i: number) {
     const l = linhas[i];
     if (!l) return;
     setImgs((m) => ({ ...m, [i]: { ...m[i], loading: true, motivo: undefined } }));
@@ -188,11 +187,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       setImgs((m) => ({ ...m, [i]: { ...m[i], loading: false, motivo: "Erro de conexão." } }));
     }
   }
-
-  useEffect(() => {
-    linhas.forEach((_, i) => { if (!imgs[i]?.url) void gerarMockup(i); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // orçamento: no 1º carregamento, pesquisa automaticamente os preços que
   // faltam (IA) enquanto o cliente finaliza; nas edições seguintes só recalcula.
@@ -248,6 +242,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       descricao: draft.descricao?.trim() || null,
     };
     if (!limpa.modelo && !limpa.cor && !limpa.total) return;
+    const antes = editIndex !== null ? linhas[editIndex] : null;
+    const visualMudou =
+      !antes ||
+      [antes.modelo, antes.cor, antes.material, antes.publico ?? null, antes.descricao].join("|") !==
+        [limpa.modelo, limpa.cor, limpa.material, limpa.publico ?? null, limpa.descricao].join("|");
     let novas: Linha[];
     let alvo: number;
     if (editIndex === null) {
@@ -260,23 +259,35 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     setLinhas(novas);
     setEditOpen(false);
     void persistir(novas);
-    setImgs((m) => ({ ...m, [alvo]: {} }));
-    setVerArte((m) => ({ ...m, [alvo]: false }));
-    geradasRef.current.delete(alvo);
-    void salvarMockup({ index: alvo, liso: null, arte: null });
-    setTimeout(() => void gerarMockup(alvo, true), 0);
+    if (visualMudou) {
+      // o visual mudou → volta pro seletor (subir próprio ou criar com IA)
+      setImgs((m) => ({ ...m, [alvo]: {} }));
+      setVerArte((m) => ({ ...m, [alvo]: false }));
+      void salvarMockup({ index: alvo, liso: null, arte: null });
+    }
   }
 
   function excluir(i: number) {
     if (!confirm("Remover este produto do pedido?")) return;
     const novas = linhas.filter((_, idx) => idx !== i);
+    // Reindexa as imagens preservando o que o cliente já subiu/criou.
+    const novasImgs: Record<number, ImgEstado> = {};
+    const novaArte: Record<number, boolean> = {};
+    novas.forEach((_, novoIdx) => {
+      const antigoIdx = novoIdx >= i ? novoIdx + 1 : novoIdx;
+      if (imgs[antigoIdx]) novasImgs[novoIdx] = imgs[antigoIdx];
+      if (verArte[antigoIdx]) novaArte[novoIdx] = true;
+    });
     setLinhas(novas);
-    setImgs({});
-    setVerArte({});
-    geradasRef.current = new Set();
+    setImgs(novasImgs);
+    setVerArte(novaArte);
     void persistir(novas);
-    void salvarMockup({ resetAll: true });
-    setTimeout(() => novas.forEach((_, idx) => void gerarMockup(idx, true)), 0);
+    void (async () => {
+      await salvarMockup({ resetAll: true });
+      for (const [k, st] of Object.entries(novasImgs)) {
+        if (st.url || st.aplicado) await salvarMockup({ index: Number(k), liso: st.url ?? null, arte: st.aplicado ?? null });
+      }
+    })();
   }
 
   // ---- aplicar arte ----
@@ -284,6 +295,54 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     setImgs((m) => ({ ...m, [i]: { ...m[i], aplicado: undefined } }));
     setVerArte((m) => ({ ...m, [i]: false }));
     void salvarMockup({ index: i, arte: null });
+  }
+
+  // ---- subir o próprio visualizador ----
+  function abrirSubir(i: number) {
+    setSubirIndex(i);
+    subirRef.current?.click();
+  }
+
+  /** Lê o arquivo; se for grande, redimensiona pra ≤2000px e re-encoda em JPEG. */
+  async function arquivoParaVisualizador(file: File): Promise<string> {
+    const dataUrl = await fileToDataUrl(file);
+    if (file.size <= 1_500_000) return dataUrl;
+    const img = document.createElement("img");
+    await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error("imagem inválida")); img.src = dataUrl; });
+    const maxDim = 2000;
+    const esc = Math.min(1, maxDim / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+    const w = Math.max(1, Math.round((img.naturalWidth || 1) * esc));
+    const h = Math.max(1, Math.round((img.naturalHeight || 1) * esc));
+    const cv = document.createElement("canvas");
+    cv.width = w;
+    cv.height = h;
+    const cx = cv.getContext("2d");
+    if (!cx) return dataUrl;
+    cx.fillStyle = "#ffffff";
+    cx.fillRect(0, 0, w, h);
+    cx.drawImage(img, 0, 0, w, h);
+    return cv.toDataURL("image/jpeg", 0.85);
+  }
+
+  async function onUploadVisualizador(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (subirRef.current) subirRef.current.value = "";
+    const i = subirIndex;
+    setSubirIndex(null);
+    if (!file || i === null) return;
+    if (!file.type.startsWith("image/")) { alert("Envie um arquivo de imagem (JPG, PNG…)."); return; }
+    if (file.size > 10 * 1024 * 1024) { alert("Imagem muito grande (máx. 10 MB)."); return; }
+    setSubindoIdx(i);
+    try {
+      const dataUrl = await arquivoParaVisualizador(file);
+      setImgs((m) => ({ ...m, [i]: { ...m[i], aplicado: dataUrl, loading: false, motivo: undefined } }));
+      setVerArte((m) => ({ ...m, [i]: true }));
+      void salvarMockup({ index: i, arte: dataUrl });
+    } catch {
+      alert("Não consegui ler essa imagem. Tenta outro arquivo.");
+    } finally {
+      setSubindoIdx(null);
+    }
   }
 
   function abrirAjuste(i: number) {
@@ -471,7 +530,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       </div>
       <h1 className="text-gray-900 text-2xl font-semibold mt-2">Pré-visualização dos seus produtos</h1>
       <p className="text-gray-500 text-sm mt-1 mb-6">
-        Veja cada produto liso (frente · lateral · costas), ajuste o que precisar e aplique suas artes. {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
+        Para cada produto, envie seu visualizador pronto ou crie um com a IA (frente · lateral · costas) — depois aplique suas artes. {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
       </p>
 
       <div className="space-y-5">
@@ -489,14 +548,21 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   <img src={urlMostrar} alt={`${l.modelo ?? "produto"} ${l.cor ?? ""}`} className="max-h-[560px] w-auto max-w-full object-contain rounded-lg" />
                 ) : st.loading ? (
                   <span className="text-xs text-gray-400">gerando prévia… (frente · lateral · costas)</span>
+                ) : subindoIdx === i ? (
+                  <span className="text-xs text-gray-400">enviando seu visualizador…</span>
                 ) : (
-                  <div className="text-center px-4">
+                  <div className="text-center px-4 py-6 w-full max-w-md mx-auto">
                     <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-gray-100 flex items-center justify-center text-gray-300 text-xl">👕</div>
-                    <p className="text-[11px] text-gray-400 leading-snug max-w-xs mx-auto">{st.motivo || "Prévia ainda não gerada."}</p>
-                    <button type="button" onClick={() => void gerarMockup(i, true)} className="mt-2 text-[11px] text-[#0F6E56] hover:underline">Tentar gerar</button>
+                    <p className="text-sm font-medium text-gray-800">Como você quer o visualizador desta peça?</p>
+                    <p className="text-[11px] text-gray-400 mt-1 mb-4 leading-snug">Já tem o mockup ou a foto da peça? É só enviar. Se não tiver, a gente cria pra você na hora.</p>
+                    <div className="flex flex-col sm:flex-row items-stretch justify-center gap-2">
+                      <button type="button" onClick={() => abrirSubir(i)} className="flex-1 bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors">📤 Subir meu visualizador</button>
+                      <button type="button" onClick={() => void gerarMockup(i)} className="flex-1 border border-[#1D9E75]/40 bg-white text-[#0F6E56] hover:bg-[#E1F5EE]/50 text-sm font-medium px-4 py-2.5 rounded-lg transition-colors">✦ Criar com IA</button>
+                    </div>
+                    {st.motivo && <p className="text-[11px] text-red-500 mt-3">{st.motivo} — tenta de novo.</p>}
                   </div>
                 )}
-                {st.aplicado && (
+                {st.url && st.aplicado && (
                   <div className="absolute top-2 left-2 flex gap-1">
                     <button type="button" onClick={() => setVerArte((m) => ({ ...m, [i]: false }))}
                       className={"px-2.5 py-1 rounded-lg text-xs border transition-colors " + (!mostrandoArte ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-500 hover:bg-gray-50")}>Liso</button>
@@ -540,15 +606,23 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
                 {/* AÇÕES — toolbar única: arte à esquerda, produto à direita */}
                 <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
-                  <button type="button" onClick={() => abrirArte(i)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-                    {st.aplicado ? "✦ Trocar arte" : "✦ Aplicar minha arte"}
-                  </button>
-                  {st.aplicado && (
-                    <button type="button" onClick={() => limparArte(i)} className="border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">Limpar arte</button>
-                  )}
-                  {st.url && (
-                    <button type="button" onClick={() => abrirAjuste(i)} className="border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">Ajustar detalhe</button>
-                  )}
+                  {st.url ? (
+                    <>
+                      <button type="button" onClick={() => abrirArte(i)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                        {st.aplicado ? "✦ Trocar arte" : "✦ Aplicar minha arte"}
+                      </button>
+                      {st.aplicado && (
+                        <button type="button" onClick={() => limparArte(i)} className="border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">Limpar arte</button>
+                      )}
+                      <button type="button" onClick={() => abrirAjuste(i)} className="border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">Ajustar detalhe</button>
+                    </>
+                  ) : st.aplicado ? (
+                    <>
+                      <button type="button" onClick={() => abrirSubir(i)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">📤 Trocar imagem</button>
+                      <button type="button" onClick={() => limparArte(i)} className="border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">Remover imagem</button>
+                      <button type="button" onClick={() => abrirAjuste(i)} className="border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">Ajustar detalhe</button>
+                    </>
+                  ) : null}
                   <span className="flex-1 min-w-2" aria-hidden />
                   <button type="button" onClick={() => abrirEdicao(i)} title="Editar produto" className="inline-flex items-center gap-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
@@ -571,6 +645,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           + Adicionar produto
         </button>
       </div>
+
+      {/* input oculto: upload do visualizador próprio */}
+      <input ref={subirRef} type="file" accept="image/*" className="hidden" onChange={(e) => void onUploadVisualizador(e)} />
 
       {/* ESTIMATIVA DE ORÇAMENTO */}
       {estimandoPrecos && (!orcamento || orcamento.total_centavos === 0) && (
