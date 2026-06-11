@@ -5,6 +5,7 @@ import { supabaseAdmin } from './supabase-server'
 import { enviarMensagem } from './zapi'
 import { SITE_URL } from './url'
 import { emailFeedbackMockup } from './email'
+import { mensagemReativacao, registrarContato } from './marketing-contatos'
 
 type LinhaJson = {
   modelo?: string | null; cor?: string | null; material?: string | null
@@ -108,6 +109,7 @@ export async function imagemMockup(id: string, linha: number, tipo: 'liso' | 'ar
 
 // ---------------------------------------------------------------------------
 // Ações do admin sobre um pedido do chat: excluir, lembrete, pedir feedback.
+// Todo envio bem-sucedido fica registrado em contatos_marketing (histórico).
 // ---------------------------------------------------------------------------
 export type AcaoPedidoChat = 'excluir' | 'lembrete' | 'feedback'
 
@@ -133,11 +135,14 @@ export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<
   // depois que o cliente responder). Feedback continua com link.
   const msg =
     acao === 'lembrete'
-      ? `Oi${p.nome ? ', ' + p.nome.split(' ')[0] : ''}! Vi que você realizou um pedido em nosso site. Gostaria de ajuda para finalizar? 😊`
+      ? mensagemReativacao(p.nome)
       : `Oi${p.nome ? ' ' + p.nome.split(' ')[0] : ''}! 👀 O mockup ficou como você queria? Dá uma olhada e, se precisar mudar algo (posição da arte, tamanho, cor…), use o botão "Ajustar detalhe" na peça que a gente atualiza na hora:\n${link}`
 
   if (p.telefone) {
     try { whats = await enviarMensagem(p.telefone, msg) } catch { whats = false }
+    if (whats) {
+      try { await registrarContato(id, { tipo: acao, origem: 'manual', mensagem: msg }) } catch { /* histórico não bloqueia */ }
+    }
   }
   if (p.email && acao === 'feedback') {
     try {
