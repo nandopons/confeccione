@@ -1,18 +1,17 @@
 // app/api/pedido/assistente/[id]/confirmar/route.ts
 // ============================================================================
-// POST — confirma o pedido: valida CPF, RECALCULA o total no servidor (não
-// confia no cliente), gera a cobrança PIX no ASAAS, salva imagens + dados de
-// pagamento, e dispara o e-mail com resumo + imagens + preço + PIX.
-// Idempotente: se o pedido já tem PIX gerado, devolve o existente (não recobra).
+// POST — confirma o pedido SEM pagamento e SEM preço (novo fluxo, jun/2026):
+// salva linhas + imagens, marca confirmado_em e dispara o e-mail "pedido
+// recebido" (sem valores) avisando que vamos encontrar o fornecedor ideal.
+// O preço só aparece pro cliente depois que o fornecedor aceitar e definir o
+// orçamento final (aí a rota /pagar gera a cobrança).
+// Idempotente: reconfirmar atualiza linhas/imagens e NÃO reenvia o e-mail.
 // ============================================================================
 
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { calcularOrcamento, type PesquisaPreco } from '@/app/lib/orcamento'
-import { criarCobrancaPixPedido, atualizarValorCobrancaPix } from '@/app/lib/pedido-pagamento'
-import { enviarEmailPedidoPix } from '@/app/lib/email-pedido'
-import { apenasDigitos } from '@/app/lib/cpf-cnpj'
+import { enviarEmailPedidoRecebido } from '@/app/lib/email-pedido'
 
 export const runtime = 'nodejs'
 
@@ -37,7 +36,6 @@ const LinhaSchema = z.object({
   descricao: z.string().nullable().optional(),
 })
 const BodySchema = z.object({
-  cpfCnpj: z.string().min(8),
   linhas: z.array(LinhaSchema).min(1),
   imagens: z.array(z.string()).max(MAX_IMGS).default([]),
 })
@@ -53,75 +51,12 @@ export async function POST(req: Request, ctx: Ctx) {
   const p = BodySchema.safeParse(bruto)
   if (!p.success) return NextResponse.json({ erro: 'Dados inválidos' }, { status: 400 })
 
-  const cpf = apenasDigitos(p.data.cpfCnpj)
-  if (cpf.length !== 11 && cpf.length !== 14) {
-    return NextResponse.json({ erro: 'CPF/CNPJ inválido.' }, { status: 400 })
-  }
-
-  // pedido
   const { data: pedido, error: errPedido } = await supabase
     .from('pedidos_assistente')
-    .select('id, nome, email, telefone, asaas_payment_id, pix_copia_cola, pix_link, valor_centavos, pagamento_status, prazo_dias')
+    .select('id, nome, email, confirmado_em, pagamento_status')
     .eq('id', id)
-    .maybeSingle()
+    .maybeSingle<{ id: string; nome: string | null; email: string | null; confirmado_em: string | null; pagamento_status: string | null }>()
   if (errPedido || !pedido) return NextResponse.json({ erro: 'Pedido não encontrado.' }, { status: 404 })
-
-  // recalcula o total no servidor (não confia no cliente)
-  const { data: pesqData } = await supabase.from('pesquisas_preco').select('chave, faixas')
-  const orcamento = calcularOrcamento(
-    p.data.linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas, estampado: l.estampado ?? null })),
-    (pesqData ?? []) as PesquisaPreco[],
-    (pedido as { prazo_dias?: number | null }).prazo_dias ?? null
-  )
-
-  // idempotência: já tem PIX gerado → devolve o existente. MAS se o orçamento
-  // recalculado divergir do valor da cobrança (ex.: desconto novo entrou depois)
-  // e ainda não foi paga, ATUALIZA o valor no ASAAS antes de devolver.
-  if (pedido.asaas_payment_id && pedido.pix_copia_cola) {
-    const divergiu =
-      pedido.pagamento_status !== 'pago' &&
-      orcamento.completo &&
-      orcamento.total_centavos > 0 &&
-      pedido.valor_centavos !== orcamento.total_centavos
-    if (divergiu) {
-      try {
-        const upd = await atualizarValorCobrancaPix(pedido.asaas_payment_id, orcamento.total_centavos)
-        await supabase
-          .from('pedidos_assistente')
-          .update({
-            valor_centavos: orcamento.total_centavos,
-            pix_copia_cola: upd.copiaCola,
-            pix_qr_imagem: upd.qrImagem,
-            pix_link: upd.invoiceUrl,
-            linhas: p.data.linhas,
-            atualizado_em: new Date().toISOString(),
-          })
-          .eq('id', id)
-        return NextResponse.json({
-          ok: true,
-          jaExistia: true,
-          valorAtualizado: true,
-          copiaCola: upd.copiaCola,
-          invoiceUrl: upd.invoiceUrl,
-          valorCentavos: orcamento.total_centavos,
-        })
-      } catch (err) {
-        console.error('[confirmar] falha ao atualizar valor da cobrança no ASAAS:', err)
-        // segue devolvendo a cobrança existente (valor antigo) pra não travar o cliente
-      }
-    }
-    return NextResponse.json({
-      ok: true,
-      jaExistia: true,
-      copiaCola: pedido.pix_copia_cola,
-      invoiceUrl: pedido.pix_link,
-      valorCentavos: pedido.valor_centavos,
-    })
-  }
-
-  if (!orcamento.completo || orcamento.total_centavos <= 0) {
-    return NextResponse.json({ erro: 'Estimativa incompleta — há itens sem preço cadastrado. Não é possível gerar o PIX.' }, { status: 409 })
-  }
 
   // valida tamanho das imagens
   const totalBytes = p.data.imagens.reduce((acc, d) => {
@@ -132,54 +67,33 @@ export async function POST(req: Request, ctx: Ctx) {
     return NextResponse.json({ erro: 'Imagens grandes demais.' }, { status: 400 })
   }
 
-  // gera a cobrança PIX
-  let pix
-  try {
-    pix = await criarCobrancaPixPedido({
-      pedidoId: id,
-      nome: pedido.nome ?? 'Cliente Confeccione',
-      email: pedido.email,
-      whatsapp: pedido.telefone,
-      cpfCnpj: cpf,
-      valorCentavos: orcamento.total_centavos,
-    })
-  } catch (err) {
-    console.error('[confirmar] falha ao gerar PIX:', err)
-    return NextResponse.json({ erro: 'Não foi possível gerar o PIX agora. Tente de novo.' }, { status: 502 })
-  }
+  const primeiraVez = !pedido.confirmado_em
+  const agora = new Date().toISOString()
 
-  // grava no pedido
-  await supabase
+  const { error: errUpd } = await supabase
     .from('pedidos_assistente')
     .update({
-      cpf_cnpj: cpf,
-      asaas_customer_id: pix.customerId,
-      asaas_payment_id: pix.paymentId,
-      valor_centavos: orcamento.total_centavos,
-      pix_copia_cola: pix.copiaCola,
-      pix_qr_imagem: pix.qrImagem,
-      pix_link: pix.invoiceUrl,
-      pagamento_status: 'gerado',
-      status: 'confirmado',
       linhas: p.data.linhas,
       imagens: p.data.imagens,
-      atualizado_em: new Date().toISOString(),
+      status: 'confirmado',
+      confirmado_em: pedido.confirmado_em ?? agora,
+      atualizado_em: agora,
     })
     .eq('id', id)
+  if (errUpd) return NextResponse.json({ erro: 'Não foi possível confirmar agora.' }, { status: 500 })
 
-  // e-mail (não bloqueia o sucesso se falhar)
-  if (pedido.email) {
+  // e-mail "pedido recebido" — só na primeira confirmação; não bloqueia o sucesso
+  let emailEnviado = false
+  if (primeiraVez && pedido.email) {
     try {
-      await enviarEmailPedidoPix({
+      await enviarEmailPedidoRecebido({
         id,
         email: pedido.email,
         nome: pedido.nome,
-        totalCentavos: orcamento.total_centavos,
-        copiaCola: pix.copiaCola,
-        invoiceUrl: pix.invoiceUrl,
         linhas: p.data.linhas,
         numImagens: p.data.imagens.length,
       })
+      emailEnviado = true
     } catch (err) {
       console.error('[confirmar] email falhou:', err)
     }
@@ -187,9 +101,8 @@ export async function POST(req: Request, ctx: Ctx) {
 
   return NextResponse.json({
     ok: true,
-    copiaCola: pix.copiaCola,
-    invoiceUrl: pix.invoiceUrl,
-    valorCentavos: orcamento.total_centavos,
-    emailEnviado: !!pedido.email,
+    jaConfirmado: !primeiraVez,
+    confirmadoEm: pedido.confirmado_em ?? agora,
+    emailEnviado,
   })
 }

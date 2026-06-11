@@ -1,5 +1,6 @@
 // app/visualizador/[id]/page.tsx
-// Server loader: carrega o pedido salvo (pedidos_assistente) e entrega ao client.
+// Server loader: carrega o pedido salvo (pedidos_assistente) + fornecedor da
+// oferta aceita (se houver) e entrega ao client.
 import { createClient } from '@supabase/supabase-js'
 import { buscarEnderecoCep } from '@/app/lib/cep'
 import Link from 'next/link'
@@ -20,7 +21,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
   const { data } = await supabase
     .from('pedidos_assistente')
-    .select('id, linhas, nome, telefone, email, cep, complemento, logradouro, bairro, cidade, uf, status, mockups, prazo_dias')
+    .select('id, linhas, nome, telefone, email, cep, complemento, logradouro, bairro, cidade, uf, status, mockups, prazo_dias, confirmado_em, orcamento_status, valor_centavos, frete_centavos, pagamento_status')
     .eq('id', id)
     .single()
 
@@ -34,6 +35,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       await supabase.from('pedidos_assistente').update(patchEnd).eq('id', pedido.id)
       pedido = { ...pedido, ...patchEnd }
     }
+  }
+
+  // Fornecedor da oferta aceita (mostrado no orçamento final).
+  let fornecedorNome: string | null = null
+  if (pedido) {
+    const { data: oferta } = await supabase
+      .from('ofertas_pedido_assistente')
+      .select('status, leads_fornecedores(nome)')
+      .eq('pedido_id', pedido.id)
+      .eq('status', 'aceita')
+      .maybeSingle<{ status: string; leads_fornecedores: { nome: string | null } | null }>()
+    fornecedorNome = oferta?.leads_fornecedores?.nome ?? null
   }
 
   return (
@@ -50,7 +63,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           </Link>
         </div>
       ) : (
-        <VisualizadorCliente pedido={pedido as PedidoVis} />
+        <VisualizadorCliente pedido={{ ...(pedido as PedidoVis), fornecedor_nome: fornecedorNome }} />
       )}
       <SiteFooter />
     </main>
