@@ -66,7 +66,7 @@ const SECOES: Secao[] = [
       },
       {
         href: '/admin/pedidos-pagos',
-        label: 'Pedidos pagos',
+        label: 'Ofertar pedidos',
         icone: (
           <Ico
             d="M8.5 12.5l2.5 2.5 4.5-5"
