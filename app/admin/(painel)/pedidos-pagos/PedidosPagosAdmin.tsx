@@ -29,6 +29,9 @@ type Pedido = {
   nome: string | null
   cep: string | null
   valor_centavos: number | null
+  pagamento_status?: string | null
+  confirmado_em?: string | null
+  orcamento_status?: string | null
   prazo_dias?: number | null
   linhas: Linha[]
   ofertas: Oferta[]
@@ -140,8 +143,8 @@ export default function PedidosPagosAdmin() {
     <div>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Pedidos pagos</h1>
-          <p className="text-sm text-gray-500">Pedidos já pagos pelo cliente. Escolha os fornecedores e oferte — eles recebem o resumo e o valor do pedido por WhatsApp.</p>
+          <h1 className="text-xl font-semibold text-gray-900">Ofertar pedidos</h1>
+          <p className="text-sm text-gray-500">Pedidos confirmados pelos clientes (e pagos do fluxo antigo). Escolha os fornecedores e oferte — quem aceitar recebe o contato do cliente e define o orçamento final.</p>
         </div>
         <button onClick={carregar} className="text-sm px-3 py-1.5 rounded-md border border-gray-300 hover:bg-gray-50">Atualizar</button>
       </div>
@@ -149,7 +152,7 @@ export default function PedidosPagosAdmin() {
       {aviso && <div className="mb-4 text-sm rounded-md bg-blue-50 text-blue-800 px-3 py-2">{aviso}</div>}
       {erro && <div className="mb-4 text-sm rounded-md bg-red-50 text-red-700 px-3 py-2">{erro}</div>}
       {carregando && <p className="text-sm text-gray-500">Carregando…</p>}
-      {!carregando && pedidos.length === 0 && <p className="text-sm text-gray-500">Nenhum pedido pago no momento.</p>}
+      {!carregando && pedidos.length === 0 && <p className="text-sm text-gray-500">Nenhum pedido aguardando oferta.</p>}
 
       <div className="space-y-5">
         {pedidos.map((p) => {
@@ -166,14 +169,25 @@ export default function PedidosPagosAdmin() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="text-sm text-gray-500">{data(p.criado_em)} · {p.cep || 'sem CEP'}</div>
-                  <div className="font-medium text-gray-900">{totalPecas} peças · cliente pagou {brl(p.valor_centavos)} · fornecedor recebe {brl(repasse97(p.valor_centavos))}</div>
+                  <div className="font-medium text-gray-900">
+                    {p.pagamento_status === 'pago'
+                      ? `${totalPecas} peças · cliente pagou ${brl(p.valor_centavos)} · fornecedor recebe ${brl(repasse97(p.valor_centavos))}`
+                      : p.orcamento_status === 'definido'
+                        ? `${totalPecas} peças · orçamento enviado: ${brl(p.valor_centavos)} (aguardando pagamento)`
+                        : `${totalPecas} peças · fornecedor define o orçamento ao aceitar`}
+                  </div>
                   {p.prazo_dias ? <div className="text-sm text-[#0F6E56]">⏱️ Prazo: {p.prazo_dias} dias (a partir do pagamento)</div> : null}
                 </div>
-                {aceita && (
-                  <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">
-                    Aceito por {aceita.fornecedor_nome || 'fornecedor'}
+                <div className="flex flex-col items-end gap-1">
+                  <span className={'text-xs px-2 py-1 rounded-full ' + (p.pagamento_status === 'pago' ? 'bg-green-100 text-green-800' : p.orcamento_status === 'definido' ? 'bg-amber-100 text-amber-800' : p.orcamento_status === 'aguardando_fornecedor' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600')}>
+                    {p.pagamento_status === 'pago' ? 'Pago' : p.orcamento_status === 'definido' ? 'Orçamento enviado' : p.orcamento_status === 'aguardando_fornecedor' ? 'Com fornecedor' : 'Aguardando oferta'}
                   </span>
-                )}
+                  {aceita && (
+                    <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">
+                      Aceito por {aceita.fornecedor_nome || 'fornecedor'}
+                    </span>
+                  )}
+                </div>
               </div>
 
               <ul className="mt-3 text-sm text-gray-700 space-y-1">

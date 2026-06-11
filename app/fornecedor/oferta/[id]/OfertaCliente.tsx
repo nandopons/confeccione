@@ -23,6 +23,10 @@ type Oferta = {
   numImagens: number
   valorRepasseCentavos: number | null
   prazoDias: number | null
+  pago?: boolean
+  orcamentoStatus?: string | null
+  contatoCliente?: { nome: string | null; telefone: string | null; email: string | null; cidade: string | null; uf: string | null } | null
+  linkOrcamento?: string | null
 }
 
 function brl(c: number | null | undefined): string {
@@ -50,6 +54,7 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
         throw new Error(j.erro || 'Não foi possível registrar a resposta.')
       }
       setStatus(j.status)
+      if (j.status === 'aceita') setTimeout(() => window.location.reload(), 700)
     } catch (e: any) {
       setErro(e.message || 'Erro')
     } finally {
@@ -65,12 +70,15 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
         <div className="text-xs uppercase tracking-wide text-emerald-700 font-semibold">Confeccione · oferta de pedido</div>
         <h1 className="text-2xl font-bold text-gray-900 mt-1">
           {oferta.totalPecas} peças · {brl(oferta.valorRepasseCentavos)}
+          {!oferta.pago && <span className="text-sm font-medium text-gray-400"> (repasse estimado)</span>}
         </h1>
         {oferta.prazoDias ? (
           <p className="text-sm text-[#0F6E56] font-medium mt-1">⏱️ Prazo de produção: {oferta.prazoDias} dias — a partir da confirmação do pagamento.</p>
         ) : null}
         <p className="text-sm text-gray-500 mt-1">
-          Pedido já pago. Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.
+          {oferta.pago
+            ? 'Pedido já pago. Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.'
+            : 'Ao assumir, VOCÊ define o orçamento final (produtos + frete). Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.'}
         </p>
       </div>
 
@@ -146,9 +154,27 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
         )}
 
         {status === 'aceita' && (
-          <div className="text-center py-4">
-            <div className="text-emerald-700 text-lg font-semibold">✓ Você assumiu este pedido!</div>
-            <p className="text-sm text-gray-600 mt-2">A Confeccione vai te passar os detalhes de produção e entrega em breve.</p>
+          <div className="py-2">
+            <div className="text-emerald-700 text-lg font-semibold text-center">✓ Você assumiu este pedido!</div>
+            {oferta.contatoCliente ? (
+              <div className="mt-4 rounded-xl bg-gray-50 border border-gray-200 px-4 py-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Contato do cliente</p>
+                <p className="text-sm text-gray-900 font-medium">{oferta.contatoCliente.nome ?? 'Cliente Confeccione'}</p>
+                {oferta.contatoCliente.telefone && <p className="text-sm text-gray-700">📱 {oferta.contatoCliente.telefone}</p>}
+                {oferta.contatoCliente.email && <p className="text-sm text-gray-700 break-all">✉️ {oferta.contatoCliente.email}</p>}
+                {(oferta.contatoCliente.cidade || oferta.contatoCliente.uf) && (
+                  <p className="text-sm text-gray-700">📍 {[oferta.contatoCliente.cidade, oferta.contatoCliente.uf].filter(Boolean).join('/')}</p>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-600 mt-2 text-center">Carregando o contato do cliente… atualize a página.</p>
+            )}
+            {!oferta.pago && oferta.linkOrcamento && (
+              <a href={oferta.linkOrcamento} className="mt-4 block w-full text-center bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 rounded-xl">
+                💰 {oferta.orcamentoStatus === 'definido' ? 'Ajustar orçamento enviado' : 'Definir orçamento final'} →
+              </a>
+            )}
+            {oferta.pago && <p className="text-sm text-gray-600 mt-3 text-center">✅ Pedido já pago — pode iniciar a produção.</p>}
           </div>
         )}
         {status === 'recusada' && (
