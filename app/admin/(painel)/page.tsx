@@ -1,11 +1,12 @@
 // app/admin/(painel)/page.tsx
 // ============================================================================
-// Dashboard /admin — semáforo de saúde + 4 cards resumo.
+// Dashboard /admin — semáforo de saúde + 4 cards resumo + KPIs de marketing.
 //
 // Server Component. Lê métricas via supabaseAdmin (queries paralelas + 1
 // sequencial dependente) e a contagem "Precisa de atenção" via lib (mesmo
 // núcleo da aba). Determinismo: agoraMs capturado UMA vez no início do
 // render e propagado pras funções puras de admin-saude.ts.
+// KPIs de marketing vêm de dadosMarketing() (mesma fonte da aba Marketing).
 // ============================================================================
 
 import Link from 'next/link'
@@ -20,7 +21,12 @@ import {
   type SemaforoStatus,
 } from '@/app/lib/admin-saude'
 import { contarPrecisaAtencao } from '@/app/lib/precisa-atencao'
+import { dadosMarketing } from '@/app/lib/marketing'
 import { BotaoDispararCron } from './BotaoDispararCron'
+
+function brlC(c: number): string {
+  return (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
 
 export default async function AdminDashboardPage() {
   if (!(await eAdminLogado())) {
@@ -45,6 +51,7 @@ export default async function AdminDashboardPage() {
     resCardNegociacao,
     resCardAguardando,
     cardPrecisaAtencao,
+    mkt,
   ] = await Promise.all([
     supabaseAdmin
       .from('cron_execucoes')
@@ -93,6 +100,9 @@ export default async function AdminDashboardPage() {
     // Card "Precisa de atenção": MESMO núcleo de seleção da aba
     // /admin/pedidos?aba=precisa_atencao — card e aba nunca divergem.
     contarPrecisaAtencao(agoraMs),
+
+    // KPIs de marketing (leads do chat) — mesma fonte da aba Marketing.
+    dadosMarketing(),
   ])
 
   // ─────────────────────────────────────────────────────────────
@@ -196,6 +206,33 @@ export default async function AdminDashboardPage() {
     },
   ]
 
+  const kpisMkt: Array<{ label: string; valor: string; sub: string; cor: string }> = [
+    {
+      label: 'Leads',
+      valor: String(mkt.kpis.leads),
+      sub: 'pedidos iniciados no chat',
+      cor: 'text-gray-900',
+    },
+    {
+      label: 'Faturamento',
+      valor: brlC(mkt.kpis.faturamentoCentavos),
+      sub: `${mkt.kpis.pagos} ${mkt.kpis.pagos === 1 ? 'pedido pago' : 'pedidos pagos'}`,
+      cor: 'text-[#0F6E56]',
+    },
+    {
+      label: 'A receber',
+      valor: brlC(mkt.kpis.aReceberCentavos),
+      sub: `${mkt.kpis.cobrancas} aguardando pagamento`,
+      cor: 'text-amber-600',
+    },
+    {
+      label: 'Conversão',
+      valor: `${mkt.kpis.conversaoPct}%`,
+      sub: 'lead → pago',
+      cor: 'text-gray-900',
+    },
+  ]
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       <Semaforo
@@ -219,6 +256,36 @@ export default async function AdminDashboardPage() {
             </div>
           </Link>
         ))}
+      </div>
+
+      {/* ───────── Marketing ───────── */}
+      <div className="mt-8">
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
+            Marketing
+          </h2>
+          <Link
+            href="/admin/marketing"
+            className="text-sm text-[#0F6E56] font-medium hover:underline"
+          >
+            Ver painel →
+          </Link>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {kpisMkt.map((k) => (
+            <Link
+              key={k.label}
+              href="/admin/marketing"
+              className="bg-white border border-gray-200 rounded-lg p-5 hover:shadow-md transition-shadow"
+            >
+              <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
+                {k.label}
+              </div>
+              <div className={`text-3xl font-bold mt-2 ${k.cor}`}>{k.valor}</div>
+              <div className="text-[11px] text-gray-400 mt-1">{k.sub}</div>
+            </Link>
+          ))}
+        </div>
       </div>
     </div>
   )
