@@ -8,5 +8,9 @@ export const dynamic = 'force-dynamic'
 
 export default async function Page() {
   const dados = await dadosMarketing()
-  return <MarketingAdmin dados={dados} />
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <MarketingAdmin dados={dados} />
+    </div>
+  )
 }
