@@ -25,7 +25,10 @@ import { validarWhatsApp, normalizarWhatsApp } from '@/app/lib/phone'
 export const runtime = 'nodejs'
 
 const MODELO = 'claude-sonnet-4-6'
-const MAX_TOKENS = 1300
+// O modelo devolve o PEDIDO INTEIRO em JSON a cada turno — pedidos grandes
+// (muitas linhas/descrições) estouravam 1300 tokens, a resposta vinha truncada
+// e o parse caía no fallback "me perdi" em loop. 4096 dá folga.
+const MAX_TOKENS = 4096
 const TEMPERATURE = 0.4
 const JANELA_MODELO = 60 // últimas N mensagens enviadas ao modelo (chat ilimitado p/ o cliente)
 
@@ -62,6 +65,15 @@ const PEDIDO_VAZIO: Pedido = { linhas: [], contato: { ...CONTATO_VAZIO } }
 
 const PERGUNTA_FALLBACK =
   'Desculpa, me perdi aqui. Pode me contar de novo o que você precisa produzir? (modelo, cor e quantidade)'
+
+// Fallback que NÃO perde o fio: se já existe pedido montado, avisa que está
+// tudo salvo e pede só pra repetir o último ajuste (em vez de recomeçar).
+function mensagemFallback(p: Pedido): string {
+  const n = p.linhas.length
+  if (n === 0) return PERGUNTA_FALLBACK
+  const pecas = p.linhas.reduce((a, l) => a + (l.total ?? 0), 0)
+  return `Opa, tive um soluço pra processar essa última mensagem — mas relaxa: seu pedido continua salvo (${n} ${n === 1 ? 'produto' : 'produtos'}${pecas > 0 ? `, ${pecas} peças` : ''}, confere no resumo). Me manda de novo só o último ajuste — se for coisa grande, pode mandar em partes. 🙏`
+}
 
 // ----------------------------------------------------------------------------
 // Schemas zod (parse tolerante: um campo torto vira null, não derruba o turno)
@@ -166,7 +178,8 @@ Regras do JSON:
 - "cores": só preencha quando estiver oferecendo 5 tonalidades de uma cor (hexes #RRGGBB reais, claro→escuro); nos outros turnos é null. A escolha final vai pro campo "cor" da linha (nome do tom + hex).
 - "prazoDias" (dentro de contato): número de dias de produção que o cliente precisa; null se ainda não perguntou.
 - "descricao" guarda detalhes úteis da linha: estampa/bordado, posição da arte (frente/costas/manga), observações.
-- Campos que você ainda não perguntou ficam null. Não preencha contato com placeholders.`
+- Campos que você ainda não perguntou ficam null. Não preencha contato com placeholders.
+- SEJA CONCISO no JSON: "descricao" com no máximo ~140 caracteres por linha (resuma; não repita modelo/cor/material/tamanhos que já estão nos outros campos). Em pedidos com MUITAS linhas, mantenha a "mensagem" curta — o JSON precisa caber INTEIRO na resposta.`
 
 // ----------------------------------------------------------------------------
 // Helpers
@@ -367,6 +380,9 @@ export async function POST(req: Request) {
       messages: janela.map((m) => ({ role: m.role, content: m.content })),
     })
     texto = textoDaResposta(resposta.content)
+    if (resposta.stop_reason === 'max_tokens') {
+      console.error('[pedido/assistente] resposta TRUNCADA por max_tokens — pedido grande demais pro limite atual')
+    }
   } catch (err) {
     console.error('[pedido/assistente] falha na chamada ao modelo:', err)
     return NextResponse.json({ error: 'Não consegui responder agora. Tente de novo.' }, { status: 502 })
@@ -385,7 +401,7 @@ export async function POST(req: Request) {
     const anteriorEnriq = await enriquecerEndereco(anterior)
     const faseAnt = calcularFase(anteriorEnriq)
     return NextResponse.json({
-      mensagem: PERGUNTA_FALLBACK,
+      mensagem: mensagemFallback(anteriorEnriq),
       cores: null,
       pedido: anteriorEnriq,
       fase: faseAnt,
