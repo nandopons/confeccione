@@ -151,8 +151,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const arteFileRef = useRef<HTMLInputElement>(null);
 
   // subir o próprio visualizador
-  const subirRef = useRef<HTMLInputElement>(null);
-  const [subirIndex, setSubirIndex] = useState<number | null>(null);
   const [subindoIdx, setSubindoIdx] = useState<number | null>(null);
 
   async function salvarMockup(payload: { index?: number; liso?: string | null; arte?: string | null; resetAll?: boolean }) {
@@ -298,11 +296,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   }
 
   // ---- subir o próprio visualizador ----
-  function abrirSubir(i: number) {
-    setSubirIndex(i);
-    subirRef.current?.click();
-  }
-
   /** Lê o arquivo; se for grande, redimensiona pra ≤2000px e re-encoda em JPEG. */
   async function arquivoParaVisualizador(file: File): Promise<string> {
     const dataUrl = await fileToDataUrl(file);
@@ -324,12 +317,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     return cv.toDataURL("image/jpeg", 0.85);
   }
 
-  async function onUploadVisualizador(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onUploadVisualizador(e: React.ChangeEvent<HTMLInputElement>, i: number) {
     const file = e.target.files?.[0];
-    if (subirRef.current) subirRef.current.value = "";
-    const i = subirIndex;
-    setSubirIndex(null);
-    if (!file || i === null) return;
+    e.target.value = "";
+    if (!file) return;
     if (!file.type.startsWith("image/")) { alert("Envie um arquivo de imagem (JPG, PNG…)."); return; }
     if (file.size > 10 * 1024 * 1024) { alert("Imagem muito grande (máx. 10 MB)."); return; }
     setSubindoIdx(i);
@@ -556,7 +547,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     <p className="text-sm font-medium text-gray-800">Como você quer o visualizador desta peça?</p>
                     <p className="text-[11px] text-gray-400 mt-1 mb-4 leading-snug">Já tem o mockup ou a foto da peça? É só enviar. Se não tiver, a gente cria pra você na hora.</p>
                     <div className="flex flex-col sm:flex-row items-stretch justify-center gap-2">
-                      <button type="button" onClick={() => abrirSubir(i)} className="flex-1 bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors">📤 Subir meu visualizador</button>
+                      <label className="flex-1 bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors cursor-pointer text-center">
+                        📤 Subir meu visualizador
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => void onUploadVisualizador(e, i)} />
+                      </label>
                       <button type="button" onClick={() => void gerarMockup(i)} className="flex-1 border border-[#1D9E75]/40 bg-white text-[#0F6E56] hover:bg-[#E1F5EE]/50 text-sm font-medium px-4 py-2.5 rounded-lg transition-colors">✦ Criar com IA</button>
                     </div>
                     {st.motivo && <p className="text-[11px] text-red-500 mt-3">{st.motivo} — tenta de novo.</p>}
@@ -618,7 +612,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     </>
                   ) : st.aplicado ? (
                     <>
-                      <button type="button" onClick={() => abrirSubir(i)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">📤 Trocar imagem</button>
+                      <label className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer">
+                        📤 Trocar imagem
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => void onUploadVisualizador(e, i)} />
+                      </label>
                       <button type="button" onClick={() => limparArte(i)} className="border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">Remover imagem</button>
                       <button type="button" onClick={() => abrirAjuste(i)} className="border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">Ajustar detalhe</button>
                     </>
@@ -645,9 +642,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           + Adicionar produto
         </button>
       </div>
-
-      {/* input oculto: upload do visualizador próprio */}
-      <input ref={subirRef} type="file" accept="image/*" className="hidden" onChange={(e) => void onUploadVisualizador(e)} />
 
       {/* ESTIMATIVA DE ORÇAMENTO */}
       {estimandoPrecos && (!orcamento || orcamento.total_centavos === 0) && (
