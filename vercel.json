@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/expirar-creditos-avulsos",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/nutricao",
+      "schedule": "0 13 * * *"
     }
   ]
 }
