@@ -7,6 +7,10 @@
 // IA (imagem panorâmica frente · lateral · costas via Gemini). Nada é gerado
 // automaticamente. Ações: aplicar/trocar arte (IA), ajustar detalhe,
 // trocar/remover imagem enviada, editar/excluir/adicionar produto.
+//
+// SEM preço pro cliente (jun/2026): ele CONFIRMA o pedido e a Confeccione
+// encontra o fornecedor; o orçamento final (definido pelo fornecedor) chega
+// por e-mail/WhatsApp e aparece aqui com o botão de pagamento.
 // ============================================================================
 
 import { useEffect, useRef, useState } from "react";
@@ -26,15 +30,8 @@ export type Linha = {
   descricao: string | null;
 };
 
-type LinhaOrc = { unit_centavos: number | null; total_centavos: number; faltando: string[] };
-type Orcamento = { linhas: LinhaOrc[]; subtotal_centavos: number; desconto_qtd_centavos: number; total_centavos: number; pix_centavos: number; total_pecas: number; frete_gratis: boolean; completo: boolean } | null;
-
 function brl(c: number): string {
   return (c / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
-/** Estimativa de frete só pra exibição: R$ 4,90 por peça, mínimo R$ 21,80. */
-function freteEstimadoCentavos(pecas: number): number {
-  return Math.max(2180, pecas * 490);
 }
 export type PedidoVis = {
   id: string;
@@ -51,6 +48,12 @@ export type PedidoVis = {
   status: string | null;
   mockups?: Record<string, { liso?: string; arte?: string }> | null;
   prazo_dias?: number | null;
+  confirmado_em?: string | null;
+  orcamento_status?: string | null;
+  valor_centavos?: number | null;
+  frete_centavos?: number | null;
+  pagamento_status?: string | null;
+  fornecedor_nome?: string | null;
 };
 
 type ImgEstado = { loading?: boolean; url?: string; motivo?: string; aplicado?: string };
@@ -110,7 +113,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
   // confirmação / pagamento
   const [confirmStep, setConfirmStep] = useState<"idle" | "form" | "feito">("idle");
-  const [metodoPag, setMetodoPag] = useState<"pix" | "cartao">("pix");
+  const [confirmadoEm, setConfirmadoEm] = useState<string | null>(pedido.confirmado_em ?? null);
+  const [confirmandoPedido, setConfirmandoPedido] = useState(false);
+  const [confirmadoMsg, setConfirmadoMsg] = useState(false);
   const [contato, setContato] = useState({ nome: pedido.nome, telefone: pedido.telefone, email: pedido.email, cep: pedido.cep, complemento: pedido.complemento, logradouro: pedido.logradouro ?? null, bairro: pedido.bairro ?? null, cidade: pedido.cidade ?? null, uf: pedido.uf ?? null });
   const [contatoOpen, setContatoOpen] = useState(false);
   const [contatoDraft, setContatoDraft] = useState({ nome: "", telefone: "", email: "", cep: "", complemento: "" });
@@ -121,15 +126,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [confirmErro, setConfirmErro] = useState<string | null>(null);
   const [pixResult, setPixResult] = useState<{ copiaCola: string | null; invoiceUrl: string; valorCentavos: number } | null>(null);
   const [copiado, setCopiado] = useState(false);
-  const [pago, setPago] = useState(false);
+  const [pago, setPago] = useState(pedido.pagamento_status === "pago");
   const [numImagensSalvas, setNumImagensSalvas] = useState(0);
   const [checandoPago, setChecandoPago] = useState(false);
-
-  // orçamento (estimativa) + opções de estampa cadastradas
-  const [orcamento, setOrcamento] = useState<Orcamento>(null);
-  const [semTabela, setSemTabela] = useState(false);
-  const [estimandoPrecos, setEstimandoPrecos] = useState(false);
-  const orcMountRef = useRef(false);
 
   // edição / adição
   const [editOpen, setEditOpen] = useState(false);
@@ -185,21 +184,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       setImgs((m) => ({ ...m, [i]: { ...m[i], loading: false, motivo: "Erro de conexão." } }));
     }
   }
-
-  // orçamento: no 1º carregamento, pesquisa automaticamente os preços que
-  // faltam (IA) enquanto o cliente finaliza; nas edições seguintes só recalcula.
-  useEffect(() => {
-    const primeira = !orcMountRef.current;
-    orcMountRef.current = true;
-    const body = { linhas: linhas.map((l) => ({ modelo: l.modelo, material: l.material, total: l.total, estampas: l.estampas ?? [], estampado: l.estampado ?? ((l.estampas?.length ?? 0) > 0) })), prazoDias: pedido.prazo_dias ?? null };
-    const url = primeira ? "/api/orcamento/pesquisar-faltantes" : "/api/orcamento";
-    if (primeira) setEstimandoPrecos(true);
-    fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
-      .then((r) => r.json())
-      .then((d) => { if (d?.ok) { setOrcamento(d.orcamento); setSemTabela(!!d.semTabela); } })
-      .catch(() => {})
-      .finally(() => { if (primeira) setEstimandoPrecos(false); });
-  }, [linhas]);
 
   async function persistir(novas: Linha[]) {
     setSalvando(true);
@@ -431,7 +415,32 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     void salvarMockup({ index: idx, arte: arteResultado });
   }
 
+  // Confirma o pedido SEM pagamento — a Confeccione busca o fornecedor ideal.
   async function confirmarPedido() {
+    if (confirmandoPedido) return;
+    setConfirmandoPedido(true);
+    setConfirmErro(null);
+    const imagens = linhas.map((_, i) => imgs[i]?.aplicado || imgs[i]?.url).filter((x): x is string => !!x);
+    try {
+      const res = await fetch(`/api/pedido/assistente/${pedido.id}/confirmar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ linhas, imagens }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.erro || "Não foi possível confirmar.");
+      setConfirmadoEm(d.confirmadoEm ?? new Date().toISOString());
+      setConfirmadoMsg(true);
+      setTimeout(() => document.getElementById("status-pedido")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+    } catch (e) {
+      setConfirmErro(e instanceof Error ? e.message : "Erro ao confirmar.");
+    } finally {
+      setConfirmandoPedido(false);
+    }
+  }
+
+  // Gera a cobrança do ORÇAMENTO FINAL (valor definido pelo fornecedor).
+  async function gerarPagamento() {
     if (confirmando) return;
     const cpfDig = cpf.replace(/\D/g, "");
     if (cpfDig.length !== 11 && cpfDig.length !== 14) {
@@ -440,19 +449,18 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     }
     setConfirmando(true);
     setConfirmErro(null);
-    const imagens = linhas.map((_, i) => imgs[i]?.aplicado || imgs[i]?.url).filter((x): x is string => !!x);
     try {
-      const res = await fetch(`/api/pedido/assistente/${pedido.id}/confirmar`, {
+      const res = await fetch(`/api/pedido/assistente/${pedido.id}/pagar`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cpfCnpj: cpf, linhas, imagens }),
+        body: JSON.stringify({ cpfCnpj: cpf }),
       });
       const d = await res.json();
-      if (!res.ok) throw new Error(d?.erro || "Não foi possível confirmar.");
+      if (!res.ok) throw new Error(d?.erro || "Não foi possível gerar o pagamento.");
       setPixResult({ copiaCola: d.copiaCola ?? null, invoiceUrl: d.invoiceUrl, valorCentavos: d.valorCentavos });
       setConfirmStep("feito");
     } catch (e) {
-      setConfirmErro(e instanceof Error ? e.message : "Erro ao confirmar.");
+      setConfirmErro(e instanceof Error ? e.message : "Erro ao gerar o pagamento.");
     } finally {
       setConfirmando(false);
     }
@@ -469,6 +477,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       setChecandoPago(false);
     }
   }
+
+  // pedido já pago ao abrir: busca o nº de imagens pro bloco de download
+  useEffect(() => {
+    if (pedido.pagamento_status === "pago") void checkStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // enquanto aguarda pagamento, faz polling do status (e libera o download)
   useEffect(() => {
@@ -510,8 +524,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     }
   }
 
-  const podeConfirmar = linhas.length > 0 && !!orcamento && orcamento.completo && orcamento.total_centavos > 0;
+  const orcamentoDefinido = pedido.orcamento_status === "definido" && (pedido.valor_centavos ?? 0) > 0;
+  const podeConfirmar = linhas.length > 0;
   const totalPecas = linhas.reduce((acc, l) => acc + (l.total ?? 0), 0);
+  const freteCliente = pedido.frete_centavos ?? 0;
+  const produtosCliente = Math.max((pedido.valor_centavos ?? 0) - freteCliente, 0);
 
   return (
     <div className="flex-1 w-full max-w-5xl mx-auto px-6 pt-8 pb-16">
@@ -529,7 +546,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           const st = imgs[i] || {};
           const mostrandoArte = !!verArte[i] && !!st.aplicado;
           const urlMostrar = mostrandoArte ? st.aplicado : st.url;
-          const orc = orcamento?.linhas?.[i];
           return (
             <div key={i} className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
               {/* VISUALIZADOR — imagem panorâmica (frente · lateral · costas) */}
@@ -592,12 +608,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 )}
                 {l.descricao && <p className="text-sm text-gray-500 mt-3 leading-relaxed">{l.descricao}</p>}
 
-                {orc && orc.unit_centavos !== null && (
-                  <p className="text-sm text-gray-700 mt-3">
-                    Estimativa: <strong>{brl(orc.total_centavos)}</strong> <span className="text-gray-400">({brl(orc.unit_centavos)}/un)</span>
-                  </p>
-                )}
-
                 {/* AÇÕES — toolbar única: arte à esquerda, produto à direita */}
                 <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
                   {st.url ? (
@@ -621,6 +631,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     </>
                   ) : null}
                   <span className="flex-1 min-w-2" aria-hidden />
+                  {!orcamentoDefinido && (<>
                   <button type="button" onClick={() => abrirEdicao(i)} title="Editar produto" className="inline-flex items-center gap-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
                     Editar
@@ -629,6 +640,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
                     Excluir
                   </button>
+                  </>)}
                 </div>
 
               </div>
@@ -637,97 +649,72 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         })}
       </div>
 
+      {!orcamentoDefinido && (
       <div className="mt-4">
         <button type="button" onClick={() => abrirEdicao(null)} className="border-2 border-dashed border-gray-300 text-gray-600 hover:border-[#1D9E75] hover:text-[#0F6E56] text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">
           + Adicionar produto
         </button>
       </div>
+      )}
 
-      {/* ESTIMATIVA DE ORÇAMENTO */}
-      {estimandoPrecos && (!orcamento || orcamento.total_centavos === 0) && (
-        <div className="mt-6 flex items-center gap-2 text-sm text-gray-500">
-          <span className="inline-block w-3.5 h-3.5 border-2 border-gray-300 border-t-[#1D9E75] rounded-full animate-spin" />
-          Pesquisando preços de mercado pros seus produtos…
+      {/* STATUS / CONFIRMAÇÃO / ORÇAMENTO FINAL */}
+      <div id="status-pedido" aria-hidden />
+      {orcamentoDefinido ? (
+        <div className="mt-6 bg-white border-2 border-[#1D9E75]/40 rounded-2xl shadow-sm p-5">
+          <div className="flex items-baseline justify-between gap-2 flex-wrap">
+            <p className="text-sm font-semibold text-gray-900">💰 Orçamento final do seu pedido</p>
+            <span className="text-[11px] text-[#0F6E56] bg-[#E1F5EE] px-2 py-0.5 rounded-full">definido pelo fornecedor</span>
+          </div>
+          {pedido.fornecedor_nome && (
+            <p className="text-xs text-gray-600 mt-1.5">Quem vai produzir: <strong className="text-gray-900">{pedido.fornecedor_nome}</strong></p>
+          )}
+          <div className="mt-4 text-sm space-y-1.5">
+            <div className="flex justify-between text-gray-600"><span>Produtos</span><span>{brl(produtosCliente)}</span></div>
+            <div className="flex justify-between text-gray-600"><span>Frete</span><span>{freteCliente > 0 ? brl(freteCliente) : "incluso"}</span></div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between gap-3">
+            <p className="text-sm font-medium text-gray-900">Total</p>
+            <p className="text-2xl font-bold text-[#0F6E56] leading-tight">{brl(pedido.valor_centavos ?? 0)}</p>
+          </div>
+          {!pago ? (
+            <>
+              <button type="button"
+                onClick={() => { setConfirmStep("form"); setConfirmErro(null); setTimeout(() => document.getElementById("pagar-agora-form")?.scrollIntoView({ behavior: "smooth", block: "center" }), 60); }}
+                className="mt-4 w-full bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-base font-semibold px-6 py-3.5 rounded-xl transition-colors shadow-sm">
+                Pagar agora →
+              </button>
+              <p className="text-[11px] text-gray-400 text-center mt-2">PIX ou cartão na página de pagamento. Com o pagamento confirmado, a produção começa.</p>
+            </>
+          ) : (
+            <p className="text-sm text-[#0F6E56] font-medium mt-3">Pagamento confirmado ✅ — pedido em produção.</p>
+          )}
+        </div>
+      ) : confirmadoEm ? (
+        <div className="mt-6 bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-2xl p-5">
+          <p className="text-sm font-semibold text-[#0F6E56]">🔎 Pedido confirmado — buscando o fornecedor ideal</p>
+          <p className="text-xs text-[#0F6E56]/80 mt-1.5 leading-relaxed">
+            Nosso time está selecionando o melhor fornecedor pras suas peças. Assim que ele preparar o <strong>orçamento final</strong> (produtos + frete), você recebe por <strong>e-mail e WhatsApp</strong> — e só paga se aprovar. Enquanto isso, pode continuar ajustando as artes por aqui.
+          </p>
+          {confirmadoMsg && <p className="text-[11px] text-[#0F6E56] bg-white/60 rounded-lg px-3 py-2 mt-3">Resumo enviado pro seu e-mail. ✉️</p>}
+        </div>
+      ) : (
+        <div className="mt-6 bg-white border border-gray-200 rounded-2xl shadow-sm p-5">
+          <p className="text-sm font-semibold text-gray-900">Tudo certo com os produtos?</p>
+          <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+            Confirme o pedido e a gente encontra o <strong>fornecedor ideal</strong> pra produzir suas peças. Você recebe o orçamento final por e-mail e WhatsApp — <strong>sem compromisso até aprovar</strong>.
+          </p>
+          <button type="button" disabled={!podeConfirmar || confirmandoPedido}
+            onClick={() => void confirmarPedido()}
+            className="mt-4 w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 disabled:cursor-not-allowed text-white text-base font-semibold px-6 py-3.5 rounded-xl transition-colors shadow-sm">
+            {confirmandoPedido ? "Confirmando…" : "Confirmar pedido →"}
+          </button>
+          {confirmErro && confirmStep === "idle" && <p className="text-xs text-red-600 mt-2">{confirmErro}</p>}
+          <p className="text-[11px] text-gray-400 text-center mt-2">Sem pagamento agora — o valor só aparece no orçamento final.</p>
         </div>
       )}
-      {orcamento && orcamento.total_centavos > 0 && (() => {
-        const pix = metodoPag === "pix";
-        const descontoPix = orcamento.total_centavos - orcamento.pix_centavos;
-        const totalPagar = pix ? orcamento.pix_centavos : orcamento.total_centavos;
-        const frete = freteEstimadoCentavos(orcamento.total_pecas);
-        return (
-        <div className="mt-6 bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-5 pb-0">
-            <div className="flex items-baseline justify-between gap-2">
-              <p className="text-sm font-semibold text-gray-900">Resumo do pedido</p>
-              <span className="text-[11px] text-gray-400">Estimativa, sujeita a confirmação</span>
-            </div>
-
-            {/* método de pagamento (PIX pré-selecionado) */}
-            <div className="mt-3 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Forma de pagamento">
-              <button type="button" role="radio" aria-checked={pix} onClick={() => setMetodoPag("pix")}
-                className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${pix ? "border-[#1D9E75] bg-[#E1F5EE]/60 ring-1 ring-[#1D9E75]" : "border-gray-200 hover:border-gray-300"}`}>
-                <span className="flex items-center gap-1.5 text-sm font-medium text-gray-900">⚡ PIX <span className="text-[10px] font-semibold text-white bg-[#1D9E75] rounded-full px-1.5 py-0.5">−3%</span></span>
-                <span className="block text-[11px] text-gray-500 mt-0.5">À vista · aprovação na hora</span>
-              </button>
-              <button type="button" role="radio" aria-checked={!pix} onClick={() => setMetodoPag("cartao")}
-                className={`rounded-xl border px-3 py-2.5 text-left transition-colors ${!pix ? "border-[#1D9E75] bg-[#E1F5EE]/60 ring-1 ring-[#1D9E75]" : "border-gray-200 hover:border-gray-300"}`}>
-                <span className="block text-sm font-medium text-gray-900">💳 Cartão de crédito</span>
-                <span className="block text-[11px] text-gray-500 mt-0.5">Em até 12x, conforme a operadora</span>
-              </button>
-            </div>
-
-            {/* extrato */}
-            <div className="mt-4 text-sm space-y-1.5">
-              <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{brl(orcamento.subtotal_centavos)}</span></div>
-              {orcamento.desconto_qtd_centavos > 0 && (
-                <div className="flex justify-between text-[#0F6E56]"><span>Desconto quantidade (5%)</span><span>− {brl(orcamento.desconto_qtd_centavos)}</span></div>
-              )}
-              <div className="flex justify-between items-center text-gray-600">
-                <span>Frete</span>
-                {orcamento.frete_gratis ? (
-                  <span className="flex items-center gap-2"><s className="text-gray-400">{brl(frete)}</s><span className="text-[#0F6E56] font-semibold">Grátis 🎉</span></span>
-                ) : (
-                  <span className="text-gray-400 text-xs">calculado no envio*</span>
-                )}
-              </div>
-              {pix && descontoPix > 0 && (
-                <div className="flex justify-between text-[#0F6E56]"><span>Desconto PIX (3%)</span><span>− {brl(descontoPix)}</span></div>
-              )}
-            </div>
-
-            {/* total */}
-            <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between gap-3">
-              <p className="text-sm font-medium text-gray-900">Total {pix ? "no PIX" : "no cartão"}</p>
-              <div className="text-right">
-                <p className="text-2xl font-bold text-[#0F6E56] leading-tight">{brl(totalPagar)}</p>
-                <p className="text-[11px] text-gray-400">{pix ? `no cartão: ${brl(orcamento.total_centavos)} em até 12x` : `no PIX sai por ${brl(orcamento.pix_centavos)} (−3%)`}</p>
-              </div>
-            </div>
-            {!orcamento.frete_gratis && (
-              <p className="text-[10px] text-gray-400 mt-1">*Frete à parte (grátis acima de R$ 200) — opções de envio após a produção.</p>
-            )}
-          </div>
-
-          {/* CTA */}
-          <div className="p-5 pt-4">
-            <button type="button" disabled={!podeConfirmar}
-              onClick={() => { setConfirmStep("form"); setConfirmErro(null); setTimeout(() => document.getElementById("pagar-agora-form")?.scrollIntoView({ behavior: "smooth", block: "center" }), 60); }}
-              className="w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 disabled:cursor-not-allowed text-white text-base font-semibold px-6 py-3.5 rounded-xl transition-colors shadow-sm">
-              Pagar agora →
-            </button>
-            <p className="text-[11px] text-gray-400 text-center mt-2">Com o pagamento confirmado, seu pedido entra em produção.</p>
-            {estimandoPrecos && <p className="text-[11px] text-gray-400 mt-1 text-center">Atualizando preços de mercado…</p>}
-            {!orcamento.completo && !estimandoPrecos && (
-              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2 leading-snug">Alguns itens ainda estão sendo precificados. Se persistir, nosso time ajusta antes de fechar.</p>
-            )}
-          </div>
-        </div>
-        );
-      })()}
 
       {/* PRAZO DE PRODUÇÃO */}
-      {pedido.prazo_dias && orcamento && orcamento.total_centavos > 0 ? (
+      {pedido.prazo_dias ? (
         <div className="mt-3 bg-white border border-gray-200 rounded-2xl shadow-sm p-4 flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-[#E1F5EE] flex items-center justify-center text-lg shrink-0" aria-hidden>⏱️</div>
           <div>
@@ -782,9 +769,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         )}
         {confirmStep === "feito" && pixResult ? (
           <div className="bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-4">
-            <p className="text-sm text-[#0F6E56] font-medium">Pedido confirmado! ✅</p>
-            <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">Enviamos o resumo pro seu e-mail. {metodoPag === "pix" ? <>Pague no <strong>PIX</strong> abaixo (3% de desconto já aplicado)</> : <>Pague no <strong>cartão de crédito</strong> pelo botão abaixo</>} — assim que o pagamento cair, seu pedido entra em produção e você poderá baixar os visualizadores. O valor fica garantido pela Confeccione até você receber tudo certinho.</p>
-            {metodoPag === "pix" && pixResult.copiaCola && (
+            <p className="text-sm text-[#0F6E56] font-medium">Pagamento gerado! ✅</p>
+            <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">Enviamos a cobrança pro seu e-mail. Pague no <strong>PIX</strong> abaixo ou no <strong>cartão</strong> pelo botão — assim que o pagamento cair, seu pedido entra em produção e você poderá baixar os visualizadores. O valor fica garantido pela Confeccione até você receber tudo certinho.</p>
+            {pixResult.copiaCola && (
               <div className="mt-4 flex flex-col sm:flex-row gap-4 items-start">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={`/api/pedido/assistente/${pedido.id}/pix-qr`} alt="QR Code PIX" className="w-40 h-40 rounded-lg border border-[#1D9E75]/30 bg-white shrink-0" />
@@ -798,21 +785,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
               </div>
             )}
             <div className="mt-3">
-              <a href={pixResult.invoiceUrl} target="_blank" rel="noopener noreferrer" className={metodoPag === "cartao" ? "inline-block bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-5 py-2.5 rounded-xl" : "inline-block border border-[#1D9E75]/40 text-[#0F6E56] hover:bg-white text-xs font-medium px-4 py-2 rounded-xl"}>💳 {metodoPag === "cartao" ? "Pagar com cartão de crédito" : "Prefere cartão? Pagar com cartão"}</a>
+              <a href={pixResult.invoiceUrl} target="_blank" rel="noopener noreferrer" className="inline-block border border-[#1D9E75]/40 text-[#0F6E56] hover:bg-white text-xs font-medium px-4 py-2 rounded-xl">💳 Prefere cartão? Pagar com cartão</a>
             </div>
-            {metodoPag === "cartao" && pixResult.copiaCola && (
-              <div className="mt-4 flex flex-col sm:flex-row gap-4 items-start">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={`/api/pedido/assistente/${pedido.id}/pix-qr`} alt="QR Code PIX" className="w-40 h-40 rounded-lg border border-[#1D9E75]/30 bg-white shrink-0" />
-                <div className="flex-1 w-full min-w-0">
-                  <p className="text-xs text-gray-500 mb-1">Ou pague no PIX (3% de desconto):</p>
-                  <code className="block break-all bg-white border border-gray-200 rounded-lg px-3 py-2 text-[11px] text-gray-700">{pixResult.copiaCola}</code>
-                  <div className="flex gap-2 mt-2">
-                    <button type="button" onClick={() => { navigator.clipboard?.writeText(pixResult.copiaCola!); setCopiado(true); setTimeout(() => setCopiado(false), 2000); }} className="border border-[#1D9E75] text-[#0F6E56] text-xs px-3 py-1.5 rounded-lg hover:bg-white">{copiado ? "Copiado!" : "Copiar código PIX"}</button>
-                  </div>
-                </div>
-              </div>
-            )}
             <div className="mt-4 pt-3 border-t border-[#1D9E75]/20">
               {pago ? (
                 <div>
@@ -838,18 +812,37 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         ) : confirmStep === "form" ? (
           <div id="pagar-agora-form" className="bg-gray-50 border border-gray-200 rounded-xl p-4">
             <p className="text-sm font-medium text-gray-900 mb-1">Quase lá — confirme pra pagar</p>
-            <p className="text-xs text-gray-500 mb-3">Informe seu CPF (ou CNPJ) pra gerar a cobrança. Total: <strong>{orcamento ? brl(metodoPag === "pix" ? orcamento.pix_centavos : orcamento.total_centavos) : ""}</strong> {metodoPag === "pix" ? "no PIX" : "no cartão (em até 12x)"}.</p>
+            <p className="text-xs text-gray-500 mb-3">Informe seu CPF (ou CNPJ) pra gerar a cobrança. Total: <strong>{brl(pedido.valor_centavos ?? 0)}</strong> — PIX ou cartão na página de pagamento.</p>
             <input value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="CPF ou CNPJ" inputMode="numeric"
               className="w-full sm:w-64 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
             <div className="flex gap-2 mt-3">
-              <button type="button" onClick={() => void confirmarPedido()} disabled={confirmando}
+              <button type="button" onClick={() => void gerarPagamento()} disabled={confirmando}
                 className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-xl">{confirmando ? "Gerando…" : "Gerar pagamento →"}</button>
               <button type="button" onClick={() => { setConfirmStep("idle"); setConfirmErro(null); }} className="text-sm text-gray-500 px-3 py-2.5 rounded-xl hover:bg-gray-100">Cancelar</button>
             </div>
             {confirmErro && <p className="text-xs text-red-600 mt-2">{confirmErro}</p>}
           </div>
+        ) : pago ? (
+          <div className="bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-4">
+            <p className="text-sm text-[#0F6E56] font-medium mb-2">Pagamento confirmado! ✅ Baixe seus visualizadores:</p>
+            {numImagensSalvas > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {Array.from({ length: numImagensSalvas }).map((_, i) => (
+                  <a key={i} href={`/api/pedido/assistente/${pedido.id}/imagem?i=${i}`} download={`confeccione-produto-${i + 1}.jpg`} className="border border-[#1D9E75] text-[#0F6E56] text-xs px-3 py-1.5 rounded-lg hover:bg-white">Baixar produto {i + 1}</a>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-[#0F6E56]/80">Seus visualizadores também foram pro seu e-mail.</p>
+            )}
+          </div>
         ) : (
-          <p className="text-xs text-gray-400">Revise os produtos e o resumo acima e clique em <strong className="text-gray-600">Pagar agora</strong> pra fechar o pedido.</p>
+          <p className="text-xs text-gray-400">
+            {orcamentoDefinido
+              ? <>Orçamento final disponível acima — clique em <strong className="text-gray-600">Pagar agora</strong> pra fechar o pedido.</>
+              : confirmadoEm
+                ? <>Pedido confirmado — assim que o fornecedor definir o orçamento, o pagamento libera por aqui.</>
+                : <>Revise os produtos acima e clique em <strong className="text-gray-600">Confirmar pedido</strong> — a gente encontra o fornecedor ideal.</>}
+          </p>
         )}
       </div>
 
