@@ -251,6 +251,19 @@ function normalizarPedido(p: Pedido): Pedido {
   return { linhas, contato }
 }
 
+// Data atual no fuso de Brasília, por extenso — injetada no system a cada
+// turno. Sem isso o modelo CHUTA a data (cutoff de treino) e converte datas
+// do cliente ("pra dia 20", "semana que vem") em prazoDias errado.
+function dataHojeBR(): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date())
+}
+
 function linhaCompleta(l: Linha): boolean {
   return Boolean(l.modelo && l.cor && l.total)
 }
@@ -364,6 +377,9 @@ export async function POST(req: Request) {
   const enderecoCep = await buscarCep(cepAtual)
   const systemBlocks: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> = [
     { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+    // Bloco SEM cache (muda por dia); vem depois do prompt cacheado, então o
+    // cache do prefixo continua valendo.
+    { type: 'text', text: `HOJE é ${dataHojeBR()} (fuso de Brasília). Use SEMPRE esta data como referência ao converter datas e prazos do cliente em "prazoDias" (número de dias a partir de HOJE).` },
   ]
   if (enderecoCep && cepAtual) {
     const partes = [enderecoCep.logradouro, enderecoCep.bairro, [enderecoCep.cidade, enderecoCep.uf].filter(Boolean).join('/')].filter(Boolean).join(', ')
