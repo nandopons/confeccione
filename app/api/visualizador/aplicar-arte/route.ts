@@ -69,11 +69,11 @@ export async function POST(req: Request) {
     artes.length > 1
       ? `As ${artes.length} imagens seguintes são artes/estampas do cliente.`
       : 'A imagem seguinte é a arte/estampa do cliente.',
-    'Aplique a(s) arte(s) sobre a peça de forma realista, acompanhando dobras, perspectiva e iluminação do tecido, COERENTE nas três vistas: o que vai na frente aparece na vista de frente; o que vai nas costas aparece na vista de costas; a vista lateral mostra o que estiver no lado correspondente.',
+    'Aplique a(s) arte(s) sobre o produto de forma realista, acompanhando a superfície, perspectiva e iluminação (dobras do tecido em roupas; curvatura em canecas, copos, garrafas e outros objetos), COERENTE nas três vistas: o que vai na frente aparece na vista de frente; o que vai nas costas aparece na vista de costas; a vista lateral mostra o que estiver no lado correspondente.',
     'MANTENHA exatamente o mesmo layout panorâmico de três ângulos, o mesmo modelo, a mesma cor e os mesmos enquadramentos do base — apenas adicione a estampa.',
     'CRÍTICO sobre enquadramento: devolva a imagem na MESMA proporção panorâmica larga (paisagem, ~16:7) do mockup base, com as TRÊS peças (frente, lateral e costas) COMPLETAS e totalmente visíveis. NÃO corte nenhuma das vistas, NÃO dê zoom, NÃO amplie nem reposicione — a terceira vista (costas) deve aparecer inteira, sem ficar cortada na borda. Fundo branco uniforme.',
     ctx ? `Contexto do produto: ${ctx}.` : '',
-    instr ? `Instruções do cliente sobre como aplicar: ${instr}.` : 'Se não houver instrução específica, posicione a arte de forma centralizada e proporcional no peito, com bom senso.',
+    instr ? `Instruções do cliente sobre como aplicar: ${instr}.` : 'Se não houver instrução específica, posicione a arte de forma centralizada e proporcional na área mais natural do produto (peito em roupas; face frontal em canecas, copos, garrafas e demais brindes), com bom senso.',
     'Devolva apenas a imagem final (panorâmica larga, as três vistas inteiras) com a arte aplicada.',
   ].filter(Boolean).join(' ')
 
