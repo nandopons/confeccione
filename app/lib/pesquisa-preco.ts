@@ -37,12 +37,12 @@ export async function pesquisarCurvaPreco(input: {
   const produtoDesc = [
     input.modelo,
     input.material ? `em ${input.material}` : null,
-    input.estampado ? 'ESTAMPADO (com estampa/print incluído no preço)' : 'LISO (sem estampa)',
+    input.estampado ? 'PERSONALIZADO (estampa/impressão/gravação da arte incluída no preço)' : 'LISO (sem personalização)',
   ].filter(Boolean).join(', ')
 
-  const prompt = `Você é especialista em precificação de CONFECÇÃO têxtil no atacado/sob demanda no Brasil (uniformes, camisetas, moda, etc.).
+  const prompt = `Você é especialista em precificação no atacado/sob demanda no Brasil de CONFECÇÃO têxtil (uniformes, camisetas, moda) e de BRINDES PERSONALIZADOS/artigos de gráfica (canecas, copos, garrafas, chaveiros, crachás, calendários, estojos, pastas, canetas etc.).
 
-Estime o PREÇO DE VENDA por UNIDADE (em reais) que uma confecção cobraria do cliente final, para: ${produtoDesc}.
+Estime o PREÇO DE VENDA por UNIDADE (em reais) que uma confecção/gráfica cobraria do cliente final, para: ${produtoDesc}.
 
 Considere ECONOMIA DE ESCALA: preço por unidade MAIS ALTO em quantidades pequenas (1 un é caro, próximo de produção sob medida) e CAINDO conforme a quantidade aumenta, estabilizando em quantidades grandes. Valores realistas do mercado brasileiro em ${new Date().getFullYear()}. Se estampado, o preço já inclui a estampa.
 
