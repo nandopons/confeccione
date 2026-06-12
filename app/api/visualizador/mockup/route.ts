@@ -43,10 +43,39 @@ function cacheavel(b: z.infer<typeof BodySchema>): boolean {
   return normMockup(b.modelo).length > 0 && normMockup(b.cor).length > 0
 }
 
+// Brindes/artigos de gráfica não são "vestidos" — o mockup é do OBJETO em si,
+// fotografado sozinho (sem modelo humano). Detecção por termo no modelo.
+const TERMOS_OBJETO = [
+  'caneca', 'copo', 'garrafa', 'squeeze', 'chaveiro', 'cracha', 'cordao',
+  'calendario', 'agenda', 'bloco', 'estojo', 'pasta', 'porta cartao',
+  'porta-cartao', 'portacartao', 'lapis', 'caneta', 'mousepad', 'mouse pad',
+  'botton', 'boton', 'adesivo', 'sacola', 'ecobag', 'necessaire', 'caderno',
+  'marcador', 'brinde', 'taca', 'garrafinha', 'lanyard',
+]
+function ehObjetoGrafica(modelo: string | null | undefined): boolean {
+  const m = (modelo || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  return TERMOS_OBJETO.some((t) => m.includes(t))
+}
+
 function montarPrompt(b: z.infer<typeof BodySchema>): string {
   const modelo = b.modelo?.trim() || 'camiseta'
   const cor = b.cor?.trim() || 'branca'
   const material = b.material?.trim()
+  if (ehObjetoGrafica(modelo)) {
+    let p =
+      `Foto de catálogo de e-commerce mostrando O MESMO produto: ${modelo} na cor ${cor}` +
+      (material ? `, em ${material}` : '') +
+      `, LISO — sem nenhuma estampa, sem logo e sem texto. ` +
+      `Gere UMA ÚNICA imagem panorâmica (orientação paisagem, proporção aproximada 16:7) com TRÊS ângulos do produto lado a lado, na ordem: ` +
+      `FRENTE à esquerda, VISTA LATERAL ao centro e VERSO/COSTAS à direita. ` +
+      `Produto fotografado SOZINHO (sem pessoas, sem mãos), apoiado sobre superfície neutra, as três tomadas com o MESMO produto, mesma cor e mesmo material, ` +
+      `fundo branco liso e uniforme, iluminação de estúdio suave, sombras sutis, alta resolução, realista, estilo catálogo de brindes corporativos.`
+    if (b.descricao?.trim()) {
+      p += ` Detalhes visuais do produto (ignore quantidades e tamanhos): ${b.descricao.trim()}.`
+    }
+    p += ' IMPORTANTE: o produto deve aparecer totalmente LIMPO, sem qualquer arte aplicada — esta é a base que depois vai receber a personalização.'
+    return p
+  }
   const pub = (b.publico || '').toLowerCase().trim()
   const pubFrase =
     pub === 'feminino' ? ' do segmento FEMININO (modelagem e caimento femininos, vestida por uma modelo mulher)'

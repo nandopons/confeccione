@@ -37,7 +37,7 @@ export async function POST(req: Request) {
   const instr = body.data.instrucoes.trim()
   const prompt = [
     'Esta imagem é um mockup panorâmico de catálogo: a MESMA peça em três ângulos lado a lado — FRENTE (esquerda), LATERAL (centro) e COSTAS (direita).',
-    'Faça SOMENTE o ajuste pedido pelo cliente abaixo, mantendo IDÊNTICO todo o resto: a mesma peça, cor, modelo, material, a mesma arte/estampa/bordado já presente, o mesmo modelo que veste, o mesmo enquadramento e o mesmo fundo. NÃO recrie a peça do zero, NÃO mude o que não foi pedido.',
+    'Faça SOMENTE o ajuste pedido pelo cliente abaixo, mantendo IDÊNTICO todo o resto: a mesma peça, cor, modelo, material, a mesma arte/estampa/bordado já presente, o mesmo modelo que veste (quando houver), o mesmo enquadramento e o mesmo fundo. NÃO recrie a peça do zero, NÃO mude o que não foi pedido.',
     `AJUSTE PEDIDO: ${instr}.`,
     ctx ? `Contexto do produto: ${ctx}.` : '',
     'CRÍTICO: devolva na MESMA proporção panorâmica larga (~16:7), com as TRÊS vistas (frente, lateral, costas) COMPLETAS e visíveis, sem cortar, sem zoom, sem reposicionar. Fundo branco uniforme.',

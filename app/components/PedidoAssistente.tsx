@@ -43,7 +43,7 @@ const CONTATO_VAZIO: Contato = { nome: null, telefone: null, email: null, cep: n
 const PEDIDO_VAZIO: Pedido = { linhas: [], contato: { ...CONTATO_VAZIO } };
 
 const SAUDACAO =
-  "Oi! 👋 Vou te ajudar a montar seu pedido aqui mesmo. Me conta: o que você quer produzir? (ex.: “camisetas oversized pretas”, “bonés bordados”, “uniforme da minha equipe”)";
+  "Oi! 👋 Vou te ajudar a montar seu pedido aqui mesmo. Me conta: o que você quer produzir? (ex.: “camisetas oversized pretas”, “canecas personalizadas”, “uniforme da minha equipe”, “crachás e brindes do evento”)";
 
 function corHex(s: string | null | undefined): string | null {
   const m = /#([0-9a-fA-F]{6})\b/.exec(s || "");
