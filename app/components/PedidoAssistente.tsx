@@ -73,6 +73,7 @@ export default function PedidoAssistente() {
   const [protocolo, setProtocolo] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [mostrarEmBreve, setMostrarEmBreve] = useState(false);
+  const [erroSalvar, setErroSalvar] = useState<string | null>(null);
   const salvoRef = useRef(false);
   const listaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -162,13 +163,14 @@ export default function PedidoAssistente() {
       const res = await fetch("/api/pedido/assistente/criar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ linhas: p.linhas, contato: p.contato, conversa: (conversaTurnos ?? turnos).map((t) => ({ role: t.role, texto: t.display })) }),
+        body: JSON.stringify({ linhas: p.linhas, contato: p.contato, conversa: (conversaTurnos ?? turnos).map((t) => ({ role: t.role, texto: (t.display ?? "").slice(0, 8000) })) }),
       });
       const data = await res.json().catch(() => null);
       if (res.ok && data?.ok) {
         const novoId = String(data.protocolo ?? data.id ?? "");
         salvoRef.current = true;
         setProtocolo(novoId);
+        setErroSalvar(null);
         try {
           const w = window as unknown as { dataLayer?: Record<string, unknown>[] };
           w.dataLayer = w.dataLayer || [];
@@ -185,9 +187,12 @@ export default function PedidoAssistente() {
         }
         return novoId;
       }
+      // Erro do servidor: guarda a mensagem pra MOSTRAR ao cliente (antes
+      // falhava mudo e parecia que o botão não fazia nada).
+      setErroSalvar(typeof data?.error === "string" && data.error ? data.error : "Não foi possível salvar o pedido agora. Tente de novo em instantes.");
       return null;
     } catch {
-      // silencioso: o cliente ainda pode prosseguir; tentamos salvar de novo no botão
+      setErroSalvar("Falha de conexão ao salvar. Confira a internet e tente de novo.");
       return null;
     } finally {
       setSalvando(false);
@@ -393,7 +398,14 @@ export default function PedidoAssistente() {
             </button>
             <p className="text-[11px] text-gray-400 text-center mt-2">Veja uma pré-visualização dos seus produtos.</p>
 
-            {mostrarEmBreve && (
+            {mostrarEmBreve && erroSalvar && (
+              <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 text-center">
+                <p className="text-sm text-red-700 font-medium">Não consegui salvar seu pedido 😕</p>
+                <p className="text-xs text-red-600/90 mt-1 leading-relaxed">{erroSalvar}</p>
+                <p className="text-[11px] text-red-500/80 mt-1.5">Seu pedido continua aqui no chat — é só clicar de novo no botão acima.</p>
+              </div>
+            )}
+            {mostrarEmBreve && !erroSalvar && (
               <div className="mt-3 bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-3 text-center">
                 <p className="text-sm text-[#0F6E56] font-medium">Pré-visualização chega em breve 🚧</p>
                 <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">
