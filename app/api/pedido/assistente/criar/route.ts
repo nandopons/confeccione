@@ -49,13 +49,30 @@ const ContatoSchema = z.object({
   uf: z.string().nullable().optional(),
   prazoDias: z.number().int().positive().nullable().optional(),
 })
-const ConversaItemSchema = z.object({ role: z.enum(['user', 'assistant']), texto: z.string().max(8000) })
 const BodySchema = z.object({
   linhas: z.array(LinhaSchema),
   contato: ContatoSchema,
   observacoes: z.string().nullable().optional(),
-  conversa: z.array(ConversaItemSchema).max(200).optional(),
+  // A conversa é ACESSÓRIA (log) — nunca pode derrubar o pedido. Entra como
+  // unknown e é sanitizada à parte. (Bug real: cliente colou o pedido inteiro
+  // numa mensagem >8000 chars e o zod estrito devolvia 400 pro pedido todo.)
+  conversa: z.unknown().optional(),
 })
+
+// Sanitização tolerante da conversa: descarta itens tortos, trunca textos
+// gigantes e guarda só os últimos 200 turnos. Nunca lança.
+function sanitizarConversa(v: unknown): Array<{ role: 'user' | 'assistant'; texto: string }> | null {
+  if (!Array.isArray(v)) return null
+  const itens: Array<{ role: 'user' | 'assistant'; texto: string }> = []
+  for (const item of v) {
+    const o = item as { role?: unknown; texto?: unknown } | null
+    const role = o?.role === 'user' || o?.role === 'assistant' ? o.role : null
+    const texto = typeof o?.texto === 'string' ? o.texto.trim() : ''
+    if (!role || !texto) continue
+    itens.push({ role, texto: texto.length > 8000 ? `${texto.slice(0, 8000)}… [mensagem truncada]` : texto })
+  }
+  return itens.length > 0 ? itens.slice(-200) : null
+}
 
 export async function POST(req: Request) {
   let bruto: unknown
@@ -67,6 +84,7 @@ export async function POST(req: Request) {
 
   const parsed = BodySchema.safeParse(bruto)
   if (!parsed.success) {
+    console.error('[pedido/assistente/criar] body inválido:', JSON.stringify(parsed.error.issues.slice(0, 5)))
     return NextResponse.json({ error: 'Formato inválido do pedido.' }, { status: 400 })
   }
 
@@ -116,7 +134,7 @@ export async function POST(req: Request) {
       uf: contato.uf ?? null,
       prazo_dias: contato.prazoDias ?? null,
       observacoes: parsed.data.observacoes ?? null,
-      conversa: parsed.data.conversa ?? null,
+      conversa: sanitizarConversa(parsed.data.conversa),
       status: 'completo',
       origem: 'home_chat',
       conta_id: contaId,
