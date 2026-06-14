@@ -302,7 +302,8 @@ function calcularFase(p: Pedido): 'produto' | 'contato' | 'completo' {
   if (!temLinha) return 'produto'
   const c = p.contato
   // Exige complemento (número/apto) — não fechar só com o CEP resolvido.
-  const contatoOk = Boolean(c.nome && telefoneValido(c.telefone) && c.email && c.cep && c.complemento && c.prazoDias)
+  // prazoDias é perguntado no fluxo, mas NÃO trava a conclusão (evita dead-end).
+  const contatoOk = Boolean(c.nome && telefoneValido(c.telefone) && c.email && c.cep && c.complemento)
   return contatoOk ? 'completo' : 'contato'
 }
 
@@ -362,8 +363,12 @@ export async function POST(req: Request) {
   // que o cliente acabou de digitar na última mensagem.
   const cepAtual = anterior.contato.cep || extrairCepDasMensagens(janela)
   const enderecoCep = await buscarCep(cepAtual)
+  const hoje = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
+  }).format(new Date())
   const systemBlocks: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> = [
     { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: `DATA DE HOJE: ${hoje} (fuso de Brasília). Use SEMPRE esta data como referência ao calcular o prazo em dias a partir de uma data que o cliente disser. Nunca use outra data.` },
   ]
   if (enderecoCep && cepAtual) {
     const partes = [enderecoCep.logradouro, enderecoCep.bairro, [enderecoCep.cidade, enderecoCep.uf].filter(Boolean).join('/')].filter(Boolean).join(', ')
