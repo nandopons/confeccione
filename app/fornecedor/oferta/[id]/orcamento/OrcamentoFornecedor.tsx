@@ -27,9 +27,11 @@ function dataBR(iso: string | null): string {
 }
 
 export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornecedorDados }) {
+  const [itens, setItens] = useState(dados.itens)
   const [unit, setUnit] = useState<string[]>(
     dados.itens.map((it) => paraTexto(it.unitLiquidoAtualCentavos ?? it.unitLiquidoSugeridoCentavos))
   )
+  const [pesquisando, setPesquisando] = useState<number | null>(null)
   const [frete, setFrete] = useState<string>(paraTexto(dados.freteLiquidoAtualCentavos))
   const [enviando, setEnviando] = useState(false)
   const [feito, setFeito] = useState<{ valorCliente: number; repasse: number } | null>(null)
@@ -37,8 +39,8 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
 
   const calc = useMemo(() => {
     let produtos = 0
-    let valido = dados.itens.length > 0
-    dados.itens.forEach((it, i) => {
+    let valido = itens.length > 0
+    itens.forEach((it, i) => {
       const u = paraCentavos(unit[i] ?? '')
       if (u <= 0) valido = false
       produtos += it.qtd * u
@@ -47,7 +49,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
     const liquido = produtos + freteC
     const cliente = liquido > 0 ? Math.round(liquido / (1 - TAXA)) : 0
     return { produtos, freteC, liquido, cliente, valido: valido && liquido > 0 }
-  }, [unit, frete, dados.itens])
+  }, [unit, frete, itens])
 
   async function enviar() {
     if (enviando || !calc.valido) return
@@ -59,7 +61,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          unitCentavos: dados.itens.map((_, i) => paraCentavos(unit[i] ?? '')),
+          unitCentavos: itens.map((_, i) => paraCentavos(unit[i] ?? '')),
           freteCentavos: paraCentavos(frete || '0'),
         }),
       })
@@ -70,6 +72,33 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
       setErro(e instanceof Error ? e.message : 'Erro ao enviar.')
     } finally {
       setEnviando(false)
+    }
+  }
+
+  async function pesquisarPreco(i: number) {
+    if (pesquisando != null) return
+    setPesquisando(i)
+    setErro(null)
+    try {
+      const r = await fetch(`/api/fornecedor/oferta/${dados.ofertaId}/pesquisar-preco`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linha: i }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.erro || 'Não foi possível pesquisar.')
+      if (j.dados?.itens) {
+        setItens(j.dados.itens)
+        // se o campo está vazio, pré-preenche com a sugestão da pesquisa
+        const sug = j.dados.itens[i]?.unitLiquidoSugeridoCentavos
+        if (sug != null) {
+          setUnit((u) => u.map((v, k) => (k === i && !paraCentavos(v ?? '')) ? paraTexto(sug) : v))
+        }
+      }
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Erro na pesquisa.')
+    } finally {
+      setPesquisando(null)
     }
   }
 
@@ -108,7 +137,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
           )}
 
           <div className="px-6 py-5 space-y-4">
-            {dados.itens.map((it, i) => (
+            {itens.map((it, i) => (
               <div key={i} className="rounded-lg bg-gray-50 border border-gray-100 px-4 py-3">
                 <p className="font-medium text-gray-900 capitalize">{it.label}</p>
                 <div className="mt-2 flex items-center gap-3 flex-wrap">
@@ -124,11 +153,21 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
                   </label>
                   <div className="text-xs text-gray-500 mt-4">
                     × {it.qtd} un. = <strong className="text-gray-800">{brl(it.qtd * paraCentavos(unit[i] ?? ''))}</strong>
-                    {it.unitLiquidoSugeridoCentavos != null && (
+                    {it.unitLiquidoSugeridoCentavos != null ? (
                       <span className="block text-[11px] text-gray-400">sugestão da plataforma: {brl(it.unitLiquidoSugeridoCentavos)}/un</span>
+                    ) : (
+                      <span className="block text-[11px] text-gray-400">sem referência de mercado ainda</span>
                     )}
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => void pesquisarPreco(i)}
+                  disabled={pesquisando != null}
+                  className="mt-2 text-[12px] text-emerald-700 hover:text-emerald-900 underline disabled:opacity-50"
+                >
+                  {pesquisando === i ? 'Pesquisando preço de mercado…' : '🔍 Pesquisar preço de mercado'}
+                </button>
               </div>
             ))}
 
