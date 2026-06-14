@@ -343,6 +343,7 @@ export async function ofertarPedido(
           linhasHtml: emailLinhas.html,
           linhasTexto: emailLinhas.texto,
           repasseTexto,
+          pago,
           linkOferta: link,
           numImagens,
           prazoDias: pedido.prazo_dias ?? null,
