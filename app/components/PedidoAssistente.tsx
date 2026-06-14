@@ -72,7 +72,6 @@ export default function PedidoAssistente() {
 
   const [protocolo, setProtocolo] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
-  const [mostrarEmBreve, setMostrarEmBreve] = useState(false);
   const salvoRef = useRef(false);
   const listaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -185,9 +184,9 @@ export default function PedidoAssistente() {
         }
         return novoId;
       }
+      if (data?.error) setErro(String(data.error));
       return null;
     } catch {
-      // silencioso: o cliente ainda pode prosseguir; tentamos salvar de novo no botão
       return null;
     } finally {
       setSalvando(false);
@@ -311,12 +310,13 @@ export default function PedidoAssistente() {
   }
 
   async function prosseguir() {
+    setErro(null);
     const id = salvoRef.current ? protocolo : await salvarPedido(pedido);
     if (id) {
       window.location.href = `/visualizador/${id}`;
       return;
     }
-    setMostrarEmBreve(true);
+    setErro("Não consegui gerar a proposta agora. Tente de novo em instantes — se persistir, chama a gente no WhatsApp (81) 99578-2077.");
   }
 
   const totalPecas = pedido.linhas.reduce((acc, l) => acc + (l.total ?? 0), 0);
@@ -393,12 +393,9 @@ export default function PedidoAssistente() {
             </button>
             <p className="text-[11px] text-gray-400 text-center mt-2">Veja uma pré-visualização dos seus produtos.</p>
 
-            {mostrarEmBreve && (
-              <div className="mt-3 bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-3 text-center">
-                <p className="text-sm text-[#0F6E56] font-medium">Pré-visualização chega em breve 🚧</p>
-                <p className="text-xs text-[#0F6E56]/80 mt-1 leading-relaxed">
-                  Seu pedido foi salvo{protocolo ? <> — protocolo <strong>#{protocolo.slice(0, 8)}</strong></> : ""}. Em breve você vai poder ver cada produto em frente, costas e lateral, e aplicar suas artes.
-                </p>
+            {erro && (
+              <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3">
+                <p className="text-sm text-red-700 leading-relaxed">{erro}</p>
               </div>
             )}
           </div>

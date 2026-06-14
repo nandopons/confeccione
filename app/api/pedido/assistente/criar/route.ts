@@ -49,12 +49,12 @@ const ContatoSchema = z.object({
   uf: z.string().nullable().optional(),
   prazoDias: z.number().int().positive().nullable().optional(),
 })
-const ConversaItemSchema = z.object({ role: z.enum(['user', 'assistant']), texto: z.string().max(8000) })
+const ConversaItemSchema = z.object({ role: z.enum(['user', 'assistant']), texto: z.string().max(20000) })
 const BodySchema = z.object({
   linhas: z.array(LinhaSchema),
   contato: ContatoSchema,
   observacoes: z.string().nullable().optional(),
-  conversa: z.array(ConversaItemSchema).max(200).optional(),
+  conversa: z.array(ConversaItemSchema).max(600).optional(),
 })
 
 export async function POST(req: Request) {
