@@ -26,6 +26,7 @@ export type PedidoChatResumo = {
   totalPecas: number
   resumo: string
   concluido: boolean
+  ofertaStatus: 'aceita' | 'ofertada' | null
 }
 
 function totalEResumo(linhas: LinhaJson[]): { totalPecas: number; resumo: string } {
@@ -48,13 +49,29 @@ export async function listarPedidosChat(filtro: 'incompletos' | 'todos'): Promis
     .limit(200)
   if (filtro === 'incompletos') q = q.neq('pagamento_status', 'pago')
   const { data } = await q
-  return ((data ?? []) as any[]).map((p) => {
+  const lista = (data ?? []) as any[]
+  // status de oferta por pedido (pra rotular 'buscando fornecedor' / 'aceito')
+  const ofertaPorPedido = new Map<string, 'aceita' | 'ofertada'>()
+  const ids = lista.map((p) => p.id)
+  if (ids.length > 0) {
+    const { data: ofs } = await supabaseAdmin
+      .from('ofertas_pedido_assistente')
+      .select('pedido_id, status')
+      .in('pedido_id', ids)
+    for (const o of (ofs ?? []) as any[]) {
+      const atual = ofertaPorPedido.get(o.pedido_id)
+      if (o.status === 'aceita') ofertaPorPedido.set(o.pedido_id, 'aceita')
+      else if (o.status === 'ofertada' && atual !== 'aceita') ofertaPorPedido.set(o.pedido_id, 'ofertada')
+    }
+  }
+  return lista.map((p) => {
     const linhas = Array.isArray(p.linhas) ? (p.linhas as LinhaJson[]) : []
     const { totalPecas, resumo } = totalEResumo(linhas)
     return {
       id: p.id, criadoEm: p.criado_em, nome: p.nome, telefone: p.telefone, email: p.email,
       status: p.status, pagamentoStatus: p.pagamento_status, valorCentavos: p.valor_centavos,
       totalPecas, resumo, concluido: p.pagamento_status === 'pago',
+      ofertaStatus: ofertaPorPedido.get(p.id) ?? null,
     }
   })
 }
