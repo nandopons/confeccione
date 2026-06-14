@@ -637,13 +637,17 @@ export async function emailOfertaPedidoAssistente(params: {
   linkOferta: string
   numImagens: number
   prazoDias?: number | null
+  pago?: boolean
 }): Promise<void> {
   const nomeEsc = escapeHtml(params.nomeFornecedor || 'fornecedor')
+  const pago = params.pago === true
   const prazoBloco = params.prazoDias
     ? `<div style="background:#f0fdf4;border-left:3px solid #1D9E75;padding:12px 16px;margin:12px 0;border-radius:6px;font-size:14px;color:#065f46;">⏱️ <strong>Prazo de produção: ${params.prazoDias} dias</strong> — a partir da confirmação do pagamento.</div>`
     : ''
   const subject = `Pedido disponível: ${params.totalPecas} peças — ${params.repasseTexto}`
-  const preheader = 'Um pedido já pago está disponível para produção. Veja os mockups e detalhes.'
+  const preheader = pago
+    ? 'Um pedido já pago está disponível para produção. Veja os mockups e detalhes.'
+    : 'Um pedido está disponível para você avaliar e assumir. Veja os mockups e detalhes.'
 
   const imgLinha = params.numImagens > 0
     ? `<p style="margin:0 0 16px;color:#666;font-size:14px;">🖼️ ${params.numImagens} mockup(s) disponível(is) na página da oferta.</p>`
@@ -652,7 +656,7 @@ export async function emailOfertaPedidoAssistente(params: {
   const html = layout(
     `
     <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">Pedido disponível, ${nomeEsc}!</h1>
-    <p style="margin:0 0 20px;color:#666;">Um pedido <strong>já pago</strong> está disponível para produção. Confira os mockups e detalhes completos na página da oferta.</p>
+    ${pago ? '<p style="margin:0 0 20px;color:#666;">Um pedido <strong>já pago</strong> está disponível para produção. Confira os mockups e detalhes completos na página da oferta.</p>' : '<p style="margin:0 0 20px;color:#666;">Um pedido está disponível para você avaliar e assumir. Confira os mockups e detalhes completos na página da oferta. <strong>Ao assumir, você define o orçamento final.</strong></p>'}
     <div style="background:#fafafa;border:1px solid #eeeeee;padding:14px 16px;margin:8px 0 16px;border-radius:6px;font-size:14px;color:#1f2937;">
       <strong style="color:#666;display:block;margin-bottom:8px;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;">Itens do pedido (${params.totalPecas} peças)</strong>
       ${params.linhasHtml}
@@ -660,8 +664,8 @@ export async function emailOfertaPedidoAssistente(params: {
     ${imgLinha}
     ${prazoBloco}
     <div style="background:#ecfdf5;border-left:3px solid #10b981;padding:14px 18px;margin:16px 0;border-radius:6px;">
-      <strong style="color:#065f46;">Valor total do pedido: ${escapeHtml(params.repasseTexto)}</strong>
-      <p style="margin:6px 0 0;color:#1f2937;font-size:14px;line-height:1.5;">Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.</p>
+      <strong style="color:#065f46;">${pago ? 'Valor total do pedido' : 'Repasse estimado'}: ${escapeHtml(params.repasseTexto)}</strong>
+      <p style="margin:6px 0 0;color:#1f2937;font-size:14px;line-height:1.5;">${pago ? 'Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.' : 'Ao assumir, você define o orçamento final (produtos + frete). O pagamento é garantido pela Confeccione após a confirmação do cliente.'}</p>
     </div>
     <div style="text-align:center;margin:28px 0;">
       <a href="${params.linkOferta}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:8px;font-weight:600;font-size:15px;">Ver mockups e assumir pedido</a>
@@ -673,13 +677,13 @@ export async function emailOfertaPedidoAssistente(params: {
 
   const text = `Pedido disponível, ${params.nomeFornecedor || 'fornecedor'}!
 
-Um pedido já pago está disponível para produção.
+${pago ? 'Um pedido já pago está disponível para produção.' : 'Um pedido está disponível para você avaliar e assumir. Ao assumir, você define o orçamento final.'}
 
 Itens (${params.totalPecas} peças):
 ${params.linhasTexto}
 
-Valor total do pedido: ${params.repasseTexto}${params.prazoDias ? `\nPrazo de produção: ${params.prazoDias} dias (a partir da confirmação do pagamento)` : ''}
-Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.
+${pago ? 'Valor total do pedido' : 'Repasse estimado'}: ${params.repasseTexto}${params.prazoDias ? `\nPrazo de produção: ${params.prazoDias} dias (a partir da confirmação do pagamento)` : ''}
+${pago ? 'Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.' : 'Ao assumir, você define o orçamento final (produtos + frete). Pagamento garantido pela Confeccione após a confirmação do cliente.'}
 
 Ver mockups e assumir o pedido:
 ${params.linkOferta}
