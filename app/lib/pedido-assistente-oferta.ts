@@ -172,7 +172,7 @@ export async function listarPedidosPagos(): Promise<{
   const { data: pedidosRaw } = await supabaseAdmin
     .from('pedidos_assistente')
     .select('id, criado_em, nome, cep, valor_centavos, pagamento_status, confirmado_em, orcamento_status, prazo_dias, linhas')
-    .or('pagamento_status.eq.pago,confirmado_em.not.is.null')
+    .or('pagamento_status.eq.pago,confirmado_em.not.is.null,status.eq.completo')
     .order('criado_em', { ascending: false })
 
   const pedidos = (pedidosRaw ?? []) as Omit<PedidoPago, 'ofertas'>[]
@@ -246,11 +246,12 @@ export async function ofertarPedido(
 
   if (!pedido) return { ok: false, criadas: 0, notificadas: 0, erro: 'Pedido não encontrado' }
   const pago = pedido.pagamento_status === 'pago'
-  if (!pago && !pedido.confirmado_em) {
-    return { ok: false, criadas: 0, notificadas: 0, erro: 'Pedido ainda não foi confirmado pelo cliente' }
-  }
-
   const linhas = Array.isArray(pedido.linhas) ? pedido.linhas : []
+  // Oferta manual pelo admin é permitida em qualquer pedido com itens — não
+  // exige pagamento/confirmação (o fornecedor define o orçamento final).
+  if (linhas.length === 0) {
+    return { ok: false, criadas: 0, notificadas: 0, erro: 'Pedido sem itens' }
+  }
 
   // Repasse: pago → 97% do valor cobrado; confirmado → 97% do preço SUGERIDO
   // pela engine (estimativa — o fornecedor define o orçamento final).
@@ -320,7 +321,7 @@ export async function ofertarPedido(
         `🧵 *Confeccione — pedido disponível*\n\n` +
         (pago
           ? `Um pedido *já pago* está disponível para produção:\n\n`
-          : `Um pedido *confirmado* por cliente está disponível para produção:\n\n`) +
+          : `Um pedido está disponível para você avaliar e assumir:\n\n`) +
         `${texto}\n\n` +
         `Total: *${totalPecas} peças*\n` +
         (pedido.prazo_dias ? `Prazo de produção: *${pedido.prazo_dias} dias* (a partir da confirmação do pagamento)\n` : '') +

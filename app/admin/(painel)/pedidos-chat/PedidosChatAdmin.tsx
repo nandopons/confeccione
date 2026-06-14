@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 type Resumo = {
   id: string; criadoEm: string; nome: string | null; telefone: string | null; email: string | null
   status: string | null; pagamentoStatus: string | null; valorCentavos: number | null
-  totalPecas: number; resumo: string; concluido: boolean
+  totalPecas: number; resumo: string; concluido: boolean; ofertaStatus?: 'aceita' | 'ofertada' | null
 }
 type Linha = {
   modelo?: string | null; cor?: string | null; material?: string | null; publico?: string | null
@@ -25,6 +25,8 @@ function data(s: string) { try { return new Date(s).toLocaleString('pt-BR', { da
 
 function statusLabel(p: Resumo): { txt: string; cor: string } {
   if (p.pagamentoStatus === 'pago') return { txt: 'pago', cor: 'bg-green-100 text-green-800' }
+  if (p.ofertaStatus === 'aceita') return { txt: 'fornecedor aceitou', cor: 'bg-green-100 text-green-800' }
+  if (p.ofertaStatus === 'ofertada') return { txt: 'buscando fornecedor', cor: 'bg-blue-100 text-blue-800' }
   if (p.pagamentoStatus === 'gerado') return { txt: 'aguardando pagamento', cor: 'bg-amber-100 text-amber-800' }
   return { txt: 'não concluído', cor: 'bg-gray-100 text-gray-600' }
 }
