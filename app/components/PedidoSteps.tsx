@@ -204,8 +204,8 @@ export default function PedidoSteps() {
         ))}
       </div>
 
-      <div className="bg-white shadow-sm border border-gray-200 rounded-2xl p-6 flex flex-col h-[760px] md:h-[620px]">
-        <div className="flex-1 overflow-y-auto -mr-2 pr-2">
+      <div className="bg-white shadow-sm border border-gray-200 rounded-2xl p-6 flex flex-col min-h-[560px] md:h-[620px]">
+        <div className="flex-1 md:overflow-y-auto md:-mr-2 md:pr-2">
         {step === 0 && (
           <>
             <p className="text-gray-900 font-medium mb-1">O que você precisa produzir?</p>
