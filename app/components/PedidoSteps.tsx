@@ -164,8 +164,8 @@ export default function PedidoSteps() {
         ))}
       </div>
 
-      <div className="bg-white shadow-sm border border-gray-200 rounded-2xl p-6 flex flex-col min-h-[560px] md:h-[620px]">
-        <div className="flex-1 md:overflow-y-auto md:-mr-2 md:pr-2">
+      <div className="bg-white shadow-sm border border-gray-200 rounded-2xl p-6 flex flex-col min-h-[560px]">
+        <div className="flex-1">
         {step === 0 && (
           <>
             <p className="text-gray-900 font-medium mb-1">O que você precisa produzir?</p>
@@ -266,7 +266,7 @@ export default function PedidoSteps() {
               <label className="text-xs text-gray-400 mb-1 block">Nome completo</label>
               <input type="text" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome" className={inputCls} />
             </div>
-            <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">WhatsApp</label>
                 <input type="tel" value={tel} onChange={(e) => setTel(e.target.value)} placeholder="(00) 00000-0000" className={inputCls} />
