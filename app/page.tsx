@@ -11,7 +11,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-white font-sans">
 
-      <section className="relative h-[88vh] min-h-[600px] overflow-hidden bg-[#0a0a0a]">
+      <section className="relative h-[60vh] min-h-[440px] md:h-[78vh] md:min-h-[560px] overflow-hidden bg-[#0a0a0a]">
         {/* Foto em tela cheia (desktop e mobile) */}
         <div className="absolute inset-0 z-0">
           <Image
@@ -21,7 +21,7 @@ export default function Home() {
             preload
             quality={85}
             sizes="100vw"
-            className="object-cover object-[50%_45%]"
+            className="object-cover object-[50%_40%]"
           />
         </div>
 
