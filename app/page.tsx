@@ -30,9 +30,12 @@ export default function Home() {
           className="hidden md:block absolute inset-0 z-[1]"
           style={{
             background: [
-              "linear-gradient(90deg, rgba(10,10,10,0.88) 0%, rgba(10,10,10,0.55) 30%, rgba(10,10,10,0.18) 55%, rgba(10,10,10,0) 75%)",
-              "linear-gradient(180deg, rgba(10,10,10,0.45) 0%, rgba(10,10,10,0) 17%)",
-              "linear-gradient(180deg, rgba(10,10,10,0) 88%, #0a0a0a 100%)",
+              // horizontal: preto sólido à esquerda (texto) dissolvendo a borda da foto
+              "linear-gradient(90deg, #0a0a0a 0%, rgba(10,10,10,0.96) 26%, rgba(10,10,10,0.6) 42%, rgba(10,10,10,0.22) 56%, rgba(10,10,10,0) 72%)",
+              // topo: leve escurecimento e fade da borda superior da foto
+              "linear-gradient(180deg, rgba(10,10,10,0.5) 0%, rgba(10,10,10,0) 18%)",
+              // base: dissolve a foto no preto da seção seguinte
+              "linear-gradient(180deg, rgba(10,10,10,0) 80%, #0a0a0a 100%)",
             ].join(", "),
           }}
         />
