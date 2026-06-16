@@ -11,7 +11,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-white font-sans">
 
-      <section className="relative h-[46vh] min-h-[320px] md:h-[72vh] md:min-h-[520px] overflow-hidden bg-[#0a0a0a]">
+      <section className="relative h-[58vh] min-h-[480px] md:h-[72vh] md:min-h-[520px] overflow-hidden bg-[#0a0a0a]">
         {/* Foto em tela cheia (desktop e mobile) */}
         <div className="absolute inset-0 z-0">
           <Image
@@ -45,7 +45,7 @@ export default function Home() {
         <SiteHeader transparent />
 
         <div
-          className="relative z-10 h-full flex items-center px-8 md:px-16 lg:px-20"
+          className="relative z-10 h-full flex items-center pt-20 md:pt-0 px-8 md:px-16 lg:px-20"
           style={{ fontFamily: "var(--font-manrope)" }}
         >
           <div className="max-w-[520px]">
