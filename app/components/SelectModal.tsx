@@ -64,7 +64,7 @@ export default function SelectModal({
         onClick={() => setOpen(true)}
         className={`w-full text-sm text-left flex items-center justify-between gap-2 focus:outline-none focus:border-[#1D9E75] ${triggerClassName}`}
       >
-        <span className={selectedLabel ? 'text-gray-800' : 'text-gray-400'}>
+        <span className={`truncate min-w-0 ${selectedLabel ? 'text-gray-800' : 'text-gray-400'}`}>
           {selectedLabel ?? placeholder}
         </span>
         <span aria-hidden="true" className="text-gray-400 text-xs">
