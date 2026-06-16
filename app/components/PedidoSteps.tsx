@@ -5,7 +5,7 @@
 // Substitui o chat na home, mas grava no MESMO pipeline atual:
 //   POST /api/pedido/assistente/criar  → tabela pedidos_assistente
 //   → redireciona pro /visualizador/{id} (mockups, orçamento, oferta, preços).
-// Coleta 1 produto (peça, cor, material, qtd, prazo, descrição) + contato.
+// Coleta categoria, quantidade, prazo, UF e descrição + contato (com CEP).
 
 import { useEffect, useState } from "react";
 
@@ -38,9 +38,6 @@ const ufs = ["AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT","P
 export default function PedidoSteps() {
   const [step, setStep] = useState(0);
   const [tipo, setTipo] = useState("");
-  const [peca, setPeca] = useState("");
-  const [cor, setCor] = useState("");
-  const [material, setMaterial] = useState("");
   const [qty, setQty] = useState(10);
   const [prazo, setPrazo] = useState("");
   const [estado, setEstado] = useState("");
@@ -72,8 +69,6 @@ export default function PedidoSteps() {
   async function avancarParaContatos() {
     setErro(null);
     const faltando: string[] = [];
-    if (!peca.trim()) faltando.push("peça");
-    if (!cor.trim()) faltando.push("cor");
     if (!qty || qty <= 0) faltando.push("quantidade");
     if (!prazo) faltando.push("prazo");
     if (!estado) faltando.push("estado");
@@ -144,9 +139,9 @@ export default function PedidoSteps() {
 
     const nichoTitle = nichosTodos.find((n) => n.id === tipo)?.title ?? tipo;
     const linha = {
-      modelo: peca.trim(),
-      cor: cor.trim(),
-      material: material.trim() || null,
+      modelo: nichoTitle,
+      cor: "a definir",
+      material: null as string | null,
       publico: null as string | null,
       total: qty,
       tamanhos: [] as { tamanho: string; qtd: number | null }[],
@@ -264,21 +259,7 @@ export default function PedidoSteps() {
         {step === 1 && (
           <>
             <p className="text-gray-900 font-medium mb-1">Detalhes do pedido</p>
-            <p className="text-gray-400 text-sm mb-5">Conta o que você quer produzir, a cor e a quantidade.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Qual peça? *</label>
-                <input type="text" value={peca} onChange={(e) => setPeca(e.target.value)} placeholder="Ex: camiseta, polo, moletom, caneca" className={inputCls} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Cor principal *</label>
-                <input type="text" value={cor} onChange={(e) => setCor(e.target.value)} placeholder="Ex: preto, branco, azul marinho" className={inputCls} />
-              </div>
-            </div>
-            <div className="mb-4">
-              <label className="text-xs text-gray-400 mb-1 block">Material / tecido (opcional)</label>
-              <input type="text" value={material} onChange={(e) => setMaterial(e.target.value)} placeholder="Ex: algodão, dry-fit, piquê" className={inputCls} />
-            </div>
+            <p className="text-gray-400 text-sm mb-5">Quanto você precisa produzir, o prazo e os detalhes.</p>
             <div className="mb-5">
               <label className="text-xs text-gray-400 mb-2 block">Quantidade de peças</label>
               <div className="flex items-center gap-3">
@@ -352,7 +333,6 @@ export default function PedidoSteps() {
               <p className="text-xs text-gray-400 font-medium mb-3">Resumo do pedido</p>
               <div className="space-y-2">
                 <div className="flex justify-between text-gray-600"><span>Categoria</span><span>{nichosTodos.find((n) => n.id === tipo)?.title}</span></div>
-                <div className="flex justify-between text-gray-600"><span>Peça</span><span className="text-right">{peca}{cor ? ` · ${cor}` : ""}{material ? ` · ${material}` : ""}</span></div>
                 <div className="flex justify-between text-gray-600"><span>Quantidade</span><span>{qty} peças</span></div>
                 {prazo && <div className="flex justify-between text-gray-600"><span>Prazo</span><span>{prazos[prazo]}</span></div>}
                 {estado && <div className="flex justify-between text-gray-600"><span>Estado</span><span>{estado}</span></div>}
