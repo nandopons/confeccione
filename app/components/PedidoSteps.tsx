@@ -5,7 +5,7 @@
 // Substitui o chat na home, mas grava no MESMO pipeline atual:
 //   POST /api/pedido/assistente/criar  → tabela pedidos_assistente
 //   → redireciona pro /visualizador/{id} (mockups, orçamento, oferta, preços).
-// Coleta categoria, quantidade, prazo, UF e descrição + contato (com CEP).
+// Coleta categoria, quantidade, prazo, UF e descrição + contato (nome/WhatsApp/e-mail).
 
 import { useEffect, useState } from "react";
 import SelectModal from "@/app/components/SelectModal";
@@ -48,11 +48,6 @@ export default function PedidoSteps() {
   const [nome, setNome] = useState("");
   const [tel, setTel] = useState("");
   const [email, setEmail] = useState("");
-  const [cep, setCep] = useState("");
-  const [complemento, setComplemento] = useState("");
-  const [endereco, setEndereco] = useState<{ logradouro: string | null; bairro: string | null; cidade: string | null; uf: string | null } | null>(null);
-  const [buscandoCep, setBuscandoCep] = useState(false);
-  const [cepMsg, setCepMsg] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [showExtras, setShowExtras] = useState(false);
@@ -98,38 +93,6 @@ export default function PedidoSteps() {
     }
   }
 
-  async function buscarCep(valor: string) {
-    const digs = valor.replace(/\D/g, "");
-    setEndereco(null);
-    setCepMsg(null);
-    if (digs.length !== 8) return;
-    setBuscandoCep(true);
-    try {
-      let end: { logradouro: string | null; bairro: string | null; cidade: string | null; uf: string | null } | null = null;
-      try {
-        const r = await fetch(`https://viacep.com.br/ws/${digs}/json/`, { headers: { Accept: "application/json" } });
-        const j = await r.json().catch(() => null);
-        if (j && !j.erro) end = { logradouro: j.logradouro || null, bairro: j.bairro || null, cidade: j.localidade || null, uf: j.uf || null };
-      } catch { /* tenta fallback */ }
-      if (!end) {
-        try {
-          const r = await fetch(`https://brasilapi.com.br/api/cep/v1/${digs}`, { headers: { Accept: "application/json" } });
-          const j = await r.json().catch(() => null);
-          if (j && (j.city || j.street)) end = { logradouro: j.street || null, bairro: j.neighborhood || null, cidade: j.city || null, uf: j.state || null };
-        } catch { /* sem endereço */ }
-      }
-      if (end) {
-        setEndereco(end);
-        if (end.uf) setEstado(end.uf);
-        setCepMsg([end.logradouro, end.bairro, end.cidade && end.uf ? `${end.cidade}/${end.uf}` : end.cidade].filter(Boolean).join(", ") || null);
-      } else {
-        setCepMsg("CEP não encontrado — você pode seguir mesmo assim.");
-      }
-    } finally {
-      setBuscandoCep(false);
-    }
-  }
-
   async function enviarPedido() {
     setErro(null);
     const faltando: string[] = [];
@@ -154,12 +117,9 @@ export default function PedidoSteps() {
       nome: nome.trim(),
       telefone: tel.trim(),
       email: email.trim(),
-      cep: cep.replace(/\D/g, "") || null,
-      complemento: complemento.trim() || null,
-      logradouro: endereco?.logradouro ?? null,
-      bairro: endereco?.bairro ?? null,
-      cidade: endereco?.cidade ?? null,
-      uf: endereco?.uf ?? (estado || null),
+      cep: null,
+      complemento: null,
+      uf: estado || null,
       prazoDias: PRAZO_DIAS[prazo] ?? null,
     };
 
@@ -316,20 +276,6 @@ export default function PedidoSteps() {
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com" className={inputCls} />
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-2">
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">CEP de entrega (recomendado)</label>
-                <input type="text" inputMode="numeric" value={cep} onChange={(e) => setCep(e.target.value)} onBlur={(e) => void buscarCep(e.target.value)} placeholder="00000-000" className={inputCls} />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Número / complemento</label>
-                <input type="text" value={complemento} onChange={(e) => setComplemento(e.target.value)} placeholder="Ex: 123, apto 4" className={inputCls} />
-              </div>
-            </div>
-            {(buscandoCep || cepMsg) && (
-              <p className="text-xs text-gray-500 mb-6">{buscandoCep ? "Buscando endereço…" : cepMsg}</p>
-            )}
-
             <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm">
               <p className="text-xs text-gray-400 font-medium mb-3">Resumo do pedido</p>
               <div className="space-y-2">
