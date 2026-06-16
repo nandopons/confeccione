@@ -203,7 +203,7 @@ export default function PedidoSteps() {
         ))}
       </div>
 
-      <div className="bg-white shadow-sm border border-gray-200 rounded-2xl p-6">
+      <div className="bg-white shadow-sm border border-gray-200 rounded-2xl p-6 flex flex-col min-h-[520px]">
         {step === 0 && (
           <>
             <p className="text-gray-900 font-medium mb-1">O que você precisa produzir?</p>
@@ -249,8 +249,8 @@ export default function PedidoSteps() {
                 </div>
               </div>
             </div>
-            <div className="flex justify-end mt-6">
-              <button onClick={avancarParaDetalhes} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium hover:opacity-85">Continuar →</button>
+            <div className="flex justify-end mt-auto pt-6">
+              <button onClick={avancarParaDetalhes} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium hover:opacity-85 whitespace-nowrap">Continuar →</button>
             </div>
             {erro && <div className="mt-3 text-red-600 text-sm text-right">{erro}</div>}
           </>
@@ -289,9 +289,9 @@ export default function PedidoSteps() {
               <label className="text-xs text-gray-400 mb-1 block">Descreva seu pedido (opcional)</label>
               <textarea rows={3} value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex: camisa polo P, M, G com logo bordado no peito..." className={inputCls + " resize-none"} />
             </div>
-            <div className="flex justify-between">
-              <button onClick={() => setStep(0)} className="border border-gray-200 text-gray-400 px-5 py-3 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
-              <button onClick={() => void avancarParaContatos()} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium hover:opacity-85">Continuar →</button>
+            <div className="flex justify-between mt-auto pt-6">
+              <button onClick={() => setStep(0)} className="border border-gray-200 text-gray-400 px-5 py-3 rounded-xl text-sm hover:bg-gray-50 whitespace-nowrap">← Voltar</button>
+              <button onClick={() => void avancarParaContatos()} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium hover:opacity-85 whitespace-nowrap">Continuar →</button>
             </div>
             {erro && <div className="mt-3 text-red-600 text-sm text-right">{erro}</div>}
           </>
@@ -346,10 +346,10 @@ export default function PedidoSteps() {
                 <textarea rows={5} value={descricaoRevisada} onChange={(e) => setDescricaoRevisada(e.target.value)} placeholder="Ex: camisa polo P, M, G com logo bordado..." className={inputCls + " resize-none"} />
               )}
             </div>
-            <div className="flex justify-between">
-              <button onClick={() => setStep(1)} className="border border-gray-200 text-gray-400 px-5 py-3 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
-              <button onClick={() => void enviarPedido()} disabled={enviando} className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white px-6 py-3 rounded-xl text-sm font-medium transition-colors">
-                {enviando ? "Gerando seu pedido…" : "Continuar para os mockups →"}
+            <div className="flex justify-between mt-auto pt-6">
+              <button onClick={() => setStep(1)} className="border border-gray-200 text-gray-400 px-5 py-3 rounded-xl text-sm hover:bg-gray-50 whitespace-nowrap">← Voltar</button>
+              <button onClick={() => void enviarPedido()} disabled={enviando} className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white px-6 py-3 rounded-xl text-sm font-medium transition-colors whitespace-nowrap">
+                {enviando ? "Gerando…" : "Continuar →"}
               </button>
             </div>
             {erro && <div className="mt-3 text-red-600 text-sm text-right">{erro}</div>}
