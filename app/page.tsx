@@ -15,13 +15,13 @@ export default function Home() {
         {/* Foto em tela cheia (desktop e mobile) */}
         <div className="absolute inset-0 z-0">
           <Image
-            src="/hero/hero-costura.jpg"
-            alt="Costureira trabalhando em máquina de costura industrial — confecção profissional"
+            src="/hero/hero-estampa.jpg"
+            alt="Camiseta estampada em destaque numa arara de camisetas — confecção e estamparia"
             fill
             preload
             quality={85}
             sizes="100vw"
-            className="object-cover object-[50%_55%]"
+            className="object-cover object-[50%_45%]"
           />
         </div>
 
