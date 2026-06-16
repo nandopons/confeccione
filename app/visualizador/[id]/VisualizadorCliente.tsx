@@ -470,6 +470,18 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       const d = await res.json();
       if (!res.ok) throw new Error(d?.erro || "Não foi possível gerar o pagamento.");
       setPixResult({ copiaCola: d.copiaCola ?? null, invoiceUrl: d.invoiceUrl, valorCentavos: d.valorCentavos });
+      // Conversão Google Ads (via GTM): cliente clicou "Pagar agora" e a cobrança foi gerada.
+      // No GTM, dispare a tag de conversão pelo gatilho do evento "iniciar_pagamento".
+      try {
+        const w = window as unknown as { dataLayer?: Record<string, unknown>[] };
+        w.dataLayer = w.dataLayer || [];
+        w.dataLayer.push({
+          event: "iniciar_pagamento",
+          pedido_id: String(pedido.id),
+          value: typeof d.valorCentavos === "number" ? d.valorCentavos / 100 : undefined,
+          currency: "BRL",
+        });
+      } catch { /* analytics nunca quebra o fluxo */ }
       setConfirmStep("feito");
     } catch (e) {
       setConfirmErro(e instanceof Error ? e.message : "Erro ao gerar o pagamento.");
