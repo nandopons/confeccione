@@ -429,6 +429,18 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d?.erro || "Não foi possível confirmar.");
+      // Conversão Google Ads (via GTM): empurra o evento no dataLayer ao confirmar
+      // o pedido. No GTM, dispare a tag de conversão pelo gatilho do evento "confirmar_pedido".
+      try {
+        const w = window as unknown as { dataLayer?: Record<string, unknown>[] };
+        w.dataLayer = w.dataLayer || [];
+        w.dataLayer.push({
+          event: "confirmar_pedido",
+          pedido_id: String(pedido.id),
+          value: typeof pedido.valor_centavos === "number" ? pedido.valor_centavos / 100 : undefined,
+          currency: "BRL",
+        });
+      } catch { /* analytics nunca quebra o fluxo */ }
       setConfirmadoEm(d.confirmadoEm ?? new Date().toISOString());
       setConfirmadoMsg(true);
       setTimeout(() => document.getElementById("status-pedido")?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
