@@ -267,7 +267,7 @@ export default function PedidoSteps() {
                 <span className="text-sm text-gray-400">peças</span>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">Prazo desejado</label>
                 <SelectModal
