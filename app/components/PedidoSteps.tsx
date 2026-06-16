@@ -203,7 +203,7 @@ export default function PedidoSteps() {
         ))}
       </div>
 
-      <div className="bg-white shadow-sm border border-gray-200 rounded-2xl p-6 flex flex-col h-[620px]">
+      <div className="bg-white shadow-sm border border-gray-200 rounded-2xl p-6 flex flex-col h-[760px] md:h-[620px]">
         <div className="flex-1 overflow-y-auto -mr-2 pr-2">
         {step === 0 && (
           <>
@@ -297,7 +297,7 @@ export default function PedidoSteps() {
               <label className="text-xs text-gray-400 mb-1 block">Nome completo</label>
               <input type="text" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome" className={inputCls} />
             </div>
-            <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">WhatsApp</label>
                 <input type="tel" value={tel} onChange={(e) => setTel(e.target.value)} placeholder="(00) 00000-0000" className={inputCls} />
@@ -321,7 +321,7 @@ export default function PedidoSteps() {
               <p className="text-xs text-gray-500 mb-6">{buscandoCep ? "Buscando endereço…" : cepMsg}</p>
             )}
 
-            <div className="bg-gray-50 rounded-xl p-4 mb-6 text-sm">
+            <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm">
               <p className="text-xs text-gray-400 font-medium mb-3">Resumo do pedido</p>
               <div className="space-y-2">
                 <div className="flex justify-between text-gray-600"><span>Categoria</span><span>{nichosTodos.find((n) => n.id === tipo)?.title}</span></div>
@@ -335,7 +335,7 @@ export default function PedidoSteps() {
               {organizando ? (
                 <div className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-400 bg-gray-50">Organizando os detalhes…</div>
               ) : (
-                <textarea rows={5} value={descricaoRevisada} onChange={(e) => setDescricaoRevisada(e.target.value)} placeholder="Ex: camisa polo P, M, G com logo bordado..." className={inputCls + " resize-none"} />
+                <textarea rows={4} value={descricaoRevisada} onChange={(e) => setDescricaoRevisada(e.target.value)} placeholder="Ex: camisa polo P, M, G com logo bordado..." className={inputCls + " resize-none"} />
               )}
             </div>
           </>
