@@ -4,7 +4,7 @@ import Image from "next/image";
 import SiteHeader from "@/app/components/SiteHeader";
 import SiteFooter from "@/app/components/SiteFooter";
 import PortoDigitalBadge from "@/app/components/PortoDigitalBadge";
-import PedidoAssistente from "@/app/components/PedidoAssistente";
+import PedidoSteps from "@/app/components/PedidoSteps";
 import { linkWhatsAppSuporte } from "@/app/lib/contatos";
 
 export default function Home() {
@@ -50,7 +50,7 @@ export default function Home() {
               Conectamos você às <span className="text-[#2DD4A7]">melhores confecções e costureiras</span> do Brasil
             </h1>
             <p className="font-light text-sm md:text-base text-gray-300 max-w-md mt-4 leading-relaxed">
-              Faça seu pedido em minutos, conversando. A gente monta tudo com você e acha os fornecedores certos.
+              Faça seu pedido em minutos. A gente gera os mockups, monta o orçamento e acha os fornecedores certos.
             </p>
             <div className="mt-7 flex flex-col items-start gap-3 md:flex-row md:items-center md:gap-6">
               <button
@@ -92,13 +92,13 @@ export default function Home() {
         <div className="px-6 pt-12 pb-16 max-w-5xl mx-auto">
           <div className="flex flex-col items-start gap-2 md:flex-row md:items-center md:gap-3 mb-1">
             <h2 className="text-gray-900 text-xl font-medium">Faça seu pedido</h2>
-            <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">Pelo chat, em minutos</span>
+            <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">3 passos simples</span>
           </div>
           <p className="text-gray-400 text-sm mb-6">
-            Converse com nosso assistente: ele monta o pedido com você e o resumo vai aparecendo ao lado.
+            Preencha em 3 passos rápidos: a gente gera os mockups e o orçamento na sequência.
           </p>
 
-          <PedidoAssistente />
+          <PedidoSteps />
 
           <div className="mt-6 flex items-center gap-4">
             <div className="w-10 h-10 bg-[#E1F5EE] rounded-full flex items-center justify-center flex-shrink-0">
