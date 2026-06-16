@@ -8,6 +8,7 @@
 // Coleta categoria, quantidade, prazo, UF e descrição + contato (com CEP).
 
 import { useEffect, useState } from "react";
+import SelectModal from "@/app/components/SelectModal";
 
 const nichosPrincipais = [
   { id: "interclasse",   icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
@@ -269,17 +270,25 @@ export default function PedidoSteps() {
             <div className="grid grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">Prazo desejado</label>
-                <select value={prazo} onChange={(e) => setPrazo(e.target.value)} className={inputCls}>
-                  <option value="">Selecione...</option>
-                  {Object.entries(prazos).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
+                <SelectModal
+                  label="Prazo desejado"
+                  placeholder="Selecione..."
+                  value={prazo}
+                  onChange={setPrazo}
+                  triggerClassName="w-full border border-gray-200 rounded-xl px-3 py-2 bg-white text-sm"
+                  options={Object.entries(prazos).map(([value, label]) => ({ value, label }))}
+                />
               </div>
               <div>
                 <label className="text-xs text-gray-400 mb-1 block">Estado (UF)</label>
-                <select value={estado} onChange={(e) => setEstado(e.target.value)} className={inputCls}>
-                  <option value="">Selecione...</option>
-                  {ufs.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
-                </select>
+                <SelectModal
+                  label="Estado (UF)"
+                  placeholder="Selecione..."
+                  value={estado}
+                  onChange={setEstado}
+                  triggerClassName="w-full border border-gray-200 rounded-xl px-3 py-2 bg-white text-sm"
+                  options={ufs.map((uf) => ({ value: uf, label: uf }))}
+                />
               </div>
             </div>
             <div className="mb-6">
