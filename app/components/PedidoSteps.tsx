@@ -300,7 +300,7 @@ export default function PedidoSteps() {
 
         {step === 2 && (
           <>
-            <p className="text-gray-900 font-medium mb-1">Seus dados para contato</p>
+            <p className="text-gray-900 font-medium mb-1">Contato</p>
             <p className="text-gray-400 text-sm mb-5">Vamos montar seus mockups e o orçamento — você acompanha tudo no visualizador.</p>
             <div className="mb-4">
               <label className="text-xs text-gray-400 mb-1 block">Nome completo</label>
