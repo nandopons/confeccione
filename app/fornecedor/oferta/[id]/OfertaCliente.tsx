@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 type Estampa = { posicao?: string | null; tamanho?: string | null }
@@ -196,6 +196,112 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
           <div className="text-center py-4 text-gray-500">Esta oferta não está mais disponível — o pedido já foi assumido por outro fornecedor.</div>
         )}
       </div>
+
+      {(status === 'ofertada' || status === 'aceita') && (
+        <PerguntasFornecedor ofertaId={oferta.ofertaId} />
+      )}
     </div>
   )
 }
+
+
+type MensagemPergunta = { id: string; autor: 'fornecedor' | 'cliente'; texto: string; criadoEm: string }
+
+function PerguntasFornecedor({ ofertaId }: { ofertaId: string }) {
+  const [mensagens, setMensagens] = useState<MensagemPergunta[]>([])
+  const [texto, setTexto] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const carregouRef = useRef(false)
+
+  async function carregar() {
+    try {
+      const r = await fetch(`/api/fornecedor/oferta/${ofertaId}/perguntas`, { cache: 'no-store' })
+      const j = await r.json()
+      if (r.ok && Array.isArray(j.mensagens)) setMensagens(j.mensagens)
+    } catch {
+      // silencioso — tenta de novo no próximo poll
+    } finally {
+      carregouRef.current = true
+    }
+  }
+
+  useEffect(() => {
+    void carregar()
+    const t = setInterval(() => { void carregar() }, 20000)
+    return () => clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ofertaId])
+
+  async function enviar() {
+    const t = texto.trim()
+    if (!t || enviando) return
+    setEnviando(true)
+    setErro(null)
+    try {
+      const r = await fetch(`/api/fornecedor/oferta/${ofertaId}/pergunta`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texto: t }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.erro || 'Não foi possível enviar a pergunta.')
+      setTexto('')
+      await carregar()
+    } catch (e: any) {
+      setErro(e.message || 'Erro ao enviar.')
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <div className="px-6 py-5 border-t border-gray-100">
+      <h2 className="text-sm font-semibold text-gray-700 mb-1">💬 Perguntas ao cliente (via Confeccione)</h2>
+      <p className="text-xs text-gray-500 mb-3">
+        O cliente recebe por WhatsApp e e-mail e responde por aqui. Sem troca de contato.
+      </p>
+
+      {carregouRef.current && mensagens.length === 0 && (
+        <p className="text-sm text-gray-400 mb-3">Nenhuma pergunta ainda. Faça a primeira abaixo.</p>
+      )}
+
+      {mensagens.length > 0 && (
+        <ul className="space-y-2 mb-4">
+          {mensagens.map((m) => {
+            const meu = m.autor === 'fornecedor'
+            return (
+              <li key={m.id} className={`flex ${meu ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm ${meu ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-800'}`}>
+                  <div className={`text-[11px] font-semibold mb-0.5 ${meu ? 'text-emerald-50' : 'text-gray-500'}`}>{meu ? 'Você' : 'Cliente'}</div>
+                  <div className="whitespace-pre-wrap break-words">{m.texto}</div>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      {erro && <div className="mb-2 text-sm rounded-md bg-red-50 text-red-700 px-3 py-2">{erro}</div>}
+
+      <textarea
+        value={texto}
+        onChange={(e) => setTexto(e.target.value)}
+        placeholder="Escreva uma pergunta para o cliente…"
+        maxLength={1000}
+        rows={3}
+        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+      />
+      <div className="mt-2 flex justify-end">
+        <button
+          onClick={() => void enviar()}
+          disabled={enviando || !texto.trim()}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold px-5 py-2.5 rounded-xl disabled:opacity-50"
+        >
+          {enviando ? 'Enviando…' : 'Enviar pergunta'}
+        </button>
+      </div>
+    </div>
+  )
+}
+

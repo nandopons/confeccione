@@ -12,7 +12,7 @@
 // por e-mail/WhatsApp e aparece aqui com o botão de pagamento.
 // ============================================================================
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 export type Tamanho = { tamanho: string; qtd: number | null };
@@ -408,6 +408,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         Para cada produto, envie sua arte ou o mockup pronto. {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
       </p>
 
+      <PerguntasCliente pedidoId={pedido.id} />
+
       <div className="space-y-5">
         {linhas.map((l, i) => {
           const st = imgs[i] || {};
@@ -801,5 +803,110 @@ function Campo({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-xs text-gray-400 mb-1 block">{label}</span>
       {children}
     </label>
+  );
+}
+
+// ─── Perguntas mediadas dos fornecedores (anonimizadas) ──────────────────
+type MensagemPergunta = { id: string; autor: "fornecedor" | "cliente"; texto: string; criadoEm: string };
+type ThreadPergunta = { ofertaId: string; label: string; mensagens: MensagemPergunta[] };
+
+function PerguntasCliente({ pedidoId }: { pedidoId: string }) {
+  const [threads, setThreads] = useState<ThreadPergunta[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [enviando, setEnviando] = useState<string | null>(null);
+  const [erro, setErro] = useState<Record<string, string | null>>({});
+  const carregouRef = useRef(false);
+
+  async function carregar() {
+    try {
+      const r = await fetch(`/api/pedido/assistente/${pedidoId}/perguntas`, { cache: "no-store" });
+      const j = await r.json();
+      if (r.ok && Array.isArray(j.threads)) setThreads(j.threads);
+    } catch {
+      // silencioso
+    } finally {
+      carregouRef.current = true;
+    }
+  }
+
+  useEffect(() => {
+    void carregar();
+    const t = setInterval(() => { void carregar(); }, 20000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedidoId]);
+
+  async function responder(ofertaId: string) {
+    const texto = (drafts[ofertaId] || "").trim();
+    if (!texto || enviando) return;
+    setEnviando(ofertaId);
+    setErro((e) => ({ ...e, [ofertaId]: null }));
+    try {
+      const r = await fetch(`/api/pedido/assistente/${pedidoId}/responder-pergunta`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ofertaId, texto }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.erro || "Não foi possível enviar a resposta.");
+      setDrafts((d) => ({ ...d, [ofertaId]: "" }));
+      await carregar();
+    } catch (e) {
+      setErro((er) => ({ ...er, [ofertaId]: e instanceof Error ? e.message : "Erro ao enviar." }));
+    } finally {
+      setEnviando(null);
+    }
+  }
+
+  // Nada a mostrar: não renderiza o bloco (mantém a âncora pro scroll).
+  if (carregouRef.current && threads.length === 0) {
+    return <div id="perguntas" aria-hidden />;
+  }
+
+  return (
+    <div id="perguntas" className="mb-6 bg-white border border-gray-200 rounded-2xl shadow-sm p-5 scroll-mt-24">
+      <h2 className="text-gray-900 text-base font-semibold">💬 Perguntas dos fornecedores</h2>
+      <p className="text-gray-500 text-sm mt-1 mb-4">
+        Fornecedores interessados no seu pedido podem perguntar por aqui — sem trocar contato. Responda que a Confeccione faz a ponte.
+      </p>
+      <div className="space-y-4">
+        {threads.map((th) => (
+          <div key={th.ofertaId} className="rounded-xl border border-gray-100 bg-gray-50/60 p-4">
+            <div className="text-xs font-semibold text-[#0F6E56] uppercase tracking-wide mb-2">{th.label}</div>
+            <ul className="space-y-2 mb-3">
+              {th.mensagens.map((m) => {
+                const meu = m.autor === "cliente";
+                return (
+                  <li key={m.id} className={`flex ${meu ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm ${meu ? "bg-[#1D9E75] text-white" : "bg-white border border-gray-200 text-gray-800"}`}>
+                      <div className={`text-[11px] font-semibold mb-0.5 ${meu ? "text-emerald-50" : "text-gray-500"}`}>{meu ? "Você" : th.label}</div>
+                      <div className="whitespace-pre-wrap break-words">{m.texto}</div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            {erro[th.ofertaId] && <div className="mb-2 text-sm rounded-md bg-red-50 text-red-700 px-3 py-2">{erro[th.ofertaId]}</div>}
+            <textarea
+              value={drafts[th.ofertaId] || ""}
+              onChange={(e) => setDrafts((d) => ({ ...d, [th.ofertaId]: e.target.value }))}
+              placeholder="Escreva sua resposta…"
+              maxLength={1000}
+              rows={2}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]"
+            />
+            <div className="mt-2 flex justify-end">
+              <button
+                onClick={() => void responder(th.ofertaId)}
+                disabled={enviando === th.ofertaId || !(drafts[th.ofertaId] || "").trim()}
+                className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-5 py-2 rounded-xl disabled:opacity-50"
+              >
+                {enviando === th.ofertaId ? "Enviando…" : "Responder"}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
