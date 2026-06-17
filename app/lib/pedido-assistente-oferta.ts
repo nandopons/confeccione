@@ -458,6 +458,8 @@ export type OfertaDetalheFornecedor = {
   numImagens: number
   valorRepasseCentavos: number | null
   prazoDias: number | null
+  cidade: string | null
+  uf: string | null
   pago: boolean
   orcamentoStatus: string | null
   contatoCliente: ContatoClienteOferta | null
@@ -507,6 +509,8 @@ export async function carregarOfertaParaFornecedor(
     numImagens: Array.isArray(pedido.imagens) ? pedido.imagens.length : 0,
     valorRepasseCentavos: oferta.valor_repasse_centavos,
     prazoDias: pedido.prazo_dias ?? null,
+    cidade: pedido.cidade ?? null,
+    uf: pedido.uf ?? null,
     pago: pedido.pagamento_status === 'pago',
     orcamentoStatus: pedido.orcamento_status ?? null,
     contatoCliente: aceita
