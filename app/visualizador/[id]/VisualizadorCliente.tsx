@@ -180,28 +180,16 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       descricao: draft.descricao?.trim() || null,
     };
     if (!limpa.modelo && !limpa.cor && !limpa.total) return;
-    const antes = editIndex !== null ? linhas[editIndex] : null;
-    const visualMudou =
-      !antes ||
-      [antes.modelo, antes.cor, antes.material, antes.publico ?? null, antes.descricao].join("|") !==
-        [limpa.modelo, limpa.cor, limpa.material, limpa.publico ?? null, limpa.descricao].join("|");
     let novas: Linha[];
-    let alvo: number;
     if (editIndex === null) {
       novas = [...linhas, limpa];
-      alvo = novas.length - 1;
     } else {
       novas = linhas.map((l, idx) => (idx === editIndex ? limpa : l));
-      alvo = editIndex;
     }
     setLinhas(novas);
     setEditOpen(false);
     void persistir(novas);
-    if (visualMudou) {
-      // o visual mudou → limpa a imagem enviada deste produto.
-      setImgs((m) => ({ ...m, [alvo]: {} }));
-      void salvarMockup({ index: alvo, liso: null, arte: null });
-    }
+    // Imagem enviada pelo cliente é preservada ao editar os detalhes do produto.
   }
 
   function excluir(i: number) {
