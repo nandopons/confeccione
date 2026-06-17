@@ -23,6 +23,8 @@ type Oferta = {
   numImagens: number
   valorRepasseCentavos: number | null
   prazoDias: number | null
+  cidade?: string | null
+  uf?: string | null
   pago?: boolean
   orcamentoStatus?: string | null
   contatoCliente?: { nome: string | null; telefone: string | null; email: string | null; cidade: string | null; uf: string | null } | null
@@ -75,6 +77,9 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
         {oferta.prazoDias ? (
           <p className="text-sm text-[#0F6E56] font-medium mt-1">⏱️ Prazo de produção: {oferta.prazoDias} dias — a partir da confirmação do pagamento.</p>
         ) : null}
+        {(oferta.cidade || oferta.uf) && (
+          <p className="text-sm text-gray-600 mt-1">📍 Local do pedido: <span className="font-medium text-gray-800">{[oferta.cidade, oferta.uf].filter(Boolean).join('/')}</span></p>
+        )}
         <p className="text-sm text-gray-500 mt-1">
           {oferta.pago
             ? 'Pedido já pago. Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.'
@@ -82,23 +87,25 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
         </p>
       </div>
 
-      {/* Mockups */}
-      {imgs.length > 0 && (
-        <div className="px-6 py-5 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-700 mb-3">Mockups</h2>
+      {/* Visualizadores enviados pelo cliente */}
+      <div className="px-6 py-5 border-b border-gray-100">
+        <h2 className="text-sm font-semibold text-gray-700 mb-3">Visualizadores do cliente</h2>
+        {imgs.length > 0 ? (
           <div className="space-y-4">
             {imgs.map((i) => (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 key={i}
                 src={`/api/pedido/assistente/${oferta.pedidoId}/imagem?i=${i}`}
-                alt={`Mockup ${i + 1}`}
+                alt={`Visualizador ${i + 1}`}
                 className="w-full rounded-lg border border-gray-200"
               />
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-sm text-gray-400">O cliente ainda não enviou um visualizador/arte para este pedido.</p>
+        )}
+      </div>
 
       {/* Detalhes */}
       <div className="px-6 py-5 border-b border-gray-100">
