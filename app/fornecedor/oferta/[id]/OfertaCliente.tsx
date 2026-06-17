@@ -174,7 +174,12 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
                 )}
               </div>
             ) : (
-              <p className="text-sm text-gray-600 mt-2 text-center">Carregando o contato do cliente… atualize a página.</p>
+              <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
+                <p className="text-sm text-amber-800">🔒 Os dados de contato do cliente são liberados <strong>após o pagamento</strong>. Defina o orçamento — assim que o cliente pagar, nome, telefone e e-mail aparecem aqui. Até lá, use o canal de perguntas (mediado pela Confeccione).</p>
+                {(oferta.cidade || oferta.uf) && (
+                  <p className="text-sm text-amber-800 mt-1">📍 Local do pedido: <strong>{[oferta.cidade, oferta.uf].filter(Boolean).join('/')}</strong></p>
+                )}
+              </div>
             )}
             {!oferta.pago && oferta.linkOrcamento && (
               <a href={oferta.linkOrcamento} className="mt-4 block w-full text-center bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 rounded-xl">

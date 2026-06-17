@@ -513,7 +513,7 @@ export async function carregarOfertaParaFornecedor(
     uf: pedido.uf ?? null,
     pago: pedido.pagamento_status === 'pago',
     orcamentoStatus: pedido.orcamento_status ?? null,
-    contatoCliente: aceita
+    contatoCliente: pedido.pagamento_status === 'pago'
       ? { nome: pedido.nome, telefone: pedido.telefone, email: pedido.email, cidade: pedido.cidade, uf: pedido.uf }
       : null,
     linkOrcamento: aceita ? `/fornecedor/oferta/${oferta.id}/orcamento` : null,
