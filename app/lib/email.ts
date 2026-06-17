@@ -731,3 +731,45 @@ export async function emailFeedbackMockup(params: { email: string; nome: string 
   const text = `Oi, ${params.nome || ''}\n\nO mockup ficou como você queria? Revise e ajuste o que precisar:\n${params.link}\n\nConfeccione`
   await enviarEmail({ to: params.email, subject, html, text })
 }
+
+// ─── Pergunta mediada: fornecedor -> cliente (notifica o cliente) ────────
+// Um fornecedor fez uma pergunta sobre o pedido. O cliente recebe este e-mail
+// (e um WhatsApp) e responde no visualizador — sem troca de contato.
+export async function emailNovaPergunta(params: {
+  email: string
+  nome: string | null
+  pergunta: string
+  link: string
+}): Promise<void> {
+  const nome = escapeHtml(params.nome || 'tudo bem?')
+  const perguntaEsc = escapeHtml(params.pergunta)
+  const subject = 'Um fornecedor tem uma pergunta sobre seu pedido'
+  const html = layout(
+    `
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">Oi, ${nome} 💬</h1>
+    <p style="margin:0 0 16px;color:#555;line-height:1.5;">Um fornecedor interessado no seu pedido enviou uma <strong>pergunta</strong>. Você responde por aqui mesmo — sem precisar trocar telefone ou e-mail. A Confeccione faz a ponte.</p>
+    <div style="background:#f0f7ff;border-left:3px solid #2563eb;padding:14px 18px;margin:20px 0;border-radius:6px;">
+      <div style="color:#1e40af;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-bottom:6px;">Pergunta do fornecedor</div>
+      <div style="color:#1f2937;font-size:15px;line-height:1.6;">${perguntaEsc}</div>
+    </div>
+    <div style="text-align:center;margin:24px 0;">
+      <a href="${params.link}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;padding:14px 28px;border-radius:10px;font-weight:bold;">Responder agora</a>
+    </div>
+    <p style="margin:8px 0 0;color:#888;font-size:13px;">Ou copie o link: <a href="${params.link}" style="color:#2563eb;">${params.link}</a></p>
+    `,
+    'Um fornecedor tem uma pergunta sobre seu pedido — responda em 1 minuto.'
+  )
+  const text = `Oi, ${params.nome || ''}
+
+Um fornecedor interessado no seu pedido enviou uma pergunta. Você responde por aqui mesmo — sem precisar trocar contato. A Confeccione faz a ponte.
+
+Pergunta do fornecedor:
+"${params.pergunta}"
+
+Responda agora:
+${params.link}
+
+Confeccione
+${SITE_URL}`
+  await enviarEmail({ to: params.email, subject, html, text })
+}
