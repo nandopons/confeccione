@@ -39,6 +39,8 @@ export default function PedidosChatAdmin() {
   const [det, setDet] = useState<Record<string, Detalhe>>({})
   const [acaoMsg, setAcaoMsg] = useState<string | null>(null)
   const [agindo, setAgindo] = useState<string | null>(null)
+  const [precoMsg, setPrecoMsg] = useState<Record<string, string>>({})
+  const [pesquisando, setPesquisando] = useState<string | null>(null)
 
   async function acao(id: string, ac: 'excluir' | 'lembrete' | 'feedback') {
     if (ac === 'excluir' && !confirm('Excluir este pedido? Não dá pra desfazer.')) return
@@ -53,6 +55,28 @@ export default function PedidosChatAdmin() {
       else setAcaoMsg(`${ac === 'lembrete' ? 'Lembrete' : 'Pedido de feedback'} enviado` + (j.whats || j.email ? ` (${[j.whats ? 'WhatsApp' : null, j.email ? 'e-mail' : null].filter(Boolean).join(' + ')}).` : ', mas nenhum canal disponível.'))
     } catch (e: any) { setAcaoMsg(e.message || 'Erro') }
     finally { setAgindo(null) }
+  }
+
+  async function pesquisarPreco(pedidoId: string, linha: number) {
+    const k = pedidoId + ':' + linha
+    if (pesquisando) return
+    setPesquisando(k)
+    setPrecoMsg((m) => ({ ...m, [k]: '' }))
+    try {
+      const r = await fetch(`/api/admin/pedidos-assistente/${pedidoId}/pesquisar-preco`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ linha }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.erro || 'Falha')
+      const unit = j.unitClienteCentavos != null
+        ? (j.unitClienteCentavos / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+        : null
+      setPrecoMsg((m) => ({ ...m, [k]: unit ? `Mercado: ${unit}/un (cliente) p/ ${j.qtd || '?'} un — salvo.` : 'Pesquisa salva.' }))
+    } catch (e: any) {
+      setPrecoMsg((m) => ({ ...m, [k]: e.message || 'Erro na pesquisa' }))
+    } finally {
+      setPesquisando(null)
+    }
   }
 
   async function carregar() {
@@ -150,6 +174,17 @@ export default function PedidosChatAdmin() {
                                     </figure>
                                   )}
                                   {!mk?.temLiso && !mk?.temArte && <span className="text-xs text-gray-400">sem mockup gerado</span>}
+                                </div>
+                                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => pesquisarPreco(p.id, i)}
+                                    disabled={pesquisando === p.id + ':' + i}
+                                    className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                                  >
+                                    {pesquisando === p.id + ':' + i ? 'Pesquisando…' : '🔍 Pesquisar preço de mercado'}
+                                  </button>
+                                  {precoMsg[p.id + ':' + i] && <span className="text-xs text-gray-500">{precoMsg[p.id + ':' + i]}</span>}
                                 </div>
                               </div>
                             )

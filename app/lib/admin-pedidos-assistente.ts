@@ -6,6 +6,7 @@ import { enviarMensagem } from './zapi'
 import { SITE_URL } from './url'
 import { emailFeedbackMockup } from './email'
 import { mensagemReativacao, registrarContato } from './marketing-contatos'
+import { pesquisarESalvarPreco, precoUnitDaFaixa } from './pesquisa-preco-salvar'
 
 type LinhaJson = {
   modelo?: string | null; cor?: string | null; material?: string | null
@@ -168,4 +169,39 @@ export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<
     } catch { email = false }
   }
   return { ok: true, whats, email }
+}
+
+// ---------------------------------------------------------------------------
+// Pesquisa de mercado sob demanda (botão no gerenciador admin). Pesquisa+salva
+// a curva de preço da linha [idx] e devolve o preço unitário de mercado p/ a
+// quantidade da linha (referência pro admin/fornecedor).
+// ---------------------------------------------------------------------------
+export async function pesquisarPrecoLinhaPedido(
+  pedidoId: string,
+  idx: number
+): Promise<{ ok: boolean; erro?: string; unitClienteCentavos?: number | null; qtd?: number; observacao?: string | null }> {
+  const { data: p } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('linhas')
+    .eq('id', pedidoId)
+    .maybeSingle<{ linhas: LinhaJson[] }>()
+  const linhas = Array.isArray(p?.linhas) ? p!.linhas : []
+  const l = linhas[idx]
+  if (!l) return { ok: false, erro: 'Produto não encontrado no pedido.' }
+
+  const estampado = l.estampado === true || (l.estampas?.length ?? 0) > 0
+  const qtd =
+    typeof l.total === 'number' && l.total > 0
+      ? l.total
+      : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0) || 0
+
+  const r = await pesquisarESalvarPreco({ modelo: l.modelo ?? null, material: l.material ?? null, estampado })
+  if (!r.ok) return { ok: false, erro: r.erro }
+
+  return {
+    ok: true,
+    unitClienteCentavos: precoUnitDaFaixa(r.faixas, qtd || 1),
+    qtd,
+    observacao: r.observacao ?? null,
+  }
 }

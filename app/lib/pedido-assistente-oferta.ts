@@ -18,6 +18,7 @@ import { emailOfertaPedidoAssistente } from './email'
 import { enviarEmailOrcamentoFinal } from './email-pedido'
 import { atualizarValorCobrancaPix } from './pedido-pagamento'
 import { calcularOrcamento, type PesquisaPreco } from './orcamento'
+import { pesquisarESalvarPreco } from './pesquisa-preco-salvar'
 
 export const COMISSAO_PCT = 0.03
 
@@ -30,6 +31,7 @@ export type LinhaPedido = {
   total?: number | null
   tamanhos?: Array<{ tamanho?: string | null; qtd?: number | null }> | null
   estampas?: Array<{ posicao?: string | null; tamanho?: string | null }> | null
+  estampado?: boolean | null
   descricao?: string | null
   preco_unit_centavos?: number | null // LÍQUIDO/un definido pelo fornecedor
 }
@@ -154,7 +156,7 @@ async function sugerirTotalCentavos(linhas: LinhaPedido[], prazoDias: number | n
       material: l.material ?? null,
       total: typeof l.total === 'number' ? l.total : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0) || null,
       estampas: (l.estampas ?? []).filter((e) => e.posicao && e.tamanho).map((e) => ({ posicao: String(e.posicao), tamanho: String(e.tamanho) })),
-      estampado: (l.estampas?.length ?? 0) > 0,
+      estampado: l.estampado === true || (l.estampas?.length ?? 0) > 0,
     })),
     (pesq ?? []) as PesquisaPreco[],
     prazoDias
@@ -606,7 +608,7 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
       material: l.material ?? null,
       total: qtdDaLinha(l) || null,
       estampas: (l.estampas ?? []).filter((e) => e.posicao && e.tamanho).map((e) => ({ posicao: String(e.posicao), tamanho: String(e.tamanho) })),
-      estampado: (l.estampas?.length ?? 0) > 0,
+      estampado: l.estampado === true || (l.estampas?.length ?? 0) > 0,
     })),
     (pesq ?? []) as PesquisaPreco[],
     pedido.prazo_dias ?? null
@@ -764,4 +766,37 @@ export async function salvarOrcamentoFornecedor(
   }
 
   return { ok: true, valorClienteCentavos: valorCliente, repasseCentavos: totalLiquido }
+}
+
+// ---------------------------------------------------------------------------
+// Pesquisa de mercado sob demanda (botão no gerenciador do fornecedor).
+// Pesquisa+salva a curva de preço da linha [idx] do pedido da oferta e devolve
+// o orçamento recarregado (com a sugestão da plataforma já preenchida).
+// ---------------------------------------------------------------------------
+export async function pesquisarPrecoLinhaOferta(
+  ofertaId: string,
+  idx: number
+): Promise<{ ok: boolean; erro?: string; dados?: OrcamentoFornecedorDados | null }> {
+  const { data: oferta } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id, pedido_id, status')
+    .eq('id', ofertaId)
+    .maybeSingle<{ id: string; pedido_id: string; status: string | null }>()
+  if (!oferta) return { ok: false, erro: 'Oferta não encontrada.' }
+
+  const { data: pedido } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('linhas')
+    .eq('id', oferta.pedido_id)
+    .maybeSingle<{ linhas: LinhaPedido[] }>()
+  const linhas = Array.isArray(pedido?.linhas) ? pedido!.linhas : []
+  const l = linhas[idx]
+  if (!l) return { ok: false, erro: 'Produto não encontrado no pedido.' }
+
+  const estampado = l.estampado === true || (l.estampas?.length ?? 0) > 0
+  const r = await pesquisarESalvarPreco({ modelo: l.modelo ?? null, material: l.material ?? null, estampado })
+  if (!r.ok) return { ok: false, erro: r.erro }
+
+  const dados = await carregarOrcamentoFornecedor(ofertaId)
+  return { ok: true, dados }
 }
