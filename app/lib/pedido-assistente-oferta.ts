@@ -43,6 +43,9 @@ export type PedidoPago = {
   pagamento_status: string | null
   confirmado_em?: string | null
   orcamento_status?: string | null
+  status?: string | null
+  telefone?: string | null
+  email?: string | null
   prazo_dias: number | null
   linhas: LinhaPedido[]
   ofertas: OfertaResumo[]
@@ -171,8 +174,7 @@ export async function listarPedidosPagos(): Promise<{
 }> {
   const { data: pedidosRaw } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, criado_em, nome, cep, valor_centavos, pagamento_status, confirmado_em, orcamento_status, prazo_dias, linhas')
-    .or('pagamento_status.eq.pago,confirmado_em.not.is.null,status.eq.completo')
+    .select('id, criado_em, nome, cep, valor_centavos, pagamento_status, confirmado_em, orcamento_status, status, telefone, email, prazo_dias, linhas')
     .order('criado_em', { ascending: false })
 
   const pedidos = (pedidosRaw ?? []) as Omit<PedidoPago, 'ofertas'>[]
@@ -434,6 +436,38 @@ export async function definirStatusOferta(
   }
 
   return { ok: true }
+}
+
+// ---------------------------------------------------------------------------
+// Reabrir: cancela as ofertas em aberto/aceitas e zera o orçamento do pedido
+// pra poder ofertar de novo. NÃO mexe no pagamento.
+// ---------------------------------------------------------------------------
+export async function reabrirPedido(pedidoId: string): Promise<{ ok: boolean; erro?: string }> {
+  try {
+    const agora = new Date().toISOString()
+
+    const { error: errOfertas } = await supabaseAdmin
+      .from('ofertas_pedido_assistente')
+      .update({ status: 'cancelada', respondido_em: agora })
+      .eq('pedido_id', pedidoId)
+      .in('status', ['ofertada', 'aceita'])
+    if (errOfertas) return { ok: false, erro: errOfertas.message }
+
+    const { error: errPedido } = await supabaseAdmin
+      .from('pedidos_assistente')
+      .update({
+        orcamento_status: null,
+        orcamento_definido_em: null,
+        frete_centavos: null,
+        atualizado_em: agora,
+      })
+      .eq('id', pedidoId)
+    if (errPedido) return { ok: false, erro: errPedido.message }
+
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, erro: e instanceof Error ? e.message : 'Falha ao reabrir' }
+  }
 }
 
 // ---------------------------------------------------------------------------
