@@ -66,19 +66,12 @@ const SECOES: Secao[] = [
       },
       {
         href: '/admin/pedidos-pagos',
-        label: 'Ofertar pedidos',
+        label: 'Pedidos & Ofertas',
         icone: (
           <Ico
             d="M8.5 12.5l2.5 2.5 4.5-5"
             extra={<circle cx="12" cy="12" r="9" />}
           />
-        ),
-      },
-      {
-        href: '/admin/pedidos-chat',
-        label: 'Pedidos do chat',
-        icone: (
-          <Ico d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 8.6 8.6 0 0 1-3.9-.9L3 20l1.1-5.4a8.1 8.1 0 0 1-1-3.9A8.4 8.4 0 0 1 11.6 2.4h.5A8.4 8.4 0 0 1 21 11v.5z" />
         ),
       },
       {
