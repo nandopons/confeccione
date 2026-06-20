@@ -25,6 +25,7 @@ type Oferta = {
 }
 type Pedido = {
   id: string
+  codigo?: string | null
   criado_em: string
   nome: string | null
   cep: string | null
@@ -303,7 +304,7 @@ export default function PedidosPagosAdmin() {
             <div key={p.id} className="rounded-lg border border-gray-200 bg-white p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm text-gray-500">{data(p.criado_em)} · {p.nome || 'Sem nome'} · {p.cep || 'sem CEP'}</div>
+                  <div className="text-sm text-gray-500">{p.codigo ? <span className="font-semibold text-gray-700">Nº {p.codigo}</span> : null}{p.codigo ? ' · ' : ''}{data(p.criado_em)} · {p.nome || 'Sem nome'} · {p.cep || 'sem CEP'}</div>
                   <div className="font-medium text-gray-900">
                     {p.pagamento_status === 'pago'
                       ? `${totalPecas} peças · cliente pagou ${brl(p.valor_centavos)} · fornecedor recebe ${brl(repasse97(p.valor_centavos))}`

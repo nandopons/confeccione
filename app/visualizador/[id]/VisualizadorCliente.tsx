@@ -54,6 +54,7 @@ export type PedidoVis = {
   frete_centavos?: number | null;
   pagamento_status?: string | null;
   fornecedor_nome?: string | null;
+  codigo?: string | null;
   oferta_id?: string | null;
   fornecedor_portfolio?: PortfolioMidiaVis[];
 };
@@ -481,6 +482,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         </div>
       </div>
       <h1 className="text-gray-900 text-2xl font-semibold mt-2">Pré-visualização dos seus produtos</h1>
+      {pedido.codigo && <p className="text-xs text-gray-400 mt-1">Pedido nº <span className="font-medium text-gray-600">{pedido.codigo}</span></p>}
       {pedido.status === "cancelado" && (
         <div className="mt-3 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">Este pedido foi cancelado.</div>
       )}
@@ -490,11 +492,19 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
       <PerguntasCliente pedidoId={pedido.id} />
 
-      <div className="space-y-5">
+      <div className="space-y-7">
         {linhas.map((l, i) => {
           const st = imgs[i] || {};
           return (
-            <div key={i} className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+            <div key={i} className="bg-white border border-gray-200 rounded-2xl shadow-md ring-1 ring-gray-900/5 overflow-hidden">
+              {/* CABEÇALHO DO MODELO */}
+              <div className="flex items-center justify-between gap-2 px-4 py-2.5 bg-[#0F6E56] text-white">
+                <span className="inline-flex items-center gap-2 font-semibold text-sm">
+                  <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full bg-white/20 text-[11px] font-bold">{i + 1}</span>
+                  Modelo {i + 1}
+                </span>
+                <span className="text-xs text-white/85 truncate max-w-[55%] capitalize">{[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ")}</span>
+              </div>
               {/* VISUALIZADOR — imagem enviada pelo cliente */}
               <div className="relative bg-gray-50 border-b border-gray-100 flex items-center justify-center p-3 min-h-[200px]">
                 {(st.urls && st.urls.length > 0) ? (

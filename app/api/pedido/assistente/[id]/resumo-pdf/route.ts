@@ -17,7 +17,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params
   const { data } = await supabase
     .from('pedidos_assistente')
-    .select('id, nome, linhas, prazo_dias, cep, numero, complemento, logradouro, bairro, cidade, uf, mockups, imagens')
+    .select('id, codigo, nome, linhas, prazo_dias, cep, numero, complemento, logradouro, bairro, cidade, uf, mockups, imagens')
     .eq('id', id)
     .maybeSingle<any>()
   if (!data) return NextResponse.json({ erro: 'Pedido não encontrado' }, { status: 404 })
@@ -29,6 +29,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     prazoDias: data.prazo_dias ?? null,
     cep: data.cep, numero: data.numero, complemento: data.complemento,
     logradouro: data.logradouro, bairro: data.bairro, cidade: data.cidade, uf: data.uf,
+    codigo: data.codigo ?? null,
     mockups: data.mockups ?? null,
     imagens: Array.isArray(data.imagens) ? data.imagens : null,
   }

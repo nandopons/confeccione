@@ -26,6 +26,7 @@ export type ResumoPedido = {
   bairro?: string | null
   cidade?: string | null
   uf?: string | null
+  codigo?: string | null
   mockups?: MapaMockups | null
   imagens?: string[] | null
 }
@@ -187,7 +188,7 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
   linha('Resumo do pedido', { size: 18, font: bold, cor: ESCURO, gap: 2 })
   const totalPecas = pedido.linhas.reduce((a, l) => a + qtdDaLinha(l), 0)
   const metaLinha = [
-    `Protocolo: ${pedido.id.slice(0, 8).toUpperCase()}`,
+    `Pedido nº ${pedido.codigo || pedido.id.slice(0, 8).toUpperCase()}`,
     `Data: ${dataBR()}`,
     `${totalPecas} ${totalPecas === 1 ? 'peça' : 'peças'} no total`,
   ].join('   ·   ')

@@ -137,7 +137,7 @@ function LinhaPedidoNovo({ pedido }: { pedido: PedidoClienteAssistente }) {
               )}
             </div>
             <div className="text-xs text-gray-500 mt-1 truncate">{pedido.resumo.replace(/\n/g, ' · ')}</div>
-            <div className="text-xs text-gray-400 mt-1">Criado em {dataHora}</div>
+            <div className="text-xs text-gray-400 mt-1">{pedido.codigo ? `Pedido nº ${pedido.codigo} · ` : ""}Criado em {dataHora}</div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${st.cor}`}>

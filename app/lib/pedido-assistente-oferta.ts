@@ -38,6 +38,7 @@ export type LinhaPedido = {
 
 export type PedidoPago = {
   id: string
+  codigo: string | null
   criado_em: string
   nome: string | null
   cep: string | null
@@ -176,7 +177,7 @@ export async function listarPedidosPagos(): Promise<{
 }> {
   const { data: pedidosRaw } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, criado_em, nome, cep, valor_centavos, pagamento_status, confirmado_em, orcamento_status, status, telefone, email, prazo_dias, linhas')
+    .select('id, codigo, criado_em, nome, cep, valor_centavos, pagamento_status, confirmado_em, orcamento_status, status, telefone, email, prazo_dias, linhas')
     .order('criado_em', { ascending: false })
 
   const pedidos = (pedidosRaw ?? []) as Omit<PedidoPago, 'ofertas'>[]
