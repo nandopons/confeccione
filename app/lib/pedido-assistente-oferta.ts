@@ -1,4 +1,5 @@
 import type { PortfolioMidia } from '@/app/lib/orcamento-portfolio'
+import { coletarVisuaisPedido, type MapaMockups } from '@/app/lib/pedido-visuais'
 // app/lib/pedido-assistente-oferta.ts
 // ============================================================================
 // Oferta de pedidos CONFIRMADOS (pedidos_assistente) a fornecedores escolhidos
@@ -234,7 +235,7 @@ export async function ofertarPedido(
 ): Promise<{ ok: boolean; criadas: number; notificadas: number; erro?: string }> {
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, pagamento_status, confirmado_em, valor_centavos, linhas, cep, imagens, prazo_dias')
+    .select('id, pagamento_status, confirmado_em, valor_centavos, linhas, cep, imagens, mockups, prazo_dias')
     .eq('id', pedidoId)
     .maybeSingle<{
       id: string
@@ -244,6 +245,7 @@ export async function ofertarPedido(
       linhas: LinhaPedido[]
       cep: string | null
       imagens: unknown[] | null
+      mockups: MapaMockups | null
       prazo_dias: number | null
     }>()
 
@@ -267,7 +269,7 @@ export async function ofertarPedido(
 
   const { totalPecas, texto } = resumirLinhas(linhas)
   const emailLinhas = resumirLinhasEmail(linhas)
-  const numImagens = Array.isArray(pedido.imagens) ? pedido.imagens.length : 0
+  const numImagens = coletarVisuaisPedido(pedido.mockups, pedido.imagens).length
 
   const { data: forns } = await supabaseAdmin
     .from('leads_fornecedores')
@@ -616,12 +618,13 @@ export async function carregarOfertaParaFornecedor(
 
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, linhas, imagens, pagamento_status, orcamento_status, prazo_dias, nome, telefone, email, cidade, uf')
+    .select('id, linhas, imagens, mockups, pagamento_status, orcamento_status, prazo_dias, nome, telefone, email, cidade, uf')
     .eq('id', oferta.pedido_id)
     .maybeSingle<{
       id: string
       linhas: LinhaPedido[]
       imagens: unknown[] | null
+      mockups: MapaMockups | null
       pagamento_status: string | null
       orcamento_status: string | null
       prazo_dias: number | null
@@ -644,7 +647,7 @@ export async function carregarOfertaParaFornecedor(
     fornecedorNome: oferta.leads_fornecedores?.nome ?? null,
     totalPecas,
     linhas,
-    numImagens: Array.isArray(pedido.imagens) ? pedido.imagens.length : 0,
+    numImagens: coletarVisuaisPedido(pedido.mockups, pedido.imagens).length,
     valorRepasseCentavos: oferta.valor_repasse_centavos,
     prazoDias: pedido.prazo_dias ?? null,
     cidade: pedido.cidade ?? null,

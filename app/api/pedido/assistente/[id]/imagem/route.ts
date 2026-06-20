@@ -2,6 +2,7 @@
 // GET ?i=N → serve a imagem N do pedido (salva ao confirmar). Acesso por uuid.
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
+import { coletarVisuaisPedido, type MapaMockups } from '@/app/lib/pedido-visuais'
 
 export const runtime = 'nodejs'
 
@@ -16,9 +17,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params
   const i = parseInt(req.nextUrl.searchParams.get('i') ?? '0', 10) || 0
 
-  const { data } = await supabase.from('pedidos_assistente').select('imagens').eq('id', id).maybeSingle()
-  const imagens = (data?.imagens ?? []) as string[]
-  const dataUrl = imagens[i]
+  const { data } = await supabase.from('pedidos_assistente').select('imagens, mockups').eq('id', id).maybeSingle<{ imagens: unknown[] | null; mockups: MapaMockups | null }>()
+  const lista = coletarVisuaisPedido(data?.mockups, data?.imagens)
+  const dataUrl = lista[i]
   if (!dataUrl) return NextResponse.json({ erro: 'Não encontrado' }, { status: 404 })
 
   const m = /^data:([^;,]+);base64,(.+)$/.exec(dataUrl)

@@ -41,7 +41,7 @@ export async function POST(req: Request, ctx: Ctx) {
 
   const { data: pedido, error: errPedido } = await supabase
     .from('pedidos_assistente')
-    .select('id, nome, email, telefone, asaas_payment_id, pix_copia_cola, pix_link, valor_centavos, pagamento_status, orcamento_status, linhas, imagens')
+    .select('id, nome, email, telefone, asaas_payment_id, pix_copia_cola, pix_link, valor_centavos, pagamento_status, orcamento_status, linhas, imagens, mockups')
     .eq('id', id)
     .maybeSingle<{
       id: string
@@ -56,6 +56,7 @@ export async function POST(req: Request, ctx: Ctx) {
       orcamento_status: string | null
       linhas: unknown[]
       imagens: unknown[] | null
+      mockups: import('@/app/lib/pedido-visuais').MapaMockups | null
     }>()
   if (errPedido || !pedido) return NextResponse.json({ erro: 'Pedido não encontrado.' }, { status: 404 })
 
@@ -132,7 +133,7 @@ export async function POST(req: Request, ctx: Ctx) {
         copiaCola: pix.copiaCola,
         invoiceUrl: pix.invoiceUrl,
         linhas: (Array.isArray(pedido.linhas) ? pedido.linhas : []) as Parameters<typeof enviarEmailPedidoPix>[0]['linhas'],
-        numImagens: Array.isArray(pedido.imagens) ? pedido.imagens.length : 0,
+        numImagens: (await import('@/app/lib/pedido-visuais')).coletarVisuaisPedido(pedido.mockups, pedido.imagens).length,
       })
     } catch (err) {
       console.error('[pagar] email falhou:', err)
