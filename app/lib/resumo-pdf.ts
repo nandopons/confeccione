@@ -1,6 +1,8 @@
 // Gera o PDF "Resumo do pedido" com a marca da Confeccione (logo vetorial + site).
 import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from 'pdf-lib'
 
+type MapaMockups = Record<string, { liso?: string; arte?: string; fotos?: string[] }>
+
 export type LinhaResumo = {
   modelo?: string | null
   cor?: string | null
@@ -24,6 +26,8 @@ export type ResumoPedido = {
   bairro?: string | null
   cidade?: string | null
   uf?: string | null
+  mockups?: MapaMockups | null
+  imagens?: string[] | null
 }
 
 const VERDE = rgb(0.114, 0.62, 0.459) // #1D9E75
@@ -40,6 +44,15 @@ const FUNDO = 70
 function corLabel(s?: string | null): string {
   return (s || '').replace(/\s*\(#?[0-9a-fA-F]{6}\)\s*/g, ' ').replace(/#[0-9a-fA-F]{6}/g, '').replace(/\s{2,}/g, ' ').trim()
 }
+function imagensDoProduto(mockups: MapaMockups | null | undefined, i: number): string[] {
+  const m = mockups && typeof mockups === 'object' ? mockups[String(i)] : undefined
+  if (!m) return []
+  if (Array.isArray(m.fotos) && m.fotos.length > 0) return m.fotos.filter(Boolean)
+  if (m.arte) return [m.arte]
+  if (m.liso) return [m.liso]
+  return []
+}
+
 function qtdDaLinha(l: LinhaResumo): number {
   return typeof l.total === 'number' && l.total > 0 ? l.total : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0)
 }
@@ -132,6 +145,44 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
     if (opts.gap) y -= opts.gap
   }
 
+  async function embedDataUrl(dataUrl: string) {
+    const m = /^data:([^;,]+);base64,(.+)$/.exec(dataUrl || '')
+    if (!m) return null
+    const mime = m[1].toLowerCase()
+    const bytes = Uint8Array.from(Buffer.from(m[2], 'base64'))
+    try {
+      if (mime.includes('png')) return await doc.embedPng(bytes)
+      if (mime.includes('jpg') || mime.includes('jpeg')) return await doc.embedJpg(bytes)
+      try { return await doc.embedPng(bytes) } catch { return await doc.embedJpg(bytes) }
+    } catch { return null }
+  }
+
+  async function desenharImagens(urls: string[]) {
+    const imgs: { im: Awaited<ReturnType<typeof doc.embedPng>> }[] = []
+    for (const u of urls) {
+      const im = await embedDataUrl(u)
+      if (im) imgs.push({ im })
+    }
+    if (imgs.length === 0) return
+    const cellW = 150, cellH = 112, gap = 8
+    const porLinha = Math.max(1, Math.floor((maxW + gap) / (cellW + gap)))
+    for (let r = 0; r < imgs.length; r += porLinha) {
+      const fileira = imgs.slice(r, r + porLinha).map(({ im }) => {
+        const sc = Math.min(cellW / im.width, cellH / im.height, 1)
+        return { im, w: im.width * sc, h: im.height * sc }
+      })
+      const rowH = Math.max(...fileira.map((d) => d.h))
+      garantir(rowH + 10)
+      let x = MX
+      for (const d of fileira) {
+        page.drawRectangle({ x: x - 1, y: y - d.h - 1, width: d.w + 2, height: d.h + 2, borderColor: CINZA_CLARO, borderWidth: 0.6 })
+        page.drawImage(d.im, { x, y: y - d.h, width: d.w, height: d.h })
+        x += cellW + gap
+      }
+      y -= rowH + 10
+    }
+  }
+
   // Título
   linha('Resumo do pedido', { size: 18, font: bold, cor: ESCURO, gap: 2 })
   const totalPecas = pedido.linhas.reduce((a, l) => a + qtdDaLinha(l), 0)
@@ -156,7 +207,9 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
   y -= 12
 
   // Produtos
-  pedido.linhas.forEach((l, i) => {
+  let algumaImagem = false
+  for (let i = 0; i < pedido.linhas.length; i++) {
+    const l = pedido.linhas[i]
     const qtd = qtdDaLinha(l)
     garantir(70)
     const titulo = `${qtd || '?'}× ${[l.modelo || 'peça', corLabel(l.cor)].filter(Boolean).join(' · ')}`
@@ -172,13 +225,28 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
     }
     if (l.publico) linha(`Público: ${l.publico}`, { size: 10 })
     if (l.descricao) linha(`Obs.: ${l.descricao}`, { size: 10, cor: ESCURO })
+    const imgsProd = imagensDoProduto(pedido.mockups, i)
+    if (imgsProd.length > 0) {
+      algumaImagem = true
+      y -= 2
+      linha('Imagens enviadas:', { size: 9, cor: CINZA, gap: 2 })
+      await desenharImagens(imgsProd)
+    }
     y -= 6
     if (i < pedido.linhas.length - 1) {
       garantir(10)
       page.drawLine({ start: { x: MX, y: y + 2 }, end: { x: A4.w - MX, y: y + 2 }, thickness: 0.6, color: CINZA_CLARO })
       y -= 10
     }
-  })
+  }
+
+  if (!algumaImagem && Array.isArray(pedido.imagens) && pedido.imagens.length > 0) {
+    garantir(30)
+    page.drawLine({ start: { x: MX, y: y + 2 }, end: { x: A4.w - MX, y: y + 2 }, thickness: 0.6, color: CINZA_CLARO })
+    y -= 12
+    linha('Visualizadores enviados', { size: 11, font: bold, cor: ESCURO, gap: 4 })
+    await desenharImagens(pedido.imagens.filter((x) => typeof x === 'string'))
+  }
 
   // Rodapé do resumo
   garantir(40)
