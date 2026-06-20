@@ -597,6 +597,7 @@ export type OfertaDetalheFornecedor = {
   totalPecas: number
   linhas: LinhaPedido[]
   numImagens: number
+  fotosPorLinha: number[] | null
   valorRepasseCentavos: number | null
   prazoDias: number | null
   cidade: string | null
@@ -641,6 +642,17 @@ export async function carregarOfertaParaFornecedor(
   const { totalPecas } = resumirLinhas(linhas)
   const aceita = oferta.status === 'aceita'
 
+  // Fotos por produto (mesma ordem do índice global de coletarVisuaisPedido,
+  // que concatena mockups[i].fotos por índice). Permite agrupar por "Modelo N"
+  // na vitrine do fornecedor. Null quando o pedido não usa fotos por produto
+  // (legado) — aí o fornecedor vê em grade única.
+  const mapaMk = pedido.mockups && typeof pedido.mockups === 'object' ? pedido.mockups : {}
+  const fotosPorLinha = linhas.map((_: unknown, i: number) => {
+    const m = mapaMk[String(i)]
+    return m && Array.isArray(m.fotos) ? m.fotos.filter((x: unknown) => typeof x === 'string' && (x as string).length > 0).length : 0
+  })
+  const temFotosPorLinha = fotosPorLinha.some((n: number) => n > 0)
+
   return {
     ofertaId: oferta.id,
     pedidoId: pedido.id,
@@ -649,6 +661,7 @@ export async function carregarOfertaParaFornecedor(
     totalPecas,
     linhas,
     numImagens: coletarVisuaisPedido(pedido.mockups, pedido.imagens).length,
+    fotosPorLinha: temFotosPorLinha ? fotosPorLinha : null,
     valorRepasseCentavos: oferta.valor_repasse_centavos,
     prazoDias: pedido.prazo_dias ?? null,
     cidade: pedido.cidade ?? null,
