@@ -327,6 +327,22 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     }
   }
 
+  const [cancelando, setCancelando] = useState(false);
+  async function cancelarPedido() {
+    if (cancelando) return;
+    if (!confirm("Cancelar este pedido? Esta ação não pode ser desfeita.")) return;
+    setCancelando(true);
+    try {
+      const res = await fetch(`/api/pedido/assistente/${pedido.id}/cancelar`, { method: "POST" });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(d?.erro || "Não foi possível cancelar agora.");
+      window.location.href = "/cliente/painel";
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erro ao cancelar.");
+      setCancelando(false);
+    }
+  }
+
   async function gerarPagamento() {
     if (confirmando) return;
     const cpfDig = cpf.replace(/\D/g, "");
@@ -432,10 +448,13 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   return (
     <div className="flex-1 w-full max-w-5xl mx-auto px-6 pt-8 pb-16">
       <div className="flex items-center justify-between gap-3 mb-1">
-        <Link href="/#pedido" className="text-sm text-gray-500 hover:text-gray-800">← Voltar</Link>
+        <Link href="/cliente/painel" className="text-sm text-gray-500 hover:text-gray-800">← Voltar aos meus pedidos</Link>
         {salvando && <span className="text-xs text-gray-400">salvando…</span>}
       </div>
       <h1 className="text-gray-900 text-2xl font-semibold mt-2">Pré-visualização dos seus produtos</h1>
+      {pedido.status === "cancelado" && (
+        <div className="mt-3 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">Este pedido foi cancelado.</div>
+      )}
       <p className="text-gray-500 text-sm mt-1 mb-6">
         Para cada produto, envie uma ou mais fotos/artes. {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
       </p>
@@ -753,6 +772,15 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           </p>
         )}
       </div>
+
+      {!pago && pedido.status !== "cancelado" && (
+        <div className="mt-6 text-center">
+          <button type="button" onClick={() => void cancelarPedido()} disabled={cancelando}
+            className="text-[13px] text-gray-500 hover:text-red-600 underline underline-offset-2 disabled:opacity-50">
+            {cancelando ? "Cancelando…" : "Cancelar pedido"}
+          </button>
+        </div>
+      )}
 
       {/* ---------- MODAL EDITAR ENTREGA/CONTATO ---------- */}
       {contatoOpen && (

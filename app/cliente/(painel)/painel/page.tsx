@@ -107,6 +107,7 @@ export default async function PainelClientePage({
 }
 
 function statusNovo(p: PedidoClienteAssistente): { label: string; cor: string } {
+  if (p.status === 'cancelado') return { label: 'Cancelado', cor: 'bg-red-100 text-red-700' }
   if (p.pagamentoStatus === 'pago') return { label: 'Pago', cor: 'bg-green-100 text-green-800' }
   if (p.status === 'confirmado' && p.pagamentoStatus === 'gerado') return { label: 'Aguardando pagamento', cor: 'bg-amber-100 text-amber-800' }
   return { label: 'Em montagem', cor: 'bg-gray-100 text-gray-600' }

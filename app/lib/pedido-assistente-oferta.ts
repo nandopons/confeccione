@@ -547,6 +547,32 @@ export async function recusarOrcamentoCliente(pedidoId: string): Promise<{ ok: b
   return { ok: true }
 }
 
+// Cliente CANCELA o pedido (antes do pagamento). Marca o pedido como cancelado
+// e cancela as ofertas em aberto/aceitas.
+export async function cancelarPedidoCliente(pedidoId: string): Promise<{ ok: boolean; erro?: string }> {
+  const { data: ped } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, status, pagamento_status')
+    .eq('id', pedidoId)
+    .maybeSingle<{ id: string; status: string | null; pagamento_status: string | null }>()
+  if (!ped) return { ok: false, erro: 'Pedido não encontrado.' }
+  if (ped.pagamento_status === 'pago') return { ok: false, erro: 'Pedido já pago — não pode ser cancelado por aqui. Fale com a gente.' }
+  if (ped.status === 'cancelado') return { ok: true }
+
+  await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .update({ status: 'cancelada', respondido_em: new Date().toISOString() })
+    .eq('pedido_id', pedidoId)
+    .in('status', ['ofertada', 'aceita'])
+
+  const { error } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .update({ status: 'cancelado', orcamento_status: null, atualizado_em: new Date().toISOString() })
+    .eq('id', pedidoId)
+  if (error) return { ok: false, erro: error.message }
+  return { ok: true }
+}
+
 // ---------------------------------------------------------------------------
 // Carrega a oferta pra a PÁGINA DO FORNECEDOR. Antes do aceite, SEM contato
 // do cliente; depois do aceite, com contato + link do orçamento.
