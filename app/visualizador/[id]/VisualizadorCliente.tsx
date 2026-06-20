@@ -93,6 +93,14 @@ function corLabel(s: string | null | undefined): string {
   return (s || "").replace(/\s*\(#?[0-9a-fA-F]{6}\)\s*/g, " ").replace(/#[0-9a-fA-F]{6}/g, "").replace(/\s{2,}/g, " ").trim();
 }
 
+const EDIT_HINTS: string[] = [
+  "Quais os tamanhos?",
+  "Qual a cor exata?",
+  "Material: algodão? poliéster?",
+  "Detalhes da estampa/bordado?",
+  "Completar este produto",
+];
+
 export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [linhas, setLinhas] = useState<Linha[]>(
     (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [], estampado: l.estampado ?? null }))
@@ -132,6 +140,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   // edição / adição
   const [editOpen, setEditOpen] = useState(false);
   const [editIndex, setEditIndex] = useState<number | null>(null);
+  const [editHintIdx, setEditHintIdx] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setEditHintIdx((x) => (x + 1) % EDIT_HINTS.length), 2600);
+    return () => clearInterval(t);
+  }, []);
   const [draft, setDraft] = useState<Linha>({ ...linhaVazia });
 
   // subir a própria arte / mockup
@@ -539,9 +552,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
                   <span className="flex-1 min-w-2" aria-hidden />
                   {!orcamentoDefinido && (<>
-                  <button type="button" onClick={() => abrirEdicao(i)} title="Editar produto" className="inline-flex items-center gap-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
-                    Editar
+                  <button type="button" onClick={() => abrirEdicao(i)} title="Editar / completar produto" className="group inline-flex items-center gap-2 bg-[#E1F5EE] hover:bg-[#1D9E75] text-[#0F6E56] hover:text-white text-sm font-medium pl-3 pr-3.5 py-2 rounded-lg ring-1 ring-[#1D9E75]/30 transition-colors">
+                    <span className="relative flex h-5 w-5 items-center justify-center shrink-0">
+                      <span className="absolute inline-flex h-full w-full rounded-full bg-[#1D9E75]/30 motion-safe:animate-ping" aria-hidden="true" />
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="relative"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                    </span>
+                    <span key={editHintIdx} style={{ animation: "hintIn .45s ease" }} className="whitespace-nowrap">{EDIT_HINTS[editHintIdx]}</span>
                   </button>
                   <button type="button" onClick={() => excluir(i)} title="Excluir produto" className="inline-flex items-center gap-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 text-sm px-3 py-2 rounded-lg transition-colors">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
