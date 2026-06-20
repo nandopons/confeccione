@@ -569,10 +569,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
               <p className="text-[11px] text-gray-400 text-center mt-2">PIX ou cartão na página de pagamento. Com o pagamento confirmado, a produção começa.</p>
               <div className="text-center mt-3">
                 <button type="button" onClick={() => void recusarOrcamento()} disabled={recusando}
-                  className="text-[12px] text-gray-400 hover:text-gray-600 underline underline-offset-2 disabled:opacity-50">
+                  className="text-[13px] font-medium text-gray-600 hover:text-gray-900 underline underline-offset-2 disabled:opacity-50">
                   {recusando ? "Recusando…" : "Recusar este orçamento"}
                 </button>
-                <p className="text-[10px] text-gray-300 mt-1 leading-snug">Ao recusar, o pedido vai pra outro fornecedor — o valor pode mudar e não garantimos manter este.</p>
+                <p className="text-[11px] text-gray-500 mt-1 leading-snug">Ao recusar, o pedido vai pra outro fornecedor — o valor pode mudar e não garantimos manter este.</p>
               </div>
             </>
           ) : (
