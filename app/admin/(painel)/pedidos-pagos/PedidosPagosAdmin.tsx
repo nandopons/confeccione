@@ -57,7 +57,7 @@ type LinhaDetalhe = {
 }
 type Detalhe = {
   id: string
-  contato: { nome: string | null; telefone: string | null; email: string | null; cep: string | null; complemento: string | null; logradouro: string | null; bairro: string | null; cidade: string | null; uf: string | null; prazoDias: number | null }
+  contato: { nome: string | null; telefone: string | null; email: string | null; cep: string | null; numero: string | null; complemento: string | null; logradouro: string | null; bairro: string | null; cidade: string | null; uf: string | null; prazoDias: number | null }
   linhas: LinhaDetalhe[]
   conversa: Array<{ role: 'user' | 'assistant'; texto: string }>
   mockups: Array<{ index: number; temLiso: boolean; temArte: boolean }>
@@ -363,7 +363,7 @@ export default function PedidosPagosAdmin() {
                       <div className="text-sm text-gray-700">
                         <div className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">Contato</div>
                         <div>{d.contato.nome} · {d.contato.telefone} · {d.contato.email}</div>
-                        <div className="text-gray-500">{[d.contato.logradouro, d.contato.bairro, [d.contato.cidade, d.contato.uf].filter(Boolean).join('/'), d.contato.cep, d.contato.complemento].filter(Boolean).join(', ')}</div>
+                        <div className="text-gray-500">{[d.contato.logradouro, d.contato.numero, d.contato.bairro, [d.contato.cidade, d.contato.uf].filter(Boolean).join('/'), d.contato.cep, d.contato.complemento].filter(Boolean).join(', ')}</div>
                         {d.contato.prazoDias ? <div className="text-gray-500">Prazo: {d.contato.prazoDias} dias</div> : null}
                         {linkWhatsCliente(d.contato.telefone, d.contato.nome) && (
                           <a

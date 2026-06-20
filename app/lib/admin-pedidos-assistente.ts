@@ -81,7 +81,7 @@ export type PedidoChatDetalhe = {
   id: string
   contato: {
     nome: string | null; telefone: string | null; email: string | null
-    cep: string | null; complemento: string | null
+    cep: string | null; numero: string | null; complemento: string | null
     logradouro: string | null; bairro: string | null; cidade: string | null; uf: string | null
     prazoDias: number | null
   }
@@ -93,7 +93,7 @@ export type PedidoChatDetalhe = {
 export async function detalharPedidoChat(id: string): Promise<PedidoChatDetalhe | null> {
   const { data } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, nome, telefone, email, cep, complemento, logradouro, bairro, cidade, uf, prazo_dias, linhas, conversa, mockups')
+    .select('id, nome, telefone, email, cep, numero, complemento, logradouro, bairro, cidade, uf, prazo_dias, linhas, conversa, mockups')
     .eq('id', id)
     .maybeSingle<any>()
   if (!data) return null
@@ -105,7 +105,7 @@ export async function detalharPedidoChat(id: string): Promise<PedidoChatDetalhe 
     id: data.id,
     contato: {
       nome: data.nome, telefone: data.telefone, email: data.email,
-      cep: data.cep, complemento: data.complemento, logradouro: data.logradouro,
+      cep: data.cep, numero: data.numero, complemento: data.complemento, logradouro: data.logradouro,
       bairro: data.bairro, cidade: data.cidade, uf: data.uf, prazoDias: data.prazo_dias,
     },
     linhas: Array.isArray(data.linhas) ? data.linhas : [],

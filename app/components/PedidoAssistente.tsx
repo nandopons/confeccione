@@ -27,6 +27,7 @@ type Contato = {
   telefone: string | null;
   email: string | null;
   cep: string | null;
+  numero?: string | null;
   complemento: string | null;
   logradouro?: string | null;
   bairro?: string | null;
@@ -39,7 +40,7 @@ type Fase = "produto" | "contato" | "completo";
 
 type Turno = { role: "user" | "assistant"; display: string; raw: string };
 
-const CONTATO_VAZIO: Contato = { nome: null, telefone: null, email: null, cep: null, complemento: null, logradouro: null, bairro: null, cidade: null, uf: null, prazoDias: null };
+const CONTATO_VAZIO: Contato = { nome: null, telefone: null, email: null, cep: null, numero: null, complemento: null, logradouro: null, bairro: null, cidade: null, uf: null, prazoDias: null };
 const PEDIDO_VAZIO: Pedido = { linhas: [], contato: { ...CONTATO_VAZIO } };
 
 const SAUDACAO =
@@ -73,6 +74,12 @@ export default function PedidoAssistente() {
   const [protocolo, setProtocolo] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
   const salvoRef = useRef(false);
+  const [endCep, setEndCep] = useState("");
+  const [endNumero, setEndNumero] = useState("");
+  const [endComplemento, setEndComplemento] = useState("");
+  const [endResolvido, setEndResolvido] = useState<string | null>(null);
+  const [endBuscando, setEndBuscando] = useState(false);
+  const endSeedRef = useRef(false);
   const listaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -309,18 +316,94 @@ export default function PedidoAssistente() {
     }
   }
 
+  const cepDigits = endCep.replace(/\D/g, "");
+  const enderecoOk = cepDigits.length === 8 && endNumero.trim().length > 0;
+
+  async function buscarCepEndereco() {
+    const d = endCep.replace(/\D/g, "");
+    if (d.length !== 8) { setEndResolvido(null); return; }
+    setEndBuscando(true);
+    try {
+      const r = await fetch(`https://viacep.com.br/ws/${d}/json/`).then((x) => x.json()).catch(() => null);
+      if (r && !r.erro && (r.localidade || r.logradouro)) {
+        setEndResolvido([r.logradouro, r.bairro, [r.localidade, r.uf].filter(Boolean).join("/")].filter(Boolean).join(", "));
+      } else {
+        setEndResolvido(null);
+      }
+    } finally {
+      setEndBuscando(false);
+    }
+  }
+
   async function prosseguir() {
     setErro(null);
-    const id = salvoRef.current ? protocolo : await salvarPedido(pedido);
-    if (id) {
-      window.location.href = `/visualizador/${id}`;
+    if (!enderecoOk) {
+      setErro("Pra calcular o frete certinho, preencha o CEP e o número da entrega.");
       return;
     }
-    setErro("Não consegui gerar a proposta agora. Tente de novo em instantes — se persistir, chama a gente no WhatsApp (81) 99578-2077.");
+    const id = salvoRef.current ? protocolo : await salvarPedido(pedido);
+    if (!id) {
+      setErro("Não consegui gerar a proposta agora. Tente de novo em instantes — se persistir, chama a gente no WhatsApp (81) 99578-2077.");
+      return;
+    }
+    // grava CEP + número no pedido antes de seguir (pro cálculo de frete)
+    try {
+      await fetch(`/api/pedido/assistente/${id}/entrega`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cep: cepDigits, numero: endNumero.trim(), complemento: endComplemento.trim() || null }),
+      });
+    } catch { /* segue mesmo se a gravação do endereço falhar */ }
+    window.location.href = `/visualizador/${id}`;
   }
+
+  useEffect(() => {
+    if (fase === "completo" && !endSeedRef.current) {
+      endSeedRef.current = true;
+      if (pedido.contato.cep) setEndCep(pedido.contato.cep);
+      if (pedido.contato.numero) setEndNumero(String(pedido.contato.numero));
+      if (pedido.contato.complemento) setEndComplemento(pedido.contato.complemento);
+    }
+  }, [fase, pedido.contato.cep, pedido.contato.numero, pedido.contato.complemento]);
 
   const totalPecas = pedido.linhas.reduce((acc, l) => acc + (l.total ?? 0), 0);
   const temResumo = pedido.linhas.length > 0 || Object.values(pedido.contato).some(Boolean);
+
+  function formEndereco() {
+    if (fase !== "completo") return null;
+    return (
+      <div className="mb-3 rounded-xl border border-gray-200 bg-gray-50/70 p-3 text-left">
+        <p className="text-xs font-medium text-gray-700">📦 Endereço de entrega <span className="text-gray-400">(pro cálculo do frete)</span></p>
+        <div className="flex flex-wrap gap-2 mt-2">
+          <input
+            value={endCep}
+            onChange={(e) => { setEndCep(e.target.value.replace(/[^\d-]/g, "").slice(0, 9)); setEndResolvido(null); }}
+            onBlur={() => void buscarCepEndereco()}
+            inputMode="numeric"
+            placeholder="CEP"
+            className="w-28 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75]"
+          />
+          <input
+            value={endNumero}
+            onChange={(e) => setEndNumero(e.target.value.slice(0, 20))}
+            placeholder="Número"
+            className="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75]"
+          />
+          <input
+            value={endComplemento}
+            onChange={(e) => setEndComplemento(e.target.value.slice(0, 80))}
+            placeholder="Complemento (opcional)"
+            className="flex-1 min-w-[140px] border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75]"
+          />
+        </div>
+        {endBuscando && <p className="text-[11px] text-gray-400 mt-1">buscando endereço…</p>}
+        {!endBuscando && endResolvido && <p className="text-[11px] text-gray-500 mt-1">{endResolvido}</p>}
+        {!endBuscando && !endResolvido && endCep.replace(/\D/g, "").length === 8 && (
+          <p className="text-[11px] text-amber-600 mt-1">Não achamos esse CEP — confira os números.</p>
+        )}
+      </div>
+    );
+  }
 
   // Miolo do resumo — compartilhado entre a coluna lateral (desktop) e o
   // bottom sheet (mobile). Chamada direta (não <Componente/>) pra não remontar.
@@ -383,10 +466,11 @@ export default function PedidoAssistente() {
         {/* CTA: só aparece quando o pedido está completo */}
         {fase === "completo" && (
           <div className="mt-5">
+            {formEndereco()}
             <button
               type="button"
               onClick={() => void prosseguir()}
-              disabled={salvando}
+              disabled={salvando || !enderecoOk}
               className="w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-4 py-3 rounded-xl transition-colors"
             >
               {salvando ? "Salvando…" : "Prosseguir para visualizadores →"}
@@ -475,12 +559,13 @@ export default function PedidoAssistente() {
             </div>
           )}
           {fase === "completo" && !enviando && (
-            <div className="flex justify-start">
+            <div className="flex flex-col items-stretch gap-2">
+              {formEndereco()}
               <button
                 type="button"
                 onClick={() => void prosseguir()}
-                disabled={salvando}
-                className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors shadow-sm"
+                disabled={salvando || !enderecoOk}
+                className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors shadow-sm self-start"
               >
                 {salvando ? "Salvando…" : "Prosseguir para visualizadores →"}
               </button>
