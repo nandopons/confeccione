@@ -144,6 +144,7 @@ export async function buscarFornecedorCompativel(
     .from('leads_fornecedores')
     .select('*')
     .eq('status', STATUS_FORNECEDOR_ATIVO)
+    .eq('aprovacao_status', 'aprovado')
     .contains('tipos_produto', [pedido.tipo])
     .or(
       `raio_atendimento.eq.nacional,and(raio_atendimento.in.(estado,regiao),estado.eq.${pedido.estado})`
