@@ -20,7 +20,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const MAX_IMGS = 12
+const MAX_IMGS = 30
 const MAX_TOTAL_BYTES = 25 * 1024 * 1024
 
 const EstampaSchema = z.object({ posicao: z.string(), tamanho: z.string() })

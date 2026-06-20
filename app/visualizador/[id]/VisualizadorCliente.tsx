@@ -45,7 +45,7 @@ export type PedidoVis = {
   cidade?: string | null;
   uf?: string | null;
   status: string | null;
-  mockups?: Record<string, { liso?: string; arte?: string }> | null;
+  mockups?: Record<string, { liso?: string; arte?: string; fotos?: string[] }> | null;
   prazo_dias?: number | null;
   confirmado_em?: string | null;
   orcamento_status?: string | null;
@@ -55,7 +55,7 @@ export type PedidoVis = {
   fornecedor_nome?: string | null;
 };
 
-type ImgEstado = { loading?: boolean; url?: string; motivo?: string };
+type ImgEstado = { loading?: boolean; urls?: string[]; motivo?: string };
 
 const linhaVazia: Linha = { modelo: "", cor: "", material: "", publico: null, total: null, tamanhos: [], estampas: [], estampado: null, descricao: "" };
 
@@ -97,8 +97,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     const init: Record<number, ImgEstado> = {};
     for (const k of Object.keys(m)) {
       const v = m[k] || {};
-      const url = v.liso || v.arte;
-      if (url) init[Number(k)] = { url };
+      const fotos = Array.isArray(v.fotos) ? v.fotos.filter(Boolean) : [];
+      const urls = fotos.length > 0 ? fotos : [v.liso || v.arte].filter((x): x is string => !!x);
+      if (urls.length > 0) init[Number(k)] = { urls };
     }
     return init;
   });
@@ -131,7 +132,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   // subir a própria arte / mockup
   const [subindoIdx, setSubindoIdx] = useState<number | null>(null);
 
-  async function salvarMockup(payload: { index?: number; liso?: string | null; arte?: string | null; resetAll?: boolean }) {
+  async function salvarMockup(payload: { index?: number; liso?: string | null; arte?: string | null; fotos?: string[] | null; resetAll?: boolean }) {
     try {
       await fetch(`/api/pedido/assistente/${pedido.id}/mockup`, {
         method: 'POST',
@@ -207,15 +208,16 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     void (async () => {
       await salvarMockup({ resetAll: true });
       for (const [k, st] of Object.entries(novasImgs)) {
-        if (st.url) await salvarMockup({ index: Number(k), liso: st.url, arte: null });
+        if (st.urls && st.urls.length) await salvarMockup({ index: Number(k), fotos: st.urls });
       }
     })();
   }
 
   // ---- remover a imagem enviada ----
-  function removerImagem(i: number) {
-    setImgs((m) => ({ ...m, [i]: { ...m[i], url: undefined, motivo: undefined } }));
-    void salvarMockup({ index: i, liso: null, arte: null });
+  function removerFoto(i: number, j: number) {
+    const urls = (imgs[i]?.urls ?? []).filter((_, k) => k !== j);
+    setImgs((m) => ({ ...m, [i]: { ...m[i], urls } }));
+    void salvarMockup({ index: i, fotos: urls });
   }
 
   // ---- subir o próprio visualizador ----
@@ -240,19 +242,29 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     return cv.toDataURL("image/jpeg", 0.85);
   }
 
+  const MAX_FOTOS = 6;
   async function onUploadVisualizador(e: React.ChangeEvent<HTMLInputElement>, i: number) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!file) return;
-    if (!file.type.startsWith("image/")) { alert("Envie um arquivo de imagem (JPG, PNG…)."); return; }
-    if (file.size > 10 * 1024 * 1024) { alert("Imagem muito grande (máx. 10 MB)."); return; }
+    if (files.length === 0) return;
+    const atuais = imgs[i]?.urls ?? [];
+    const espaco = Math.max(0, MAX_FOTOS - atuais.length);
+    if (espaco === 0) { alert(`Máximo de ${MAX_FOTOS} fotos por produto.`); return; }
+    const aUsar = files.slice(0, espaco);
     setSubindoIdx(i);
     try {
-      const dataUrl = await arquivoParaVisualizador(file);
-      setImgs((m) => ({ ...m, [i]: { ...m[i], url: dataUrl, loading: false, motivo: undefined } }));
-      void salvarMockup({ index: i, liso: dataUrl, arte: null });
+      const novas: string[] = [];
+      for (const file of aUsar) {
+        if (!file.type.startsWith("image/")) continue;
+        if (file.size > 10 * 1024 * 1024) { alert(`"${file.name}" passa de 10 MB e foi ignorada.`); continue; }
+        novas.push(await arquivoParaVisualizador(file));
+      }
+      if (novas.length === 0) return;
+      const urls = [...atuais, ...novas];
+      setImgs((m) => ({ ...m, [i]: { ...m[i], urls, loading: false, motivo: undefined } }));
+      void salvarMockup({ index: i, fotos: urls });
     } catch {
-      alert("Não consegui ler essa imagem. Tenta outro arquivo.");
+      alert("Não consegui ler a imagem. Tenta outro arquivo.");
     } finally {
       setSubindoIdx(null);
     }
@@ -263,7 +275,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     if (confirmandoPedido) return;
     setConfirmandoPedido(true);
     setConfirmErro(null);
-    const imagens = linhas.map((_, i) => imgs[i]?.url).filter((x): x is string => !!x);
+    const imagens = linhas.flatMap((_, i) => imgs[i]?.urls ?? []);
     try {
       const res = await fetch(`/api/pedido/assistente/${pedido.id}/confirmar`, {
         method: "POST",
@@ -405,7 +417,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       </div>
       <h1 className="text-gray-900 text-2xl font-semibold mt-2">Pré-visualização dos seus produtos</h1>
       <p className="text-gray-500 text-sm mt-1 mb-6">
-        Para cada produto, envie sua arte ou o mockup pronto. {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
+        Para cada produto, envie uma ou mais fotos/artes. {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
       </p>
 
       <PerguntasCliente pedidoId={pedido.id} />
@@ -416,20 +428,38 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           return (
             <div key={i} className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
               {/* VISUALIZADOR — imagem enviada pelo cliente */}
-              <div className="relative bg-gray-50 border-b border-gray-100 flex items-center justify-center p-3 min-h-[320px]">
-                {st.url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={st.url} alt={`${l.modelo ?? "produto"} ${l.cor ?? ""}`} className="max-h-[560px] w-auto max-w-full object-contain rounded-lg" />
+              <div className="relative bg-gray-50 border-b border-gray-100 flex items-center justify-center p-3 min-h-[200px]">
+                {(st.urls && st.urls.length > 0) ? (
+                  <div className="w-full">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {st.urls.map((u, j) => (
+                        <div key={j} className="relative">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={u} alt={`foto ${j + 1}`} className="w-full h-40 object-contain rounded-lg border border-gray-200 bg-white" />
+                          <button type="button" onClick={() => removerFoto(i, j)} aria-label="Remover foto" className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/55 hover:bg-black/80 text-white text-base leading-none flex items-center justify-center">×</button>
+                        </div>
+                      ))}
+                      {st.urls.length < MAX_FOTOS && (
+                        <label className="h-40 rounded-lg border-2 border-dashed border-[#1D9E75]/50 hover:border-[#1D9E75] bg-[#E1F5EE]/30 hover:bg-[#E1F5EE]/60 text-[#0F6E56] flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors">
+                          <span className="text-3xl leading-none">＋</span>
+                          <span className="text-xs font-medium">Adicionar foto</span>
+                          <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onUploadVisualizador(e, i)} />
+                        </label>
+                      )}
+                    </div>
+                    {subindoIdx === i && <p className="text-xs text-gray-400 mt-2 text-center">enviando…</p>}
+                    <p className="text-[11px] text-gray-400 mt-2 text-center">{st.urls.length}/{MAX_FOTOS} fotos — toque no + pra adicionar mais.</p>
+                  </div>
                 ) : subindoIdx === i ? (
-                  <span className="text-xs text-gray-400">enviando sua imagem…</span>
+                  <span className="text-xs text-gray-400">enviando suas fotos…</span>
                 ) : (
                   <div className="text-center px-4 py-6 w-full max-w-md mx-auto">
                     <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-gray-100 flex items-center justify-center text-gray-300 text-xl">👕</div>
-                    <p className="text-sm font-medium text-gray-800">Adicione a imagem desta peça</p>
-                    <p className="text-[11px] text-gray-400 mt-1 mb-4 leading-snug">Envie a arte ou o mockup pronto desta peça.</p>
+                    <p className="text-sm font-medium text-gray-800">Adicione as fotos desta peça</p>
+                    <p className="text-[11px] text-gray-400 mt-1 mb-4 leading-snug">Envie uma ou mais fotos/artes desta peça (até {MAX_FOTOS}).</p>
                     <label className="inline-block bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors cursor-pointer text-center">
-                      📤 Enviar minha arte
-                      <input type="file" accept="image/*" className="hidden" onChange={(e) => void onUploadVisualizador(e, i)} />
+                      📤 Enviar fotos
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onUploadVisualizador(e, i)} />
                     </label>
                     {st.motivo && <p className="text-[11px] text-red-500 mt-3">{st.motivo} — tenta de novo.</p>}
                   </div>
@@ -464,15 +494,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
                 {/* AÇÕES — toolbar única: imagem à esquerda, produto à direita */}
                 <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
-                  {st.url && (
-                    <>
-                      <label className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer">
-                        📤 Trocar imagem
-                        <input type="file" accept="image/*" className="hidden" onChange={(e) => void onUploadVisualizador(e, i)} />
-                      </label>
-                      <button type="button" onClick={() => removerImagem(i)} className="border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">Remover imagem</button>
-                    </>
-                  )}
                   <span className="flex-1 min-w-2" aria-hidden />
                   {!orcamentoDefinido && (<>
                   <button type="button" onClick={() => abrirEdicao(i)} title="Editar produto" className="inline-flex items-center gap-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-50 text-sm px-3 py-2 rounded-lg transition-colors">
