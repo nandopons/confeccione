@@ -807,7 +807,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
       {/* ---------- MODAL EDITAR ENTREGA/CONTATO ---------- */}
       {contatoOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => { if (!salvandoContato) setContatoOpen(false); }}>
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !salvandoContato) setContatoOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
               <p className="text-gray-900 font-medium">Editar entrega e contato</p>
@@ -848,7 +848,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       )}
 
       {editOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setEditOpen(false)}>
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
             <p className="text-gray-900 font-medium mb-4">{editIndex === null ? "Adicionar produto" : "Editar produto"}</p>
             <div className="space-y-3">
@@ -1059,7 +1059,7 @@ function PortfolioGaleriaCliente({ ofertaId, midias }: { ofertaId: string; midia
       </div>
 
       {aberto !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" onClick={() => setAberto(null)} role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setAberto(null); }} role="dialog" aria-modal="true">
           <button type="button" onClick={() => setAberto(null)} className="absolute top-4 right-4 h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl leading-none" aria-label="Fechar">×</button>
           {midias.length > 1 && (
             <>
