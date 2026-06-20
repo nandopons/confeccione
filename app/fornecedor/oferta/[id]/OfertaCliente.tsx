@@ -40,6 +40,7 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
   const [status, setStatus] = useState(oferta.status)
   const [enviando, setEnviando] = useState<null | 'aceitar' | 'recusar'>(null)
   const [erro, setErro] = useState<string | null>(null)
+  const [lightbox, setLightbox] = useState<number | null>(null)
 
   async function responder(acao: 'aceitar' | 'recusar') {
     setEnviando(acao)
@@ -91,15 +92,25 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
       <div className="px-6 py-5 border-b border-gray-100">
         <h2 className="text-sm font-semibold text-gray-700 mb-3">Visualizadores do cliente</h2>
         {imgs.length > 0 ? (
-          <div className="space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {imgs.map((i) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <button
                 key={i}
-                src={`/api/pedido/assistente/${oferta.pedidoId}/imagem?i=${i}`}
-                alt={`Visualizador ${i + 1}`}
-                className="w-full rounded-lg border border-gray-200"
-              />
+                type="button"
+                onClick={() => setLightbox(i)}
+                className="group relative block aspect-square overflow-hidden rounded-lg border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#1D9E75]"
+                aria-label={`Abrir visualizador ${i + 1} em tela cheia`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`/api/pedido/assistente/${oferta.pedidoId}/imagem?i=${i}`}
+                  alt={`Visualizador ${i + 1}`}
+                  className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                />
+                <span className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/20 transition-colors">
+                  <span className="opacity-0 group-hover:opacity-100 text-white text-xs font-medium bg-black/50 rounded-full px-2.5 py-1 transition-opacity">Ampliar</span>
+                </span>
+              </button>
             ))}
           </div>
         ) : (
@@ -199,6 +210,56 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
 
       {(status === 'ofertada' || status === 'aceita') && (
         <PerguntasFornecedor ofertaId={oferta.ofertaId} />
+      )}
+
+      {lightbox !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+          onClick={() => setLightbox(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            className="absolute top-4 right-4 h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl leading-none"
+            aria-label="Fechar"
+          >
+            ×
+          </button>
+          {imgs.length > 1 && (
+            <>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setLightbox((lightbox - 1 + imgs.length) % imgs.length) }}
+                className="absolute left-3 sm:left-6 h-11 w-11 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl"
+                aria-label="Anterior"
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setLightbox((lightbox + 1) % imgs.length) }}
+                className="absolute right-3 sm:right-6 h-11 w-11 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl"
+                aria-label="Próximo"
+              >
+                ›
+              </button>
+            </>
+          )}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/pedido/assistente/${oferta.pedidoId}/imagem?i=${lightbox}`}
+            alt={`Visualizador ${lightbox + 1}`}
+            className="max-h-[90vh] max-w-[92vw] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+          {imgs.length > 1 && (
+            <span className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-xs bg-black/40 rounded-full px-3 py-1">
+              {lightbox + 1} / {imgs.length}
+            </span>
+          )}
+        </div>
       )}
     </div>
   )
