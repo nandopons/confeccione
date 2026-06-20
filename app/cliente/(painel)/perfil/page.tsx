@@ -36,20 +36,16 @@ export default async function PerfilPage({
           email={conta.email}
           nomeInicial={conta.nome ?? ''}
           whatsappInicial={conta.whatsapp ?? ''}
+          cepInicial={conta.cep ?? ''}
+          numeroInicial={conta.numero ?? ''}
+          complementoInicial={conta.complemento ?? ''}
+          logradouroInicial={conta.logradouro ?? ''}
+          bairroInicial={conta.bairro ?? ''}
+          cidadeInicial={conta.cidade ?? ''}
+          ufInicial={conta.uf ?? ''}
           completar={modoCompletar}
         />
       </div>
-
-      {!modoCompletar && (
-        <div className="bg-white border border-gray-200 rounded-2xl p-5 mt-6">
-          <div className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
-            Seu plano
-          </div>
-          <div className="text-lg font-semibold text-gray-900 mt-0.5 capitalize">
-            {conta.plano}
-          </div>
-        </div>
-      )}
     </section>
   )
 }

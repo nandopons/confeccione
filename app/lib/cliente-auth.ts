@@ -52,6 +52,13 @@ export type ContaCliente = {
   plano: 'free' | 'pro'
   plano_ativado_em: string | null
   plano_expira_em: string | null
+  cep: string | null
+  numero: string | null
+  complemento: string | null
+  logradouro: string | null
+  bairro: string | null
+  cidade: string | null
+  uf: string | null
   criado_em: string
   atualizado_em: string
   ultimo_login_em: string | null
