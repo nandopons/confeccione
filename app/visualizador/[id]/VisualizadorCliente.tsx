@@ -54,7 +54,11 @@ export type PedidoVis = {
   frete_centavos?: number | null;
   pagamento_status?: string | null;
   fornecedor_nome?: string | null;
+  oferta_id?: string | null;
+  fornecedor_portfolio?: PortfolioMidiaVis[];
 };
+
+type PortfolioMidiaVis = { path: string; mime: string | null; tipo: 'imagem' | 'video'; nome: string };
 
 type ImgEstado = { loading?: boolean; urls?: string[]; motivo?: string };
 
@@ -571,6 +575,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           {pedido.fornecedor_nome && (
             <p className="text-xs text-gray-600 mt-1.5">Quem vai produzir: <strong className="text-gray-900">{pedido.fornecedor_nome}</strong></p>
           )}
+          {pedido.oferta_id && (pedido.fornecedor_portfolio?.length ?? 0) > 0 && (
+            <PortfolioGaleriaCliente ofertaId={pedido.oferta_id} midias={pedido.fornecedor_portfolio!} />
+          )}
           <div className="mt-4 divide-y divide-gray-100 border-y border-gray-100">
             {linhas.map((l, i) => {
               const qtd = l.total ?? (l.tamanhos || []).reduce((a, t) => a + (t.qtd ?? 0), 0);
@@ -1000,6 +1007,61 @@ function PerguntasCliente({ pedidoId }: { pedidoId: string }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function PortfolioGaleriaCliente({ ofertaId, midias }: { ofertaId: string; midias: PortfolioMidiaVis[] }) {
+  const [aberto, setAberto] = useState<number | null>(null);
+  if (!midias || midias.length === 0) return null;
+  return (
+    <div className="mt-3">
+      <p className="text-xs font-medium text-gray-700">📸 Trabalhos do fornecedor</p>
+      <p className="text-[11px] text-gray-500 mt-0.5">Fotos e vídeos de peças parecidas com o seu pedido, enviados por quem vai produzir.</p>
+      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2">
+        {midias.map((m, i) => (
+          <button
+            key={m.path}
+            type="button"
+            onClick={() => setAberto(i)}
+            className="relative group aspect-square overflow-hidden rounded-lg border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#1D9E75]"
+            aria-label={`Abrir ${m.tipo === "video" ? "vídeo" : "foto"} ${i + 1}`}
+          >
+            {m.tipo === "video" ? (
+              <>
+                <video src={`/api/oferta/${ofertaId}/portfolio/${i}`} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+                <span className="absolute inset-0 flex items-center justify-center">
+                  <span className="h-7 w-7 rounded-full bg-black/55 text-white flex items-center justify-center text-xs">▶</span>
+                </span>
+              </>
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={`/api/oferta/${ofertaId}/portfolio/${i}`} alt={m.nome} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      {aberto !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" onClick={() => setAberto(null)} role="dialog" aria-modal="true">
+          <button type="button" onClick={() => setAberto(null)} className="absolute top-4 right-4 h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl leading-none" aria-label="Fechar">×</button>
+          {midias.length > 1 && (
+            <>
+              <button type="button" onClick={(e) => { e.stopPropagation(); setAberto((aberto - 1 + midias.length) % midias.length); }} className="absolute left-3 sm:left-6 h-11 w-11 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl" aria-label="Anterior">‹</button>
+              <button type="button" onClick={(e) => { e.stopPropagation(); setAberto((aberto + 1) % midias.length); }} className="absolute right-3 sm:right-6 h-11 w-11 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl" aria-label="Próximo">›</button>
+            </>
+          )}
+          {midias[aberto].tipo === "video" ? (
+            <video src={`/api/oferta/${ofertaId}/portfolio/${aberto}`} className="max-h-[90vh] max-w-[92vw] rounded-lg shadow-2xl" controls autoPlay playsInline onClick={(e) => e.stopPropagation()} />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={`/api/oferta/${ofertaId}/portfolio/${aberto}`} alt={midias[aberto].nome} className="max-h-[90vh] max-w-[92vw] object-contain rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
+          )}
+          {midias.length > 1 && (
+            <span className="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-xs bg-black/40 rounded-full px-3 py-1">{aberto + 1} / {midias.length}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

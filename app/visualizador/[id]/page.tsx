@@ -62,14 +62,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
   // Fornecedor da oferta aceita (mostrado no orçamento final).
   let fornecedorNome: string | null = null
+  let ofertaId: string | null = null
+  let fornecedorPortfolio: unknown[] = []
   if (pedido) {
     const { data: oferta } = await supabase
       .from('ofertas_pedido_assistente')
-      .select('status, leads_fornecedores(nome)')
+      .select('id, status, portfolio_midias, leads_fornecedores(nome)')
       .eq('pedido_id', pedido.id)
       .eq('status', 'aceita')
-      .maybeSingle<{ status: string; leads_fornecedores: { nome: string | null } | null }>()
+      .maybeSingle<{ id: string; status: string; portfolio_midias: unknown[] | null; leads_fornecedores: { nome: string | null } | null }>()
     fornecedorNome = oferta?.leads_fornecedores?.nome ?? null
+    ofertaId = oferta?.id ?? null
+    fornecedorPortfolio = Array.isArray(oferta?.portfolio_midias) ? oferta!.portfolio_midias : []
   }
 
   return (
@@ -86,7 +90,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           </Link>
         </div>
       ) : (
-        <VisualizadorCliente pedido={{ ...(pedido as PedidoVis), fornecedor_nome: fornecedorNome }} />
+        <VisualizadorCliente pedido={{ ...(pedido as PedidoVis), fornecedor_nome: fornecedorNome, oferta_id: ofertaId, fornecedor_portfolio: fornecedorPortfolio as PedidoVis['fornecedor_portfolio'] }} />
       )}
       <SiteFooter />
     </main>

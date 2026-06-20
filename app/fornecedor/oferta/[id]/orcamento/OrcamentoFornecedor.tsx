@@ -7,6 +7,7 @@
 
 import { useMemo, useState } from 'react'
 import type { OrcamentoFornecedorDados } from '@/app/lib/pedido-assistente-oferta'
+import PortfolioUploader from './PortfolioUploader'
 
 const TAXA = 0.03
 
@@ -145,6 +146,8 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
               </label>
               <p className="text-[11px] text-gray-400 mt-1">Deixe 0,00 se o frete já está embutido nos produtos.</p>
             </div>
+
+            <PortfolioUploader ofertaId={dados.ofertaId} inicial={dados.portfolio} />
 
             <div className="rounded-xl border-2 border-emerald-600/30 bg-emerald-50/50 px-4 py-3.5">
               <div className="flex justify-between text-sm text-gray-700"><span>Você recebe (produtos + frete)</span><strong>{brl(calc.liquido)}</strong></div>
