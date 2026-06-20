@@ -27,6 +27,7 @@ export type Linha = {
   estampas: Estampa[];
   estampado: boolean | null;
   descricao: string | null;
+  preco_unit_centavos?: number | null;
 };
 
 function brl(c: number): string {
@@ -551,13 +552,30 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           {pedido.fornecedor_nome && (
             <p className="text-xs text-gray-600 mt-1.5">Quem vai produzir: <strong className="text-gray-900">{pedido.fornecedor_nome}</strong></p>
           )}
-          <div className="mt-4 text-sm space-y-1.5">
-            <div className="flex justify-between text-gray-600"><span>Produtos</span><span>{brl(produtosCliente)}</span></div>
+          <div className="mt-4 divide-y divide-gray-100 border-y border-gray-100">
+            {linhas.map((l, i) => {
+              const qtd = l.total ?? (l.tamanhos || []).reduce((a, t) => a + (t.qtd ?? 0), 0);
+              const unitCliente = l.preco_unit_centavos != null ? Math.round(l.preco_unit_centavos / (1 - 0.03)) : null;
+              const subtotal = unitCliente != null ? unitCliente * (qtd || 0) : null;
+              const nome = [l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ") || `Produto ${i + 1}`;
+              return (
+                <div key={i} className="py-2.5 flex items-start justify-between gap-3 text-sm">
+                  <div className="min-w-0">
+                    <p className="text-gray-800 capitalize truncate">{nome}</p>
+                    <p className="text-xs text-gray-500">{qtd || "?"} un{unitCliente != null ? ` × ${brl(unitCliente)}` : ""}</p>
+                  </div>
+                  <span className="text-gray-900 font-medium shrink-0">{subtotal != null ? brl(subtotal) : brl(produtosCliente)}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-3 text-sm space-y-1.5">
+            <div className="flex justify-between text-gray-600"><span>Subtotal dos produtos</span><span>{brl(produtosCliente)}</span></div>
             <div className="flex justify-between text-gray-600"><span>Frete</span><span>{freteCliente > 0 ? brl(freteCliente) : "incluso"}</span></div>
           </div>
           <div className="mt-3 pt-3 border-t border-gray-200 flex items-center justify-between gap-3">
-            <p className="text-sm font-medium text-gray-900">Total</p>
-            <p className="text-2xl font-bold text-[#0F6E56] leading-tight">{brl(pedido.valor_centavos ?? 0)}</p>
+            <p className="text-sm font-medium text-gray-900">Valor total</p>
+            <p className="text-xl font-bold text-[#0F6E56] leading-tight">{brl(pedido.valor_centavos ?? 0)}</p>
           </div>
           {!pago ? (
             <>
