@@ -46,7 +46,7 @@ export default function RootLayout({
         </Script>
         {/* Microsoft Clarity — gravação de sessões + heatmaps. ID público (visível no HTML); pode ser sobrescrito por NEXT_PUBLIC_CLARITY_ID na Vercel. */}
         <Script id="clarity-script" strategy="afterInteractive">
-          {`(function(c,l,a,r,i,t,y){c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);})(window,document,"clarity","script","${process.env.NEXT_PUBLIC_CLARITY_ID || 'x9qlu1huv8'}");`}
+          {`(function(){try{var p=new URLSearchParams(location.search);if(p.get('clarity')==='off'){localStorage.setItem('clarity_off','1');}if(p.get('clarity')==='on'){localStorage.removeItem('clarity_off');}if(localStorage.getItem('clarity_off')==='1'){return;}}catch(e){}(function(c,l,a,r,i,t,y){c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);})(window,document,"clarity","script","${process.env.NEXT_PUBLIC_CLARITY_ID || 'x9qlu1huv8'}");})();`}
         </Script>
       </head>
       <body className="min-h-full flex flex-col">
