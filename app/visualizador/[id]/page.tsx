@@ -21,7 +21,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
   const { data } = await supabase
     .from('pedidos_assistente')
-    .select('id, linhas, nome, telefone, email, cep, complemento, logradouro, bairro, cidade, uf, status, mockups, prazo_dias, confirmado_em, orcamento_status, valor_centavos, frete_centavos, pagamento_status')
+    .select('id, conta_id, linhas, nome, telefone, email, cep, complemento, logradouro, bairro, cidade, uf, status, mockups, prazo_dias, confirmado_em, orcamento_status, valor_centavos, frete_centavos, pagamento_status')
     .eq('id', id)
     .single()
 
@@ -34,6 +34,29 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       const patchEnd = { logradouro: end.logradouro, bairro: end.bairro, cidade: end.cidade, uf: end.uf, atualizado_em: new Date().toISOString() }
       await supabase.from('pedidos_assistente').update(patchEnd).eq('id', pedido.id)
       pedido = { ...pedido, ...patchEnd }
+    }
+  }
+  // Pré-preenche a ENTREGA do pedido com o endereço do PERFIL do cliente
+  // (contas_clientes), quando o pedido ainda não tem CEP e está vinculado a uma conta.
+  if (pedido && !pedido.cep && pedido.conta_id) {
+    const { data: conta } = await supabase
+      .from('contas_clientes')
+      .select('cep, numero, complemento, logradouro, bairro, cidade, uf')
+      .eq('id', pedido.conta_id)
+      .maybeSingle<{ cep: string | null; numero: string | null; complemento: string | null; logradouro: string | null; bairro: string | null; cidade: string | null; uf: string | null }>()
+    if (conta?.cep) {
+      const complementoPerfil = [conta.numero, conta.complemento].filter(Boolean).join(' - ') || null
+      const patchPerfil = {
+        cep: conta.cep,
+        complemento: pedido.complemento || complementoPerfil,
+        logradouro: conta.logradouro,
+        bairro: conta.bairro,
+        cidade: conta.cidade,
+        uf: conta.uf,
+        atualizado_em: new Date().toISOString(),
+      }
+      await supabase.from('pedidos_assistente').update(patchPerfil).eq('id', pedido.id)
+      pedido = { ...pedido, ...patchPerfil }
     }
   }
 
