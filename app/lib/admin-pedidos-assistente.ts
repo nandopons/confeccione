@@ -116,8 +116,9 @@ export async function detalharPedidoChat(id: string): Promise<PedidoChatDetalhe 
 
 // Bytes de um mockup salvo (liso/arte) de uma linha — pro admin renderizar.
 export async function imagemMockup(id: string, linha: number, tipo: 'liso' | 'arte'): Promise<{ mime: string; bytes: Buffer } | null> {
-  const { data } = await supabaseAdmin.from('pedidos_assistente').select('mockups').eq('id', id).maybeSingle<{ mockups: Record<string, { liso?: string; arte?: string }> | null }>()
-  const dataUrl = data?.mockups?.[String(linha)]?.[tipo]
+  const { data } = await supabaseAdmin.from('pedidos_assistente').select('mockups').eq('id', id).maybeSingle<{ mockups: Record<string, { liso?: string; arte?: string; fotos?: string[] }> | null }>()
+  const mk = data?.mockups?.[String(linha)]
+  const dataUrl = mk?.[tipo] ?? mk?.fotos?.[0]
   if (!dataUrl) return null
   const m = /^data:([^;,]+);base64,(.+)$/.exec(dataUrl)
   if (!m) return null
