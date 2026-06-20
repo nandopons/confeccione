@@ -1,3 +1,4 @@
+import type { PortfolioMidia } from '@/app/lib/orcamento-portfolio'
 // app/lib/pedido-assistente-oferta.ts
 // ============================================================================
 // Oferta de pedidos CONFIRMADOS (pedidos_assistente) a fornecedores escolhidos
@@ -701,6 +702,7 @@ export type OrcamentoFornecedorDados = {
   jaDefinido: boolean
   pago: boolean
   definidoEm: string | null
+  portfolio: PortfolioMidia[]
 }
 
 function qtdDaLinha(l: LinhaPedido): number {
@@ -712,7 +714,7 @@ function qtdDaLinha(l: LinhaPedido): number {
 export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<OrcamentoFornecedorDados | null> {
   const { data: oferta } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
-    .select('id, pedido_id, status, leads_fornecedores(nome)')
+    .select('id, pedido_id, status, portfolio_midias, leads_fornecedores(nome)')
     .eq('id', ofertaId)
     .maybeSingle<any>()
   if (!oferta || oferta.status !== 'aceita') return null
@@ -773,6 +775,7 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
     jaDefinido,
     pago: pedido.pagamento_status === 'pago',
     definidoEm: pedido.orcamento_definido_em ?? null,
+    portfolio: Array.isArray(oferta.portfolio_midias) ? oferta.portfolio_midias : [],
   }
 }
 
