@@ -11,6 +11,7 @@ export type PedidoClienteAssistente = {
   pagamentoStatus: string | null
   valorCentavos: number | null
   criadoEm: string
+  codigo: string | null
   totalPecas: number
   resumo: string
   numImagens: number
@@ -21,7 +22,7 @@ export async function pedidosAssistenteDoCliente(email: string | null | undefine
   const emailNorm = email.trim().toLowerCase()
   const { data } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, status, pagamento_status, valor_centavos, criado_em, linhas, imagens')
+    .select('id, codigo, status, pagamento_status, valor_centavos, criado_em, linhas, imagens')
     .ilike('email', emailNorm)
     .order('criado_em', { ascending: false })
 
@@ -30,6 +31,7 @@ export async function pedidosAssistenteDoCliente(email: string | null | undefine
     const { totalPecas, texto } = resumirLinhas(linhas)
     return {
       id: p.id,
+      codigo: p.codigo ?? null,
       status: p.status ?? null,
       pagamentoStatus: p.pagamento_status ?? null,
       valorCentavos: p.valor_centavos ?? null,

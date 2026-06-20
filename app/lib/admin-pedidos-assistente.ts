@@ -16,6 +16,7 @@ type LinhaJson = {
 
 export type PedidoChatResumo = {
   id: string
+  codigo: string | null
   criadoEm: string
   nome: string | null
   telefone: string | null
@@ -44,7 +45,7 @@ function totalEResumo(linhas: LinhaJson[]): { totalPecas: number; resumo: string
 export async function listarPedidosChat(filtro: 'incompletos' | 'todos'): Promise<PedidoChatResumo[]> {
   let q = supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, criado_em, nome, telefone, email, status, pagamento_status, valor_centavos, linhas')
+    .select('id, codigo, criado_em, nome, telefone, email, status, pagamento_status, valor_centavos, linhas')
     .order('criado_em', { ascending: false })
     .limit(200)
   if (filtro === 'incompletos') q = q.neq('pagamento_status', 'pago')
@@ -68,7 +69,7 @@ export async function listarPedidosChat(filtro: 'incompletos' | 'todos'): Promis
     const linhas = Array.isArray(p.linhas) ? (p.linhas as LinhaJson[]) : []
     const { totalPecas, resumo } = totalEResumo(linhas)
     return {
-      id: p.id, criadoEm: p.criado_em, nome: p.nome, telefone: p.telefone, email: p.email,
+      id: p.id, codigo: p.codigo ?? null, criadoEm: p.criado_em, nome: p.nome, telefone: p.telefone, email: p.email,
       status: p.status, pagamentoStatus: p.pagamento_status, valorCentavos: p.valor_centavos,
       totalPecas, resumo, concluido: p.pagamento_status === 'pago',
       ofertaStatus: ofertaPorPedido.get(p.id) ?? null,
@@ -79,6 +80,7 @@ export async function listarPedidosChat(filtro: 'incompletos' | 'todos'): Promis
 export type ConversaItem = { role: 'user' | 'assistant'; texto: string }
 export type PedidoChatDetalhe = {
   id: string
+  codigo: string | null
   contato: {
     nome: string | null; telefone: string | null; email: string | null
     cep: string | null; numero: string | null; complemento: string | null
@@ -93,7 +95,7 @@ export type PedidoChatDetalhe = {
 export async function detalharPedidoChat(id: string): Promise<PedidoChatDetalhe | null> {
   const { data } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, nome, telefone, email, cep, numero, complemento, logradouro, bairro, cidade, uf, prazo_dias, linhas, conversa, mockups')
+    .select('id, codigo, nome, telefone, email, cep, numero, complemento, logradouro, bairro, cidade, uf, prazo_dias, linhas, conversa, mockups')
     .eq('id', id)
     .maybeSingle<any>()
   if (!data) return null
@@ -103,6 +105,7 @@ export async function detalharPedidoChat(id: string): Promise<PedidoChatDetalhe 
     .map((i) => ({ index: i, temLiso: !!mockupsRaw[String(i)]?.liso, temArte: !!mockupsRaw[String(i)]?.arte }))
   return {
     id: data.id,
+    codigo: data.codigo ?? null,
     contato: {
       nome: data.nome, telefone: data.telefone, email: data.email,
       cep: data.cep, numero: data.numero, complemento: data.complemento, logradouro: data.logradouro,
