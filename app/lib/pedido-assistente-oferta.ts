@@ -372,19 +372,66 @@ async function notificarFornecedorAceite(ofertaId: string, pedidoId: string, for
 
     const linkOrcamento = `${SITE_URL}/fornecedor/oferta/${ofertaId}/orcamento`
     const local = [pedido.cidade, pedido.uf].filter(Boolean).join('/')
-    const mensagem =
-      `🎉 *Pedido confirmado pra você!*\n\n` +
-      `Contato do cliente pra combinar os detalhes:\n` +
-      `👤 ${pedido.nome ?? 'Cliente Confeccione'}\n` +
-      (pedido.telefone ? `📱 ${telBR(pedido.telefone)}\n` : '') +
-      (pedido.email ? `✉️ ${pedido.email}\n` : '') +
-      (local ? `📍 ${local}\n` : '') +
-      (pedido.pagamento_status === 'pago'
-        ? `\n✅ Este pedido já está pago — pode iniciar a produção.`
-        : `\n💰 *Agora defina o orçamento final* (seu valor por produto + frete). O cliente recebe por e-mail e WhatsApp pra aprovar e pagar:\n${linkOrcamento}`)
+    const mensagem = pedido.pagamento_status === 'pago'
+      ? `🎉 *Pedido assumido!*\n\n✅ Este pedido já está pago — pode iniciar a produção. Os dados de contato do cliente já estão liberados na página do pedido.`
+      : (
+        `🎉 *Pedido assumido!*\n\n` +
+        `Você assumiu este pedido.` +
+        (local ? `\n📍 Entrega: ${local} (use pra calcular o frete)` : '') +
+        `\n\n💰 *Agora defina o orçamento final* (seu valor por produto + frete). O cliente recebe pra aprovar e pagar:\n${linkOrcamento}` +
+        `\n\n🔒 Os dados de contato do cliente são liberados *após o pagamento*.`
+      )
     await enviarMensagem(forn.whatsapp, mensagem)
   } catch (e) {
     console.error('[oferta] notificação de aceite falhou', ofertaId, e)
+  }
+}
+
+// Pedido PAGO → revela os contatos dos dois lados (cliente <-> fornecedor),
+// um pra cada via WhatsApp. Só aqui os dados pessoais são trocados.
+export async function revelarContatosPedidoPago(pedidoId: string): Promise<void> {
+  try {
+    const { data: pedido } = await supabaseAdmin
+      .from('pedidos_assistente')
+      .select('id, nome, telefone, email, cidade, uf')
+      .eq('id', pedidoId)
+      .maybeSingle<{ id: string; nome: string | null; telefone: string | null; email: string | null; cidade: string | null; uf: string | null }>()
+    if (!pedido) return
+
+    const { data: oferta } = await supabaseAdmin
+      .from('ofertas_pedido_assistente')
+      .select('id, leads_fornecedores(nome, whatsapp)')
+      .eq('pedido_id', pedidoId)
+      .eq('status', 'aceita')
+      .maybeSingle<{ id: string; leads_fornecedores: { nome: string | null; whatsapp: string | null } | null }>()
+    const forn = oferta?.leads_fornecedores ?? null
+    const local = [pedido.cidade, pedido.uf].filter(Boolean).join('/')
+
+    // → para o FORNECEDOR: contato do cliente + libera produção
+    if (forn?.whatsapp) {
+      const msg =
+        `✅ *Pagamento confirmado!*\n\n` +
+        `O cliente pagou — *pode iniciar a produção*.\n\n` +
+        `Contato do cliente pra combinar produção e entrega:\n` +
+        `👤 ${pedido.nome ?? 'Cliente Confeccione'}\n` +
+        (pedido.telefone ? `📱 ${telBR(pedido.telefone)}\n` : '') +
+        (pedido.email ? `✉️ ${pedido.email}\n` : '') +
+        (local ? `📍 ${local}` : '')
+      await enviarMensagem(forn.whatsapp, msg)
+    }
+
+    // → para o CLIENTE: quem vai produzir + contato do fornecedor
+    if (pedido.telefone && forn) {
+      const msg =
+        `✅ *Pagamento confirmado!*\n\n` +
+        `Quem vai produzir o seu pedido:\n` +
+        `🏭 ${forn.nome ?? 'Confecção parceira'}\n` +
+        (forn.whatsapp ? `📱 ${telBR(forn.whatsapp)}\n` : '') +
+        `\nVocê pode combinar os detalhes direto com a confecção. O pagamento fica garantido pela Confeccione até você confirmar o recebimento. 💚`
+      await enviarMensagem(pedido.telefone, msg)
+    }
+  } catch (e) {
+    console.error('[oferta] revelar contatos (pago) falhou', pedidoId, e)
   }
 }
 
