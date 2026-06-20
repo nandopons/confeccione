@@ -68,6 +68,7 @@ export async function GET(req: NextRequest) {
       'id, nome, estado, status, tipos_produto, pedido_minimo, raio_atendimento'
     )
     .eq('status', STATUS_FORNECEDOR_ATIVO)
+    .eq('aprovacao_status', 'aprovado')
 
   if (fErr) {
     console.error('[fornecedores-compativeis] SELECT fornecedores falhou:', fErr)

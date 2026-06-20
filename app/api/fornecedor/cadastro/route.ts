@@ -83,6 +83,7 @@ export async function POST(req: Request) {
       .from('leads_fornecedores')
       .insert({
         ...payload,
+        aprovacao_status: 'pendente',
         plano: 'pro',
         plano_ativado_em: new Date().toISOString(),
         plano_expira_em: planoExpiraEm,
@@ -99,39 +100,39 @@ export async function POST(req: Request) {
     fornecedorId = (novo as { id: string }).id
   }
 
-  // Sprint 1 — matching retroativo de pedidos órfãos.
-  // Roda em background via after() pra não bloquear a resposta do cadastro
-  // (matchingRetroativo varre órfãos abertos, dispara criarEDispararOferta
-  // pros compatíveis — pode levar segundos). Cobre INSERT (novo fornecedor)
-  // E UPDATE (edição que mudou tipo/raio/estado/status — pode passar a
-  // atender órfãos diferentes). Idempotência da função protege contra
-  // disparos redundantes. Failure-soft: erro só logga, não afeta o cadastro.
-  after(async () => {
-    try {
-      const resultado = await matchingRetroativo(fornecedorId)
-      console.log(
-        `[cadastro-callback] fornecedor=${fornecedorId} ` +
-          `ofertasDisparadas=${resultado.ofertasDisparadas} ` +
-          `orfaosComOfertaAtiva=${resultado.orfaosComOfertaAtiva.length}`
-      )
-    } catch (err) {
-      console.error(
-        `[cadastro-callback] matchingRetroativo falhou pra ${fornecedorId}:`,
-        err
-      )
-    }
-  })
-
-  await enviarMensagem(
-    numero,
-    `Olá ${nome}! 🎉\n\nSeu cadastro no *Confeccione* foi confirmado.\n\n🎁 *Bônus de cadastro:* você ganhou 90 dias do plano *Pro* gratuitos! Isso significa até 30 pedidos por mês durante esse período.\n\nEm breve você vai receber pedidos de clientes que batem com o perfil da sua produção. Quando um pedido chegar, basta responder se quer ou não atender.\n\nQualquer dúvida é só chamar aqui mesmo! 🚀`
-  )
-
-  if (email) {
-    try {
-      await emailBoasVindasFornecedor({ email, nome })
-    } catch (err) {
-      console.error('email boas-vindas falhou:', err)
+  // Edição de cadastro (fornecedor já existente e já aprovado no passado):
+  // mantém o comportamento antigo — dispara matching retroativo e confirma.
+  // Cadastro NOVO entra como PENDENTE: não recebe pedidos até a equipe
+  // aprovar o perfil (gate em matching.ts / fornecedores-compativeis).
+  if (existente) {
+    after(async () => {
+      try {
+        const resultado = await matchingRetroativo(fornecedorId)
+        console.log(
+          `[cadastro-callback] fornecedor=${fornecedorId} ` +
+            `ofertasDisparadas=${resultado.ofertasDisparadas} ` +
+            `orfaosComOfertaAtiva=${resultado.orfaosComOfertaAtiva.length}`
+        )
+      } catch (err) {
+        console.error(
+          `[cadastro-callback] matchingRetroativo falhou pra ${fornecedorId}:`,
+          err
+        )
+      }
+    })
+  } else {
+    // Cadastro novo — avisa que o perfil está em análise (não promete bônus
+    // nem pedidos ainda; isso vem quando a equipe aprovar no admin).
+    await enviarMensagem(
+      numero,
+      `Olá ${nome}! 🙌\n\nRecebemos seu cadastro no *Confeccione*.\n\n🔎 *Seu perfil está em análise.* Nossa equipe revisa cada fornecedor antes de liberar o acesso aos pedidos — isso garante a qualidade da nossa rede.\n\nAssim que aprovarmos (normalmente em até 1 dia útil), você recebe um aviso aqui e já começa a receber pedidos compatíveis com a sua produção. 🚀`
+    )
+    if (email) {
+      try {
+        await emailBoasVindasFornecedor({ email, nome })
+      } catch (err) {
+        console.error('email boas-vindas falhou:', err)
+      }
     }
   }
 

@@ -94,6 +94,13 @@ const SECOES: Secao[] = [
         ),
       },
       {
+        href: '/admin/fornecedores-pendentes',
+        label: 'Aprovações',
+        icone: (
+          <Ico d="M20 6L9 17l-5-5" />
+        ),
+      },
+      {
         href: '/admin/captacao',
         label: 'Captação',
         icone: (
