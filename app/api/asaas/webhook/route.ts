@@ -25,6 +25,7 @@ import { NextResponse } from 'next/server'
 import { mapearStatusAsaas, type AsaasPaymentStatus } from '@/app/lib/asaas-payments'
 import { PLANOS_CONFIG, creditarLoteAvulso, type Plano } from '@/app/lib/planos'
 import { enviarMensagem } from '@/app/lib/zapi'
+import { revelarContatosPedidoPago } from '@/app/lib/pedido-assistente-oferta'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -357,10 +358,22 @@ async function marcarPedidoAssistentePago(
   payment: NonNullable<AsaasWebhookPayload['payment']>
 ): Promise<void> {
   try {
+    const { data: antes } = await supabase
+      .from('pedidos_assistente')
+      .select('id, pagamento_status')
+      .eq('asaas_payment_id', payment.id)
+      .maybeSingle<{ id: string; pagamento_status: string | null }>()
+    if (!antes) return
+
     await supabase
       .from('pedidos_assistente')
       .update({ pagamento_status: 'pago', atualizado_em: new Date().toISOString() })
       .eq('asaas_payment_id', payment.id)
+
+    // só revela contatos na TRANSIÇÃO pra pago (evita reenvio em webhooks repetidos)
+    if (antes.pagamento_status !== 'pago') {
+      await revelarContatosPedidoPago(antes.id)
+    }
   } catch (err) {
     console.error('[asaas-webhook] marcar pedido pago falhou:', err)
   }
