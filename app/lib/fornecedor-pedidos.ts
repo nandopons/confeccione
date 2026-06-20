@@ -9,6 +9,13 @@
 import { supabaseAdmin } from './supabase-server'
 import { resumirLinhas, type LinhaPedido, type StatusOferta } from './pedido-assistente-oferta'
 
+// Estado derivado de uma oferta ACEITA, conforme o pagamento REAL do cliente:
+//  - 'orcar'              -> aceita, mas orcamento ainda nao enviado (orcamento_status !== 'definido')
+//  - 'aguardando_cliente' -> orcamento enviado, mas cliente AINDA NAO pagou
+//  - 'producao'           -> cliente PAGOU; fornecedor pode produzir; este e o real "a receber"
+//  - 'concluido'          -> Confeccione ja repassou o valor ao fornecedor (repasse pago)
+export type EstadoOferta = 'orcar' | 'aguardando_cliente' | 'producao' | 'concluido'
+
 export type OfertaFornecedor = {
   ofertaId: string
   pedidoId: string
@@ -20,6 +27,11 @@ export type OfertaFornecedor = {
   resumo: string
   numImagens: number
   linhas: LinhaPedido[]
+  pagamentoStatus: string | null
+  orcamentoStatus: string | null
+  prazoDias: number | null
+  clienteNome: string | null
+  estado: EstadoOferta
 }
 
 type Row = {
@@ -29,12 +41,33 @@ type Row = {
   repasse_status: 'a_receber' | 'pago'
   valor_repasse_centavos: number | null
   criado_em: string
-  pedidos_assistente: { linhas: LinhaPedido[] | null; imagens: unknown[] | null } | null
+  pedidos_assistente: {
+    linhas: LinhaPedido[] | null
+    imagens: unknown[] | null
+    pagamento_status: string | null
+    orcamento_status: string | null
+    nome: string | null
+    prazo_dias: number | null
+  } | null
+}
+
+function derivarEstado(
+  orcamentoStatus: string | null,
+  pagamentoStatus: string | null,
+  repasseStatus: 'a_receber' | 'pago',
+): EstadoOferta {
+  if (repasseStatus === 'pago') return 'concluido'
+  if (pagamentoStatus === 'pago') return 'producao'
+  if (orcamentoStatus === 'definido') return 'aguardando_cliente'
+  return 'orcar'
 }
 
 function mapRow(o: Row): OfertaFornecedor {
-  const linhas = Array.isArray(o.pedidos_assistente?.linhas) ? (o.pedidos_assistente!.linhas as LinhaPedido[]) : []
+  const ped = o.pedidos_assistente
+  const linhas = Array.isArray(ped?.linhas) ? (ped!.linhas as LinhaPedido[]) : []
   const { totalPecas, texto } = resumirLinhas(linhas)
+  const pagamentoStatus = ped?.pagamento_status ?? null
+  const orcamentoStatus = ped?.orcamento_status ?? null
   return {
     ofertaId: o.id,
     pedidoId: o.pedido_id,
@@ -44,15 +77,20 @@ function mapRow(o: Row): OfertaFornecedor {
     criadoEm: o.criado_em,
     totalPecas,
     resumo: texto,
-    numImagens: Array.isArray(o.pedidos_assistente?.imagens) ? o.pedidos_assistente!.imagens!.length : 0,
+    numImagens: Array.isArray(ped?.imagens) ? ped!.imagens!.length : 0,
     linhas,
+    pagamentoStatus,
+    orcamentoStatus,
+    prazoDias: ped?.prazo_dias ?? null,
+    clienteNome: ped?.nome ?? null,
+    estado: derivarEstado(orcamentoStatus, pagamentoStatus, o.repasse_status),
   }
 }
 
 async function buscar(fornecedorId: string, status: StatusOferta[]): Promise<OfertaFornecedor[]> {
   const { data } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
-    .select('id, pedido_id, status, repasse_status, valor_repasse_centavos, criado_em, pedidos_assistente(linhas, imagens)')
+    .select('id, pedido_id, status, repasse_status, valor_repasse_centavos, criado_em, pedidos_assistente(linhas, imagens, pagamento_status, orcamento_status, nome, prazo_dias)')
     .eq('fornecedor_id', fornecedorId)
     .in('status', status)
     .order('criado_em', { ascending: false })
@@ -70,8 +108,13 @@ export async function pedidosAceitosFornecedor(fornecedorId: string) {
 // Carteira
 // ---------------------------------------------------------------------------
 export type Carteira = {
+  // "A receber" SOMENTE conta pedidos que o CLIENTE realmente pagou e que
+  // ainda nao foram repassados ao fornecedor. Pedidos aguardando pagamento do
+  // cliente NAO entram aqui.
   saldoAReceberCentavos: number
   totalRecebidoCentavos: number
+  // Opcional: orcamentos enviados que ainda aguardam o cliente pagar.
+  aguardandoClienteCentavos: number
   itens: Array<{
     ofertaId: string
     pedidoId: string
@@ -87,14 +130,24 @@ export async function carteiraFornecedor(fornecedorId: string): Promise<Carteira
   const aceitas = await pedidosAceitosFornecedor(fornecedorId)
   let aReceber = 0
   let recebido = 0
+  let aguardandoCliente = 0
   for (const o of aceitas) {
     const v = o.valorRepasseCentavos ?? 0
-    if (o.repasseStatus === 'pago') recebido += v
-    else aReceber += v
+    if (o.repasseStatus === 'pago') {
+      // Confeccione ja repassou ao fornecedor.
+      recebido += v
+    } else if (o.pagamentoStatus === 'pago') {
+      // Cliente pagou e ainda nao houve repasse -> real "a receber".
+      aReceber += v
+    } else if (o.orcamentoStatus === 'definido') {
+      // Orcamento enviado, aguardando o cliente pagar -> nao conta como a receber.
+      aguardandoCliente += v
+    }
   }
   return {
     saldoAReceberCentavos: aReceber,
     totalRecebidoCentavos: recebido,
+    aguardandoClienteCentavos: aguardandoCliente,
     itens: aceitas.map((o) => ({
       ofertaId: o.ofertaId,
       pedidoId: o.pedidoId,
