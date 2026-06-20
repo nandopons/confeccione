@@ -38,6 +38,7 @@ const ContatoSchema = z.object({
   telefone: z.string().trim().max(20).nullable(),
   email: z.string().trim().email().max(160).nullable(),
   cep: z.string().trim().max(10).nullable(),
+  numero: z.string().trim().max(40).nullable().optional(),
   complemento: z.string().trim().max(120).nullable(),
 })
 const PatchSchema = z.object({
@@ -82,6 +83,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     patch.email = c.email
     const cepDigs = c.cep ? c.cep.replace(/\D/g, '') : ''
     patch.cep = cepDigs || null
+    if (c.numero !== undefined) patch.numero = c.numero
     patch.complemento = c.complemento
     if (cepDigs.length === 8) {
       const end = await buscarCep(cepDigs)
@@ -98,7 +100,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     .from('pedidos_assistente')
     .update(patch)
     .eq('id', id)
-    .select('id, linhas, status, nome, telefone, email, cep, complemento, logradouro, bairro, cidade, uf')
+    .select('id, linhas, status, nome, telefone, email, cep, numero, complemento, logradouro, bairro, cidade, uf')
     .single()
 
   if (error || !data) {
