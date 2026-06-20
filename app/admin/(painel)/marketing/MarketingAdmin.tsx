@@ -318,7 +318,7 @@ export default function MarketingAdmin({
                 max={60}
                 value={nDias}
                 onChange={(e) => setNDias(Math.max(1, Math.min(60, Number(e.target.value) || 1)))}
-                className="block mt-1 w-24 border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-[#1D9E75]"
+                className="block mt-1 w-24 border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-[#1D9E75]"
               />
             </label>
             <label className="text-xs text-gray-600">
@@ -329,7 +329,7 @@ export default function MarketingAdmin({
                 max={5}
                 value={nMax}
                 onChange={(e) => setNMax(Math.max(1, Math.min(5, Number(e.target.value) || 1)))}
-                className="block mt-1 w-24 border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-[#1D9E75]"
+                className="block mt-1 w-24 border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-[#1D9E75]"
               />
             </label>
             <button
@@ -365,14 +365,14 @@ export default function MarketingAdmin({
             onChange={(e) => { setDMensagem(e.target.value); setDPrevia(null) }}
             rows={3}
             placeholder="Oi, #nome! Essa semana liberamos uma condição especial pra fechar seu pedido. Quer que eu te mande os detalhes? 😊"
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#1D9E75] resize-y"
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-[#1D9E75] resize-y"
           />
 
           <div className="flex items-center gap-2 flex-wrap mt-2">
             <select
               value={dFase}
               onChange={(e) => { setDFase(e.target.value as 'todas' | FaseLead); setDPrevia(null) }}
-              className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white"
+              className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-900 bg-white"
             >
               <option value="todas">Todas as fases</option>
               <option value="montado">Pedido montado</option>
@@ -384,13 +384,13 @@ export default function MarketingAdmin({
               value={dUf}
               onChange={(e) => { setDUf(e.target.value.toUpperCase().slice(0, 2)); setDPrevia(null) }}
               placeholder="UF"
-              className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm w-16 focus:outline-none focus:border-[#1D9E75]"
+              className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm w-16 text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-[#1D9E75]"
             />
             <input
               value={dBusca}
               onChange={(e) => { setDBusca(e.target.value); setDPrevia(null) }}
               placeholder="Produto/interesse…"
-              className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm flex-1 min-w-[140px] focus:outline-none focus:border-[#1D9E75]"
+              className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm flex-1 min-w-[140px] text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-[#1D9E75]"
             />
             <button
               type="button"
@@ -447,12 +447,12 @@ export default function MarketingAdmin({
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             placeholder="Buscar nome, contato, produto…"
-            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm w-56 focus:outline-none focus:border-[#1D9E75]"
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm w-56 text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-[#1D9E75]"
           />
           <select
             value={filtroFase}
             onChange={(e) => setFiltroFase(e.target.value as 'todas' | FaseLead)}
-            className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white"
+            className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-900 bg-white"
           >
             <option value="todas">Todas as fases</option>
             <option value="montado">Pedido montado</option>
