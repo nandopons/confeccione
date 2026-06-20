@@ -14,6 +14,20 @@ import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { getContaAtual } from '@/app/lib/cliente-auth'
 
 const NOME_MAX = 100
+const CEP_MAX = 9
+const UF_MAX = 2
+const ENDERECO_MAX = 120
+
+// Campos de endereço: string opcional, '' → null, trim, max length.
+const CAMPOS_ENDERECO: Array<{ chave: string; max: number }> = [
+  { chave: 'cep', max: CEP_MAX },
+  { chave: 'numero', max: ENDERECO_MAX },
+  { chave: 'complemento', max: ENDERECO_MAX },
+  { chave: 'logradouro', max: ENDERECO_MAX },
+  { chave: 'bairro', max: ENDERECO_MAX },
+  { chave: 'cidade', max: ENDERECO_MAX },
+  { chave: 'uf', max: UF_MAX },
+]
 
 export async function POST(req: Request) {
   const conta = await getContaAtual()
@@ -21,7 +35,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 })
   }
 
-  let body: { nome?: unknown; whatsapp?: unknown }
+  let body: {
+    nome?: unknown
+    whatsapp?: unknown
+    cep?: unknown
+    numero?: unknown
+    complemento?: unknown
+    logradouro?: unknown
+    bairro?: unknown
+    cidade?: unknown
+    uf?: unknown
+  }
   try {
     body = await req.json()
   } catch {
@@ -62,6 +86,20 @@ export async function POST(req: Request) {
     } else {
       atualizacao.whatsapp = digitos
     }
+  }
+
+  // Endereço (todos opcionais). Vazio = limpa (null).
+  for (const { chave, max } of CAMPOS_ENDERECO) {
+    const valor = (body as Record<string, unknown>)[chave]
+    if (valor === undefined) continue
+    if (typeof valor !== 'string') {
+      return NextResponse.json(
+        { erro: `${chave} deve ser string` },
+        { status: 400 },
+      )
+    }
+    const limpo = valor.trim().slice(0, max)
+    atualizacao[chave] = limpo.length > 0 ? limpo : null
   }
 
   if (Object.keys(atualizacao).length === 0) {
