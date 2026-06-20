@@ -307,6 +307,25 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   }
 
   // Gera a cobrança do ORÇAMENTO FINAL (valor definido pelo fornecedor).
+  const [recusando, setRecusando] = useState(false);
+  async function recusarOrcamento() {
+    if (recusando) return;
+    if (!confirm(
+      "Recusar este orçamento?\n\n" +
+      "Seu pedido será oferecido a outro fornecedor. O novo orçamento pode vir com valor diferente (maior ou menor) — não garantimos o mesmo preço deste."
+    )) return;
+    setRecusando(true);
+    try {
+      const res = await fetch(`/api/pedido/assistente/${pedido.id}/recusar-orcamento`, { method: "POST" });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(d?.erro || "Não foi possível recusar agora.");
+      window.location.reload();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Erro ao recusar.");
+      setRecusando(false);
+    }
+  }
+
   async function gerarPagamento() {
     if (confirmando) return;
     const cpfDig = cpf.replace(/\D/g, "");
@@ -548,6 +567,13 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 Pagar agora →
               </button>
               <p className="text-[11px] text-gray-400 text-center mt-2">PIX ou cartão na página de pagamento. Com o pagamento confirmado, a produção começa.</p>
+              <div className="text-center mt-3">
+                <button type="button" onClick={() => void recusarOrcamento()} disabled={recusando}
+                  className="text-[12px] text-gray-400 hover:text-gray-600 underline underline-offset-2 disabled:opacity-50">
+                  {recusando ? "Recusando…" : "Recusar este orçamento"}
+                </button>
+                <p className="text-[10px] text-gray-300 mt-1 leading-snug">Ao recusar, o pedido vai pra outro fornecedor — o valor pode mudar e não garantimos manter este.</p>
+              </div>
             </>
           ) : (
             <p className="text-sm text-[#0F6E56] font-medium mt-3">Pagamento confirmado ✅ — pedido em produção.</p>

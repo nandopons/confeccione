@@ -470,6 +470,36 @@ export async function reabrirPedido(pedidoId: string): Promise<{ ok: boolean; er
   }
 }
 
+// Cliente RECUSA o orçamento enviado pelo fornecedor: a oferta aceita é
+// recusada, o orçamento é zerado e o pedido volta a ficar disponível pra ser
+// ofertado a outro fornecedor (sem garantia de manter o mesmo valor).
+export async function recusarOrcamentoCliente(pedidoId: string): Promise<{ ok: boolean; erro?: string }> {
+  const { data: ped } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, orcamento_status, pagamento_status')
+    .eq('id', pedidoId)
+    .maybeSingle<{ id: string; orcamento_status: string | null; pagamento_status: string | null }>()
+  if (!ped) return { ok: false, erro: 'Pedido não encontrado.' }
+  if (ped.pagamento_status === 'pago') return { ok: false, erro: 'Pedido já pago — não dá pra recusar o orçamento.' }
+  if (ped.orcamento_status !== 'definido') return { ok: false, erro: 'Não há orçamento para recusar.' }
+
+  // recusa a oferta aceita atual
+  await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .update({ status: 'recusada', respondido_em: new Date().toISOString() })
+    .eq('pedido_id', pedidoId)
+    .eq('status', 'aceita')
+
+  // zera o orçamento → pedido volta pra fila de oferta (admin reoferece)
+  const { error } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .update({ orcamento_status: null, orcamento_definido_em: null, frete_centavos: null, valor_centavos: null, atualizado_em: new Date().toISOString() })
+    .eq('id', pedidoId)
+  if (error) return { ok: false, erro: error.message }
+
+  return { ok: true }
+}
+
 // ---------------------------------------------------------------------------
 // Carrega a oferta pra a PÁGINA DO FORNECEDOR. Antes do aceite, SEM contato
 // do cliente; depois do aceite, com contato + link do orçamento.
