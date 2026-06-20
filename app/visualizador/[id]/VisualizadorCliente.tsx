@@ -466,7 +466,19 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     <div className="flex-1 w-full max-w-5xl mx-auto px-6 pt-8 pb-16">
       <div className="flex items-center justify-between gap-3 mb-1">
         <Link href="/cliente/painel" className="text-sm text-gray-500 hover:text-gray-800">← Voltar aos meus pedidos</Link>
-        {salvando && <span className="text-xs text-gray-400">salvando…</span>}
+        <div className="flex items-center gap-3">
+          {salvando && <span className="text-xs text-gray-400">salvando…</span>}
+          <a
+            href={`/api/pedido/assistente/${pedido.id}/resumo-pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-[#0F6E56] bg-[#E1F5EE] hover:bg-[#cdeee2] px-3 py-1.5 rounded-lg ring-1 ring-[#1D9E75]/25 transition-colors"
+            title="Baixar um PDF com o resumo do pedido"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M5 21h14" /></svg>
+            Baixar resumo (PDF)
+          </a>
+        </div>
       </div>
       <h1 className="text-gray-900 text-2xl font-semibold mt-2">Pré-visualização dos seus produtos</h1>
       {pedido.status === "cancelado" && (
