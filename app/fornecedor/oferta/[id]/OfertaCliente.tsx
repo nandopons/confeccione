@@ -21,6 +21,7 @@ type Oferta = {
   totalPecas: number
   linhas: Linha[]
   numImagens: number
+  fotosPorLinha: number[] | null
   valorRepasseCentavos: number | null
   prazoDias: number | null
   cidade?: string | null
@@ -29,6 +30,10 @@ type Oferta = {
   orcamentoStatus?: string | null
   contatoCliente?: { nome: string | null; telefone: string | null; email: string | null; cidade: string | null; uf: string | null } | null
   linkOrcamento?: string | null
+}
+
+function corLimpa(s: string | null | undefined): string {
+  return (s || '').replace(/\s*\(#?[0-9a-fA-F]{6}\)\s*/g, ' ').replace(/#[0-9a-fA-F]{6}/g, '').replace(/\s{2,}/g, ' ').trim()
 }
 
 function brl(c: number | null | undefined): string {
@@ -88,7 +93,70 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
         </p>
       </div>
 
-      {/* Visualizadores enviados pelo cliente */}
+      {/* Modelos do pedido — visual igual ao da página do cliente */}
+      {oferta.fotosPorLinha ? (
+        <div className="px-6 py-5 border-b border-gray-100 space-y-6">
+          <h2 className="text-sm font-semibold text-gray-700">Pedido do cliente</h2>
+          {oferta.linhas.map((l, idx) => {
+            const fpl = oferta.fotosPorLinha as number[]
+            const count = fpl[idx] ?? 0
+            const offset = fpl.slice(0, idx).reduce((a, b) => a + b, 0)
+            const tam = (l.tamanhos || []).filter((t) => t.tamanho).map((t) => `${String(t.tamanho).toUpperCase()}: ${t.qtd ?? '?'}`).join('   ·   ')
+            const estampado = (l.estampas?.length ?? 0) > 0
+            const subtitulo = [l.modelo, corLimpa(l.cor)].filter(Boolean).join(' · ')
+            return (
+              <div key={idx} className="rounded-2xl border border-gray-200 shadow-sm ring-1 ring-gray-900/5 overflow-hidden">
+                <div className="flex items-center justify-between gap-2 px-4 py-2.5 bg-[#0F6E56] text-white">
+                  <span className="inline-flex items-center gap-2 font-semibold text-sm">
+                    <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full bg-white/20 text-[11px] font-bold">{idx + 1}</span>
+                    Modelo {idx + 1}
+                  </span>
+                  <span className="text-xs text-white/85 truncate max-w-[55%] capitalize">{subtitulo}</span>
+                </div>
+                <div className="p-4">
+                  {count > 0 ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {Array.from({ length: count }).map((_, j) => {
+                        const gi = offset + j
+                        return (
+                          <button
+                            key={j}
+                            type="button"
+                            onClick={() => setLightbox(gi)}
+                            className="group relative block aspect-square overflow-hidden rounded-lg border border-gray-200 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[#1D9E75]"
+                            aria-label={`Ampliar foto ${j + 1} do modelo ${idx + 1}`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={`/api/pedido/assistente/${oferta.pedidoId}/imagem?i=${gi}`} alt={`Modelo ${idx + 1} — foto ${j + 1}`} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+                            <span className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/20 transition-colors">
+                              <span className="opacity-0 group-hover:opacity-100 text-white text-xs font-medium bg-black/50 rounded-full px-2.5 py-1 transition-opacity">Ampliar</span>
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400">Sem foto enviada para este modelo.</p>
+                  )}
+                  <div className="mt-3 text-sm">
+                    <div className="font-medium text-gray-900">
+                      {l.total ?? '?'}× {l.modelo || 'peça'}{l.material ? ` · ${l.material}` : ''}
+                      {estampado && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">estampado</span>}
+                    </div>
+                    {tam && <div className="text-gray-600 mt-1">{tam}</div>}
+                    {l.estampas && l.estampas.length > 0 && (
+                      <div className="text-gray-600 mt-1">Estampa: {l.estampas.map((e) => [e.posicao, e.tamanho].filter(Boolean).join(' ')).join(', ')}</div>
+                    )}
+                    {l.descricao && <div className="text-gray-500 mt-1">{l.descricao}</div>}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+      <>
+      {/* Visualizadores enviados pelo cliente (legado / grade única) */}
       <div className="px-6 py-5 border-b border-gray-100">
         <h2 className="text-sm font-semibold text-gray-700 mb-3">Visualizadores do cliente</h2>
         {imgs.length > 0 ? (
@@ -143,6 +211,8 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
           })}
         </ul>
       </div>
+      </>
+      )}
 
       {/* Ação */}
       <div className="px-6 py-5">
