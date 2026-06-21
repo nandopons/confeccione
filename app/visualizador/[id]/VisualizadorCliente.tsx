@@ -103,6 +103,20 @@ const EDIT_HINTS: string[] = [
   "Completar este produto",
 ];
 
+const CATEGORIAS = [
+  "Interclasse / Evento",
+  "Private Label",
+  "Fitness",
+  "Moda Praia",
+  "Moda Íntima",
+  "Padrão Esportivo",
+  "Fardamento",
+  "Inverno",
+  "Roupas UV",
+  "Bonés",
+  "Brindes / Gráfica",
+];
+
 export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [linhas, setLinhas] = useState<Linha[]>(
     (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [], estampado: l.estampado ?? null, categoria: l.categoria ?? null }))
@@ -201,12 +215,14 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   }
 
   function salvarEdicao() {
+    const tams = (draft.tamanhos || []).map((t) => ({ tamanho: t.tamanho.trim(), qtd: t.qtd && t.qtd > 0 ? Math.round(t.qtd) : null })).filter((t) => t.tamanho);
+    const somaTam = tams.reduce((a, t) => a + (t.qtd || 0), 0);
     const limpa: Linha = {
       modelo: draft.modelo?.trim() || null,
       cor: draft.cor?.trim() || null,
       material: draft.material?.trim() || null,
-      total: draft.total && draft.total > 0 ? Math.round(draft.total) : null,
-      tamanhos: (draft.tamanhos || []).map((t) => ({ tamanho: t.tamanho.trim(), qtd: t.qtd && t.qtd > 0 ? Math.round(t.qtd) : null })).filter((t) => t.tamanho),
+      total: somaTam > 0 ? somaTam : (draft.total && draft.total > 0 ? Math.round(draft.total) : null),
+      tamanhos: tams,
       estampas: (draft.estampas || []).map((e) => ({ posicao: (e.posicao || "").trim(), tamanho: (e.tamanho || "").trim() })).filter((e) => e.posicao && e.tamanho),
       publico: draft.publico ?? null,
       estampado: draft.estampado ?? null,
@@ -1009,8 +1025,13 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             </div>
             {editStep === 1 ? (
             <div className="space-y-3">
-              <Campo label="Categoria (opcional) — ex.: Private Label, uniforme, brinde">
-                <input value={draft.categoria ?? ""} onChange={(e) => setDraft({ ...draft, categoria: e.target.value })} className={inputCls} placeholder="Private Label" />
+              <Campo label="Categoria">
+                <select value={draft.categoria ?? ""} onChange={(e) => setDraft({ ...draft, categoria: e.target.value || null })} className={inputCls + " bg-white"}>
+                  <option value="">Selecione…</option>
+                  {(draft.categoria && !CATEGORIAS.includes(draft.categoria) ? [draft.categoria, ...CATEGORIAS] : CATEGORIAS).map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
               </Campo>
               <Campo label="Modelo (tshirt, oversized, polo, boné…)">
                 <input value={draft.modelo ?? ""} onChange={(e) => setDraft({ ...draft, modelo: e.target.value })} className={inputCls} placeholder="oversized" />
@@ -1019,9 +1040,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 <Campo label="Cor"><input value={draft.cor ?? ""} onChange={(e) => setDraft({ ...draft, cor: e.target.value })} className={inputCls} placeholder="preta" /></Campo>
                 <Campo label="Material"><input value={draft.material ?? ""} onChange={(e) => setDraft({ ...draft, material: e.target.value })} className={inputCls} placeholder="algodão" /></Campo>
               </div>
-              <Campo label="Quantidade total">
-                <input type="number" min={1} value={draft.total ?? ""} onChange={(e) => setDraft({ ...draft, total: parseInt(e.target.value) || null })} className={inputCls} placeholder="10" />
-              </Campo>
             </div>
             ) : (
             <div className="space-y-3">
@@ -1047,7 +1065,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   ))}
                   <button type="button" onClick={() => setDraft({ ...draft, tamanhos: [...(draft.tamanhos || []), { tamanho: "", qtd: null }] })} className="text-xs text-[#0F6E56] hover:underline">+ adicionar tamanho</button>
                 </div>
-                <p className="text-[11px] text-gray-400 mt-1">Toque nos tamanhos pra adicionar — a quantidade por tamanho é opcional.</p>
+                <p className="text-[11px] text-gray-400 mt-1">Toque nos tamanhos pra adicionar. Se você informar a quantidade por tamanho, o total do modelo passa a ser a soma deles.</p>
               </Campo>
               <Campo label="Público">
                 <div className="flex flex-wrap gap-2">

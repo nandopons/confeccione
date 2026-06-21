@@ -99,7 +99,7 @@ export default function PedidoSteps() {
 
     const nichoTitle = nichosTodos.find((n) => n.id === tipo)?.title ?? tipo;
     const linha = {
-      modelo: nichoTitle,
+      modelo: null as string | null,
       cor: "a definir",
       material: null as string | null,
       publico: null as string | null,
@@ -107,6 +107,7 @@ export default function PedidoSteps() {
       tamanhos: [] as { tamanho: string; qtd: number | null }[],
       estampas: [] as { posicao: string; tamanho: string }[],
       estampado: null as boolean | null,
+      categoria: nichoTitle as string | null,
       descricao: null,
     };
     const contato = {
