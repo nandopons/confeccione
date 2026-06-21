@@ -139,9 +139,9 @@ const CORES_NOMEADAS: { nome: string; hex: string; claro?: boolean }[] = [
 
 type ObjetivoMaterial = { id: string; label: string; desc: string; material: string; recomendado?: boolean };
 const OBJETIVOS_MATERIAL: ObjetivoMaterial[] = [
-  { id: "economica", label: "Econômica", desc: "Mais em conta — malha básica (algodão básico ou PV)", material: "malha básica (algodão básico/PV)" },
-  { id: "padrao", label: "Padrão", desc: "Custo-benefício — algodão fio 30 penteado", material: "algodão fio 30 penteado", recomendado: true },
-  { id: "premium", label: "Premium", desc: "Fios nobres — algodão pima / penteado premium", material: "algodão premium (pima/penteado nobre)" },
+  { id: "economica", label: "Econômica", desc: "Material mais em conta, sem perder a modelagem, costura e estamparia.", material: "malha básica (algodão básico/PV)" },
+  { id: "padrao", label: "Padrão", desc: "Tecido mais durável e resistente — bom custo-benefício.", material: "algodão fio 30 penteado", recomendado: true },
+  { id: "premium", label: "Premium", desc: "Alta qualidade, conforto e tecnologia — pra quem busca o melhor.", material: "algodão premium (pima/penteado nobre)" },
   { id: "performance", label: "Performance / Dry", desc: "Seca rápido — dry-fit, poliamida (esporte/fitness)", material: "dry-fit / poliamida" },
   { id: "indefinido", label: "Não sei, me ajudem", desc: "A gente sugere o melhor material pro seu objetivo", material: "" },
 ];
