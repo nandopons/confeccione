@@ -1019,9 +1019,20 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       {editOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-gray-900 font-medium">{editIndex === null ? "Adicionar produto" : "Editar produto"}</p>
-              <span className="text-xs text-gray-400">Etapa {editStep} de 2</span>
+            <p className="text-gray-900 font-medium mb-3">{editIndex === null ? "Adicionar produto" : "Editar produto"}</p>
+            <div className="flex items-center mb-5">
+              {[0, 1].map((i) => {
+                const cur = editStep - 1;
+                return (
+                  <div key={i} className="flex items-center flex-1 last:flex-none">
+                    <div className={"w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0 shadow-sm transition-all " + (i < cur ? "bg-[#1D9E75] text-white" : i === cur ? "bg-[#111] text-white" : "bg-white border border-gray-300 text-gray-500")}>
+                      {i < cur ? "✓" : i + 1}
+                    </div>
+                    <span className={"ml-2 text-xs whitespace-nowrap " + (i <= cur ? "text-gray-700 font-medium" : "text-gray-400")}>{i === 0 ? "Básico" : "Detalhes"}</span>
+                    {i < 1 && <div className={"flex-1 h-px mx-3 transition-colors " + (i < cur ? "bg-[#1D9E75]" : "bg-gray-200")} />}
+                  </div>
+                );
+              })}
             </div>
             {editStep === 1 ? (
             <div className="space-y-3">
