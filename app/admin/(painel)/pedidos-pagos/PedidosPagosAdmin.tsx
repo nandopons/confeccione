@@ -136,6 +136,9 @@ export default function PedidosPagosAdmin() {
   const [det, setDet] = useState<Record<string, Detalhe>>({})
   const [agindo, setAgindo] = useState<string | null>(null)
   const [reabrindo, setReabrindo] = useState<string | null>(null)
+  const [entregaEdit, setEntregaEdit] = useState<string | null>(null)
+  const [entregaForm, setEntregaForm] = useState<{ cep: string; numero: string; complemento: string }>({ cep: '', numero: '', complemento: '' })
+  const [salvandoEntrega, setSalvandoEntrega] = useState(false)
 
   async function carregar() {
     setCarregando(true)
@@ -236,6 +239,25 @@ export default function PedidosPagosAdmin() {
     }
   }
 
+  function abrirEntrega(p: Pedido) {
+    const c = (det[p.id] as Detalhe | undefined)?.contato
+    setEntregaForm({ cep: (c?.cep ?? p.cep ?? '') || '', numero: c?.numero ?? '', complemento: c?.complemento ?? '' })
+    setEntregaEdit((cur) => (cur === p.id ? null : p.id))
+  }
+  async function salvarEntregaAdmin(id: string) {
+    const cepDigs = entregaForm.cep.replace(/\D/g, '')
+    if (cepDigs.length !== 8) { setAviso('CEP deve ter 8 dígitos.'); return }
+    setSalvandoEntrega(true); setAviso(null)
+    try {
+      const r = await fetch(`/api/pedido/assistente/${id}/entrega`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cep: cepDigs, numero: entregaForm.numero.trim() || null, complemento: entregaForm.complemento.trim() || null }) })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) { setAviso(j.erro || 'Falha ao salvar endereço'); return }
+      setPedidos((ps) => ps.map((x) => x.id === id ? { ...x, cep: cepDigs } : x))
+      try { const rd = await fetch(`/api/admin/pedidos-assistente/${id}`, { cache: 'no-store' }); const jd = await rd.json(); if (jd.ok) setDet((m) => ({ ...m, [id]: jd })) } catch {}
+      setEntregaEdit(null); setAviso('Endereço atualizado.')
+    } finally { setSalvandoEntrega(false) }
+  }
+
   async function acao(id: string, ac: 'excluir' | 'lembrete' | 'feedback') {
     if (ac === 'excluir' && !confirm('Excluir este pedido? Não dá pra desfazer.')) return
     setAgindo(id + ac); setAviso(null)
@@ -286,7 +308,7 @@ export default function PedidosPagosAdmin() {
       {carregando && <p className="text-sm text-gray-500">Carregando…</p>}
       {!carregando && visiveis.length === 0 && <p className="text-sm text-gray-500">Nenhum pedido neste filtro.</p>}
 
-      <div className="space-y-5">
+      <div className="space-y-3">
         {visiveis.map((p) => {
           const totalPecas = p.linhas.reduce((s, l) => s + (typeof l.total === 'number' ? l.total : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0)), 0)
           const aceita = p.ofertas.find((o) => o.status === 'aceita')
@@ -301,7 +323,7 @@ export default function PedidosPagosAdmin() {
           const d = det[p.id]
           const expandido = aberto === p.id
           return (
-            <div key={p.id} className="rounded-lg border border-gray-200 bg-white p-4">
+            <div key={p.id} className="rounded-lg border border-gray-200 bg-white p-3.5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="text-sm text-gray-500">{p.codigo ? <span className="font-semibold text-gray-700">Nº {p.codigo}</span> : null}{p.codigo ? ' · ' : ''}{data(p.criado_em)} · {p.nome || 'Sem nome'} · {p.cep || 'sem CEP'}</div>
@@ -326,7 +348,7 @@ export default function PedidosPagosAdmin() {
                 </div>
               </div>
 
-              <ul className="mt-3 text-sm text-gray-700 space-y-1">
+              <ul className="mt-2 text-sm text-gray-700 space-y-0.5">
                 {p.linhas.map((l, i) => {
                   const tam = (l.tamanhos || []).filter((t) => t.tamanho).map((t) => `${t.tamanho}:${t.qtd ?? '?'}`).join(' ')
                   const estampado = (l.estampas?.length ?? 0) > 0
@@ -340,7 +362,7 @@ export default function PedidosPagosAdmin() {
               </ul>
 
               {/* Ações: detalhe + reabrir */}
-              <div className="mt-3 flex flex-wrap items-center gap-2">
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
                 <button onClick={() => abrir(p.id)} className="text-sm px-3 py-1.5 rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50">
                   {expandido ? 'Ocultar detalhes' : 'Ver conversa, mockups e contato'}
                 </button>
@@ -353,7 +375,24 @@ export default function PedidosPagosAdmin() {
                     {reabrindo === p.id ? 'Reabrindo…' : 'Reabrir e ofertar novamente'}
                   </button>
                 )}
+                <button onClick={() => abrirEntrega(p)} className={'text-sm px-3 py-1.5 rounded-md border ' + (p.cep ? 'border-gray-200 text-gray-700 hover:bg-gray-50' : 'border-[#1D9E75]/40 text-[#0F6E56] hover:bg-[#E1F5EE]/60')}>
+                  {p.cep ? '📍 Editar entrega' : '📍 Lançar CEP/endereço'}
+                </button>
               </div>
+              {entregaEdit === p.id && (
+                <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                  <div className="flex flex-wrap gap-2">
+                    <input value={entregaForm.cep} onChange={(e) => setEntregaForm((d) => ({ ...d, cep: e.target.value.replace(/[^\d-]/g, '').slice(0, 9) }))} inputMode="numeric" placeholder="CEP" className="w-32 border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900" />
+                    <input value={entregaForm.numero} onChange={(e) => setEntregaForm((d) => ({ ...d, numero: e.target.value.slice(0, 20) }))} placeholder="Número" className="w-28 border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900" />
+                    <input value={entregaForm.complemento} onChange={(e) => setEntregaForm((d) => ({ ...d, complemento: e.target.value.slice(0, 80) }))} placeholder="Complemento (opcional)" className="flex-1 min-w-[140px] border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900" />
+                  </div>
+                  <div className="flex items-center gap-2 mt-2">
+                    <button onClick={() => void salvarEntregaAdmin(p.id)} disabled={salvandoEntrega} className="bg-[#1D9E75] hover:bg-[#178A65] text-white text-sm font-medium px-4 py-1.5 rounded-md disabled:opacity-50">{salvandoEntrega ? 'Salvando…' : 'Salvar endereço'}</button>
+                    <button onClick={() => setEntregaEdit(null)} className="text-sm text-gray-500 hover:text-gray-700 px-2">Cancelar</button>
+                    <span className="text-[11px] text-gray-400">Rua/cidade são preenchidas pelo CEP.</span>
+                  </div>
+                </div>
+              )}
 
               {/* Detalhe expansível (chat) */}
               {expandido && (
