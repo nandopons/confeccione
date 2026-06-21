@@ -35,11 +35,18 @@ export type Linha = {
   preco_unit_centavos?: number | null;
 };
 
+// Lista de tamanhos só faz sentido em pedidos coletivos: interclasse/eventos
+// e padrão esportivo (futebol/vôlei com nome nas costas).
+function permiteListaTamanhos(cat?: string | null): boolean {
+  const c = (cat || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return /interclasse|evento|esportiv/.test(c);
+}
 function brl(c: number): string {
   return (c / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 export type PedidoVis = {
   id: string;
+  categoria?: string | null;
   linhas: Linha[];
   nome: string | null;
   telefone: string | null;
@@ -282,7 +289,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
   function abrirEdicao(i: number | null) {
     if (i === null) {
-      setDraft({ ...linhaVazia, tamanhos: [] });
+      setDraft({ ...linhaVazia, categoria: pedido.categoria ?? (linhas.find((l) => l.categoria)?.categoria ?? null), tamanhos: [] });
       setEditIndex(null);
     } else {
       setDraft(JSON.parse(JSON.stringify(linhas[i])));
@@ -800,7 +807,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 })()}
 
                 {/* LISTA DE COLETA (Listas Externas) — o grupo informa os tamanhos */}
-                {!orcamentoDefinido && (
+                {!orcamentoDefinido && permiteListaTamanhos(pedido.categoria ?? (linhas.find((x) => x.categoria)?.categoria ?? null)) && (
                   <ListaColeta
                     pedidoId={pedido.id}
                     linhaIndex={i}

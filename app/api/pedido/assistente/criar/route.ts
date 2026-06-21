@@ -105,10 +105,15 @@ export async function POST(req: Request) {
     contaId = null
   }
 
+  const categoriaPedido =
+    linhasValidas.find((l) => l.categoria)?.categoria ??
+    (parsed.data.observacoes ? (parsed.data.observacoes.match(/Categoria:\s*(.+)/)?.[1]?.trim() || null) : null)
+
   const { data, error } = await supabase
     .from('pedidos_assistente')
     .insert({
       linhas: linhasValidas,
+      categoria: categoriaPedido ?? null,
       nome: contato.nome,
       telefone: contato.telefone ? normalizarWhatsApp(contato.telefone) : null,
       email: contato.email,
