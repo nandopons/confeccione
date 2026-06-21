@@ -20,11 +20,12 @@ const BodySchema = z.object({
   liso: z.string().nullable().optional(),
   arte: z.string().nullable().optional(),
   fotos: z.array(z.string()).max(6).nullable().optional(),
+  ia: z.array(z.object({ url: z.string(), prompt: z.string().optional() })).max(8).nullable().optional(),
   resetAll: z.boolean().optional(),
 })
 
 type Ctx = { params: Promise<{ id: string }> }
-type MapaMockups = Record<string, { liso?: string; arte?: string; fotos?: string[] }>
+type MapaMockups = Record<string, { liso?: string; arte?: string; fotos?: string[]; ia?: { url: string; prompt?: string }[] }>
 
 export async function POST(req: Request, ctx: Ctx) {
   const { id } = await ctx.params
@@ -47,7 +48,7 @@ export async function POST(req: Request, ctx: Ctx) {
   } else if (typeof p.data.index === 'number') {
     const k = String(p.data.index)
     const atual = mapa[k] ?? {}
-    const novo: { liso?: string; arte?: string; fotos?: string[] } = { ...atual }
+    const novo: { liso?: string; arte?: string; fotos?: string[]; ia?: { url: string; prompt?: string }[] } = { ...atual }
     if (p.data.liso !== undefined) { if (p.data.liso === null) delete novo.liso; else novo.liso = p.data.liso }
     if (p.data.arte !== undefined) { if (p.data.arte === null) delete novo.arte; else novo.arte = p.data.arte }
     if (p.data.fotos !== undefined) {
@@ -56,7 +57,11 @@ export async function POST(req: Request, ctx: Ctx) {
       // ao usar o novo modelo de múltiplas fotos, descarta o campo legado liso/arte
       delete novo.liso; delete novo.arte
     }
-    if (Object.keys(novo).length === 0 || (novo.fotos && novo.fotos.length === 0 && !novo.liso && !novo.arte)) delete mapa[k]
+    if (p.data.ia !== undefined) {
+      if (!p.data.ia || p.data.ia.length === 0) delete novo.ia
+      else novo.ia = p.data.ia
+    }
+    if (Object.keys(novo).length === 0 || (!novo.liso && !novo.arte && (!novo.fotos || novo.fotos.length === 0) && (!novo.ia || novo.ia.length === 0))) delete mapa[k]
     else mapa[k] = novo
   } else {
     return NextResponse.json({ erro: 'Informe index ou resetAll' }, { status: 400 })

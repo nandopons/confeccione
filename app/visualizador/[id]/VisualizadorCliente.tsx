@@ -46,7 +46,7 @@ export type PedidoVis = {
   cidade?: string | null;
   uf?: string | null;
   status: string | null;
-  mockups?: Record<string, { liso?: string; arte?: string; fotos?: string[] }> | null;
+  mockups?: Record<string, { liso?: string; arte?: string; fotos?: string[]; ia?: { url: string; prompt?: string }[] }> | null;
   prazo_dias?: number | null;
   confirmado_em?: string | null;
   orcamento_status?: string | null;
@@ -118,6 +118,15 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     return init;
   });
   const [salvando, setSalvando] = useState(false);
+  const [iaImgs, setIaImgs] = useState<Record<number, { url: string; prompt?: string }[]>>(() => {
+    const m = pedido.mockups || {}; const init: Record<number, { url: string; prompt?: string }[]> = {};
+    for (const k of Object.keys(m)) { const v = (m as Record<string, { ia?: { url: string; prompt?: string }[] }>)[k] || {}; if (Array.isArray(v.ia) && v.ia.length) init[Number(k)] = v.ia; }
+    return init;
+  });
+  const [iaInstr, setIaInstr] = useState<Record<number, string>>({});
+  const [iaBusy, setIaBusy] = useState<number | null>(null);
+  const [iaErro, setIaErro] = useState<Record<number, string | null>>({});
+  const [iaAjuste, setIaAjuste] = useState<{ i: number; idx: number } | null>(null);
 
   // confirmação / pagamento
   const [confirmStep, setConfirmStep] = useState<"idle" | "form" | "feito">("idle");
@@ -262,6 +271,30 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   }
 
   const MAX_FOTOS = 6;
+
+  function modeloCompleto(l: Linha): boolean {
+    const qtd = (l.total ?? 0) > 0 ? (l.total as number) : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0);
+    return !!(l.modelo && corLabel(l.cor) && qtd > 0);
+  }
+  async function gerarMockupIA(i: number, regenIaIndex: number | null = null) {
+    if (iaBusy !== null) return;
+    setIaBusy(i); setIaErro((p) => ({ ...p, [i]: null }));
+    try {
+      const r = await fetch(`/api/visualizador/${pedido.id}/gerar-mockup`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ index: i, instrucoes: iaInstr[i] || "", regenIaIndex }),
+      }).then((x) => x.json());
+      if (r.disponivel === false) { setIaErro((p) => ({ ...p, [i]: r.motivo || "Geração de IA indisponível agora." })); return; }
+      if (r.erro) { setIaErro((p) => ({ ...p, [i]: r.erro })); return; }
+      if (Array.isArray(r.ia)) { setIaImgs((p) => ({ ...p, [i]: r.ia })); setIaAjuste(null); }
+    } catch { setIaErro((p) => ({ ...p, [i]: "Falha de conexão." })); }
+    finally { setIaBusy(null); }
+  }
+  async function removerIaImg(i: number, idx: number) {
+    const nova = (iaImgs[i] || []).filter((_, k) => k !== idx);
+    setIaImgs((p) => ({ ...p, [i]: nova }));
+    try { await fetch(`/api/pedido/assistente/${pedido.id}/mockup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index: i, ia: nova }) }); } catch {}
+  }
   async function onUploadVisualizador(e: React.ChangeEvent<HTMLInputElement>, i: number) {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
@@ -569,6 +602,57 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   </div>
                 )}
                 {l.descricao && <p className="text-sm text-gray-500 mt-3 leading-relaxed">{l.descricao}</p>}
+
+                {/* MOCKUP COM IA */}
+                {!orcamentoDefinido && (() => {
+                  const temArte = (st.urls?.length ?? 0) > 0;
+                  const completo = modeloCompleto(l);
+                  const liberado = temArte && completo;
+                  const lista = iaImgs[i] || [];
+                  const ajustandoEste = iaAjuste && iaAjuste.i === i;
+                  return (
+                    <div className="mt-4 pt-4 border-t border-gray-100">
+                      <p className="text-sm font-medium text-gray-800 mb-2">✨ Mockup com IA</p>
+                      {lista.length > 0 && (
+                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-3">
+                          {lista.map((it, idx) => (
+                            <div key={idx} className={"relative group aspect-square rounded-lg overflow-hidden border bg-white " + (ajustandoEste && iaAjuste!.idx === idx ? "border-[#1D9E75] ring-2 ring-[#1D9E75]" : "border-[#1D9E75]/40")}>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={it.url} alt={`Mockup IA ${idx + 1}`} className="h-full w-full object-cover" />
+                              <span className="absolute top-1 left-1 text-[10px] font-semibold bg-[#1D9E75] text-white rounded px-1">IA</span>
+                              <button type="button" onClick={() => { setIaAjuste({ i, idx }); setIaInstr((p) => ({ ...p, [i]: it.prompt || p[i] || "" })); }} className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition" aria-label="Ajustar mockup">Ajustar</button>
+                              <button type="button" onClick={() => void removerIaImg(i, idx)} className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/55 hover:bg-black/80 text-white text-sm leading-none flex items-center justify-center" aria-label="Remover">×</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {liberado ? (
+                        <div>
+                          {ajustandoEste && <p className="text-[11px] text-[#0F6E56] mb-1">Ajustando o mockup selecionado — descreva o que mudar.</p>}
+                          <textarea
+                            value={iaInstr[i] ?? ""}
+                            onChange={(e) => setIaInstr((p) => ({ ...p, [i]: e.target.value }))}
+                            rows={2}
+                            placeholder="Como aplicar? Ex.: logo branca centralizada no peito; nome nas costas em dourado…"
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75] resize-y"
+                          />
+                          <div className="flex items-center gap-2 mt-2 flex-wrap">
+                            <button type="button" onClick={() => void gerarMockupIA(i, ajustandoEste ? iaAjuste!.idx : null)} disabled={iaBusy !== null} className="inline-flex items-center gap-1.5 bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50">
+                              {iaBusy === i ? "Gerando…" : ajustandoEste ? "Atualizar mockup" : "✨ Gerar mockup com IA"}
+                            </button>
+                            {ajustandoEste && <button type="button" onClick={() => setIaAjuste(null)} className="text-sm text-gray-500 hover:text-gray-700">cancelar ajuste</button>}
+                          </div>
+                          {iaErro[i] && <p className="text-xs text-red-600 mt-2">{iaErro[i]}</p>}
+                          <p className="text-[11px] text-gray-400 mt-1">A IA usa as artes deste modelo + os detalhes. Clique numa imagem gerada pra ajustar com outro texto.</p>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                          Pra gerar o mockup com IA, {!completo ? "complete os detalhes (toque em Editar)" : ""}{!completo && !temArte ? " e " : ""}{!temArte ? "envie ao menos uma arte/foto" : ""}.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* AÇÕES — toolbar única: imagem à esquerda, produto à direita */}
                 <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">

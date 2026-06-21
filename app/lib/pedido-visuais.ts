@@ -7,7 +7,7 @@
 //   1) Fotos por produto (mockups[i].fotos[]) — o modelo ATUAL de upload.
 //   2) Imagens legadas (campo 'imagens', composição salva no confirm antigo).
 //   3) Arte/liso por produto (mockups legado, sem fotos[]).
-export type MapaMockups = Record<string, { liso?: string; arte?: string; fotos?: string[] }>
+export type MapaMockups = Record<string, { liso?: string; arte?: string; fotos?: string[]; ia?: { url: string; prompt?: string }[] }>
 
 export function coletarVisuaisPedido(
   mockups: MapaMockups | null | undefined,
@@ -19,11 +19,12 @@ export function coletarVisuaisPedido(
     .filter((n) => !Number.isNaN(n))
     .sort((a, b) => a - b)
 
-  // 1) Fotos por produto (modelo atual de múltiplas fotos).
+  // 1) Fotos por produto (modelo atual) + mockups gerados por IA.
   const fotos: string[] = []
   for (const k of keys) {
     const v = mapa[String(k)] || {}
     if (Array.isArray(v.fotos)) fotos.push(...v.fotos.filter((x) => typeof x === 'string' && x.length > 0))
+    if (Array.isArray(v.ia)) fotos.push(...v.ia.map((it) => it?.url).filter((x): x is string => typeof x === 'string' && x.length > 0))
   }
   if (fotos.length > 0) return fotos
 

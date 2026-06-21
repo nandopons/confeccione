@@ -1,7 +1,7 @@
 // Gera o PDF "Resumo do pedido" com a marca da Confeccione (logo vetorial + site).
 import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from 'pdf-lib'
 
-type MapaMockups = Record<string, { liso?: string; arte?: string; fotos?: string[] }>
+type MapaMockups = Record<string, { liso?: string; arte?: string; fotos?: string[]; ia?: { url: string; prompt?: string }[] }>
 
 export type LinhaResumo = {
   modelo?: string | null
@@ -49,7 +49,9 @@ function corLabel(s?: string | null): string {
 function imagensDoProduto(mockups: MapaMockups | null | undefined, i: number): string[] {
   const m = mockups && typeof mockups === 'object' ? mockups[String(i)] : undefined
   if (!m) return []
-  if (Array.isArray(m.fotos) && m.fotos.length > 0) return m.fotos.filter(Boolean)
+  const fotos = Array.isArray(m.fotos) ? m.fotos.filter(Boolean) : []
+  const ia = Array.isArray(m.ia) ? m.ia.map((it) => it?.url).filter((x): x is string => typeof x === 'string' && x.length > 0) : []
+  if (fotos.length > 0 || ia.length > 0) return [...fotos, ...ia]
   if (m.arte) return [m.arte]
   if (m.liso) return [m.liso]
   return []
