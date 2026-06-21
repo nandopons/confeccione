@@ -26,6 +26,7 @@ export type Linha = {
   tamanhos: Tamanho[];
   estampas: Estampa[];
   estampado: boolean | null;
+  categoria?: string | null;
   descricao: string | null;
   preco_unit_centavos?: number | null;
 };
@@ -63,7 +64,7 @@ type PortfolioMidiaVis = { path: string; mime: string | null; tipo: 'imagem' | '
 
 type ImgEstado = { loading?: boolean; urls?: string[]; motivo?: string };
 
-const linhaVazia: Linha = { modelo: "", cor: "", material: "", publico: null, total: null, tamanhos: [], estampas: [], estampado: null, descricao: "" };
+const linhaVazia: Linha = { modelo: "", cor: "", material: "", publico: null, total: null, tamanhos: [], estampas: [], estampado: null, categoria: null, descricao: "" };
 
 async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -104,7 +105,7 @@ const EDIT_HINTS: string[] = [
 
 export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [linhas, setLinhas] = useState<Linha[]>(
-    (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [], estampado: l.estampado ?? null }))
+    (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [], estampado: l.estampado ?? null, categoria: l.categoria ?? null }))
   );
   const [imgs, setImgs] = useState<Record<number, ImgEstado>>(() => {
     const m = pedido.mockups || {};
@@ -157,6 +158,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     return () => clearInterval(t);
   }, []);
   const [draft, setDraft] = useState<Linha>({ ...linhaVazia });
+  const [editStep, setEditStep] = useState<1 | 2>(1);
 
   // subir a própria arte / mockup
   const [subindoIdx, setSubindoIdx] = useState<number | null>(null);
@@ -194,6 +196,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       setDraft(JSON.parse(JSON.stringify(linhas[i])));
       setEditIndex(i);
     }
+    setEditStep(1);
     setEditOpen(true);
   }
 
@@ -207,6 +210,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       estampas: (draft.estampas || []).map((e) => ({ posicao: (e.posicao || "").trim(), tamanho: (e.tamanho || "").trim() })).filter((e) => e.posicao && e.tamanho),
       publico: draft.publico ?? null,
       estampado: draft.estampado ?? null,
+      categoria: draft.categoria?.trim() || null,
       descricao: draft.descricao?.trim() || null,
     };
     if (!limpa.modelo && !limpa.cor && !limpa.total) return;
@@ -240,6 +244,34 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         if (st.urls && st.urls.length) await salvarMockup({ index: Number(k), fotos: st.urls });
       }
     })();
+  }
+
+  async function reSalvarTodosMockups(imgsMap: Record<number, ImgEstado>, iaMap: Record<number, { url: string; prompt?: string }[]>) {
+    await salvarMockup({ resetAll: true });
+    for (const [k, st] of Object.entries(imgsMap)) {
+      if (st.urls && st.urls.length) await salvarMockup({ index: Number(k), fotos: st.urls });
+    }
+    for (const [k, arr] of Object.entries(iaMap)) {
+      if (arr && arr.length) {
+        try { await fetch(`/api/pedido/assistente/${pedido.id}/mockup`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ index: Number(k), ia: arr }) }); } catch {}
+      }
+    }
+  }
+
+  function clonarProduto(i: number) {
+    const copia: Linha = JSON.parse(JSON.stringify(linhas[i]));
+    const novas = [...linhas.slice(0, i + 1), copia, ...linhas.slice(i + 1)];
+    const novasImgs: Record<number, ImgEstado> = {};
+    const novasIa: Record<number, { url: string; prompt?: string }[]> = {};
+    Object.entries(imgs).forEach(([k, v]) => { const idx = Number(k); novasImgs[idx > i ? idx + 1 : idx] = v; });
+    Object.entries(iaImgs).forEach(([k, v]) => { const idx = Number(k); novasIa[idx > i ? idx + 1 : idx] = v; });
+    if (imgs[i]?.urls?.length) novasImgs[i + 1] = { urls: [...(imgs[i].urls as string[])] };
+    if (iaImgs[i]?.length) novasIa[i + 1] = iaImgs[i].map((x) => ({ ...x }));
+    setLinhas(novas);
+    setImgs(novasImgs);
+    setIaImgs(novasIa);
+    void persistir(novas);
+    void reSalvarTodosMockups(novasImgs, novasIa);
   }
 
   // ---- remover a imagem enviada ----
@@ -591,6 +623,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   <div>
                     <p className="text-gray-900 font-medium capitalize flex items-center gap-1.5">{corHex(l.cor) && <span className="w-3.5 h-3.5 rounded-full border border-black/10 inline-block shrink-0" style={{ backgroundColor: corHex(l.cor) as string }} />}{[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ") || "Produto"}</p>
                     {l.material && <p className="text-sm text-gray-500 mt-0.5">Material: {l.material}</p>}
+                    {l.categoria && <p className="text-xs text-gray-400 mt-0.5">Categoria: {l.categoria}</p>}
                   </div>
                   {l.total ? <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full shrink-0">{l.total} un.</span> : null}
                 </div>
@@ -674,6 +707,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="relative"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
                     </span>
                     <span key={editHintIdx} style={{ animation: "hintIn .45s ease" }} className="whitespace-nowrap">{EDIT_HINTS[editHintIdx]}</span>
+                  </button>
+                  <button type="button" onClick={() => clonarProduto(i)} title="Clonar este modelo" className="inline-flex items-center gap-1.5 text-gray-500 hover:text-[#0F6E56] hover:bg-[#E1F5EE] text-sm px-3 py-2 rounded-lg transition-colors">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
+                    Clonar
                   </button>
                   <button type="button" onClick={() => excluir(i)} title="Excluir produto" className="inline-flex items-center gap-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 text-sm px-3 py-2 rounded-lg transition-colors">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
@@ -966,8 +1003,15 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       {editOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditOpen(false); }}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
-            <p className="text-gray-900 font-medium mb-4">{editIndex === null ? "Adicionar produto" : "Editar produto"}</p>
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-gray-900 font-medium">{editIndex === null ? "Adicionar produto" : "Editar produto"}</p>
+              <span className="text-xs text-gray-400">Etapa {editStep} de 2</span>
+            </div>
+            {editStep === 1 ? (
             <div className="space-y-3">
+              <Campo label="Categoria (opcional) — ex.: Private Label, uniforme, brinde">
+                <input value={draft.categoria ?? ""} onChange={(e) => setDraft({ ...draft, categoria: e.target.value })} className={inputCls} placeholder="Private Label" />
+              </Campo>
               <Campo label="Modelo (tshirt, oversized, polo, boné…)">
                 <input value={draft.modelo ?? ""} onChange={(e) => setDraft({ ...draft, modelo: e.target.value })} className={inputCls} placeholder="oversized" />
               </Campo>
@@ -978,7 +1022,21 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
               <Campo label="Quantidade total">
                 <input type="number" min={1} value={draft.total ?? ""} onChange={(e) => setDraft({ ...draft, total: parseInt(e.target.value) || null })} className={inputCls} placeholder="10" />
               </Campo>
+            </div>
+            ) : (
+            <div className="space-y-3">
               <Campo label="Tamanhos">
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {["P", "M", "G", "GG", "XG"].map((tam) => {
+                    const ativo = (draft.tamanhos || []).some((t) => (t.tamanho || "").toUpperCase() === tam);
+                    return (
+                      <button key={tam} type="button" onClick={() => setDraft({ ...draft, tamanhos: ativo ? (draft.tamanhos || []).filter((t) => (t.tamanho || "").toUpperCase() !== tam) : [...(draft.tamanhos || []), { tamanho: tam, qtd: null }] })}
+                        className={"px-3 py-1 rounded-lg text-sm border transition-colors " + (ativo ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50")}>
+                        {tam}
+                      </button>
+                    );
+                  })}
+                </div>
                 <div className="space-y-2">
                   {(draft.tamanhos || []).map((t, j) => (
                     <div key={j} className="flex items-center gap-2">
@@ -989,6 +1047,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   ))}
                   <button type="button" onClick={() => setDraft({ ...draft, tamanhos: [...(draft.tamanhos || []), { tamanho: "", qtd: null }] })} className="text-xs text-[#0F6E56] hover:underline">+ adicionar tamanho</button>
                 </div>
+                <p className="text-[11px] text-gray-400 mt-1">Toque nos tamanhos pra adicionar — a quantidade por tamanho é opcional.</p>
               </Campo>
               <Campo label="Público">
                 <div className="flex flex-wrap gap-2">
@@ -1016,9 +1075,19 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 <textarea rows={2} value={draft.descricao ?? ""} onChange={(e) => setDraft({ ...draft, descricao: e.target.value })} className={inputCls + " resize-none"} placeholder="estampa na frente, arte própria" />
               </Campo>
             </div>
-            <div className="flex justify-end gap-2 mt-5">
-              <button type="button" onClick={() => setEditOpen(false)} className="border border-gray-200 text-gray-500 px-4 py-2 rounded-xl text-sm hover:bg-gray-50">Cancelar</button>
-              <button type="button" onClick={salvarEdicao} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-4 py-2 rounded-xl text-sm font-medium">Salvar</button>
+            )}
+            <div className="flex justify-between gap-2 mt-5">
+              {editStep === 1 ? (
+                <>
+                  <button type="button" onClick={() => setEditOpen(false)} className="border border-gray-200 text-gray-500 px-4 py-2 rounded-xl text-sm hover:bg-gray-50">Cancelar</button>
+                  <button type="button" onClick={() => setEditStep(2)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-4 py-2 rounded-xl text-sm font-medium">Continuar →</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setEditStep(1)} className="border border-gray-200 text-gray-500 px-4 py-2 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
+                  <button type="button" onClick={salvarEdicao} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-4 py-2 rounded-xl text-sm font-medium">Salvar</button>
+                </>
+              )}
             </div>
           </div>
         </div>
