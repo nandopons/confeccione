@@ -1146,11 +1146,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     return lista.map((tam) => {
                       const ativo = presentes.includes(tam);
                       return (
-                        <button key={tam} type="button"
-                          onClick={() => setDraft({ ...draft, tamanhos: ordenarTamanhos(ativo
-                            ? (draft.tamanhos || []).filter((t) => (t.tamanho || "").trim().toUpperCase() !== tam)
-                            : [...(draft.tamanhos || []), { tamanho: tam, qtd: null }]) })}
-                          className={"px-3 py-1 rounded-lg text-sm border transition-colors " + (ativo ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50")}>
+                        <button key={tam} type="button" title={ativo ? "Já adicionado — remova no ✕ da linha" : "Adicionar tamanho"}
+                          onClick={() => { if (ativo) return; setDraft({ ...draft, tamanhos: ordenarTamanhos([...(draft.tamanhos || []), { tamanho: tam, qtd: null }]) }); }}
+                          className={"px-3 py-1 rounded-lg text-sm border transition-colors " + (ativo ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56] cursor-default" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50")}>
                           {tam}
                         </button>
                       );
