@@ -31,7 +31,7 @@ type Linha = {
   modelo?: string | null; cor?: string | null; material?: string | null
   total?: number | null; tamanhos?: { tamanho?: string | null; qtd?: number | null }[] | null
   estampas?: { posicao?: string | null; tamanho?: string | null }[] | null
-  estampado?: boolean | null; descricao?: string | null
+  estampado?: boolean | null; objetivo_material?: string | null; descricao?: string | null
 }
 
 function parseDataUrl(d: string): ImagemEntrada | null {
@@ -45,6 +45,17 @@ function ehPlaceholder(v?: string | null): boolean {
   const t = (v || '').trim().toLowerCase()
   if (!t) return true
   return /(a\s*definir|a\s*combinar|\bdefinir\b|indefinid|private\s*label|sob\s*consulta|^n\/?a$|^-+$)/.test(t)
+}
+const MATERIAL_OBJ: Record<string, string> = {
+  economica: 'malha básica (algodão básico/PV)',
+  padrao: 'algodão fio 30 penteado',
+  premium: 'algodão premium (pima/penteado nobre)',
+  performance: 'dry-fit / poliamida',
+  indefinido: '',
+}
+function materialDaLinha(l: Linha): string {
+  if (l.material && l.material.trim()) return l.material.trim()
+  return MATERIAL_OBJ[(l.objetivo_material || '').trim()] || ''
 }
 function qtd(l: Linha): number {
   return typeof l.total === 'number' && l.total > 0 ? l.total : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0)
@@ -89,7 +100,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const ctxProd = [
     l.modelo,
     corLimpa(l.cor) ? `na cor ${corLimpa(l.cor)}` : '',
-    l.material ? `em ${l.material}` : '',
+    materialDaLinha(l) ? `em ${materialDaLinha(l)}` : '',
     estampado ? 'com estampa/bordado' : '',
   ].filter(Boolean).join(' ')
 
