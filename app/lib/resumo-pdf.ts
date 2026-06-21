@@ -9,6 +9,7 @@ export type LinhaResumo = {
   material?: string | null
   total?: number | null
   estampado?: boolean | null
+  acabamentos?: string[] | null
   tamanhos?: { tamanho?: string | null; qtd?: number | null }[] | null
   estampas?: { posicao?: string | null; tamanho?: string | null }[] | null
   publico?: string | null
@@ -280,7 +281,9 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
     const tam = (l.tamanhos || []).filter((t) => t.tamanho).map((t) => `${String(t.tamanho).toUpperCase()}: ${t.qtd ?? '?'}`).join('   ')
     if (tam) linha(`Tamanhos: ${tam}`, { size: 10 })
     const estampado = l.estampado === true || (l.estampas?.length ?? 0) > 0
-    linha(`Acabamento: ${estampado ? 'Estampado / bordado' : 'Lisa'}`, { size: 10 })
+    const acab = Array.isArray(l.acabamentos) ? l.acabamentos : []
+    const acabTxt = acab.length > 0 ? acab.map((x) => (x === 'bordada' ? 'Bordada' : 'Estampada')).join(' + ') : (estampado ? 'Estampado / bordado' : 'Lisa')
+    linha(`Acabamento: ${acabTxt}`, { size: 10 })
     if (estampado) {
       const est = (l.estampas || []).map((e) => [e.posicao, e.tamanho].filter(Boolean).join(' ')).filter(Boolean).join(', ')
       if (est) linha(`Estampa: ${est}`, { size: 10 })
