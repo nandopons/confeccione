@@ -648,8 +648,10 @@ export async function carregarOfertaParaFornecedor(
   // (legado) — aí o fornecedor vê em grade única.
   const mapaMk = pedido.mockups && typeof pedido.mockups === 'object' ? pedido.mockups : {}
   const fotosPorLinha = linhas.map((_: unknown, i: number) => {
-    const m = mapaMk[String(i)]
-    return m && Array.isArray(m.fotos) ? m.fotos.filter((x: unknown) => typeof x === 'string' && (x as string).length > 0).length : 0
+    const m = mapaMk[String(i)] as { fotos?: unknown[]; ia?: unknown[] } | undefined
+    const nf = m && Array.isArray(m.fotos) ? m.fotos.filter((x) => typeof x === 'string' && (x as string).length > 0).length : 0
+    const ni = m && Array.isArray(m.ia) ? m.ia.length : 0
+    return nf + ni
   })
   const temFotosPorLinha = fotosPorLinha.some((n: number) => n > 0)
 
