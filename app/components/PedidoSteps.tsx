@@ -26,6 +26,7 @@ const nichosExtras = [
   { id: "brindes",          icon: "🎁", title: "Brindes / Gráfica",    sub: "Canecas, crachás, copos, chaveiros" },
 ];
 const nichosTodos = [...nichosPrincipais, ...nichosExtras];
+function cepFmt(v: string): string { const d = (v || "").replace(/\D/g, ""); return d.length === 8 ? `${d.slice(0,5)}-${d.slice(5)}` : (v || ""); }
 
 const prazos: Record<string, string> = {
   urgente: "Urgente (até 7 dias)",
@@ -64,15 +65,15 @@ export default function PedidoSteps() {
     setStep(1);
   }
 
-  function avancarParaContatos() {
+  async function avancarParaContatos() {
     setErro(null);
     const faltando: string[] = [];
     if (!qty || qty <= 0) faltando.push("quantidade");
     if (!prazo) faltando.push("prazo");
-    if (!estado) faltando.push("estado");
     if (cep.replace(/\D/g, "").length !== 8) faltando.push("CEP");
     if (!numero.trim()) faltando.push("número");
     if (faltando.length > 0) { setErro(`Preencha: ${faltando.join(", ")}`); return; }
+    if (!estado) { await buscarCep(); }
     setStep(2);
   }
 
@@ -225,40 +226,37 @@ export default function PedidoSteps() {
                 <span className="text-sm text-gray-400">peças</span>
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Prazo desejado</label>
-                <SelectModal
-                  label="Prazo desejado"
-                  placeholder="Selecione..."
-                  value={prazo}
-                  onChange={setPrazo}
-                  triggerClassName="w-full border border-gray-200 rounded-xl px-3 py-2 bg-white text-sm"
-                  options={Object.entries(prazos).map(([value, label]) => ({ value, label }))}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Estado (UF)</label>
-                <SelectModal
-                  label="Estado (UF)"
-                  placeholder="Selecione..."
-                  value={estado}
-                  onChange={setEstado}
-                  triggerClassName="w-full border border-gray-200 rounded-xl px-3 py-2 bg-white text-sm"
-                  options={ufs.map((uf) => ({ value: uf, label: uf }))}
-                />
-              </div>
+            <div className="mb-4">
+              <label className="text-xs text-gray-400 mb-1 block">Prazo desejado</label>
+              <SelectModal
+                label="Prazo desejado"
+                placeholder="Selecione..."
+                value={prazo}
+                onChange={setPrazo}
+                triggerClassName="w-full border border-gray-200 rounded-xl px-3 py-2 bg-white text-sm"
+                options={Object.entries(prazos).map(([value, label]) => ({ value, label }))}
+              />
             </div>
             <div className="mb-6">
               <label className="text-xs text-gray-400 mb-1 block">Endereço de entrega <span className="text-gray-300">(pro cálculo do frete)</span></label>
-              <div className="flex flex-wrap gap-2">
-                <input value={cep} onChange={(e) => { setCep(e.target.value.replace(/[^\d-]/g, "").slice(0, 9)); setCepInfo(null); }} onBlur={() => void buscarCep()} inputMode="numeric" placeholder="CEP" className={inputCls + " w-32"} />
-                <input value={numero} onChange={(e) => setNumero(e.target.value.slice(0, 20))} placeholder="Número" className={inputCls + " w-28"} />
-                <input value={complemento} onChange={(e) => setComplemento(e.target.value.slice(0, 80))} placeholder="Complemento (opcional)" className={inputCls + " flex-1 min-w-[140px]"} />
+              <div className="flex items-start gap-2">
+                <input value={cepFmt(cep)} onChange={(e) => { setCep(e.target.value.replace(/\D/g, "").slice(0, 8)); setCepInfo(null); }} onBlur={() => void buscarCep()} inputMode="numeric" placeholder="CEP" className={inputCls + " w-40"} />
+                <button type="button" onClick={() => void buscarCep()} disabled={buscandoCep || cep.replace(/\D/g, "").length !== 8} className="shrink-0 border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 text-sm px-3 py-2 rounded-xl whitespace-nowrap">{buscandoCep ? "buscando…" : "buscar CEP"}</button>
               </div>
-              {buscandoCep && <p className="text-[11px] text-gray-400 mt-1">buscando endereço…</p>}
-              {!buscandoCep && cepInfo && <p className="text-[11px] text-gray-500 mt-1">{cepInfo}</p>}
-              <p className="text-[11px] text-gray-400 mt-1">Os detalhes de cada modelo (cor, estampa, etc.) você ajusta na próxima página, modelo a modelo.</p>
+              {!buscandoCep && cepInfo && (
+                <div className="mt-2 flex items-start gap-2 rounded-xl bg-[#E1F5EE]/60 border border-[#1D9E75]/20 px-3 py-2">
+                  <span className="text-[#1D9E75] mt-0.5">✓</span>
+                  <p className="text-xs text-gray-700">{cepInfo}</p>
+                </div>
+              )}
+              {!buscandoCep && !cepInfo && cep.replace(/\D/g, "").length === 8 && (
+                <p className="text-[11px] text-amber-600 mt-1">Não achamos esse CEP — confira os números.</p>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                <input value={numero} onChange={(e) => setNumero(e.target.value.slice(0, 20))} placeholder="Número" className={inputCls} />
+                <input value={complemento} onChange={(e) => setComplemento(e.target.value.slice(0, 80))} placeholder="Complemento (opcional)" className={inputCls} />
+              </div>
+              <p className="text-[11px] text-gray-400 mt-2">Não precisa escolher o estado — pegamos pelo CEP. Os detalhes de cada modelo (cor, estampa…) você ajusta na próxima página.</p>
             </div>
           </>
         )}
@@ -287,8 +285,10 @@ export default function PedidoSteps() {
                 <div className="flex justify-between text-gray-600"><span>Categoria</span><span>{nichosTodos.find((n) => n.id === tipo)?.title}</span></div>
                 <div className="flex justify-between text-gray-600"><span>Quantidade</span><span>{qty} peças</span></div>
                 {prazo && <div className="flex justify-between text-gray-600"><span>Prazo</span><span>{prazos[prazo]}</span></div>}
-                {estado && <div className="flex justify-between text-gray-600"><span>Estado</span><span>{estado}</span></div>}
-                {cep && <div className="flex justify-between text-gray-600"><span>CEP</span><span>{cep}{numero ? ` , ${numero}` : ""}</span></div>}
+                {(cepInfo || cep) && (
+                  <div className="flex justify-between gap-4 text-gray-600"><span>Entrega</span><span className="text-right">{[cepInfo, numero ? `nº ${numero}` : "", complemento].filter(Boolean).join(" · ") || `CEP ${cepFmt(cep)}`}</span></div>
+                )}
+                {cep && <div className="flex justify-between text-gray-600"><span>CEP</span><span>{cepFmt(cep)}</span></div>}
               </div>
             </div>
 
