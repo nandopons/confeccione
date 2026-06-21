@@ -19,6 +19,7 @@ import ListaColeta from "./ListaColeta";
 export type Tamanho = { tamanho: string; qtd: number | null };
 export type Estampa = { posicao: string; tamanho: string };
 export type Linha = {
+  lid?: string | null;
   modelo: string | null;
   cor: string | null;
   material: string | null;
@@ -356,6 +357,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
   function clonarProduto(i: number) {
     const copia: Linha = JSON.parse(JSON.stringify(linhas[i]));
+    delete copia.lid; // clone é um modelo novo — ganha lid próprio se criar lista
     const novas = [...linhas.slice(0, i + 1), copia, ...linhas.slice(i + 1)];
     const novasImgs: Record<number, ImgEstado> = {};
     const novasIa: Record<number, { url: string; prompt?: string }[]> = {};

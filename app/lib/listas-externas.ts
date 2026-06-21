@@ -6,6 +6,7 @@
 // Acesso só via service_role (RLS liga sem policies) — mediado pelas rotas.
 // ============================================================================
 import type { SupabaseClient } from '@supabase/supabase-js'
+import crypto from 'crypto'
 import { SITE_URL } from './url'
 
 export type ListaExterna = {
@@ -18,6 +19,7 @@ export type ListaExterna = {
   token: string
   ativa: boolean
   criado_em: string
+  lid?: string | null
 }
 
 export type InscricaoExterna = {
@@ -51,10 +53,71 @@ function ordemTam(t: string): number {
 
 // Recalcula as quantidades por tamanho da LINHA a partir das inscrições da
 // lista e grava de volta no pedido (linhas[linha_index].tamanhos + total).
+export function novoLid(): string {
+  return crypto.randomBytes(8).toString('hex')
+}
+
+// Garante que a linha do índice tenha um lid estável; persiste se faltava.
+export async function garantirLidLinha(
+  supabase: SupabaseClient,
+  pedido_id: string,
+  idx: number,
+): Promise<string | null> {
+  const { data: ped } = await supabase.from('pedidos_assistente').select('linhas').eq('id', pedido_id).single()
+  const linhas = Array.isArray(ped?.linhas) ? [...(ped!.linhas as Record<string, unknown>[])] : []
+  const l = linhas[idx] as { lid?: string } | undefined
+  if (!l) return null
+  if (typeof l.lid === 'string' && l.lid) return l.lid
+  const lid = novoLid()
+  linhas[idx] = { ...l, lid }
+  await supabase.from('pedidos_assistente').update({ linhas, atualizado_em: new Date().toISOString() }).eq('id', pedido_id)
+  return lid
+}
+
+// Resolve o índice ATUAL do modelo de uma lista pelo lid (estável), e mantém
+// lista.linha_index/lid em dia. Retorna -1 quando o modelo foi excluído
+// (órfã) — nesse caso NÃO se deve escrever em índice nenhum.
+export async function resolverIndiceDaLista(
+  supabase: SupabaseClient,
+  lista: { id: string; pedido_id: string; linha_index: number; lid?: string | null },
+): Promise<number> {
+  const { data: ped } = await supabase.from('pedidos_assistente').select('linhas').eq('id', lista.pedido_id).single()
+  const linhas = Array.isArray(ped?.linhas) ? (ped!.linhas as { lid?: string }[]) : []
+
+  // Lista legada (sem lid): adota o lid da linha no índice atual (ou cria um) e migra.
+  if (!lista.lid) {
+    const l = linhas[lista.linha_index] as { lid?: string } | undefined
+    if (!l) return -1
+    let lid = typeof l.lid === 'string' && l.lid ? l.lid : null
+    if (!lid) {
+      lid = novoLid()
+      const novas = [...linhas]
+      novas[lista.linha_index] = { ...l, lid }
+      await supabase.from('pedidos_assistente').update({ linhas: novas, atualizado_em: new Date().toISOString() }).eq('id', lista.pedido_id)
+    }
+    await supabase.from('listas_externas').update({ lid, atualizado_em: new Date().toISOString() }).eq('id', lista.id)
+    lista.lid = lid
+    return lista.linha_index
+  }
+
+  // Lista com lid: acha a posição atual do modelo.
+  const idx = linhas.findIndex((l) => l && l.lid === lista.lid)
+  if (idx < 0) return -1 // modelo excluído — órfã
+  if (idx !== lista.linha_index) {
+    await supabase.from('listas_externas').update({ linha_index: idx, atualizado_em: new Date().toISOString() }).eq('id', lista.id)
+    lista.linha_index = idx
+  }
+  return idx
+}
+
 export async function recomputarLinhaDaLista(
   supabase: SupabaseClient,
-  lista: Pick<ListaExterna, 'id' | 'pedido_id' | 'linha_index'>,
+  lista: Pick<ListaExterna, 'id' | 'pedido_id' | 'linha_index'> & { lid?: string | null },
 ): Promise<void> {
+  // Acha o modelo pelo lid (estável). Se o modelo foi excluído, não escreve.
+  const idx = await resolverIndiceDaLista(supabase, lista)
+  if (idx < 0) return
+
   const { data: insc } = await supabase
     .from('inscricoes_externas')
     .select('tamanho')
@@ -77,8 +140,8 @@ export async function recomputarLinhaDaLista(
     .eq('id', lista.pedido_id)
     .single()
   const linhas = Array.isArray(ped?.linhas) ? [...(ped!.linhas as Record<string, unknown>[])] : []
-  if (!linhas[lista.linha_index]) return
-  linhas[lista.linha_index] = { ...linhas[lista.linha_index], tamanhos, total }
+  if (!linhas[idx]) return
+  linhas[idx] = { ...linhas[idx], tamanhos, total }
   await supabase
     .from('pedidos_assistente')
     .update({ linhas, atualizado_em: new Date().toISOString() })

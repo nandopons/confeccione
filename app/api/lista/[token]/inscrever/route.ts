@@ -35,7 +35,7 @@ export async function POST(req: Request, ctx: Ctx) {
 
   const { data: lista } = await supabase
     .from('listas_externas')
-    .select('id, pedido_id, linha_index, ativa')
+    .select('id, pedido_id, linha_index, ativa, lid')
     .eq('token', token)
     .single()
   if (!lista) return NextResponse.json({ erro: 'Lista não encontrada.' }, { status: 404 })

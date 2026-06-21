@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import crypto from 'crypto'
+import { garantirLidLinha, resolverIndiceDaLista } from '@/app/lib/listas-externas'
 
 export const runtime = 'nodejs'
 
@@ -23,11 +24,17 @@ export async function GET(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params
   if (!id) return NextResponse.json({ erro: 'id ausente' }, { status: 400 })
 
-  const { data: listas } = await supabase
+  const { data: listasRaw } = await supabase
     .from('listas_externas')
-    .select('id, pedido_id, linha_index, modelo_nome, cor, titulo, token, ativa, criado_em')
+    .select('id, pedido_id, linha_index, modelo_nome, cor, titulo, token, ativa, criado_em, lid')
     .eq('pedido_id', id)
     .order('linha_index', { ascending: true })
+
+  // mantém linha_index em dia com a posição atual do modelo (resolve por lid)
+  const listas = listasRaw ?? []
+  for (const l of listas) {
+    try { await resolverIndiceDaLista(supabase, l as { id: string; pedido_id: string; linha_index: number; lid?: string | null }) } catch { /* noop */ }
+  }
 
   const { data: insc } = await supabase
     .from('inscricoes_externas')
@@ -72,12 +79,14 @@ export async function POST(req: Request, ctx: Ctx) {
   const linhas = Array.isArray(ped?.linhas) ? (ped!.linhas as Record<string, unknown>[]) : []
   const l = linhas[p.data.linha_index] as { modelo?: string | null; cor?: string | null } | undefined
   const token = crypto.randomBytes(9).toString('base64url')
+  const lid = await garantirLidLinha(supabase, id, p.data.linha_index)
 
   const { data: nova, error } = await supabase
     .from('listas_externas')
     .insert({
       pedido_id: id,
       linha_index: p.data.linha_index,
+      lid,
       modelo_nome: l?.modelo ?? null,
       cor: corLabel(l?.cor) || null,
       titulo: p.data.titulo?.trim() || null,

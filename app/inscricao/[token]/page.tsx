@@ -31,7 +31,7 @@ export default async function Page({ params }: { params: Promise<{ token: string
 
   const { data: lista } = await supabase
     .from('listas_externas')
-    .select('id, pedido_id, linha_index, modelo_nome, cor, titulo, ativa')
+    .select('id, pedido_id, linha_index, modelo_nome, cor, titulo, ativa, lid')
     .eq('token', token)
     .single()
 
@@ -46,12 +46,15 @@ export default async function Page({ params }: { params: Promise<{ token: string
 
   const { data: ped } = await supabase
     .from('pedidos_assistente')
-    .select('codigo, nome, mockups')
+    .select('codigo, nome, mockups, linhas')
     .eq('id', lista.pedido_id)
     .single()
 
   const organizador = primeiroNome(ped?.nome)
-  const thumb = thumbDoModelo(ped?.mockups, lista.linha_index)
+  // posição ATUAL do modelo (estável por lid; cai pro linha_index se sem lid)
+  const linhasPed = Array.isArray(ped?.linhas) ? (ped!.linhas as { lid?: string }[]) : []
+  const idxAtual = lista.lid ? (linhasPed.findIndex((l) => l && l.lid === lista.lid) ?? -1) : lista.linha_index
+  const thumb = thumbDoModelo(ped?.mockups, idxAtual >= 0 ? idxAtual : lista.linha_index)
   const modelo = [lista.modelo_nome, corLabel(lista.cor)].filter(Boolean).join(' · ') || lista.titulo || 'a camiseta do grupo'
 
   return (

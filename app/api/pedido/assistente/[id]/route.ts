@@ -23,6 +23,7 @@ const TamanhoSchema = z.object({
 })
 const EstampaSchema = z.object({ posicao: z.string(), tamanho: z.string() })
 const LinhaSchema = z.object({
+  lid: z.string().nullable().optional(),
   modelo: z.string().nullable(),
   cor: z.string().nullable(),
   material: z.string().nullable(),
