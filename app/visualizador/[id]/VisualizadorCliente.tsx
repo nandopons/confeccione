@@ -215,7 +215,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     return () => clearInterval(t);
   }, []);
   const [draft, setDraft] = useState<Linha>({ ...linhaVazia });
-  const [editStep, setEditStep] = useState<1 | 2>(1);
+  const [editStep, setEditStep] = useState<1 | 2 | 3>(1);
+  const [corPickerOpen, setCorPickerOpen] = useState(false);
 
   // subir a própria arte / mockup
   const [subindoIdx, setSubindoIdx] = useState<number | null>(null);
@@ -254,6 +255,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       setEditIndex(i);
     }
     setEditStep(1);
+    setCorPickerOpen(false);
     setEditOpen(true);
   }
 
@@ -1070,56 +1072,30 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             <button type="button" onClick={() => setEditOpen(false)} aria-label="Fechar" className="absolute top-3 right-3 h-8 w-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 text-xl leading-none">×</button>
             <p className="text-gray-900 font-medium mb-3">{editIndex === null ? "Adicionar produto" : "Editar produto"}</p>
             <div className="flex items-center mb-5">
-              {[0, 1].map((i) => {
+              {[0, 1, 2].map((i) => {
                 const cur = editStep - 1;
+                const labels = ["Tecido", "Básico", "Detalhes"];
                 return (
                   <div key={i} className="flex items-center flex-1 last:flex-none">
                     <div className={"w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0 shadow-sm transition-all " + (i < cur ? "bg-[#1D9E75] text-white" : i === cur ? "bg-[#111] text-white" : "bg-white border border-gray-300 text-gray-500")}>
                       {i < cur ? "✓" : i + 1}
                     </div>
-                    <span className={"ml-2 text-xs whitespace-nowrap " + (i <= cur ? "text-gray-700 font-medium" : "text-gray-400")}>{i === 0 ? "Básico" : "Detalhes"}</span>
-                    {i < 1 && <div className={"flex-1 h-px mx-3 transition-colors " + (i < cur ? "bg-[#1D9E75]" : "bg-gray-200")} />}
+                    <span className={"ml-2 text-xs whitespace-nowrap " + (i <= cur ? "text-gray-700 font-medium" : "text-gray-400")}>{labels[i]}</span>
+                    {i < 2 && <div className={"flex-1 h-px mx-3 transition-colors " + (i < cur ? "bg-[#1D9E75]" : "bg-gray-200")} />}
                   </div>
                 );
               })}
             </div>
+
             {editStep === 1 ? (
             <div className="space-y-3">
-              <Campo label="Categoria">
-                <select value={draft.categoria ?? ""} onChange={(e) => setDraft({ ...draft, categoria: e.target.value || null })} className={inputCls + " bg-white"}>
-                  <option value="">Selecione…</option>
-                  {(draft.categoria && !CATEGORIAS.includes(draft.categoria) ? [draft.categoria, ...CATEGORIAS] : CATEGORIAS).map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </Campo>
-              <Campo label="Modelo (tshirt, oversized, polo, boné…)">
-                <input value={draft.modelo ?? ""} onChange={(e) => setDraft({ ...draft, modelo: e.target.value })} className={inputCls} placeholder="oversized" />
-              </Campo>
-              <Campo label="Cor">
-                <input value={draft.cor ?? ""} onChange={(e) => setDraft({ ...draft, cor: e.target.value })} className={inputCls} placeholder="Ex.: Verde Oliva, Azul Marinho…" />
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {CORES_NOMEADAS.map((c) => {
-                    const sel = (draft.cor || "").trim().toLowerCase() === c.nome.toLowerCase();
-                    return (
-                      <button key={c.nome} type="button" title={c.nome} aria-label={c.nome}
-                        onClick={() => setDraft({ ...draft, cor: c.nome })}
-                        className={"h-7 w-7 rounded-full flex items-center justify-center border transition-all " + (sel ? "ring-2 ring-[#1D9E75] ring-offset-1 border-gray-300" : "border-gray-200 hover:scale-110")}
-                        style={{ backgroundColor: c.hex }}>
-                        {sel && <span className="text-[11px] leading-none" style={{ color: c.claro ? "#111" : "#fff" }}>✓</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-[11px] text-gray-400 mt-1">Escolha uma cor ou escreva o nome da cor (sem código).</p>
-              </Campo>
               <Campo label="Tipo / qualidade do tecido">
                 <div className="space-y-1.5">
-                  {OBJETIVOS_MATERIAL.map((o) => {
+                  {OBJETIVOS_MATERIAL.filter((o) => ["economica", "padrao", "premium"].includes(o.id)).map((o) => {
                     const sel = (draft.objetivo_material ?? "") === o.id;
                     return (
                       <button key={o.id} type="button" onClick={() => setDraft({ ...draft, objetivo_material: o.id })}
-                        className={"w-full text-left rounded-lg border px-3 py-2 transition-colors " + (sel ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 bg-white hover:bg-gray-50")}>
+                        className={"w-full text-left rounded-lg border px-3 py-2.5 transition-colors " + (sel ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 bg-white hover:bg-gray-50")}>
                         <div className="flex items-center gap-2">
                           <span className={"h-4 w-4 rounded-full border flex items-center justify-center shrink-0 " + (sel ? "border-[#1D9E75] bg-[#1D9E75]" : "border-gray-300")}>
                             {sel && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
@@ -1133,7 +1109,50 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   })}
                 </div>
                 <input value={draft.material ?? ""} onChange={(e) => setDraft({ ...draft, material: e.target.value })} className={inputCls + " mt-2"} placeholder="Especificar material (opcional) — ex.: algodão Menegotti 170g" />
-                <p className="text-[11px] text-gray-400 mt-1">Escolha pelo objetivo da peça — a gente alinha o tecido ideal e o orçamento. Se já souber o tecido exato, especifique acima.</p>
+                <p className="text-[11px] text-gray-400 mt-1">Escolha pelo objetivo da peça — a gente alinha o tecido ideal e o orçamento.</p>
+              </Campo>
+            </div>
+            ) : editStep === 2 ? (
+            <div className="space-y-3">
+              <Campo label="Categoria">
+                <select value={draft.categoria ?? ""} onChange={(e) => setDraft({ ...draft, categoria: e.target.value || null })} className={inputCls + " bg-white"}>
+                  <option value="">Selecione…</option>
+                  {(draft.categoria && !CATEGORIAS.includes(draft.categoria) ? [draft.categoria, ...CATEGORIAS] : CATEGORIAS).map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </Campo>
+              <Campo label="Modelo (tshirt, oversized, polo, boné…)">
+                <input value={draft.modelo ?? ""} onChange={(e) => setDraft({ ...draft, modelo: e.target.value })} className={inputCls} placeholder="oversized" />
+              </Campo>
+              <Campo label="Cor">
+                <div className="flex items-center gap-2">
+                  <input value={draft.cor ?? ""} onChange={(e) => setDraft({ ...draft, cor: e.target.value })} className={inputCls} placeholder="Ex.: Verde Oliva, Azul Marinho…" />
+                  <div className="relative shrink-0">
+                    <button type="button" onClick={() => setCorPickerOpen((v) => !v)} aria-label="Escolher cor pela paleta" title="Escolher cor"
+                      className="h-9 w-9 rounded-lg border border-gray-300 flex items-center justify-center hover:bg-gray-50">
+                      <span className="h-5 w-5 rounded-full border border-black/10" style={{ backgroundColor: CORES_NOMEADAS.find((c) => c.nome.toLowerCase() === (draft.cor || "").trim().toLowerCase())?.hex ?? "#FFFFFF" }} />
+                    </button>
+                    {corPickerOpen && (
+                      <div className="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-gray-200 bg-white shadow-lg p-2">
+                        <div className="grid grid-cols-6 gap-1.5">
+                          {CORES_NOMEADAS.map((c) => {
+                            const sel = (draft.cor || "").trim().toLowerCase() === c.nome.toLowerCase();
+                            return (
+                              <button key={c.nome} type="button" title={c.nome} aria-label={c.nome}
+                                onClick={() => { setDraft({ ...draft, cor: c.nome }); setCorPickerOpen(false); }}
+                                className={"h-7 w-7 rounded-full flex items-center justify-center border transition-all " + (sel ? "ring-2 ring-[#1D9E75] ring-offset-1 border-gray-300" : "border-gray-200 hover:scale-110")}
+                                style={{ backgroundColor: c.hex }}>
+                                {sel && <span className="text-[11px] leading-none" style={{ color: c.claro ? "#111" : "#fff" }}>✓</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1">Escolha pela paleta (botão ao lado) ou escreva o nome da cor (sem código).</p>
               </Campo>
             </div>
             ) : (
@@ -1199,15 +1218,21 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
               </Campo>
             </div>
             )}
+
             <div className="flex justify-between gap-2 mt-5">
               {editStep === 1 ? (
                 <>
                   <button type="button" onClick={() => setEditOpen(false)} className="border border-gray-200 text-gray-500 px-4 py-2 rounded-xl text-sm hover:bg-gray-50">Cancelar</button>
                   <button type="button" onClick={() => setEditStep(2)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-4 py-2 rounded-xl text-sm font-medium">Continuar →</button>
                 </>
-              ) : (
+              ) : editStep === 2 ? (
                 <>
                   <button type="button" onClick={() => setEditStep(1)} className="border border-gray-200 text-gray-500 px-4 py-2 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
+                  <button type="button" onClick={() => setEditStep(3)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-4 py-2 rounded-xl text-sm font-medium">Continuar →</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setEditStep(2)} className="border border-gray-200 text-gray-500 px-4 py-2 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
                   <button type="button" onClick={salvarEdicao} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-4 py-2 rounded-xl text-sm font-medium">Salvar</button>
                 </>
               )}
