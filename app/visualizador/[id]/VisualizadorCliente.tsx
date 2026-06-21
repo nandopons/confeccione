@@ -738,7 +738,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 </div>
 
                 {!orcamentoDefinido && (
-                  <button type="button" onClick={() => abrirEdicao(i)} title="Editar / completar produto" className="group mt-3 w-full inline-flex items-center justify-center gap-2 bg-[#E1F5EE] hover:bg-[#1D9E75] text-[#0F6E56] hover:text-white text-sm font-medium px-3.5 py-2.5 rounded-lg ring-1 ring-[#1D9E75]/30 transition-colors">
+                  <button type="button" onClick={() => abrirEdicao(i)} title="Editar / completar produto" className="group mt-3 w-full sm:w-auto inline-flex items-center justify-center sm:justify-start gap-2 bg-[#E1F5EE] hover:bg-[#1D9E75] text-[#0F6E56] hover:text-white text-sm font-medium px-3.5 py-2.5 rounded-lg ring-1 ring-[#1D9E75]/30 transition-colors">
                     <span className="relative flex h-5 w-5 items-center justify-center shrink-0">
                       <span className="absolute inline-flex h-full w-full rounded-full bg-[#1D9E75]/30 motion-safe:animate-ping" aria-hidden="true" />
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="relative"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
