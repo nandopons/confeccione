@@ -32,6 +32,7 @@ type Oferta = {
   orcamentoStatus?: string | null
   contatoCliente?: { nome: string | null; telefone: string | null; email: string | null; cidade: string | null; uf: string | null } | null
   linkOrcamento?: string | null
+  temListaAberta?: boolean
 }
 
 function corLimpa(s: string | null | undefined): string {
@@ -106,6 +107,15 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
             : 'Ao assumir, VOCÊ define o orçamento final (produtos + frete). Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.'}
         </p>
       </div>
+
+      {oferta.temListaAberta && (
+        <div className="mx-6 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-semibold text-amber-900">⚠️ Lista de tamanhos em aberto com o cliente</p>
+          <p className="text-xs text-amber-800 mt-1 leading-snug">
+            As quantidades por tamanho deste pedido ainda podem mudar (o total de peças não muda, só a distribuição). Confirme os tamanhos com o cliente antes de liberar a produção.
+          </p>
+        </div>
+      )}
 
       {/* Modelos do pedido — visual igual ao da página do cliente */}
       {oferta.fotosPorLinha ? (
