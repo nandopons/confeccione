@@ -1,5 +1,5 @@
 // Gera o PDF "Resumo do pedido" com a marca da Confeccione (logo vetorial + site).
-import { PDFDocument, StandardFonts, rgb, PDFName, PDFString, pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath, type PDFPage, type PDFFont } from 'pdf-lib'
+import { PDFDocument, StandardFonts, rgb, PDFName, PDFString, type PDFPage, type PDFFont } from 'pdf-lib'
 
 type MapaMockups = Record<string, { liso?: string; arte?: string; fotos?: string[]; ia?: { url: string; prompt?: string }[] }>
 
@@ -171,31 +171,32 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
       if (im) imgs.push({ im })
     }
     if (imgs.length === 0) return
-    // Células quadradas uniformes; a imagem PREENCHE a célula (cover) com recorte,
-    // pra não ficar pequena por causa de margem branca da foto.
-    const cell = 160, gap = 12
-    const porLinha = Math.max(1, Math.floor((maxW + gap) / (cell + gap)))
+    // Caixa máxima por imagem; a imagem aparece INTEIRA (contain), sem recorte,
+    // preservando a proporção original do mockup enviado pelo cliente.
+    const box = 200, gap = 12
+    const porLinha = Math.max(1, Math.floor((maxW + gap) / (box + gap)))
     for (let r = 0; r < imgs.length; r += porLinha) {
       const fileira = imgs.slice(r, r + porLinha)
-      garantir(cell + 10)
+      // altura real desta fileira = maior altura entre as imagens (contain)
+      const alturas = fileira.map(({ im }) => {
+        const sc = Math.min(box / im.width, box / im.height)
+        return im.height * sc
+      })
+      const alturaFileira = Math.max(...alturas)
+      garantir(alturaFileira + 10)
       let x = MX
       for (const { im } of fileira) {
-        const x0 = x, y0 = y - cell
-        // recorta no retângulo da célula
-        page.pushOperators(
-          pushGraphicsState(),
-          moveTo(x0, y0), lineTo(x0 + cell, y0), lineTo(x0 + cell, y0 + cell), lineTo(x0, y0 + cell), closePath(),
-          clip(), endPath(),
-        )
-        const sc = Math.max(cell / im.width, cell / im.height) // cover
+        const sc = Math.min(box / im.width, box / im.height) // contain
         const w = im.width * sc, h = im.height * sc
-        page.drawImage(im, { x: x0 + (cell - w) / 2, y: y0 + (cell - h) / 2, width: w, height: h })
-        page.pushOperators(popGraphicsState())
-        // borda por cima
-        page.drawRectangle({ x: x0, y: y0, width: cell, height: cell, borderColor: CINZA_CLARO, borderWidth: 0.6 })
-        x += cell + gap
+        // alinha pelo topo da fileira e centraliza na largura da caixa
+        const ix = x + (box - w) / 2
+        const iy = y - h
+        page.drawImage(im, { x: ix, y: iy, width: w, height: h })
+        // borda acompanha a imagem real (sem moldura vazia ao redor)
+        page.drawRectangle({ x: ix, y: iy, width: w, height: h, borderColor: CINZA_CLARO, borderWidth: 0.6 })
+        x += box + gap
       }
-      y -= cell + 12
+      y -= alturaFileira + 12
     }
   }
 
