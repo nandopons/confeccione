@@ -127,6 +127,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [iaBusy, setIaBusy] = useState<number | null>(null);
   const [iaErro, setIaErro] = useState<Record<number, string | null>>({});
   const [iaAjuste, setIaAjuste] = useState<{ i: number; idx: number } | null>(null);
+  const [zoom, setZoom] = useState<string | null>(null);
 
   // confirmação / pagamento
   const [confirmStep, setConfirmStep] = useState<"idle" | "form" | "feito">("idle");
@@ -545,8 +546,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                       {st.urls.map((u, j) => (
                         <div key={j} className="relative">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={u} alt={`foto ${j + 1}`} className="w-full h-40 object-contain rounded-lg border border-gray-200 bg-white" />
+                          <button type="button" onClick={() => setZoom(u)} className="block w-full" aria-label={`Ampliar foto ${j + 1}`}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={u} alt={`foto ${j + 1}`} className="w-full h-40 object-contain rounded-lg border border-gray-200 bg-white cursor-zoom-in" />
+                          </button>
                           <button type="button" onClick={() => removerFoto(i, j)} aria-label="Remover foto" className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/55 hover:bg-black/80 text-white text-base leading-none flex items-center justify-center">×</button>
                         </div>
                       ))}
@@ -617,10 +620,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-3">
                           {lista.map((it, idx) => (
                             <div key={idx} className={"relative group aspect-square rounded-lg overflow-hidden border bg-white " + (ajustandoEste && iaAjuste!.idx === idx ? "border-[#1D9E75] ring-2 ring-[#1D9E75]" : "border-[#1D9E75]/40")}>
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={it.url} alt={`Mockup IA ${idx + 1}`} className="h-full w-full object-cover" />
+                              <button type="button" onClick={() => setZoom(it.url)} className="block h-full w-full" aria-label={`Ampliar mockup IA ${idx + 1}`}>
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={it.url} alt={`Mockup IA ${idx + 1}`} className="h-full w-full object-cover cursor-zoom-in" />
+                              </button>
                               <span className="absolute top-1 left-1 text-[10px] font-semibold bg-[#1D9E75] text-white rounded px-1">IA</span>
-                              <button type="button" onClick={() => { setIaAjuste({ i, idx }); setIaInstr((p) => ({ ...p, [i]: it.prompt || p[i] || "" })); }} className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/30 text-white text-xs font-medium opacity-0 group-hover:opacity-100 transition" aria-label="Ajustar mockup">Ajustar</button>
+                              <button type="button" onClick={() => { setIaAjuste({ i, idx }); setIaInstr((p) => ({ ...p, [i]: it.prompt || p[i] || "" })); }} className="absolute bottom-1 left-1 inline-flex items-center gap-1 text-[10px] font-medium bg-black/60 hover:bg-black/80 text-white rounded px-1.5 py-0.5" aria-label="Ajustar mockup">✎ Ajustar</button>
                               <button type="button" onClick={() => void removerIaImg(i, idx)} className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/55 hover:bg-black/80 text-white text-sm leading-none flex items-center justify-center" aria-label="Remover">×</button>
                             </div>
                           ))}
@@ -1011,6 +1016,13 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
               <button type="button" onClick={salvarEdicao} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-4 py-2 rounded-xl text-sm font-medium">Salvar</button>
             </div>
           </div>
+        </div>
+      )}
+      {zoom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setZoom(null); }} role="dialog" aria-modal="true">
+          <button type="button" onClick={() => setZoom(null)} className="absolute top-4 right-4 h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl leading-none" aria-label="Fechar">×</button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={zoom} alt="Imagem ampliada" className="max-h-[92vh] max-w-[94vw] object-contain rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
     </div>
