@@ -737,6 +737,16 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   {l.total ? <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full shrink-0">{l.total} un.</span> : null}
                 </div>
 
+                {!orcamentoDefinido && (
+                  <button type="button" onClick={() => abrirEdicao(i)} title="Editar / completar produto" className="group mt-3 w-full inline-flex items-center justify-center gap-2 bg-[#E1F5EE] hover:bg-[#1D9E75] text-[#0F6E56] hover:text-white text-sm font-medium px-3.5 py-2.5 rounded-lg ring-1 ring-[#1D9E75]/30 transition-colors">
+                    <span className="relative flex h-5 w-5 items-center justify-center shrink-0">
+                      <span className="absolute inline-flex h-full w-full rounded-full bg-[#1D9E75]/30 motion-safe:animate-ping" aria-hidden="true" />
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="relative"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                    </span>
+                    <span key={editHintIdx} style={{ animation: "hintIn .45s ease" }} className="whitespace-nowrap">{EDIT_HINTS[editHintIdx]}</span>
+                  </button>
+                )}
+
                 {l.tamanhos.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mt-3">
                     {l.tamanhos.map((t, j) => (
@@ -819,13 +829,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
                   <span className="flex-1 min-w-2" aria-hidden />
                   {!orcamentoDefinido && (<>
-                  <button type="button" onClick={() => abrirEdicao(i)} title="Editar / completar produto" className="group inline-flex items-center gap-2 bg-[#E1F5EE] hover:bg-[#1D9E75] text-[#0F6E56] hover:text-white text-sm font-medium pl-3 pr-3.5 py-2 rounded-lg ring-1 ring-[#1D9E75]/30 transition-colors">
-                    <span className="relative flex h-5 w-5 items-center justify-center shrink-0">
-                      <span className="absolute inline-flex h-full w-full rounded-full bg-[#1D9E75]/30 motion-safe:animate-ping" aria-hidden="true" />
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="relative"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
-                    </span>
-                    <span key={editHintIdx} style={{ animation: "hintIn .45s ease" }} className="whitespace-nowrap">{EDIT_HINTS[editHintIdx]}</span>
-                  </button>
                   <button type="button" onClick={() => clonarProduto(i)} title="Clonar este modelo" className="inline-flex items-center gap-1.5 text-gray-500 hover:text-[#0F6E56] hover:bg-[#E1F5EE] text-sm px-3 py-2 rounded-lg transition-colors">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
                     Clonar
