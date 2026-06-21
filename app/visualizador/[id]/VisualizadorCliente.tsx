@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import ListaColeta from "./ListaColeta";
 
 export type Tamanho = { tamanho: string; qtd: number | null };
 export type Estampa = { posicao: string; tamanho: string };
@@ -795,6 +796,15 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     </div>
                   );
                 })()}
+
+                {/* LISTA DE COLETA (Listas Externas) — o grupo informa os tamanhos */}
+                {!orcamentoDefinido && (
+                  <ListaColeta
+                    pedidoId={pedido.id}
+                    linhaIndex={i}
+                    onAtualizarLinha={(idx, tamanhos, total) => setLinhas((prev) => prev.map((l, k) => (k === idx ? { ...l, tamanhos, total } : l)))}
+                  />
+                )}
 
                 {/* AÇÕES — toolbar única: imagem à esquerda, produto à direita */}
                 <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">

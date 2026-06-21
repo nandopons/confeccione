@@ -75,6 +75,13 @@ const SECOES: Secao[] = [
         ),
       },
       {
+        href: '/admin/listas-externas',
+        label: 'Listas Externas',
+        icone: (
+          <Ico d="M9 5h11M9 12h11M9 19h11M4.5 5h.01M4.5 12h.01M4.5 19h.01" />
+        ),
+      },
+      {
         href: '/admin/marketing',
         label: 'Marketing',
         icone: (
