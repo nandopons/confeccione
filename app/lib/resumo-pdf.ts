@@ -1,5 +1,5 @@
 // Gera o PDF "Resumo do pedido" com a marca da Confeccione (logo vetorial + site).
-import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from 'pdf-lib'
+import { PDFDocument, StandardFonts, rgb, PDFName, PDFString, type PDFPage, type PDFFont } from 'pdf-lib'
 
 type MapaMockups = Record<string, { liso?: string; arte?: string; fotos?: string[]; ia?: { url: string; prompt?: string }[] }>
 
@@ -33,6 +33,7 @@ export type ResumoPedido = {
 }
 
 const VERDE = rgb(0.114, 0.62, 0.459) // #1D9E75
+const VERDE_ESC = rgb(0.059, 0.431, 0.337) // #0F6E56
 const ESCURO = rgb(0.094, 0.094, 0.094) // #181818
 const CINZA = rgb(0.42, 0.45, 0.49)
 const CINZA_CLARO = rgb(0.85, 0.87, 0.89)
@@ -168,22 +169,21 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
       if (im) imgs.push({ im })
     }
     if (imgs.length === 0) return
-    const cellW = 232, cellH = 300, gap = 12
-    const porLinha = Math.max(1, Math.floor((maxW + gap) / (cellW + gap)))
+    // Células quadradas uniformes (todas do mesmo tamanho), imagem centralizada (contain).
+    const cell = 150, gap = 12
+    const porLinha = Math.max(1, Math.floor((maxW + gap) / (cell + gap)))
     for (let r = 0; r < imgs.length; r += porLinha) {
-      const fileira = imgs.slice(r, r + porLinha).map(({ im }) => {
-        const sc = Math.min(cellW / im.width, cellH / im.height, 1)
-        return { im, w: im.width * sc, h: im.height * sc }
-      })
-      const rowH = Math.max(...fileira.map((d) => d.h))
-      garantir(rowH + 10)
+      const fileira = imgs.slice(r, r + porLinha)
+      garantir(cell + 10)
       let x = MX
-      for (const d of fileira) {
-        page.drawRectangle({ x: x - 1, y: y - d.h - 1, width: d.w + 2, height: d.h + 2, borderColor: CINZA_CLARO, borderWidth: 0.6 })
-        page.drawImage(d.im, { x, y: y - d.h, width: d.w, height: d.h })
-        x += cellW + gap
+      for (const { im } of fileira) {
+        page.drawRectangle({ x, y: y - cell, width: cell, height: cell, borderColor: CINZA_CLARO, borderWidth: 0.6 })
+        const sc = Math.min(cell / im.width, cell / im.height)
+        const w = im.width * sc, h = im.height * sc
+        page.drawImage(im, { x: x + (cell - w) / 2, y: y - cell + (cell - h) / 2, width: w, height: h })
+        x += cell + gap
       }
-      y -= rowH + 10
+      y -= cell + 12
     }
   }
 
@@ -207,6 +207,29 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
     y -= 4
   }
 
+  // Link pro painel de acompanhamento do cliente.
+  {
+    const intro = 'Para acompanhar e visualizar seu pedido, acesse seu painel:'
+    linha(intro, { size: 9.5, cor: CINZA, gap: 1 })
+    const url = `https://${SITE}/cliente/painel`
+    const label = `${SITE}/cliente/painel`
+    const size = 10
+    garantir(size + 6)
+    page.drawText(label, { x: MX, y, size, font: bold, color: VERDE })
+    const w = bold.widthOfTextAtSize(label, size)
+    const annot = doc.context.obj({
+      Type: 'Annot', Subtype: 'Link',
+      Rect: [MX, y - 2, MX + w, y + size],
+      Border: [0, 0, 0],
+      A: doc.context.obj({ Type: 'Action', S: 'URI', URI: PDFString.of(url) }),
+    })
+    const ref = doc.context.register(annot)
+    const existentes = page.node.Annots()
+    if (existentes) existentes.push(ref)
+    else page.node.set(PDFName.of('Annots'), doc.context.obj([ref]))
+    y -= size + 10
+  }
+
   page.drawLine({ start: { x: MX, y: y + 2 }, end: { x: A4.w - MX, y: y + 2 }, thickness: 1, color: CINZA_CLARO })
   y -= 12
 
@@ -215,7 +238,19 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
   for (let i = 0; i < pedido.linhas.length; i++) {
     const l = pedido.linhas[i]
     const qtd = qtdDaLinha(l)
-    garantir(70)
+    garantir(96)
+    // Faixa "Modelo N" (igual à página do pedido).
+    {
+      const barH = 20
+      page.drawRectangle({ x: MX, y: y - barH + 4, width: maxW, height: barH, color: VERDE_ESC })
+      page.drawText(`Modelo ${i + 1}`, { x: MX + 10, y: y - barH + 4 + (barH - 9) / 2, size: 10, font: bold, color: rgb(1, 1, 1) })
+      const sub = [l.modelo, corLabel(l.cor)].filter(Boolean).join(' · ')
+      if (sub) {
+        const subW = reg.widthOfTextAtSize(sub, 9)
+        page.drawText(sub, { x: A4.w - MX - 10 - subW, y: y - barH + 4 + (barH - 8) / 2, size: 9, font: reg, color: rgb(0.9, 0.96, 0.93) })
+      }
+      y -= barH + 12
+    }
     const titulo = `${qtd || '?'}× ${[l.modelo || 'peça', corLabel(l.cor)].filter(Boolean).join(' · ')}`
     linha(titulo, { size: 12, font: bold, cor: ESCURO, gap: 1 })
     if (l.material) linha(`Material: ${l.material}`, { size: 10 })
