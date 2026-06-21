@@ -27,6 +27,7 @@ export type Linha = {
   estampas: Estampa[];
   estampado: boolean | null;
   categoria?: string | null;
+  objetivo_material?: string | null;
   descricao: string | null;
   preco_unit_centavos?: number | null;
 };
@@ -64,7 +65,7 @@ type PortfolioMidiaVis = { path: string; mime: string | null; tipo: 'imagem' | '
 
 type ImgEstado = { loading?: boolean; urls?: string[]; motivo?: string };
 
-const linhaVazia: Linha = { modelo: "", cor: "", material: "", publico: null, total: null, tamanhos: [], estampas: [], estampado: null, categoria: null, descricao: "" };
+const linhaVazia: Linha = { modelo: "", cor: "", material: "", publico: null, total: null, tamanhos: [], estampas: [], estampado: null, categoria: null, objetivo_material: null, descricao: "" };
 
 async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -136,6 +137,15 @@ const CORES_NOMEADAS: { nome: string; hex: string; claro?: boolean }[] = [
   { nome: "Rosa Pink", hex: "#E5006E" },
 ];
 
+type ObjetivoMaterial = { id: string; label: string; desc: string; material: string; recomendado?: boolean };
+const OBJETIVOS_MATERIAL: ObjetivoMaterial[] = [
+  { id: "economica", label: "Econômica", desc: "Mais em conta — malha básica (algodão básico ou PV)", material: "malha básica (algodão básico/PV)" },
+  { id: "padrao", label: "Padrão", desc: "Custo-benefício — algodão fio 30 penteado", material: "algodão fio 30 penteado", recomendado: true },
+  { id: "premium", label: "Premium", desc: "Fios nobres — algodão pima / penteado premium", material: "algodão premium (pima/penteado nobre)" },
+  { id: "performance", label: "Performance / Dry", desc: "Seca rápido — dry-fit, poliamida (esporte/fitness)", material: "dry-fit / poliamida" },
+  { id: "indefinido", label: "Não sei, me ajudem", desc: "A gente sugere o melhor material pro seu objetivo", material: "" },
+];
+
 const CATEGORIAS = [
   "Interclasse / Evento",
   "Private Label",
@@ -152,7 +162,7 @@ const CATEGORIAS = [
 
 export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [linhas, setLinhas] = useState<Linha[]>(
-    (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [], estampado: l.estampado ?? null, categoria: l.categoria ?? null }))
+    (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [], estampado: l.estampado ?? null, categoria: l.categoria ?? null, objetivo_material: l.objetivo_material ?? null }))
   );
   const [imgs, setImgs] = useState<Record<number, ImgEstado>>(() => {
     const m = pedido.mockups || {};
@@ -260,6 +270,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       publico: draft.publico ?? null,
       estampado: draft.estampado ?? null,
       categoria: draft.categoria?.trim() || null,
+      objetivo_material: draft.objetivo_material ?? null,
       descricao: draft.descricao?.trim() || null,
     };
     if (!limpa.modelo && !limpa.cor && !limpa.total) return;
@@ -671,7 +682,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-gray-900 font-medium capitalize flex items-center gap-1.5">{corHex(l.cor) && <span className="w-3.5 h-3.5 rounded-full border border-black/10 inline-block shrink-0" style={{ backgroundColor: corHex(l.cor) as string }} />}{[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ") || "Produto"}</p>
-                    {l.material && <p className="text-sm text-gray-500 mt-0.5">Material: {l.material}</p>}
+                    {(() => {
+                      const obj = OBJETIVOS_MATERIAL.find((o) => o.id === l.objetivo_material);
+                      const txt = [obj?.label, l.material].filter(Boolean).join(" · ");
+                      return txt ? <p className="text-sm text-gray-500 mt-0.5">Tecido: {txt}</p> : null;
+                    })()}
                     {l.categoria && <p className="text-xs text-gray-400 mt-0.5">Categoria: {l.categoria}</p>}
                   </div>
                   {l.total ? <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full shrink-0">{l.total} un.</span> : null}
@@ -1098,8 +1113,27 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 </div>
                 <p className="text-[11px] text-gray-400 mt-1">Escolha uma cor ou escreva o nome da cor (sem código).</p>
               </Campo>
-              <Campo label="Material">
-                <input value={draft.material ?? ""} onChange={(e) => setDraft({ ...draft, material: e.target.value })} className={inputCls} placeholder="algodão" />
+              <Campo label="Tipo / qualidade do tecido">
+                <div className="space-y-1.5">
+                  {OBJETIVOS_MATERIAL.map((o) => {
+                    const sel = (draft.objetivo_material ?? "") === o.id;
+                    return (
+                      <button key={o.id} type="button" onClick={() => setDraft({ ...draft, objetivo_material: o.id })}
+                        className={"w-full text-left rounded-lg border px-3 py-2 transition-colors " + (sel ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 bg-white hover:bg-gray-50")}>
+                        <div className="flex items-center gap-2">
+                          <span className={"h-4 w-4 rounded-full border flex items-center justify-center shrink-0 " + (sel ? "border-[#1D9E75] bg-[#1D9E75]" : "border-gray-300")}>
+                            {sel && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                          </span>
+                          <span className="text-sm font-medium text-gray-900">{o.label}</span>
+                          {o.recomendado && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#1D9E75] text-white">recomendado</span>}
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-0.5 ml-6">{o.desc}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+                <input value={draft.material ?? ""} onChange={(e) => setDraft({ ...draft, material: e.target.value })} className={inputCls + " mt-2"} placeholder="Especificar material (opcional) — ex.: algodão Menegotti 170g" />
+                <p className="text-[11px] text-gray-400 mt-1">Escolha pelo objetivo da peça — a gente alinha o tecido ideal e o orçamento. Se já souber o tecido exato, especifique acima.</p>
               </Campo>
             </div>
             ) : (

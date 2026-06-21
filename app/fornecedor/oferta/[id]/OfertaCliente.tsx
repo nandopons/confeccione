@@ -11,6 +11,7 @@ type Linha = {
   total?: number | null
   tamanhos?: Tamanho[] | null
   estampas?: Estampa[] | null
+  objetivo_material?: string | null
   descricao?: string | null
 }
 type Oferta = {
@@ -34,6 +35,11 @@ type Oferta = {
 
 function corLimpa(s: string | null | undefined): string {
   return (s || '').replace(/\s*\(#?[0-9a-fA-F]{6}\)\s*/g, ' ').replace(/#[0-9a-fA-F]{6}/g, '').replace(/\s{2,}/g, ' ').trim()
+}
+
+const OBJ_MATERIAL_LABEL: Record<string, string> = { economica: 'Econômica', padrao: 'Padrão', premium: 'Premium', performance: 'Performance / Dry', indefinido: 'A definir (cliente quer sugestão)' }
+function tecidoLabel(l: { objetivo_material?: string | null; material?: string | null }): string {
+  return [OBJ_MATERIAL_LABEL[(l.objetivo_material || '').trim()], l.material].filter(Boolean).join(' · ')
 }
 
 function brl(c: number | null | undefined): string {
@@ -140,9 +146,10 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
                   )}
                   <div className="mt-3 text-sm">
                     <div className="font-medium text-gray-900">
-                      {l.total ?? '?'}× {l.modelo || 'peça'}{l.material ? ` · ${l.material}` : ''}
+                      {l.total ?? '?'}× {l.modelo || 'peça'}
                       {estampado && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">estampado</span>}
                     </div>
+                    {tecidoLabel(l) && <div className="text-gray-600 mt-1">Tecido: {tecidoLabel(l)}</div>}
                     {tam && <div className="text-gray-600 mt-1">{tam}</div>}
                     {l.estampas && l.estampas.length > 0 && (
                       <div className="text-gray-600 mt-1">Estampa: {l.estampas.map((e) => [e.posicao, e.tamanho].filter(Boolean).join(' ')).join(', ')}</div>
@@ -196,9 +203,10 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
             return (
               <li key={idx} className="rounded-lg bg-gray-50 border border-gray-100 px-4 py-3">
                 <div className="font-medium text-gray-900">
-                  {l.total ?? '?'}× {l.modelo || 'peça'}{l.cor ? ` · ${l.cor}` : ''}{l.material ? ` · ${l.material}` : ''}
+                  {l.total ?? '?'}× {l.modelo || 'peça'}{l.cor ? ` · ${l.cor}` : ''}
                   {estampado && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">estampado</span>}
                 </div>
+                {tecidoLabel(l) && <div className="text-sm text-gray-600 mt-1">Tecido: {tecidoLabel(l)}</div>}
                 {tam && <div className="text-sm text-gray-600 mt-1">{tam}</div>}
                 {l.estampas && l.estampas.length > 0 && (
                   <div className="text-sm text-gray-600 mt-1">

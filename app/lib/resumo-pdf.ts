@@ -12,6 +12,7 @@ export type LinhaResumo = {
   tamanhos?: { tamanho?: string | null; qtd?: number | null }[] | null
   estampas?: { posicao?: string | null; tamanho?: string | null }[] | null
   publico?: string | null
+  objetivo_material?: string | null
   descricao?: string | null
 }
 
@@ -254,7 +255,9 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
     }
     const titulo = `${qtd || '?'}× ${[l.modelo || 'peça', corLabel(l.cor)].filter(Boolean).join(' · ')}`
     linha(titulo, { size: 12, font: bold, cor: ESCURO, gap: 1 })
-    if (l.material) linha(`Material: ${l.material}`, { size: 10 })
+    const OBJ_LABEL: Record<string, string> = { economica: 'Econômica', padrao: 'Padrão', premium: 'Premium', performance: 'Performance / Dry', indefinido: 'A definir (cliente pediu sugestão)' }
+    const tecido = [OBJ_LABEL[(l.objetivo_material || '').trim()], l.material].filter(Boolean).join(' · ')
+    if (tecido) linha(`Tecido: ${tecido}`, { size: 10 })
     const tam = (l.tamanhos || []).filter((t) => t.tamanho).map((t) => `${String(t.tamanho).toUpperCase()}: ${t.qtd ?? '?'}`).join('   ')
     if (tam) linha(`Tamanhos: ${tam}`, { size: 10 })
     const estampado = l.estampado === true || (l.estampas?.length ?? 0) > 0
