@@ -107,19 +107,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       'As imagens seguintes são a logo/arte enviada pelo cliente.',
       `Ajuste o mockup conforme o pedido do cliente: ${instr || 'melhore o realismo mantendo o produto.'}`,
       `Produto: ${ctxProd}.`,
+      corLimpa(l.cor) ? `Mantenha a peça na cor "${corLimpa(l.cor)}".` : '',
       'Mantenha um mockup realista de produto, fundo branco uniforme, boa iluminação. Devolva apenas a imagem final.',
-    ].join(' ')
+    ].filter(Boolean).join(' ')
   } else {
     imagens = artes
     prompt = [
       `Crie um mockup de produto realista: ${ctxProd}.`,
+      corLimpa(l.cor) ? `IMPORTANTE: a peça (tecido) DEVE ser exatamente na cor "${corLimpa(l.cor)}". A logo/arte mantém as cores originais dela.` : '',
       artes.length > 1 ? 'As imagens fornecidas são as logos/artes do cliente.' : 'A imagem fornecida é a logo/arte do cliente.',
       instr
         ? `Aplique conforme as instruções do cliente: ${instr}.`
         : 'Aplique a arte de forma centralizada e proporcional na área mais natural do produto (peito, em roupas), com bom senso.',
       'Mostre o produto em vista frontal (e traseira, se as instruções mencionarem as costas), com a peça inteira e bem enquadrada.',
       'Fundo branco uniforme, iluminação de estúdio, sem texto extra. Devolva apenas a imagem final.',
-    ].join(' ')
+    ].filter(Boolean).join(' ')
   }
 
   const r = await gerarImagem({ prompt, imagens, aspectRatio: '1:1', imageSize: '2K' })
