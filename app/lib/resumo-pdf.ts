@@ -1,5 +1,5 @@
 // Gera o PDF "Resumo do pedido" com a marca da Confeccione (logo vetorial + site).
-import { PDFDocument, StandardFonts, rgb, PDFName, PDFString, type PDFPage, type PDFFont } from 'pdf-lib'
+import { PDFDocument, StandardFonts, rgb, PDFName, PDFString, pushGraphicsState, popGraphicsState, moveTo, lineTo, closePath, clip, endPath, type PDFPage, type PDFFont } from 'pdf-lib'
 
 type MapaMockups = Record<string, { liso?: string; arte?: string; fotos?: string[]; ia?: { url: string; prompt?: string }[] }>
 
@@ -170,19 +170,28 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
       if (im) imgs.push({ im })
     }
     if (imgs.length === 0) return
-    // Células quadradas uniformes (todas do mesmo tamanho), imagem centralizada (contain).
-    const cell = 150, gap = 12, pad = 12
-    const inner = cell - pad * 2
+    // Células quadradas uniformes; a imagem PREENCHE a célula (cover) com recorte,
+    // pra não ficar pequena por causa de margem branca da foto.
+    const cell = 160, gap = 12
     const porLinha = Math.max(1, Math.floor((maxW + gap) / (cell + gap)))
     for (let r = 0; r < imgs.length; r += porLinha) {
       const fileira = imgs.slice(r, r + porLinha)
       garantir(cell + 10)
       let x = MX
       for (const { im } of fileira) {
-        page.drawRectangle({ x, y: y - cell, width: cell, height: cell, borderColor: CINZA_CLARO, borderWidth: 0.6 })
-        const sc = Math.min(inner / im.width, inner / im.height)
+        const x0 = x, y0 = y - cell
+        // recorta no retângulo da célula
+        page.pushOperators(
+          pushGraphicsState(),
+          moveTo(x0, y0), lineTo(x0 + cell, y0), lineTo(x0 + cell, y0 + cell), lineTo(x0, y0 + cell), closePath(),
+          clip(), endPath(),
+        )
+        const sc = Math.max(cell / im.width, cell / im.height) // cover
         const w = im.width * sc, h = im.height * sc
-        page.drawImage(im, { x: x + (cell - w) / 2, y: y - cell + (cell - h) / 2, width: w, height: h })
+        page.drawImage(im, { x: x0 + (cell - w) / 2, y: y0 + (cell - h) / 2, width: w, height: h })
+        page.pushOperators(popGraphicsState())
+        // borda por cima
+        page.drawRectangle({ x: x0, y: y0, width: cell, height: cell, borderColor: CINZA_CLARO, borderWidth: 0.6 })
         x += cell + gap
       }
       y -= cell + 12
@@ -209,19 +218,28 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
     y -= 4
   }
 
-  // Link pro painel de acompanhamento do cliente.
+  // Callout destacado: acompanhe o pedido pelo painel (clicável).
   {
-    const intro = 'Para acompanhar e visualizar seu pedido, acesse seu painel:'
-    linha(intro, { size: 9.5, cor: CINZA, gap: 1 })
     const url = `https://${SITE}/cliente/painel`
+    const boxH = 50
+    garantir(boxH + 8)
+    const top = y
+    const bottom = y - boxH
+    // fundo verde claro + barra de destaque à esquerda
+    page.drawRectangle({ x: MX, y: bottom, width: maxW, height: boxH, color: rgb(0.882, 0.961, 0.933) })
+    page.drawRectangle({ x: MX, y: bottom, width: 4, height: boxH, color: VERDE_ESC })
+    const ix = MX + 16
+    page.drawText('Acompanhe e visualize seu pedido', { x: ix, y: top - 19, size: 11.5, font: bold, color: VERDE_ESC })
+    const pre = 'Acesse seu painel: '
+    page.drawText(pre, { x: ix, y: top - 35, size: 10, font: reg, color: CINZA })
+    const preW = reg.widthOfTextAtSize(pre, 10)
     const label = `${SITE}/cliente/painel`
-    const size = 10
-    garantir(size + 6)
-    page.drawText(label, { x: MX, y, size, font: bold, color: VERDE })
-    const w = bold.widthOfTextAtSize(label, size)
+    page.drawText(label, { x: ix + preW, y: top - 35, size: 10, font: bold, color: VERDE })
+    const linkW = bold.widthOfTextAtSize(label, 10)
+    // a caixa inteira é clicável
     const annot = doc.context.obj({
       Type: 'Annot', Subtype: 'Link',
-      Rect: [MX, y - 2, MX + w, y + size],
+      Rect: [MX, bottom, MX + maxW, top],
       Border: [0, 0, 0],
       A: doc.context.obj({ Type: 'Action', S: 'URI', URI: PDFString.of(url) }),
     })
@@ -229,7 +247,8 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
     const existentes = page.node.Annots()
     if (existentes) existentes.push(ref)
     else page.node.set(PDFName.of('Annots'), doc.context.obj([ref]))
-    y -= size + 10
+    void linkW
+    y -= boxH + 14
   }
 
   page.drawLine({ start: { x: MX, y: y + 2 }, end: { x: A4.w - MX, y: y + 2 }, thickness: 1, color: CINZA_CLARO })
