@@ -18,7 +18,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
 
   const { data: lista } = await supabase
     .from('listas_externas')
-    .select('id, pedido_id, linha_index')
+    .select('id, pedido_id, linha_index, lid')
     .eq('id', listaId)
     .eq('pedido_id', id)
     .single()
