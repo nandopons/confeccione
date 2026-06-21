@@ -16,9 +16,10 @@ type SendParams = {
   subject: string
   html: string
   text: string
+  attachments?: { filename: string; content: string }[]
 }
 
-async function enviarEmail({ to, subject, html, text }: SendParams): Promise<void> {
+async function enviarEmail({ to, subject, html, text, attachments }: SendParams): Promise<void> {
   const apiKey = process.env.RESEND_API_KEY
 
   if (!apiKey) {
@@ -45,6 +46,7 @@ async function enviarEmail({ to, subject, html, text }: SendParams): Promise<voi
         subject,
         html,
         text,
+        ...(attachments && attachments.length ? { attachments } : {}),
       }),
     })
 
@@ -772,4 +774,33 @@ ${params.link}
 Confeccione
 ${SITE_URL}`
   await enviarEmail({ to: params.email, subject, html, text })
+}
+
+// ─── Email: link da lista de coleta (Listas Externas) ──────────
+export async function emailLinkColeta(params: {
+  email: string
+  organizador: string | null
+  modelo: string | null
+  link: string
+  pdfBase64?: string | null
+}): Promise<void> {
+  const nome = params.organizador?.trim() || 'Olá'
+  const modelo = params.modelo ? escapeHtml(params.modelo) : 'seu pedido'
+  const conteudo = `
+    <p style="margin:0 0 16px;">Oi ${escapeHtml(nome)},</p>
+    <p style="margin:0 0 16px;">Aqui está o link de coleta de tamanhos do modelo <strong>${modelo}</strong>. Compartilhe com o grupo — cada pessoa informa nome e tamanho, e as quantidades entram no seu pedido automaticamente.</p>
+    <p style="margin:0 0 24px;text-align:center;">
+      <a href="${params.link}" style="display:inline-block;background:#1D9E75;color:#ffffff;text-decoration:none;font-weight:600;padding:12px 28px;border-radius:8px;">Abrir a lista de coleta</a>
+    </p>
+    <p style="margin:0 0 8px;color:#6b7280;font-size:13px;">Ou copie e cole o link:</p>
+    <p style="margin:0 0 16px;"><a href="${params.link}" style="color:#0F6E56;">${escapeHtml(params.link)}</a></p>
+    <p style="margin:0;color:#6b7280;font-size:13px;">Em anexo vai um PDF com QR Code pra você imprimir ou mandar no grupo.</p>
+  `
+  await enviarEmail({
+    to: params.email,
+    subject: 'Seu link de coleta de tamanhos — Confeccione',
+    html: layout(conteudo, 'Compartilhe o link e colete os tamanhos do grupo.'),
+    text: `Link de coleta de tamanhos do modelo ${params.modelo || ''}: ${params.link}`,
+    attachments: params.pdfBase64 ? [{ filename: 'coleta-tamanhos-confeccione.pdf', content: params.pdfBase64 }] : undefined,
+  })
 }
