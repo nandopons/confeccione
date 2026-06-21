@@ -1,5 +1,6 @@
 import type { PortfolioMidia } from '@/app/lib/orcamento-portfolio'
 import { coletarVisuaisPedido, type MapaMockups } from '@/app/lib/pedido-visuais'
+import { pedidoTemListaAbertaIncompleta } from '@/app/lib/listas-externas'
 // app/lib/pedido-assistente-oferta.ts
 // ============================================================================
 // Oferta de pedidos CONFIRMADOS (pedidos_assistente) a fornecedores escolhidos
@@ -34,6 +35,7 @@ export type LinhaPedido = {
   estampas?: Array<{ posicao?: string | null; tamanho?: string | null }> | null
   descricao?: string | null
   preco_unit_centavos?: number | null // LÍQUIDO/un definido pelo fornecedor
+  lid?: string | null
 }
 
 export type PedidoPago = {
@@ -606,6 +608,7 @@ export type OfertaDetalheFornecedor = {
   orcamentoStatus: string | null
   contatoCliente: ContatoClienteOferta | null
   linkOrcamento: string | null
+  temListaAberta: boolean
 }
 
 export async function carregarOfertaParaFornecedor(
@@ -655,6 +658,14 @@ export async function carregarOfertaParaFornecedor(
   })
   const temFotosPorLinha = fotosPorLinha.some((n: number) => n > 0)
 
+  // Aviso ao fornecedor: existe lista de tamanhos ABERTA e ainda incompleta?
+  // Nesse caso as quantidades por tamanho do pedido ainda podem mudar.
+  const temListaAberta = await pedidoTemListaAbertaIncompleta(
+    supabaseAdmin,
+    pedido.id,
+    linhas as { total?: number | null; lid?: string | null }[],
+  )
+
   return {
     ofertaId: oferta.id,
     pedidoId: pedido.id,
@@ -674,6 +685,7 @@ export async function carregarOfertaParaFornecedor(
       ? { nome: pedido.nome, telefone: pedido.telefone, email: pedido.email, cidade: pedido.cidade, uf: pedido.uf }
       : null,
     linkOrcamento: aceita ? `/fornecedor/oferta/${oferta.id}/orcamento` : null,
+    temListaAberta,
   }
 }
 

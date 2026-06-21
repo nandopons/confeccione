@@ -51,6 +51,15 @@ function ordemTam(t: string): number {
   return 90
 }
 
+// Quantidade-alvo da linha = a quantidade já definida no pedido pra aquele
+// modelo. Quando há alvo (>0), a lista PREENCHE até ele e só "assume" os
+// tamanhos do modelo quando completa (atinge o alvo) — antes disso o pedido
+// mantém o breakdown original. Sem alvo (0), a lista é a fonte (legado).
+export function metaQtdLinha(linha: { total?: number | null } | undefined | null): number {
+  const t = linha?.total
+  return typeof t === 'number' && t > 0 ? Math.round(t) : 0
+}
+
 // Recalcula as quantidades por tamanho da LINHA a partir das inscrições da
 // lista e grava de volta no pedido (linhas[linha_index].tamanhos + total).
 export function novoLid(): string {
@@ -132,7 +141,7 @@ export async function recomputarLinhaDaLista(
   const tamanhos = Array.from(cont.entries())
     .map(([tamanho, qtd]) => ({ tamanho, qtd }))
     .sort((a, b) => ordemTam(a.tamanho) - ordemTam(b.tamanho))
-  const total = tamanhos.reduce((a, t) => a + t.qtd, 0)
+  const coletado = tamanhos.reduce((a, t) => a + t.qtd, 0)
 
   const { data: ped } = await supabase
     .from('pedidos_assistente')
@@ -141,9 +150,62 @@ export async function recomputarLinhaDaLista(
     .single()
   const linhas = Array.isArray(ped?.linhas) ? [...(ped!.linhas as Record<string, unknown>[])] : []
   if (!linhas[idx]) return
-  linhas[idx] = { ...linhas[idx], tamanhos, total }
+
+  const meta = metaQtdLinha(linhas[idx] as { total?: number | null })
+
+  // COM alvo: a lista só "assume" os tamanhos do modelo quando COMPLETA (o nº
+  // de inscritos atinge o alvo). Enquanto incompleta, NÃO mexe na linha — o
+  // pedido mantém o breakdown original e o total-alvo fica intacto. Ao
+  // completar, grava os tamanhos coletados (total continua = alvo) e fecha a
+  // lista (ativa=false), pra a quantidade não mudar mais depois.
+  if (meta > 0) {
+    if (coletado < meta) return // incompleta → não altera a linha
+    linhas[idx] = { ...linhas[idx], tamanhos, total: meta }
+    await supabase
+      .from('pedidos_assistente')
+      .update({ linhas, atualizado_em: new Date().toISOString() })
+      .eq('id', lista.pedido_id)
+    await supabase
+      .from('listas_externas')
+      .update({ ativa: false, atualizado_em: new Date().toISOString() })
+      .eq('id', lista.id)
+    return
+  }
+
+  // SEM alvo (coleta pura, legado): a lista é a fonte das quantidades.
+  linhas[idx] = { ...linhas[idx], tamanhos, total: coletado }
   await supabase
     .from('pedidos_assistente')
     .update({ linhas, atualizado_em: new Date().toISOString() })
     .eq('id', lista.pedido_id)
+}
+
+// True se o pedido tem ALGUMA lista ativa ainda incompleta (inscritos < alvo).
+// Usado pra avisar o fornecedor que as quantidades de tamanho podem mudar.
+// Recebe as linhas do pedido (pra ler alvo e casar lid → índice atual).
+export async function pedidoTemListaAbertaIncompleta(
+  supabase: SupabaseClient,
+  pedidoId: string,
+  linhas: { total?: number | null; lid?: string | null }[],
+): Promise<boolean> {
+  const { data: listas } = await supabase
+    .from('listas_externas')
+    .select('id, linha_index, lid, ativa')
+    .eq('pedido_id', pedidoId)
+    .eq('ativa', true)
+  for (const l of (listas ?? []) as { id: string; linha_index: number; lid?: string | null }[]) {
+    let idx = l.linha_index
+    if (l.lid) {
+      const j = linhas.findIndex((x) => x && (x as { lid?: string | null }).lid === l.lid)
+      if (j >= 0) idx = j
+    }
+    const meta = metaQtdLinha(linhas[idx])
+    if (meta <= 0) continue // coleta pura sem alvo: não gera aviso de "muda qtd"
+    const { count } = await supabase
+      .from('inscricoes_externas')
+      .select('id', { count: 'exact', head: true })
+      .eq('lista_id', l.id)
+    if ((count ?? 0) < meta) return true
+  }
+  return false
 }
