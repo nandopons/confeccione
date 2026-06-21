@@ -168,7 +168,7 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
       if (im) imgs.push({ im })
     }
     if (imgs.length === 0) return
-    const cellW = 150, cellH = 112, gap = 8
+    const cellW = 232, cellH = 300, gap = 12
     const porLinha = Math.max(1, Math.floor((maxW + gap) / (cellW + gap)))
     for (let r = 0; r < imgs.length; r += porLinha) {
       const fileira = imgs.slice(r, r + porLinha).map(({ im }) => {
