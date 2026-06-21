@@ -41,6 +41,11 @@ function parseDataUrl(d: string): ImagemEntrada | null {
 function corLimpa(s?: string | null): string {
   return (s || '').replace(/\s*\(#?[0-9a-fA-F]{6}\)\s*/g, ' ').replace(/#[0-9a-fA-F]{6}/g, '').replace(/\s{2,}/g, ' ').trim()
 }
+function ehPlaceholder(v?: string | null): boolean {
+  const t = (v || '').trim().toLowerCase()
+  if (!t) return true
+  return /(a\s*definir|a\s*combinar|\bdefinir\b|indefinid|private\s*label|sob\s*consulta|^n\/?a$|^-+$)/.test(t)
+}
 function qtd(l: Linha): number {
   return typeof l.total === 'number' && l.total > 0 ? l.total : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0)
 }
@@ -69,8 +74,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const mapa: Mapa = pedido.mockups && typeof pedido.mockups === 'object' ? { ...pedido.mockups } : {}
   const mk: Mockup = { ...(mapa[String(index)] || {}) }
   const artesUrls = Array.isArray(mk.fotos) ? mk.fotos.filter((x) => typeof x === 'string' && x.length > 0) : []
-  if (!l.modelo || !corLimpa(l.cor) || qtd(l) <= 0) {
-    return NextResponse.json({ erro: 'Complete os detalhes do produto (modelo, cor e quantidade) antes de gerar o mockup.' }, { status: 422 })
+  if (ehPlaceholder(l.modelo) || ehPlaceholder(corLimpa(l.cor)) || qtd(l) <= 0) {
+    return NextResponse.json({ erro: 'Complete os detalhes do modelo (tipo da peça, cor e quantidade) antes de gerar o mockup com IA.' }, { status: 422 })
   }
   if (artesUrls.length === 0) {
     return NextResponse.json({ erro: 'Envie ao menos uma arte/foto neste produto antes de gerar o mockup.' }, { status: 422 })

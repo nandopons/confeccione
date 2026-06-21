@@ -273,9 +273,14 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
   const MAX_FOTOS = 6;
 
+  function ehPlaceholder(v?: string | null): boolean {
+    const t = (v || "").trim().toLowerCase();
+    if (!t) return true;
+    return /(a\s*definir|a\s*combinar|\bdefinir\b|indefinid|private\s*label|sob\s*consulta|^n\/?a$|^-+$)/.test(t);
+  }
   function modeloCompleto(l: Linha): boolean {
     const qtd = (l.total ?? 0) > 0 ? (l.total as number) : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0);
-    return !!(l.modelo && corLabel(l.cor) && qtd > 0);
+    return !ehPlaceholder(l.modelo) && !ehPlaceholder(corLabel(l.cor)) && qtd > 0;
   }
   async function gerarMockupIA(i: number, regenIaIndex: number | null = null) {
     if (iaBusy !== null) return;
@@ -652,7 +657,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                         </div>
                       ) : (
                         <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                          Pra gerar o mockup com IA, {!completo ? "complete os detalhes (toque em Editar)" : ""}{!completo && !temArte ? " e " : ""}{!temArte ? "envie ao menos uma arte/foto" : ""}.
+                          Pra gerar o mockup com IA, {!completo ? "complete os detalhes do modelo (toque em \u201cCompletar este produto\u201d) \u2014 ex.: tipo da pe\u00e7a e cor" : ""}{!completo && !temArte ? " e " : ""}{!temArte ? "envie ao menos uma arte/foto" : ""}.
                         </p>
                       )}
                     </div>
