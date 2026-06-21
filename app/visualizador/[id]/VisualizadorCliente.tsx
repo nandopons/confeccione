@@ -43,6 +43,7 @@ export type PedidoVis = {
   telefone: string | null;
   email: string | null;
   cep: string | null;
+  numero?: string | null;
   complemento: string | null;
   logradouro?: string | null;
   bairro?: string | null;
@@ -223,9 +224,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [confirmadoEm, setConfirmadoEm] = useState<string | null>(pedido.confirmado_em ?? null);
   const [confirmandoPedido, setConfirmandoPedido] = useState(false);
   const [confirmadoMsg, setConfirmadoMsg] = useState(false);
-  const [contato, setContato] = useState({ nome: pedido.nome, telefone: pedido.telefone, email: pedido.email, cep: pedido.cep, complemento: pedido.complemento, logradouro: pedido.logradouro ?? null, bairro: pedido.bairro ?? null, cidade: pedido.cidade ?? null, uf: pedido.uf ?? null });
+  const [contato, setContato] = useState({ nome: pedido.nome, telefone: pedido.telefone, email: pedido.email, cep: pedido.cep, numero: pedido.numero ?? null, complemento: pedido.complemento, logradouro: pedido.logradouro ?? null, bairro: pedido.bairro ?? null, cidade: pedido.cidade ?? null, uf: pedido.uf ?? null });
   const [contatoOpen, setContatoOpen] = useState(false);
-  const [contatoDraft, setContatoDraft] = useState({ nome: "", telefone: "", email: "", cep: "", complemento: "" });
+  const [contatoDraft, setContatoDraft] = useState({ nome: "", telefone: "", email: "", cep: "", numero: "", complemento: "" });
   const [salvandoContato, setSalvandoContato] = useState(false);
   const [contatoErro, setContatoErro] = useState<string | null>(null);
   const [cpf, setCpf] = useState("");
@@ -592,7 +593,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   }, [confirmStep, pago]);
 
   function abrirContato() {
-    setContatoDraft({ nome: contato.nome ?? "", telefone: contato.telefone ?? "", email: contato.email ?? "", cep: contato.cep ?? "", complemento: contato.complemento ?? "" });
+    setContatoDraft({ nome: contato.nome ?? "", telefone: contato.telefone ?? "", email: contato.email ?? "", cep: contato.cep ?? "", numero: (contato as { numero?: string | null }).numero ?? "", complemento: contato.complemento ?? "" });
     setContatoErro(null);
     setContatoOpen(true);
   }
@@ -608,12 +609,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       const res = await fetch(`/api/pedido/assistente/${pedido.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contato: { nome: contatoDraft.nome.trim(), telefone: contatoDraft.telefone.trim() || null, email: contatoDraft.email.trim() || null, cep: cepDigs || null, complemento: contatoDraft.complemento.trim() || null } }),
+        body: JSON.stringify({ contato: { nome: contatoDraft.nome.trim(), telefone: contatoDraft.telefone.trim() || null, email: contatoDraft.email.trim() || null, cep: cepDigs || null, numero: contatoDraft.numero.trim() || null, complemento: contatoDraft.complemento.trim() || null } }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d?.error || "Não foi possível salvar.");
       const p = d.pedido ?? {};
-      setContato({ nome: p.nome ?? contatoDraft.nome, telefone: p.telefone ?? null, email: p.email ?? null, cep: p.cep ?? null, complemento: p.complemento ?? null, logradouro: p.logradouro ?? null, bairro: p.bairro ?? null, cidade: p.cidade ?? null, uf: p.uf ?? null });
+      setContato({ nome: p.nome ?? contatoDraft.nome, telefone: p.telefone ?? null, email: p.email ?? null, cep: p.cep ?? null, numero: p.numero ?? null, complemento: p.complemento ?? null, logradouro: p.logradouro ?? null, bairro: p.bairro ?? null, cidade: p.cidade ?? null, uf: p.uf ?? null });
       setContatoOpen(false);
     } catch (e) {
       setContatoErro(e instanceof Error ? e.message : "Erro ao salvar.");
@@ -950,7 +951,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 <p className="text-[11px] text-[#0F6E56] mb-1">Seu lote será enviado para:</p>
                 {contato.logradouro || contato.cidade ? (
                   <>
-                    <p className="text-sm text-gray-800 leading-snug">{[contato.logradouro, contato.complemento].filter(Boolean).join(", ")}</p>
+                    <p className="text-sm text-gray-800 leading-snug">{[[contato.logradouro, (contato as { numero?: string | null }).numero].filter(Boolean).join(", "), contato.complemento].filter(Boolean).join(" — ")}</p>
                     <p className="text-sm text-gray-600 leading-snug">{[contato.bairro, [contato.cidade, contato.uf].filter(Boolean).join("/")].filter(Boolean).join(" — ")}</p>
                     {contato.cep && <p className="text-xs text-gray-500 mt-1">CEP {cepBR(contato.cep)}</p>}
                   </>
@@ -1085,8 +1086,16 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 <input value={contatoDraft.email} onChange={(e) => setContatoDraft((d) => ({ ...d, email: e.target.value }))} inputMode="email" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Número e complemento</label>
-                <input value={contatoDraft.complemento} onChange={(e) => setContatoDraft((d) => ({ ...d, complemento: e.target.value }))} placeholder="ex.: 121, loja 2" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Número</label>
+                    <input value={contatoDraft.numero} onChange={(e) => setContatoDraft((d) => ({ ...d, numero: e.target.value }))} placeholder="ex.: 121" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Complemento</label>
+                    <input value={contatoDraft.complemento} onChange={(e) => setContatoDraft((d) => ({ ...d, complemento: e.target.value }))} placeholder="ex.: loja 2, fundos" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]" />
+                  </div>
+                </div>
               </div>
             </div>
             {contatoErro && <p className="text-xs text-red-600 mt-3">{contatoErro}</p>}
