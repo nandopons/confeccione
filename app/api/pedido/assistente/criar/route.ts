@@ -77,7 +77,9 @@ export async function POST(req: Request) {
   const { linhas, contato } = parsed.data
 
   // Validação mínima: pelo menos 1 linha com modelo + cor + total, e contato básico.
-  const linhasValidas = linhas.filter((l) => l.modelo && l.cor && l.total)
+  // A home cria um produto-rascunho (modelo definido depois no visualizador):
+  // basta ter identidade (modelo OU cor) + quantidade (total OU tamanhos).
+  const linhasValidas = linhas.filter((l) => (l.modelo || l.cor) && (l.total || (l.tamanhos?.length ?? 0) > 0))
   if (linhasValidas.length === 0) {
     return NextResponse.json(
       { error: 'Inclua pelo menos um produto com modelo, cor e quantidade.' },
