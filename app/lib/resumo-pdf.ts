@@ -170,7 +170,8 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
     }
     if (imgs.length === 0) return
     // Células quadradas uniformes (todas do mesmo tamanho), imagem centralizada (contain).
-    const cell = 150, gap = 12
+    const cell = 150, gap = 12, pad = 12
+    const inner = cell - pad * 2
     const porLinha = Math.max(1, Math.floor((maxW + gap) / (cell + gap)))
     for (let r = 0; r < imgs.length; r += porLinha) {
       const fileira = imgs.slice(r, r + porLinha)
@@ -178,7 +179,7 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
       let x = MX
       for (const { im } of fileira) {
         page.drawRectangle({ x, y: y - cell, width: cell, height: cell, borderColor: CINZA_CLARO, borderWidth: 0.6 })
-        const sc = Math.min(cell / im.width, cell / im.height)
+        const sc = Math.min(inner / im.width, inner / im.height)
         const w = im.width * sc, h = im.height * sc
         page.drawImage(im, { x: x + (cell - w) / 2, y: y - cell + (cell - h) / 2, width: w, height: h })
         x += cell + gap
