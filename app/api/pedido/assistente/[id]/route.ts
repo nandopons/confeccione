@@ -31,6 +31,7 @@ const LinhaSchema = z.object({
   tamanhos: z.array(TamanhoSchema).default([]),
   estampas: z.array(EstampaSchema).default([]),
   estampado: z.boolean().nullable().optional(),
+  categoria: z.string().nullable().optional(),
   descricao: z.string().nullable(),
 })
 const ContatoSchema = z.object({
