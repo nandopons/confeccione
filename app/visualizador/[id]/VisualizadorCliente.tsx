@@ -772,7 +772,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   const ajustandoEste = iaAjuste && iaAjuste.i === i;
                   return (
                     <div className="mt-4 pt-4 border-t border-gray-100">
-                      <p className="text-sm font-medium text-gray-800 mb-2">✨ Mockup com IA</p>
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="text-sm font-medium text-gray-800">✨ Mockup com IA</p>
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">opcional</span>
+                      </div>
+                      <p className="text-[11px] text-gray-400 mb-2 leading-snug">Não é obrigatório. Se você já tem o mockup/arte da peça, as fotos que você enviou já servem de referência — o mockup com IA é só uma ajuda extra.</p>
                       {lista.length > 0 && (
                         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-3">
                           {lista.map((it, idx) => (
