@@ -1114,14 +1114,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             </div>
             ) : editStep === 2 ? (
             <div className="space-y-3">
-              <Campo label="Categoria">
-                <select value={draft.categoria ?? ""} onChange={(e) => setDraft({ ...draft, categoria: e.target.value || null })} className={inputCls + " bg-white"}>
-                  <option value="">Selecione…</option>
-                  {(draft.categoria && !CATEGORIAS.includes(draft.categoria) ? [draft.categoria, ...CATEGORIAS] : CATEGORIAS).map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </Campo>
               <Campo label="Modelo (tshirt, oversized, polo, boné…)">
                 <input value={draft.modelo ?? ""} onChange={(e) => setDraft({ ...draft, modelo: e.target.value })} className={inputCls} placeholder="oversized" />
               </Campo>
