@@ -825,6 +825,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   <ListaColeta
                     pedidoId={pedido.id}
                     linhaIndex={i}
+                    metaQtd={typeof l.total === "number" && l.total > 0 ? l.total : 0}
                     onAtualizarLinha={(idx, tamanhos, total) => setLinhas((prev) => prev.map((l, k) => (k === idx ? { ...l, tamanhos, total } : l)))}
                   />
                 )}

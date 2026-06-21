@@ -4,7 +4,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { recomputarLinhaDaLista } from '@/app/lib/listas-externas'
+import { recomputarLinhaDaLista, metaQtdLinha } from '@/app/lib/listas-externas'
 
 export const runtime = 'nodejs'
 
@@ -40,6 +40,25 @@ export async function POST(req: Request, ctx: Ctx) {
     .single()
   if (!lista) return NextResponse.json({ erro: 'Lista não encontrada.' }, { status: 404 })
   if (!lista.ativa) return NextResponse.json({ erro: 'Esta lista está fechada no momento.' }, { status: 409 })
+
+  // Bloqueio por ALVO: se a linha tem quantidade-alvo definida e a lista já
+  // atingiu esse número de inscritos, recusa novas inscrições (a qtd não pode
+  // passar do pedido). Sem alvo (coleta pura), não bloqueia.
+  {
+    const { data: ped } = await supabase
+      .from('pedidos_assistente').select('linhas').eq('id', lista.pedido_id).single()
+    const linhasPed = Array.isArray(ped?.linhas) ? (ped!.linhas as { lid?: string | null; total?: number | null }[]) : []
+    let idx = lista.linha_index
+    if (lista.lid) { const j = linhasPed.findIndex((x) => x && x.lid === lista.lid); if (j >= 0) idx = j }
+    const meta = metaQtdLinha(linhasPed[idx])
+    if (meta > 0) {
+      const { count } = await supabase
+        .from('inscricoes_externas').select('id', { count: 'exact', head: true }).eq('lista_id', lista.id)
+      if ((count ?? 0) >= meta) {
+        return NextResponse.json({ erro: 'Esta lista já atingiu a quantidade do pedido. Fale com quem organizou.' }, { status: 409 })
+      }
+    }
+  }
 
   const email = (p.data.email || '').trim()
   const reg = {
