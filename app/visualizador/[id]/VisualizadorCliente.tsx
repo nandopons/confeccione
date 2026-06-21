@@ -26,6 +26,7 @@ export type Linha = {
   tamanhos: Tamanho[];
   estampas: Estampa[];
   estampado: boolean | null;
+  acabamentos?: string[] | null;
   categoria?: string | null;
   objetivo_material?: string | null;
   descricao: string | null;
@@ -65,7 +66,7 @@ type PortfolioMidiaVis = { path: string; mime: string | null; tipo: 'imagem' | '
 
 type ImgEstado = { loading?: boolean; urls?: string[]; motivo?: string };
 
-const linhaVazia: Linha = { modelo: "", cor: "", material: "", publico: null, total: null, tamanhos: [], estampas: [], estampado: null, categoria: null, objetivo_material: null, descricao: "" };
+const linhaVazia: Linha = { modelo: "", cor: "", material: "", publico: null, total: null, tamanhos: [], estampas: [], estampado: null, acabamentos: [], categoria: null, objetivo_material: null, descricao: "" };
 
 async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -92,6 +93,13 @@ function cepBR(s: string | null | undefined): string {
   const d = (s || "").replace(/\D/g, "");
   return d.length === 8 ? `${d.slice(0, 5)}-${d.slice(5)}` : (s || "");
 }
+function acabamentoLabel(l: { acabamentos?: string[] | null; estampado?: boolean | null; estampas?: { posicao: string; tamanho: string }[] | null }): string {
+  const a = Array.isArray(l.acabamentos) ? l.acabamentos : [];
+  if (a.length > 0) return a.map((x) => (x === "bordada" ? "Bordada" : "Estampada")).join(" + ");
+  if (l.estampado === true || (l.estampas?.length ?? 0) > 0) return "Estampado / bordado";
+  return "";
+}
+
 function corLabel(s: string | null | undefined): string {
   return (s || "").replace(/\s*\(#?[0-9a-fA-F]{6}\)\s*/g, " ").replace(/#[0-9a-fA-F]{6}/g, "").replace(/\s{2,}/g, " ").trim();
 }
@@ -117,24 +125,47 @@ function ordenarTamanhos(arr: Tamanho[]): Tamanho[] {
 const CORES_NOMEADAS: { nome: string; hex: string; claro?: boolean }[] = [
   { nome: "Branca", hex: "#FFFFFF", claro: true },
   { nome: "Off White", hex: "#F3EFE6", claro: true },
+  { nome: "Pérola", hex: "#EAE6DA", claro: true },
+  { nome: "Areia", hex: "#E4D5B7", claro: true },
   { nome: "Bege", hex: "#D9C7A6", claro: true },
+  { nome: "Caqui", hex: "#B6A06A", claro: true },
+  { nome: "Cinza Clara", hex: "#C9CDD2", claro: true },
   { nome: "Cinza Mescla", hex: "#B9BDC2", claro: true },
   { nome: "Cinza", hex: "#8A8F98" },
+  { nome: "Chumbo", hex: "#4A4F55" },
   { nome: "Preta", hex: "#141414" },
+  { nome: "Café", hex: "#3B2A20" },
   { nome: "Marrom", hex: "#5B3A29" },
+  { nome: "Coral", hex: "#FF6F61" },
+  { nome: "Salmão", hex: "#F5A38B", claro: true },
   { nome: "Vermelha", hex: "#C62828" },
+  { nome: "Vermelho Tomate", hex: "#E04A2F" },
   { nome: "Vinho", hex: "#6E1423" },
+  { nome: "Bordô", hex: "#4E1119" },
   { nome: "Laranja", hex: "#E8590C" },
+  { nome: "Laranja Queimado", hex: "#B5481B" },
   { nome: "Amarela", hex: "#F2C200", claro: true },
+  { nome: "Amarelo Ouro", hex: "#D4A017" },
+  { nome: "Mostarda", hex: "#C99A2E" },
+  { nome: "Verde Limão", hex: "#9CCB3B", claro: true },
   { nome: "Verde Bandeira", hex: "#1B7A3D" },
+  { nome: "Verde Musgo", hex: "#3E5631" },
   { nome: "Verde Oliva", hex: "#6B7333" },
   { nome: "Verde Militar", hex: "#4B5320" },
-  { nome: "Azul Marinho", hex: "#1B2A4A" },
-  { nome: "Azul Royal", hex: "#1E50C8" },
+  { nome: "Verde Água", hex: "#9FE2BF", claro: true },
+  { nome: "Tiffany", hex: "#5FD0C5", claro: true },
+  { nome: "Turquesa", hex: "#1AA7A0" },
+  { nome: "Azul Bebê", hex: "#A9CCE3", claro: true },
   { nome: "Azul Celeste", hex: "#7EC8E3", claro: true },
+  { nome: "Azul Royal", hex: "#1E50C8" },
+  { nome: "Azul Marinho", hex: "#1B2A4A" },
+  { nome: "Lilás", hex: "#C9A7E0", claro: true },
   { nome: "Roxa", hex: "#5E35B1" },
+  { nome: "Roxo Uva", hex: "#3F2A6E" },
+  { nome: "Rosa Bebê", hex: "#F4C2D7", claro: true },
   { nome: "Rosa", hex: "#E59ABF", claro: true },
   { nome: "Rosa Pink", hex: "#E5006E" },
+  { nome: "Magenta", hex: "#C2185B" },
 ];
 
 type ObjetivoMaterial = { id: string; label: string; desc: string; material: string; recomendado?: boolean };
@@ -162,7 +193,7 @@ const CATEGORIAS = [
 
 export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [linhas, setLinhas] = useState<Linha[]>(
-    (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [], estampado: l.estampado ?? null, categoria: l.categoria ?? null, objetivo_material: l.objetivo_material ?? null }))
+    (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [], estampado: l.estampado ?? null, acabamentos: Array.isArray(l.acabamentos) ? l.acabamentos : (l.estampado === true ? ["estampada"] : []), categoria: l.categoria ?? null, objetivo_material: l.objetivo_material ?? null }))
   );
   const [imgs, setImgs] = useState<Record<number, ImgEstado>>(() => {
     const m = pedido.mockups || {};
@@ -270,7 +301,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       tamanhos: tams,
       estampas: (draft.estampas || []).map((e) => ({ posicao: (e.posicao || "").trim(), tamanho: (e.tamanho || "").trim() })).filter((e) => e.posicao && e.tamanho),
       publico: draft.publico ?? null,
-      estampado: draft.estampado ?? null,
+      acabamentos: draft.acabamentos ?? [],
+      estampado: (draft.acabamentos ?? []).length > 0,
       categoria: draft.categoria?.trim() || null,
       objetivo_material: draft.objetivo_material ?? null,
       descricao: draft.descricao?.trim() || null,
@@ -703,9 +735,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     ))}
                   </div>
                 )}
-                {(l.estampado === true || (l.estampas?.length ?? 0) > 0) && (
+                {acabamentoLabel(l) && (
                   <div className="mt-2">
-                    <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs px-2 py-0.5 rounded-md">Estampado / bordado</span>
+                    <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs px-2 py-0.5 rounded-md">{acabamentoLabel(l)}</span>
                   </div>
                 )}
                 {l.descricao && <p className="text-sm text-gray-500 mt-3 leading-relaxed">{l.descricao}</p>}
@@ -1070,7 +1102,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditOpen(false); }}>
           <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
             <button type="button" onClick={() => setEditOpen(false)} aria-label="Fechar" className="absolute top-3 right-3 h-8 w-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 text-xl leading-none">×</button>
-            <p className="text-gray-900 font-medium mb-3">{editIndex === null ? "Adicionar produto" : "Editar produto"}</p>
+            <p className="text-gray-900 font-medium mb-3">{editIndex === null ? "Adicionar produto" : `Editar Modelo ${editIndex + 1}`}</p>
             <div className="flex items-center mb-5">
               {[0, 1, 2].map((i) => {
                 const cur = editStep - 1;
@@ -1196,16 +1228,20 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 </div>
               </Campo>
               <Campo label="Acabamento (entra no orçamento)">
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setDraft({ ...draft, estampado: false })}
-                    className={"px-3 py-1.5 rounded-lg text-sm border transition-colors " + (draft.estampado !== true ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50")}>
-                    Lisa
-                  </button>
-                  <button type="button" onClick={() => setDraft({ ...draft, estampado: true })}
-                    className={"px-3 py-1.5 rounded-lg text-sm border transition-colors " + (draft.estampado === true ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50")}>
-                    Estampada / bordada
-                  </button>
-                </div>
+                {(() => {
+                  const acab = draft.acabamentos ?? [];
+                  const has = (v: string) => acab.includes(v);
+                  const toggle = (v: string) => setDraft({ ...draft, acabamentos: has(v) ? acab.filter((a) => a !== v) : [...acab, v] });
+                  const cls = (ativo: boolean) => "px-3 py-1.5 rounded-lg text-sm border transition-colors " + (ativo ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50");
+                  return (
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => setDraft({ ...draft, acabamentos: [] })} className={cls(acab.length === 0)}>Lisa</button>
+                      <button type="button" onClick={() => toggle("estampada")} className={cls(has("estampada"))}>Estampada</button>
+                      <button type="button" onClick={() => toggle("bordada")} className={cls(has("bordada"))}>Bordada</button>
+                    </div>
+                  );
+                })()}
+                <p className="text-[11px] text-gray-400 mt-1">Dá pra combinar Estampada + Bordada se o layout tiver os dois.</p>
               </Campo>
               <Campo label="Detalhes (observações, instruções…)">
                 <textarea rows={2} value={draft.descricao ?? ""} onChange={(e) => setDraft({ ...draft, descricao: e.target.value })} className={inputCls + " resize-none"} placeholder="estampa na frente, arte própria" />
