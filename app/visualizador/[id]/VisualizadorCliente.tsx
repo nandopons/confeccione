@@ -103,6 +103,39 @@ const EDIT_HINTS: string[] = [
   "Completar este produto",
 ];
 
+const TAM_CHIPS = ["P", "M", "G", "GG", "XG"];
+const TAM_ORDEM = ["PP", "P", "M", "G", "GG", "XG", "XGG", "XXG", "XXXG"];
+function ordemTam(t: string | null | undefined): number {
+  const i = TAM_ORDEM.indexOf((t || "").trim().toUpperCase());
+  return i >= 0 ? i : 90;
+}
+function ordenarTamanhos(arr: Tamanho[]): Tamanho[] {
+  return [...arr].sort((a, b) => ordemTam(a.tamanho) - ordemTam(b.tamanho) || (a.tamanho || "").localeCompare(b.tamanho || ""));
+}
+
+const CORES_NOMEADAS: { nome: string; hex: string; claro?: boolean }[] = [
+  { nome: "Branca", hex: "#FFFFFF", claro: true },
+  { nome: "Off White", hex: "#F3EFE6", claro: true },
+  { nome: "Bege", hex: "#D9C7A6", claro: true },
+  { nome: "Cinza Mescla", hex: "#B9BDC2", claro: true },
+  { nome: "Cinza", hex: "#8A8F98" },
+  { nome: "Preta", hex: "#141414" },
+  { nome: "Marrom", hex: "#5B3A29" },
+  { nome: "Vermelha", hex: "#C62828" },
+  { nome: "Vinho", hex: "#6E1423" },
+  { nome: "Laranja", hex: "#E8590C" },
+  { nome: "Amarela", hex: "#F2C200", claro: true },
+  { nome: "Verde Bandeira", hex: "#1B7A3D" },
+  { nome: "Verde Oliva", hex: "#6B7333" },
+  { nome: "Verde Militar", hex: "#4B5320" },
+  { nome: "Azul Marinho", hex: "#1B2A4A" },
+  { nome: "Azul Royal", hex: "#1E50C8" },
+  { nome: "Azul Celeste", hex: "#7EC8E3", claro: true },
+  { nome: "Roxa", hex: "#5E35B1" },
+  { nome: "Rosa", hex: "#E59ABF", claro: true },
+  { nome: "Rosa Pink", hex: "#E5006E" },
+];
+
 const CATEGORIAS = [
   "Interclasse / Evento",
   "Private Label",
@@ -1018,7 +1051,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
       {editOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditOpen(false); }}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+            <button type="button" onClick={() => setEditOpen(false)} aria-label="Fechar" className="absolute top-3 right-3 h-8 w-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 text-xl leading-none">×</button>
             <p className="text-gray-900 font-medium mb-3">{editIndex === null ? "Adicionar produto" : "Editar produto"}</p>
             <div className="flex items-center mb-5">
               {[0, 1].map((i) => {
@@ -1047,36 +1081,64 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
               <Campo label="Modelo (tshirt, oversized, polo, boné…)">
                 <input value={draft.modelo ?? ""} onChange={(e) => setDraft({ ...draft, modelo: e.target.value })} className={inputCls} placeholder="oversized" />
               </Campo>
-              <div className="grid grid-cols-2 gap-3">
-                <Campo label="Cor"><input value={draft.cor ?? ""} onChange={(e) => setDraft({ ...draft, cor: e.target.value })} className={inputCls} placeholder="preta" /></Campo>
-                <Campo label="Material"><input value={draft.material ?? ""} onChange={(e) => setDraft({ ...draft, material: e.target.value })} className={inputCls} placeholder="algodão" /></Campo>
-              </div>
+              <Campo label="Cor">
+                <input value={draft.cor ?? ""} onChange={(e) => setDraft({ ...draft, cor: e.target.value })} className={inputCls} placeholder="Ex.: Verde Oliva, Azul Marinho…" />
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {CORES_NOMEADAS.map((c) => {
+                    const sel = (draft.cor || "").trim().toLowerCase() === c.nome.toLowerCase();
+                    return (
+                      <button key={c.nome} type="button" title={c.nome} aria-label={c.nome}
+                        onClick={() => setDraft({ ...draft, cor: c.nome })}
+                        className={"h-7 w-7 rounded-full flex items-center justify-center border transition-all " + (sel ? "ring-2 ring-[#1D9E75] ring-offset-1 border-gray-300" : "border-gray-200 hover:scale-110")}
+                        style={{ backgroundColor: c.hex }}>
+                        {sel && <span className="text-[11px] leading-none" style={{ color: c.claro ? "#111" : "#fff" }}>✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1">Escolha uma cor ou escreva o nome da cor (sem código).</p>
+              </Campo>
+              <Campo label="Material">
+                <input value={draft.material ?? ""} onChange={(e) => setDraft({ ...draft, material: e.target.value })} className={inputCls} placeholder="algodão" />
+              </Campo>
             </div>
             ) : (
             <div className="space-y-3">
               <Campo label="Tamanhos">
                 <div className="flex flex-wrap gap-1.5 mb-2">
-                  {["P", "M", "G", "GG", "XG"].map((tam) => {
-                    const ativo = (draft.tamanhos || []).some((t) => (t.tamanho || "").toUpperCase() === tam);
-                    return (
-                      <button key={tam} type="button" onClick={() => setDraft({ ...draft, tamanhos: ativo ? (draft.tamanhos || []).filter((t) => (t.tamanho || "").toUpperCase() !== tam) : [...(draft.tamanhos || []), { tamanho: tam, qtd: null }] })}
-                        className={"px-3 py-1 rounded-lg text-sm border transition-colors " + (ativo ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50")}>
-                        {tam}
-                      </button>
-                    );
-                  })}
+                  {(() => {
+                    const presentes = (draft.tamanhos || []).map((t) => (t.tamanho || "").trim().toUpperCase()).filter(Boolean);
+                    const lista = Array.from(new Set([...TAM_CHIPS, ...presentes])).sort((a, b) => ordemTam(a) - ordemTam(b) || a.localeCompare(b));
+                    return lista.map((tam) => {
+                      const ativo = presentes.includes(tam);
+                      return (
+                        <button key={tam} type="button"
+                          onClick={() => setDraft({ ...draft, tamanhos: ordenarTamanhos(ativo
+                            ? (draft.tamanhos || []).filter((t) => (t.tamanho || "").trim().toUpperCase() !== tam)
+                            : [...(draft.tamanhos || []), { tamanho: tam, qtd: null }]) })}
+                          className={"px-3 py-1 rounded-lg text-sm border transition-colors " + (ativo ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50")}>
+                          {tam}
+                        </button>
+                      );
+                    });
+                  })()}
                 </div>
                 <div className="space-y-2">
                   {(draft.tamanhos || []).map((t, j) => (
                     <div key={j} className="flex items-center gap-2">
-                      <input value={t.tamanho} onChange={(e) => setDraft({ ...draft, tamanhos: draft.tamanhos.map((x, k) => k === j ? { ...x, tamanho: e.target.value } : x) })} className={inputCls + " w-20"} placeholder="M" />
-                      <input type="number" min={1} value={t.qtd ?? ""} onChange={(e) => setDraft({ ...draft, tamanhos: draft.tamanhos.map((x, k) => k === j ? { ...x, qtd: parseInt(e.target.value) || null } : x) })} className={inputCls + " w-24"} placeholder="qtd" />
-                      <button type="button" onClick={() => setDraft({ ...draft, tamanhos: draft.tamanhos.filter((_, k) => k !== j) })} className="text-gray-400 hover:text-red-600 text-sm px-1">✕</button>
+                      <input value={t.tamanho}
+                        onChange={(e) => setDraft({ ...draft, tamanhos: (draft.tamanhos || []).map((x, k) => k === j ? { ...x, tamanho: e.target.value.toUpperCase() } : x) })}
+                        onBlur={() => setDraft({ ...draft, tamanhos: ordenarTamanhos(draft.tamanhos || []) })}
+                        className={inputCls + " w-24"} placeholder="Ex.: 4XGG" />
+                      <input type="number" min={1} value={t.qtd ?? ""}
+                        onChange={(e) => setDraft({ ...draft, tamanhos: (draft.tamanhos || []).map((x, k) => k === j ? { ...x, qtd: parseInt(e.target.value) || null } : x) })}
+                        className={inputCls + " w-24"} placeholder="qtd" />
+                      <button type="button" onClick={() => setDraft({ ...draft, tamanhos: (draft.tamanhos || []).filter((_, k) => k !== j) })} className="text-gray-400 hover:text-red-600 text-sm px-1">✕</button>
                     </div>
                   ))}
                   <button type="button" onClick={() => setDraft({ ...draft, tamanhos: [...(draft.tamanhos || []), { tamanho: "", qtd: null }] })} className="text-xs text-[#0F6E56] hover:underline">+ adicionar tamanho</button>
                 </div>
-                <p className="text-[11px] text-gray-400 mt-1">Toque nos tamanhos pra adicionar. Se você informar a quantidade por tamanho, o total do modelo passa a ser a soma deles.</p>
+                <p className="text-[11px] text-gray-400 mt-1">Toque nos tamanhos pra adicionar (ou crie um com “+ adicionar tamanho”). Informe a quantidade por tamanho — o total do modelo vira a soma deles.</p>
               </Campo>
               <Campo label="Público">
                 <div className="flex flex-wrap gap-2">
