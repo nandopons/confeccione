@@ -42,9 +42,11 @@ export default function PedidoSteps() {
   const [qty, setQty] = useState(10);
   const [prazo, setPrazo] = useState("");
   const [estado, setEstado] = useState("");
-  const [descricao, setDescricao] = useState("");
-  const [descricaoRevisada, setDescricaoRevisada] = useState("");
-  const [organizando, setOrganizando] = useState(false);
+  const [cep, setCep] = useState("");
+  const [numero, setNumero] = useState("");
+  const [complemento, setComplemento] = useState("");
+  const [cepInfo, setCepInfo] = useState<string | null>(null);
+  const [buscandoCep, setBuscandoCep] = useState(false);
   const [nome, setNome] = useState("");
   const [tel, setTel] = useState("");
   const [email, setEmail] = useState("");
@@ -62,35 +64,29 @@ export default function PedidoSteps() {
     setStep(1);
   }
 
-  async function avancarParaContatos() {
+  function avancarParaContatos() {
     setErro(null);
     const faltando: string[] = [];
     if (!qty || qty <= 0) faltando.push("quantidade");
     if (!prazo) faltando.push("prazo");
     if (!estado) faltando.push("estado");
+    if (cep.replace(/\D/g, "").length !== 8) faltando.push("CEP");
+    if (!numero.trim()) faltando.push("número");
     if (faltando.length > 0) { setErro(`Preencha: ${faltando.join(", ")}`); return; }
     setStep(2);
-    await organizarDescricao();
   }
 
-  // Organiza a descrição com IA pra revisão. Nunca bloqueia.
-  async function organizarDescricao() {
-    const original = descricao;
-    if (original.trim().length < 15) { setDescricaoRevisada(original); return; }
-    setOrganizando(true);
+  async function buscarCep() {
+    const d = cep.replace(/\D/g, "");
+    if (d.length !== 8) { setCepInfo(null); return; }
+    setBuscandoCep(true);
     try {
-      const res = await fetch("/api/pedido/organizar-descricao", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ descricao: original, tipo }),
-      });
-      const data = await res.json().catch(() => null);
-      setDescricaoRevisada((data && typeof data.descricao_organizada === "string" ? data.descricao_organizada : original) || original);
-    } catch {
-      setDescricaoRevisada(original);
-    } finally {
-      setOrganizando(false);
-    }
+      const r = await fetch(`https://viacep.com.br/ws/${d}/json/`).then((x) => x.json()).catch(() => null);
+      if (r && !r.erro && (r.localidade || r.logradouro)) {
+        setCepInfo([r.logradouro, r.bairro, [r.localidade, r.uf].filter(Boolean).join("/")].filter(Boolean).join(", "));
+        if (r.uf && !estado) setEstado(r.uf);
+      } else { setCepInfo(null); }
+    } finally { setBuscandoCep(false); }
   }
 
   async function enviarPedido() {
@@ -111,14 +107,15 @@ export default function PedidoSteps() {
       tamanhos: [] as { tamanho: string; qtd: number | null }[],
       estampas: [] as { posicao: string; tamanho: string }[],
       estampado: null as boolean | null,
-      descricao: (descricaoRevisada || descricao).trim() || null,
+      descricao: null,
     };
     const contato = {
       nome: nome.trim(),
       telefone: tel.trim(),
       email: email.trim(),
-      cep: null,
-      complemento: null,
+      cep: cep.replace(/\D/g, "") || null,
+      numero: numero.trim() || null,
+      complemento: complemento.trim() || null,
       uf: estado || null,
       prazoDias: PRAZO_DIAS[prazo] ?? null,
     };
@@ -252,8 +249,15 @@ export default function PedidoSteps() {
               </div>
             </div>
             <div className="mb-6">
-              <label className="text-xs text-gray-400 mb-1 block">Descreva seu pedido (opcional)</label>
-              <textarea rows={3} value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex: camisa polo P, M, G com logo bordado no peito..." className={inputCls + " resize-none"} />
+              <label className="text-xs text-gray-400 mb-1 block">Endereço de entrega <span className="text-gray-300">(pro cálculo do frete)</span></label>
+              <div className="flex flex-wrap gap-2">
+                <input value={cep} onChange={(e) => { setCep(e.target.value.replace(/[^\d-]/g, "").slice(0, 9)); setCepInfo(null); }} onBlur={() => void buscarCep()} inputMode="numeric" placeholder="CEP" className={inputCls + " w-32"} />
+                <input value={numero} onChange={(e) => setNumero(e.target.value.slice(0, 20))} placeholder="Número" className={inputCls + " w-28"} />
+                <input value={complemento} onChange={(e) => setComplemento(e.target.value.slice(0, 80))} placeholder="Complemento (opcional)" className={inputCls + " flex-1 min-w-[140px]"} />
+              </div>
+              {buscandoCep && <p className="text-[11px] text-gray-400 mt-1">buscando endereço…</p>}
+              {!buscandoCep && cepInfo && <p className="text-[11px] text-gray-500 mt-1">{cepInfo}</p>}
+              <p className="text-[11px] text-gray-400 mt-1">Os detalhes de cada modelo (cor, estampa, etc.) você ajusta na próxima página, modelo a modelo.</p>
             </div>
           </>
         )}
@@ -283,16 +287,10 @@ export default function PedidoSteps() {
                 <div className="flex justify-between text-gray-600"><span>Quantidade</span><span>{qty} peças</span></div>
                 {prazo && <div className="flex justify-between text-gray-600"><span>Prazo</span><span>{prazos[prazo]}</span></div>}
                 {estado && <div className="flex justify-between text-gray-600"><span>Estado</span><span>{estado}</span></div>}
+                {cep && <div className="flex justify-between text-gray-600"><span>CEP</span><span>{cep}{numero ? ` , ${numero}` : ""}</span></div>}
               </div>
             </div>
-            <div className="mb-6">
-              <label className="text-xs text-gray-400 mb-1 block">Detalhes do pedido (revise e ajuste se quiser)</label>
-              {organizando ? (
-                <div className="w-full border border-gray-200 rounded-xl px-3 py-3 text-sm text-gray-400 bg-gray-50">Organizando os detalhes…</div>
-              ) : (
-                <textarea rows={4} value={descricaoRevisada} onChange={(e) => setDescricaoRevisada(e.target.value)} placeholder="Ex: camisa polo P, M, G com logo bordado..." className={inputCls + " resize-none"} />
-              )}
-            </div>
+
           </>
         )}
         </div>
