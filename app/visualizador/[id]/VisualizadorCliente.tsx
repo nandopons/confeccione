@@ -1108,7 +1108,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     );
                   })}
                 </div>
-                <input value={draft.material ?? ""} onChange={(e) => setDraft({ ...draft, material: e.target.value })} className={inputCls + " mt-2"} placeholder="Especificar material (opcional) — ex.: algodão Menegotti 170g" />
                 <p className="text-[11px] text-gray-400 mt-1">Escolha pelo objetivo da peça — a gente alinha o tecido ideal e o orçamento.</p>
               </Campo>
             </div>
@@ -1145,6 +1144,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   </div>
                 </div>
                 <p className="text-[11px] text-gray-400 mt-1">Escolha pela paleta (botão ao lado) ou escreva o nome da cor (sem código).</p>
+              </Campo>
+              <Campo label="Especificar tecido (opcional)">
+                <input value={draft.material ?? ""} onChange={(e) => setDraft({ ...draft, material: e.target.value })} className={inputCls} placeholder="Ex.: algodão Menegotti 170g" />
               </Campo>
             </div>
             ) : (
