@@ -767,7 +767,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 {!orcamentoDefinido && (() => {
                   const temArte = (st.urls?.length ?? 0) > 0;
                   const completo = modeloCompleto(l);
-                  const liberado = temArte && completo;
+                  const estampadoLinha = l.estampado === true || (l.estampas?.length ?? 0) > 0;
+                  // Peça lisa pode gerar só com as infos do produto (sem arte).
+                  const liberado = completo && (temArte || !estampadoLinha);
                   const lista = iaImgs[i] || [];
                   const ajustandoEste = iaAjuste && iaAjuste.i === i;
                   return (
@@ -809,11 +811,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                             {ajustandoEste && <button type="button" onClick={() => setIaAjuste(null)} className="text-sm text-gray-500 hover:text-gray-700">cancelar ajuste</button>}
                           </div>
                           {iaErro[i] && <p className="text-xs text-red-600 mt-2">{iaErro[i]}</p>}
-                          <p className="text-[11px] text-gray-400 mt-1">A IA usa as artes deste modelo + os detalhes. Clique numa imagem gerada pra ajustar com outro texto.</p>
+                          <p className="text-[11px] text-gray-400 mt-1">A IA usa as fotos/artes (quando houver) + os detalhes do modelo. Clique numa imagem gerada pra ajustar com outro texto.</p>
                         </div>
                       ) : (
                         <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                          Pra gerar o mockup com IA, {!completo ? "complete os detalhes do modelo (toque em \u201cCompletar este produto\u201d) \u2014 ex.: tipo da pe\u00e7a e cor" : ""}{!completo && !temArte ? " e " : ""}{!temArte ? "envie ao menos uma arte/foto" : ""}.
+                          Pra gerar o mockup com IA, {!completo ? "complete os detalhes do modelo (toque em \u201cCompletar este produto\u201d) \u2014 ex.: tipo da pe\u00e7a e cor" : "esta pe\u00e7a tem estampa/bordado \u2014 envie ao menos uma arte/foto da estampa"}.
                         </p>
                       )}
                     </div>
