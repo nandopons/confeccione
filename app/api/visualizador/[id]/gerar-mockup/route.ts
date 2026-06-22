@@ -85,18 +85,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const mapa: Mapa = pedido.mockups && typeof pedido.mockups === 'object' ? { ...pedido.mockups } : {}
   const mk: Mockup = { ...(mapa[String(index)] || {}) }
   const artesUrls = Array.isArray(mk.fotos) ? mk.fotos.filter((x) => typeof x === 'string' && x.length > 0) : []
+  const estampado = l.estampado === true || (l.estampas?.length ?? 0) > 0
+
   if (ehPlaceholder(l.modelo) || ehPlaceholder(corLimpa(l.cor)) || qtd(l) <= 0) {
     return NextResponse.json({ erro: 'Complete os detalhes do modelo (tipo da peça, cor e quantidade) antes de gerar o mockup com IA.' }, { status: 422 })
   }
-  if (artesUrls.length === 0) {
-    return NextResponse.json({ erro: 'Envie ao menos uma arte/foto neste produto antes de gerar o mockup.' }, { status: 422 })
+  // Peça LISA pode ser gerada só com as infos do produto (tipo, cor, tecido,
+  // descrição). Peça com estampa/bordado exige ao menos uma arte/foto.
+  if (estampado && artesUrls.length === 0) {
+    return NextResponse.json({ erro: 'Esta peça tem estampa/bordado — envie ao menos uma arte/foto antes de gerar o mockup.' }, { status: 422 })
   }
 
   const artes: ImagemEntrada[] = []
   for (const u of artesUrls) { const e = parseDataUrl(u); if (e) artes.push(e) }
-  if (artes.length === 0) return NextResponse.json({ erro: 'Artes inválidas' }, { status: 400 })
+  if (estampado && artes.length === 0) return NextResponse.json({ erro: 'Artes inválidas' }, { status: 400 })
 
-  const estampado = l.estampado === true || (l.estampas?.length ?? 0) > 0
   const ctxProd = [
     l.modelo,
     corLimpa(l.cor) ? `na cor ${corLimpa(l.cor)}` : '',
@@ -134,12 +137,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     ].filter(Boolean).join(' ')
   } else if (semAplicacao) {
     imagens = artes
+    const refLinha = artes.length === 0
+      ? 'Não há imagem de referência: gere a peça a partir da descrição abaixo.'
+      : (artes.length > 1
+          ? 'As imagens fornecidas são apenas REFERÊNCIA do tipo/estilo da peça desejada.'
+          : 'A imagem fornecida é apenas REFERÊNCIA do tipo/estilo da peça desejada.')
     prompt = [
       `Crie um mockup de produto realista: ${ctxProd}.`,
       corLimpa(l.cor) ? `IMPORTANTE: a peça (tecido) DEVE ser exatamente na cor "${corLimpa(l.cor)}".` : '',
-      artes.length > 1
-        ? 'As imagens fornecidas são apenas REFERÊNCIA do tipo/estilo da peça desejada.'
-        : 'A imagem fornecida é apenas REFERÊNCIA do tipo/estilo da peça desejada.',
+      materialDaLinha(l) ? `Tecido: ${materialDaLinha(l)}.` : '',
+      l.descricao && l.descricao.trim() ? `Detalhes do produto: ${l.descricao.trim()}.` : '',
+      refLinha,
       SEM_APLICACAO_REGRA,
       instr ? `Observações do cliente: ${instr}.` : '',
       'Mostre o produto em vista frontal (e traseira, se as instruções mencionarem as costas), com a peça inteira e bem enquadrada.',
