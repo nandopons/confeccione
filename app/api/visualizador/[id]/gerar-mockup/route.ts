@@ -108,6 +108,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const ajustando = typeof regenIaIndex === 'number' && iaAtual[regenIaIndex]
   const instr = instrucoes.trim()
 
+  // A peça é LISA (sem nada aplicado) quando o modelo NÃO é estampado/bordado,
+  // ou quando o cliente pede explicitamente "sem estampa/logo" / "lisa". Nesse
+  // caso as imagens enviadas são REFERÊNCIA do tipo de peça — NÃO uma logo a
+  // aplicar — e a IA não deve inventar logo/selo/estampa.
+  const pedeLisa = /sem\s*(estampa|logo|logotipo|marca|arte|print|bordad|aplica|emblema|selo)|totalmente\s*lis|\blis[ao]s?\b/i.test(instr)
+  const semAplicacao = !estampado || pedeLisa
+  const SEM_APLICACAO_REGRA = 'A peça é LISA: NÃO adicione logo, estampa, bordado, emblema, selo/etiqueta redonda, marca nem texto. Não invente nenhum logotipo. Se houver algo aplicado, remova.'
+
   let imagens: ImagemEntrada[]
   let prompt: string
   if (ajustando) {
@@ -115,11 +123,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     imagens = base ? [base, ...artes] : artes
     prompt = [
       'A PRIMEIRA imagem é um mockup já gerado deste produto.',
-      'As imagens seguintes são a logo/arte enviada pelo cliente.',
+      semAplicacao
+        ? 'As imagens seguintes são apenas REFERÊNCIA do tipo de peça (não são logo).'
+        : 'As imagens seguintes são a logo/arte enviada pelo cliente.',
       `Ajuste o mockup conforme o pedido do cliente: ${instr || 'melhore o realismo mantendo o produto.'}`,
       `Produto: ${ctxProd}.`,
       corLimpa(l.cor) ? `Mantenha a peça na cor "${corLimpa(l.cor)}".` : '',
+      semAplicacao ? SEM_APLICACAO_REGRA : '',
       'Mantenha um mockup realista de produto, fundo branco uniforme, boa iluminação. Devolva apenas a imagem final.',
+    ].filter(Boolean).join(' ')
+  } else if (semAplicacao) {
+    imagens = artes
+    prompt = [
+      `Crie um mockup de produto realista: ${ctxProd}.`,
+      corLimpa(l.cor) ? `IMPORTANTE: a peça (tecido) DEVE ser exatamente na cor "${corLimpa(l.cor)}".` : '',
+      artes.length > 1
+        ? 'As imagens fornecidas são apenas REFERÊNCIA do tipo/estilo da peça desejada.'
+        : 'A imagem fornecida é apenas REFERÊNCIA do tipo/estilo da peça desejada.',
+      SEM_APLICACAO_REGRA,
+      instr ? `Observações do cliente: ${instr}.` : '',
+      'Mostre o produto em vista frontal (e traseira, se as instruções mencionarem as costas), com a peça inteira e bem enquadrada.',
+      'Fundo branco uniforme, iluminação de estúdio, sem texto extra. Devolva apenas a imagem final.',
     ].filter(Boolean).join(' ')
   } else {
     imagens = artes
