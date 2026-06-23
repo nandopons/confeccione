@@ -256,7 +256,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     return () => clearInterval(t);
   }, []);
   const [draft, setDraft] = useState<Linha>({ ...linhaVazia });
-  const [editStep, setEditStep] = useState<1 | 2 | 3>(1);
+  const [editStep, setEditStep] = useState<1 | 2>(1);
   const [corPickerOpen, setCorPickerOpen] = useState(false);
 
   // subir a própria arte / mockup
@@ -1142,46 +1142,22 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             <button type="button" onClick={() => setEditOpen(false)} aria-label="Fechar" className="absolute top-3 right-3 h-8 w-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 text-xl leading-none">×</button>
             <p className="text-gray-900 font-medium mb-3">{editIndex === null ? "Adicionar produto" : `Editar Modelo ${editIndex + 1}`}</p>
             <div className="flex items-center mb-5">
-              {[0, 1, 2].map((i) => {
+              {[0, 1].map((i) => {
                 const cur = editStep - 1;
-                const labels = ["Tecido", "Básico", "Detalhes"];
+                const labels = ["Básico", "Detalhes"];
                 return (
                   <div key={i} className="flex items-center flex-1 last:flex-none">
                     <div className={"w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0 shadow-sm transition-all " + (i < cur ? "bg-[#1D9E75] text-white" : i === cur ? "bg-[#111] text-white" : "bg-white border border-gray-300 text-gray-500")}>
                       {i < cur ? "✓" : i + 1}
                     </div>
                     <span className={"ml-2 text-xs whitespace-nowrap " + (i <= cur ? "text-gray-700 font-medium" : "text-gray-400")}>{labels[i]}</span>
-                    {i < 2 && <div className={"flex-1 h-px mx-3 transition-colors " + (i < cur ? "bg-[#1D9E75]" : "bg-gray-200")} />}
+                    {i < 1 && <div className={"flex-1 h-px mx-3 transition-colors " + (i < cur ? "bg-[#1D9E75]" : "bg-gray-200")} />}
                   </div>
                 );
               })}
             </div>
 
             {editStep === 1 ? (
-            <div className="space-y-3">
-              <Campo label="Tipo / qualidade do tecido">
-                <div className="space-y-1.5">
-                  {OBJETIVOS_MATERIAL.filter((o) => ["economica", "padrao", "premium"].includes(o.id)).map((o) => {
-                    const sel = (draft.objetivo_material ?? "") === o.id;
-                    return (
-                      <button key={o.id} type="button" onClick={() => setDraft({ ...draft, objetivo_material: o.id })}
-                        className={"w-full text-left rounded-lg border px-3 py-2.5 transition-colors " + (sel ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 bg-white hover:bg-gray-50")}>
-                        <div className="flex items-center gap-2">
-                          <span className={"h-4 w-4 rounded-full border flex items-center justify-center shrink-0 " + (sel ? "border-[#1D9E75] bg-[#1D9E75]" : "border-gray-300")}>
-                            {sel && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
-                          </span>
-                          <span className="text-sm font-medium text-gray-900">{o.label}</span>
-                          {o.recomendado && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#1D9E75] text-white">recomendado</span>}
-                        </div>
-                        <p className="text-[11px] text-gray-500 mt-0.5 ml-6">{o.desc}</p>
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-[11px] text-gray-400 mt-1">Escolha pelo objetivo da peça — a gente alinha o tecido ideal e o orçamento.</p>
-              </Campo>
-            </div>
-            ) : editStep === 2 ? (
             <div className="space-y-3">
               <Campo label="Modelo (tshirt, oversized, polo, boné…)">
                 <input value={draft.modelo ?? ""} onChange={(e) => setDraft({ ...draft, modelo: e.target.value })} className={inputCls} placeholder="oversized" />
@@ -1293,14 +1269,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   <button type="button" onClick={() => setEditOpen(false)} className="border border-gray-200 text-gray-500 px-4 py-2 rounded-xl text-sm hover:bg-gray-50">Cancelar</button>
                   <button type="button" onClick={() => setEditStep(2)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-4 py-2 rounded-xl text-sm font-medium">Continuar →</button>
                 </>
-              ) : editStep === 2 ? (
-                <>
-                  <button type="button" onClick={() => setEditStep(1)} className="border border-gray-200 text-gray-500 px-4 py-2 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
-                  <button type="button" onClick={() => setEditStep(3)} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-4 py-2 rounded-xl text-sm font-medium">Continuar →</button>
-                </>
               ) : (
                 <>
-                  <button type="button" onClick={() => setEditStep(2)} className="border border-gray-200 text-gray-500 px-4 py-2 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
+                  <button type="button" onClick={() => setEditStep(1)} className="border border-gray-200 text-gray-500 px-4 py-2 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
                   <button type="button" onClick={salvarEdicao} className="bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-4 py-2 rounded-xl text-sm font-medium">Salvar</button>
                 </>
               )}
