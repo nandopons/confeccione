@@ -201,6 +201,166 @@ const CATEGORIAS = [
   "Brindes / Gráfica",
 ];
 
+// ─── Catálogo de produtos por categoria (Fase 1) ──────────────────────────
+type ProdutoCat = { id: string; nome: string };
+
+function normCat(s?: string | null): string {
+  return (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+const CATALOGO: Record<string, ProdutoCat[]> = {
+  fitness: [
+    { id: "top", nome: "Top" },
+    { id: "legging", nome: "Legging" },
+    { id: "calca", nome: "Calça" },
+    { id: "short", nome: "Short" },
+    { id: "cropped", nome: "Cropped" },
+    { id: "regata", nome: "Regata cavada" },
+    { id: "tshirt", nome: "Camiseta dry" },
+  ],
+  "private label": [
+    { id: "tshirt", nome: "T-shirt" },
+    { id: "oversized", nome: "Oversized" },
+    { id: "babylook", nome: "Baby look" },
+    { id: "cropped", nome: "Cropped" },
+    { id: "regata", nome: "Regata" },
+    { id: "polo", nome: "Polo" },
+    { id: "camisa_mc", nome: "Camisa botão M. curta" },
+    { id: "camisa_ml", nome: "Camisa botão M. longa" },
+    { id: "moletom", nome: "Moletom careca" },
+    { id: "moletom_canguru", nome: "Moletom canguru" },
+  ],
+  "moda praia": [
+    { id: "biquini", nome: "Biquíni" },
+    { id: "maio", nome: "Maiô" },
+    { id: "sunga", nome: "Sunga" },
+    { id: "saida", nome: "Saída de praia" },
+    { id: "short", nome: "Short praia" },
+  ],
+  "moda intima": [
+    { id: "calcinha", nome: "Calcinha" },
+    { id: "top", nome: "Sutiã" },
+    { id: "pijama", nome: "Pijama" },
+    { id: "camisola", nome: "Camisola" },
+    { id: "boxer", nome: "Boxer" },
+  ],
+  interclasse: [
+    { id: "tshirt", nome: "Camiseta" },
+    { id: "oversized", nome: "Oversized" },
+    { id: "manga_longa", nome: "Manga longa" },
+    { id: "moletom", nome: "Moletom" },
+  ],
+  "padrao esportivo": [
+    { id: "regata", nome: "Regata basquete" },
+    { id: "tshirt", nome: "Camisa de time" },
+    { id: "short", nome: "Short" },
+    { id: "manga_longa", nome: "Manga longa" },
+  ],
+  fardamento: [
+    { id: "camisa_mc", nome: "Camisa social" },
+    { id: "polo", nome: "Polo" },
+    { id: "jaleco", nome: "Jaleco" },
+    { id: "avental", nome: "Avental" },
+    { id: "colete", nome: "Colete" },
+  ],
+  inverno: [
+    { id: "moletom", nome: "Moletom" },
+    { id: "jaqueta", nome: "Jaqueta" },
+    { id: "casaco", nome: "Casaco" },
+    { id: "moletom_canguru", nome: "Blusa de frio" },
+  ],
+  "roupas uv": [
+    { id: "manga_longa", nome: "Camisa UV M. longa" },
+    { id: "legging", nome: "Legging UV" },
+    { id: "top", nome: "Top UV" },
+  ],
+  bones: [
+    { id: "bone", nome: "Boné aba curva" },
+    { id: "trucker", nome: "Trucker" },
+    { id: "bucket", nome: "Bucket" },
+  ],
+  brindes: [
+    { id: "caneca", nome: "Caneca" },
+    { id: "copo", nome: "Copo" },
+    { id: "squeeze", nome: "Squeeze" },
+    { id: "ecobag", nome: "Ecobag" },
+    { id: "cracha", nome: "Crachá" },
+    { id: "chaveiro", nome: "Chaveiro" },
+  ],
+};
+
+const CATALOGO_PADRAO: ProdutoCat[] = [
+  { id: "tshirt", nome: "T-shirt" },
+  { id: "oversized", nome: "Oversized" },
+  { id: "manga_longa", nome: "Manga longa" },
+  { id: "regata", nome: "Regata" },
+  { id: "polo", nome: "Polo" },
+  { id: "moletom", nome: "Moletom" },
+  { id: "bone", nome: "Boné" },
+];
+
+function produtosDaCategoria(cat?: string | null): ProdutoCat[] {
+  const k = normCat(cat);
+  for (const key of Object.keys(CATALOGO)) {
+    if (k === key || (k.length > 0 && k.includes(key))) return CATALOGO[key];
+  }
+  return CATALOGO_PADRAO;
+}
+
+function silhueta(id: string): string {
+  const m: Record<string, string> = {
+    tshirt: "tee", oversized: "tee", babylook: "tee",
+    manga_longa: "tee_ml",
+    regata: "tank",
+    cropped: "cropped",
+    polo: "polo",
+    camisa_mc: "camisa", camisa_ml: "camisa", jaleco: "camisa",
+    moletom: "moletom", moletom_canguru: "moletom", casaco: "moletom",
+    jaqueta: "jaqueta", colete: "jaqueta",
+    calca: "calca", legging: "calca",
+    short: "short",
+    top: "top", biquini: "top", maio: "top",
+    sunga: "brief", boxer: "brief", calcinha: "brief",
+    camisola: "vestido", saida: "vestido", pijama: "vestido", avental: "vestido",
+    bone: "bone", trucker: "bone", bucket: "bone",
+    caneca: "caneca", copo: "copo", squeeze: "squeeze",
+    ecobag: "sacola",
+    cracha: "cracha",
+  };
+  return m[id] || "generico";
+}
+
+function ProdutoVetor({ id, className }: { id: string; className?: string }) {
+  const s = silhueta(id);
+  const P: Record<string, JSX.Element> = {
+    tee: <path d="M22 14 L16 19 L20 25 L24 22 V50 H40 V22 L44 25 L48 19 L42 14 H38 a6 4 0 0 1 -12 0 Z" />,
+    tee_ml: <path d="M24 14 L14 22 L18 40 L23 38 L24 24 V50 H40 V24 L41 38 L46 40 L50 22 L40 14 H38 a6 4 0 0 1 -12 0 Z" />,
+    tank: <path d="M26 14 L22 20 V50 H42 V20 L38 14 a6 5 0 0 1 -12 0 Z" />,
+    cropped: <path d="M22 14 L16 19 L20 25 L24 22 V38 H40 V22 L44 25 L48 19 L42 14 H38 a6 4 0 0 1 -12 0 Z" />,
+    polo: <path d="M22 14 L16 19 L20 25 L24 22 V50 H40 V22 L44 25 L48 19 L42 14 L36 16 L32 22 L28 16 Z" />,
+    camisa: <path d="M22 14 L16 19 L20 25 L24 22 V50 H40 V22 L44 25 L48 19 L42 14 L34 16 L32 14 L30 16 Z M32 22 V48" />,
+    moletom: <path d="M23 15 L14 23 L19 31 L23 28 V50 H41 V28 L45 31 L50 23 L41 15 H23 Z M26 15 a6 4 0 0 0 12 0" />,
+    jaqueta: <path d="M23 15 L15 22 L19 30 L23 27 V50 H41 V27 L45 30 L49 22 L41 15 H23 Z M32 16 V50" />,
+    calca: <path d="M24 14 H40 L41 50 H34 L32 28 L30 50 H23 Z" />,
+    short: <path d="M23 16 H41 L42 36 H34 L32 24 L30 36 H22 Z" />,
+    top: <path d="M18 20 Q32 30 46 20 L44 31 Q32 41 20 31 Z" />,
+    brief: <path d="M20 22 H44 L40 36 Q32 32 24 36 Z" />,
+    vestido: <path d="M26 14 L22 20 L24 50 H40 L42 20 L38 14 a6 5 0 0 1 -12 0 Z" />,
+    bone: <path d="M16 35 Q16 20 32 20 Q48 20 48 33 L30 33 Q22 31 16 35 Z" />,
+    caneca: <path d="M22 20 H40 V44 H22 Z M40 25 H46 V37 H40" />,
+    copo: <path d="M24 18 H42 L39 46 H27 Z" />,
+    squeeze: <path d="M28 16 H36 V20 Q40 24 40 32 V46 H24 V32 Q24 24 28 20 Z" />,
+    sacola: <path d="M22 24 H42 L44 48 H20 Z M27 24 Q27 16 32 16 Q37 16 37 24" />,
+    cracha: <path d="M24 18 H40 V46 H24 Z M28 14 H36 V18 H28 Z M28 38 H36" />,
+    generico: <path d="M22 16 H42 V48 H22 Z" />,
+  };
+  return (
+    <svg viewBox="0 0 64 64" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
+      {P[s] ?? P.generico}
+    </svg>
+  );
+}
+
 export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [linhas, setLinhas] = useState<Linha[]>(
     (pedido.linhas ?? []).map((l) => ({ ...l, tamanhos: l.tamanhos ?? [], estampas: l.estampas ?? [], estampado: l.estampado ?? null, acabamentos: Array.isArray(l.acabamentos) ? l.acabamentos : (l.estampado === true ? ["estampada"] : []), categoria: l.categoria ?? null, objetivo_material: l.objetivo_material ?? null }))
@@ -258,6 +418,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [draft, setDraft] = useState<Linha>({ ...linhaVazia });
   const [editStep, setEditStep] = useState<1 | 2>(1);
   const [corPickerOpen, setCorPickerOpen] = useState(false);
+  const [catalogoOpen, setCatalogoOpen] = useState(false);
 
   // subir a própria arte / mockup
   const [subindoIdx, setSubindoIdx] = useState<number | null>(null);
@@ -297,6 +458,15 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     }
     setEditStep(1);
     setCorPickerOpen(false);
+    setEditOpen(true);
+  }
+
+  function abrirComProduto(nome: string) {
+    setDraft({ ...linhaVazia, categoria: pedido.categoria ?? (linhas.find((l) => l.categoria)?.categoria ?? null), tamanhos: [], modelo: nome });
+    setEditIndex(null);
+    setEditStep(1);
+    setCorPickerOpen(false);
+    setCatalogoOpen(false);
     setEditOpen(true);
   }
 
@@ -855,7 +1025,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
       {!orcamentoDefinido && (
       <div className="mt-4">
-        <button type="button" onClick={() => abrirEdicao(null)} className="border-2 border-dashed border-gray-300 text-gray-600 hover:border-[#1D9E75] hover:text-[#0F6E56] text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">
+        <button type="button" onClick={() => setCatalogoOpen(true)} className="border-2 border-dashed border-gray-300 text-gray-600 hover:border-[#1D9E75] hover:text-[#0F6E56] text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">
           + Adicionar produto
         </button>
       </div>
@@ -1136,6 +1306,27 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         </div>
       )}
 
+      {catalogoOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setCatalogoOpen(false); }}>
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+            <button type="button" onClick={() => setCatalogoOpen(false)} aria-label="Fechar" className="absolute top-3 right-3 h-8 w-8 flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 text-xl leading-none">×</button>
+            <p className="text-gray-900 font-medium">Escolha o produto</p>
+            <p className="text-[12px] text-gray-500 mt-0.5 mb-4">{pedido.categoria ? `Sugestões para ${pedido.categoria}` : "Tipos de produto"} — toque pra começar.</p>
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
+              {produtosDaCategoria(pedido.categoria).map((p) => (
+                <button key={p.id + p.nome} type="button" onClick={() => abrirComProduto(p.nome)}
+                  className="group flex flex-col items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2 py-3 hover:border-[#1D9E75] hover:bg-[#E1F5EE] transition-colors">
+                  <ProdutoVetor id={p.id} className="h-10 w-10 text-gray-500 group-hover:text-[#0F6E56]" />
+                  <span className="text-[11px] text-center leading-tight text-gray-700">{p.nome}</span>
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={() => { setCatalogoOpen(false); abrirEdicao(null); }} className="mt-4 w-full text-sm text-[#0F6E56] hover:underline">
+              Meu produto não está na lista →
+            </button>
+          </div>
+        </div>
+      )}
       {editOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditOpen(false); }}>
           <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
