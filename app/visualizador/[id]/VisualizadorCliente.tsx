@@ -350,7 +350,7 @@ function silhueta(id: string): string {
   if (has("top", "sutia", "biquini", "maio")) return "top";
   if (has("sunga", "boxer", "calcinha")) return "brief";
   if (has("camisola", "saida", "pijama", "avental", "vestido")) return "vestido";
-  if (has("camiseta", "t-shirt", "tshirt", "baby", "oversized", "dry")) return "tee";
+  if (has("camiseta", "camisete", "t-shirt", "tshirt", "baby", "oversized", "boxy", "gola", "dry", "basica", "basico")) return "tee";
   return "generico";
 }
 
@@ -376,7 +376,7 @@ function ProdutoVetor({ id, className }: { id: string; className?: string }) {
     squeeze: <path d="M28 16 H36 V20 Q40 24 40 32 V46 H24 V32 Q24 24 28 20 Z" />,
     sacola: <path d="M22 24 H42 L44 48 H20 Z M27 24 Q27 16 32 16 Q37 16 37 24" />,
     cracha: <path d="M24 18 H40 V46 H24 Z M28 14 H36 V18 H28 Z M28 38 H36" />,
-    generico: <path d="M22 16 H42 V48 H22 Z" />,
+    generico: <path d="M22 14 L16 19 L20 25 L24 22 V50 H40 V22 L44 25 L48 19 L42 14 H38 a6 4 0 0 1 -12 0 Z" />,
   };
   return (
     <svg viewBox="0 0 64 64" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
@@ -918,11 +918,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   <span className="text-xs text-gray-400">enviando suas fotos…</span>
                 ) : (
                   <div className="text-center px-4 py-6 w-full max-w-md mx-auto">
-                    {!ehPlaceholder(l.modelo) ? (
-                      <ProdutoVetor id={l.modelo || ""} className="w-20 h-20 mx-auto mb-3 text-gray-300" />
-                    ) : (
-                      <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-gray-100 flex items-center justify-center text-gray-300 text-xl">👕</div>
-                    )}
+                    <ProdutoVetor id="generico" className="w-20 h-20 mx-auto mb-3 text-gray-300" />
                     <p className="text-sm font-medium text-gray-800">Adicione as fotos desta peça</p>
                     <p className="text-[11px] text-gray-400 mt-1 mb-4 leading-snug">Envie uma ou mais fotos/artes desta peça (até {MAX_FOTOS}).</p>
                     <label className="inline-block bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors cursor-pointer text-center">
