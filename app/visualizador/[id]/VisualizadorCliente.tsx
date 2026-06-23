@@ -1230,7 +1230,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                       const ativo = presentes.includes(tam);
                       return (
                         <button key={tam} type="button" title={ativo ? "Já adicionado — remova no ✕ da linha" : "Adicionar tamanho"}
-                          onClick={() => { if (ativo) return; setDraft({ ...draft, tamanhos: ordenarTamanhos([...(draft.tamanhos || []), { tamanho: tam, qtd: null }]) }); }}
+                          onClick={() => { if (ativo) return; setDraft({ ...draft, tamanhos: ordenarTamanhos([...(draft.tamanhos || []), { tamanho: tam, qtd: 1 }]) }); }}
                           className={"px-3 py-1 rounded-lg text-sm border transition-colors " + (ativo ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56] cursor-default" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50")}>
                           {tam}
                         </button>
@@ -1251,7 +1251,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                       <button type="button" onClick={() => setDraft({ ...draft, tamanhos: (draft.tamanhos || []).filter((_, k) => k !== j) })} className="text-gray-400 hover:text-red-600 text-sm px-1">✕</button>
                     </div>
                   ))}
-                  <button type="button" onClick={() => setDraft({ ...draft, tamanhos: [...(draft.tamanhos || []), { tamanho: "", qtd: null }] })} className="text-xs text-[#0F6E56] hover:underline">+ adicionar tamanho</button>
+                  <button type="button" onClick={() => setDraft({ ...draft, tamanhos: [...(draft.tamanhos || []), { tamanho: "", qtd: 1 }] })} className="text-xs text-[#0F6E56] hover:underline">+ adicionar tamanho</button>
                 </div>
                 <p className="text-[11px] text-gray-400 mt-1">Toque nos tamanhos pra adicionar (ou crie um com “+ adicionar tamanho”). Informe a quantidade por tamanho — o total do modelo vira a soma deles.</p>
               </Campo>
