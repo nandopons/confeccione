@@ -12,7 +12,7 @@
 // por e-mail/WhatsApp e aparece aqui com o botão de pagamento.
 // ============================================================================
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
 import Link from "next/link";
 import ListaColeta from "./ListaColeta";
 
@@ -332,7 +332,7 @@ function silhueta(id: string): string {
 
 function ProdutoVetor({ id, className }: { id: string; className?: string }) {
   const s = silhueta(id);
-  const P: Record<string, JSX.Element> = {
+  const P: Record<string, ReactElement> = {
     tee: <path d="M22 14 L16 19 L20 25 L24 22 V50 H40 V22 L44 25 L48 19 L42 14 H38 a6 4 0 0 1 -12 0 Z" />,
     tee_ml: <path d="M24 14 L14 22 L18 40 L23 38 L24 24 V50 H40 V24 L41 38 L46 40 L50 22 L40 14 H38 a6 4 0 0 1 -12 0 Z" />,
     tank: <path d="M26 14 L22 20 V50 H42 V20 L38 14 a6 5 0 0 1 -12 0 Z" />,
