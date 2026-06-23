@@ -327,7 +327,31 @@ function silhueta(id: string): string {
     ecobag: "sacola",
     cracha: "cracha",
   };
-  return m[id] || "generico";
+  if (m[id]) return m[id];
+  const t = normCat(id);
+  if (!t) return "generico";
+  const has = (...ks: string[]) => ks.some((k) => t.includes(k));
+  if (has("time")) return "tee";
+  if (has("manga longa", "uv")) return "tee_ml";
+  if (has("legging", "calca")) return "calca";
+  if (has("short", "bermuda")) return "short";
+  if (has("cropped")) return "cropped";
+  if (has("regata")) return "tank";
+  if (has("polo")) return "polo";
+  if (has("camisa", "social", "jaleco")) return "camisa";
+  if (has("moletom", "blusa de frio", "casaco")) return "moletom";
+  if (has("jaqueta", "colete")) return "jaqueta";
+  if (has("bone", "trucker", "bucket")) return "bone";
+  if (has("caneca")) return "caneca";
+  if (has("copo")) return "copo";
+  if (has("squeeze", "garrafa")) return "squeeze";
+  if (has("ecobag", "sacola", "bag")) return "sacola";
+  if (has("cracha", "cordao")) return "cracha";
+  if (has("top", "sutia", "biquini", "maio")) return "top";
+  if (has("sunga", "boxer", "calcinha")) return "brief";
+  if (has("camisola", "saida", "pijama", "avental", "vestido")) return "vestido";
+  if (has("camiseta", "t-shirt", "tshirt", "baby", "oversized", "dry")) return "tee";
+  return "generico";
 }
 
 function ProdutoVetor({ id, className }: { id: string; className?: string }) {
@@ -579,6 +603,15 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   }
 
   const MAX_FOTOS = 6;
+  function tornarCapa(i: number, j: number) {
+    const cur = imgs[i]?.urls;
+    const urls = cur ? [...cur] : [];
+    if (j <= 0 || j >= urls.length) return;
+    const [u] = urls.splice(j, 1);
+    urls.unshift(u);
+    setImgs((m) => ({ ...m, [i]: { ...m[i], urls } }));
+    void salvarMockup({ index: i, fotos: urls });
+  }
 
   function ehPlaceholder(v?: string | null): boolean {
     const t = (v || "").trim().toLowerCase();
@@ -863,6 +896,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                             <img src={u} alt={`foto ${j + 1}`} className="w-full h-40 object-contain rounded-lg border border-gray-200 bg-white cursor-zoom-in" />
                           </button>
                           <button type="button" onClick={() => removerFoto(i, j)} aria-label="Remover foto" className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/55 hover:bg-black/80 text-white text-base leading-none flex items-center justify-center">×</button>
+                          {(st.urls?.length ?? 0) > 1 && (j === 0 ? (
+                            <span className="absolute bottom-1.5 left-1.5 text-[10px] font-semibold bg-[#1D9E75] text-white rounded px-1.5 py-0.5">★ Capa</span>
+                          ) : (
+                            <button type="button" onClick={() => tornarCapa(i, j)} aria-label="Definir como capa" className="absolute bottom-1.5 left-1.5 text-[10px] font-medium bg-black/55 hover:bg-black/80 text-white rounded px-1.5 py-0.5">Tornar capa</button>
+                          ))}
                         </div>
                       ))}
                       {st.urls.length < MAX_FOTOS && (
@@ -880,7 +918,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   <span className="text-xs text-gray-400">enviando suas fotos…</span>
                 ) : (
                   <div className="text-center px-4 py-6 w-full max-w-md mx-auto">
-                    <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-gray-100 flex items-center justify-center text-gray-300 text-xl">👕</div>
+                    {!ehPlaceholder(l.modelo) ? (
+                      <ProdutoVetor id={l.modelo || ""} className="w-20 h-20 mx-auto mb-3 text-gray-300" />
+                    ) : (
+                      <div className="w-12 h-12 mx-auto mb-2 rounded-full bg-gray-100 flex items-center justify-center text-gray-300 text-xl">👕</div>
+                    )}
                     <p className="text-sm font-medium text-gray-800">Adicione as fotos desta peça</p>
                     <p className="text-[11px] text-gray-400 mt-1 mb-4 leading-snug">Envie uma ou mais fotos/artes desta peça (até {MAX_FOTOS}).</p>
                     <label className="inline-block bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors cursor-pointer text-center">
