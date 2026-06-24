@@ -133,7 +133,7 @@ const RespostaModeloSchema = z.object({
   mensagem: z.string().min(1),
   cores: CoresSchema.optional(),
   pedido: PedidoModeloSchema.default({ ...PEDIDO_VAZIO }),
-  fotosPorLinha: z.record(z.string(), z.array(z.number())).optional(),
+  fotosPorLinha: z.record(z.string(), z.array(z.number())).nullable().optional(),
 })
 
 const BlocoTextoSchema = z.object({ type: z.literal('text'), text: z.string() })
@@ -206,7 +206,7 @@ REGRAS DE CONFIABILIDADE DO CONTATO:
 Quando tudo estiver coletado (linhas + contato), faça uma confirmação curta e simpática do resumo e diga que ele já pode prosseguir para ver a pré-visualização dos produtos.
 
 A cada resposta, devolva SOMENTE um JSON válido (sem markdown, sem cercas de código, sem texto fora dele), com o PEDIDO INTEIRO e atualizado neste formato exato:
-{"mensagem": string, "cores": {"termo": string, "opcoes": [{"nome": string, "hex": string}]} | null, "pedido": {"linhas": [{"modelo": string|null, "cor": string|null, "material": string|null, "publico": "feminino"|"masculino"|"infantil"|"unissex"|null, "total": number|null, "tamanhos": [{"tamanho": string, "qtd": number|null}], "estampado": boolean|null, "descricao": string|null}], "contato": {"nome": string|null, "telefone": string|null, "email": string|null, "cep": string|null, "complemento": string|null, "prazoDias": number|null}}, "fotosPorLinha": {"<índice da linha 0,1,2…>": [<números das fotos #1,#2… daquele produto>]} | null}
+{"mensagem": string, "cores": {"termo": string, "opcoes": [{"nome": string, "hex": string}]} | null, "pedido": {"linhas": [{"modelo": string|null, "cor": string|null, "material": string|null, "publico": "feminino"|"masculino"|"infantil"|"unissex"|null, "total": number|null, "tamanhos": [{"tamanho": string, "qtd": number|null}], "estampado": boolean|null, "descricao": string|null}], "contato": {"nome": string|null, "telefone": string|null, "email": string|null, "cep": string|null, "complemento": string|null, "prazoDias": number|null}}, "fotosPorLinha": {"0": [1, 2], "1": [3]} | null}
 
 Regras do JSON:
 - "mensagem" é só o que você fala com o cliente (a próxima pergunta ou a confirmação). Nunca coloque JSON dentro da mensagem.
@@ -467,7 +467,9 @@ export async function POST(req: Request) {
     const obj = JSON.parse(extrairJson(texto))
     const r = RespostaModeloSchema.safeParse(obj)
     if (r.success) parsed = r.data
-  } catch {
+    else console.error('[pedido/assistente] zod rejeitou a resposta:', JSON.stringify(r.error.issues).slice(0, 500))
+  } catch (e) {
+    console.error('[pedido/assistente] parse falhou — texto do modelo:', texto?.slice(0, 800), e)
     parsed = null
   }
 
