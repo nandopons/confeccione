@@ -107,6 +107,27 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     finally { setSubindo(false); }
   }
 
+  async function onColar(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const itens = Array.from(e.clipboardData?.items ?? []);
+    const imgs = itens.filter((it) => it.type.startsWith("image/"));
+    if (imgs.length === 0) return; // sem imagem: deixa colar texto normalmente
+    e.preventDefault();
+    const espaco = Math.max(0, MAX_FOTOS - totalFotos);
+    if (espaco === 0) { setErro(`Máximo de ${MAX_FOTOS} fotos.`); return; }
+    setSubindo(true); setErro(null);
+    try {
+      const novas: string[] = [];
+      for (const it of imgs.slice(0, espaco)) {
+        const f = it.getAsFile();
+        if (!f) continue;
+        if (f.size > 10 * 1024 * 1024) { setErro("A imagem colada passa de 10 MB e foi ignorada."); continue; }
+        novas.push(await arquivoParaRef(f));
+      }
+      if (novas.length) setAnexos((p) => [...p, ...novas]);
+    } catch { setErro("Não consegui ler a imagem colada. Tenta de novo."); }
+    finally { setSubindo(false); }
+  }
+
   async function enviar(textoForcado?: string) {
     const texto = (textoForcado ?? input).trim();
     const fotos = anexos;
@@ -234,7 +255,8 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
             <textarea
               value={input} onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void enviar(); } }}
-              rows={1} placeholder="Escreva aqui…" enterKeyHint="send"
+              onPaste={(e) => void onColar(e)}
+              rows={1} placeholder="Escreva ou cole uma foto aqui…" enterKeyHint="send"
               className="flex-1 resize-none border border-gray-300 rounded-xl px-3 py-2.5 text-[16px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75] max-h-28"
             />
             <button type="button" onClick={() => void enviar()} disabled={enviando || (!input.trim() && anexos.length === 0)}
