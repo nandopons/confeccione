@@ -31,7 +31,7 @@ function linhaCompleta(l: Linha): boolean {
 
 export default function AlinharCliente({ pedidoId, categoria, totalPecas }: { pedidoId: string; categoria: string | null; totalPecas: number }) {
   const abertura =
-    `Boa! ${totalPecas > 0 ? `Você sinalizou *${totalPecas} ${totalPecas === 1 ? "peça" : "peças"}*${categoria ? ` de ${categoria}` : ""}. ` : ""}` +
+    `Boa! ${totalPecas > 0 ? `Você sinalizou ${totalPecas} ${totalPecas === 1 ? "peça" : "peças"}${categoria ? ` de ${categoria}` : ""}. ` : ""}` +
     `Pra deixar tudo organizado: quantos modelos diferentes você quer produzir? (ex.: só 1 modelo, ou camiseta + moletom…) — se já souber o modelo, pode me dizer direto.`;
   const [turnos, setTurnos] = useState<Turno[]>([{ role: "assistant", display: abertura }]);
   const [input, setInput] = useState("");
