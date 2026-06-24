@@ -133,6 +133,7 @@ const RespostaModeloSchema = z.object({
   mensagem: z.string().min(1),
   cores: CoresSchema.optional(),
   pedido: PedidoModeloSchema.default({ ...PEDIDO_VAZIO }),
+  fotosPorLinha: z.record(z.string(), z.array(z.number())).optional(),
 })
 
 const BlocoTextoSchema = z.object({ type: z.literal('text'), text: z.string() })
@@ -435,7 +436,7 @@ export async function POST(req: Request) {
       `Ao perguntar o MATERIAL/tecido, SUGIRA os tecidos típicos daquele produto (use a biblioteca abaixo) e deixe claro que ele pode indicar outro se preferir. ` +
       `REGRA DE CAMPOS (siga à risca): o campo "modelo" é SÓ o tipo da peça (ex.: "moletom", "calça wide leg", "camiseta") — NUNCA coloque tecido, material, cor ou gramatura no "modelo". O tecido vai SEMPRE no campo "material". Ex.: cliente diz "moletom de algodão rosa" → modelo:"moletom", cor:"rosa", material:"algodão"; "calça wide leg de moletom" → modelo:"calça wide leg", material:"moletom". ` +
       `REGRA DE TÉCNICA (importante): estampa FULL PRINT / sublimação total SÓ funciona em POLIÉSTER (ou tecidos com alto teor de poliéster) — NÃO funciona em algodão. Se o cliente pedir full print / sublimação total em algodão (ou num produto que ele disse ser de algodão), avise gentilmente que essa técnica exige poliéster e ofereça trocar o tecido pra poliéster (ou dry/poliamida); deixe claro que estampa LOCALIZADA (silk, DTF, transfer) funciona em algodão normalmente. ` +
-      `Se o cliente ENVIAR FOTO(S), ANALISE a imagem pra identificar o(s) produto(s), a cor e (quando der pra ver) o material. Se a foto mostrar um CONJUNTO/look com MAIS DE UMA peça (ex.: calça wide leg + casaco/moletom com zíper), NÃO assuma uma peça só: diga quais peças você viu e PERGUNTE se ele quer produzir o CONJUNTO COMPLETO (aí cada peça vira uma linha) ou só uma delas — só crie as linhas depois que ele confirmar. Se for uma peça só, confirme ("vi que é um(a) ___, certo?") e já preencha. ` +
+      `Se o cliente ENVIAR FOTO(S), ANALISE a imagem pra identificar o(s) produto(s), a cor e (quando der pra ver) o material. Se a foto mostrar um CONJUNTO/look com MAIS DE UMA peça (ex.: calça wide leg + casaco/moletom com zíper), NÃO assuma uma peça só: diga quais peças você viu e PERGUNTE se ele quer produzir o CONJUNTO COMPLETO (aí cada peça vira uma linha) ou só uma delas — só crie as linhas depois que ele confirmar. Se for uma peça só, confirme ("vi que é um(a) ___, certo?") e já preencha. Cada foto enviada vem com um NÚMERO (#1, #2…). SEMPRE devolva no JSON o campo "fotosPorLinha": um objeto que mapeia o índice de cada linha (0, 1, 2…) para a lista dos números das fotos daquele produto — ponha CADA foto na linha do produto que ela mostra (ex.: cliente mandou 1 foto de cada um dos 4 modelos → "fotosPorLinha":{"0":[1],"1":[2],"2":[3],"3":[4]}; conjunto com 1 foto que mostra 2 peças → a mesma foto pode ir nas 2 linhas). ` +
       `Quando ele terminar ${emEdicao ? 'o ajuste' : 'de descrever os produtos'}, faça um resumo curto e simpático e diga que ele já pode tocar em "Concluir e ver os produtos" — NÃO peça contato.\n\n` +
       hintsTecidoTexto(contexto?.categoria ?? null)
     systemBlocks.push({ type: 'text', text: alinhar })
@@ -487,6 +488,7 @@ export async function POST(req: Request) {
     mensagem: parsed.mensagem,
     cores: sanitizarCores(parsed.cores),
     pedido,
+    fotosPorLinha: parsed.fotosPorLinha ?? null,
     fase,
     completo: fase === 'completo',
   })
