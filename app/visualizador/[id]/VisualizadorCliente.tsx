@@ -635,12 +635,17 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     if (estampadoLinha && !temArte && ehPlaceholder(l.descricao)) out.push("a descrição da estampa/bordado");
     return out;
   }
-  async function concluirProdutoChat(i: number, nova: Linha) {
-    const novas = linhas.map((l, k) => (k === i ? { ...l, ...nova } : l));
+  // Chat por produto: salva as infos no produto AO VIVO (a cada resposta).
+  async function atualizarLinhaProduto(i: number, parcial: Linha) {
+    const novas = linhas.map((l, k) => (k === i ? { ...l, ...parcial } : l));
     setLinhas(novas);
-    setProdutoChatIdx(null);
     await persistir(novas);
-    void gerarMockupIA(i);
+  }
+  function anexarFotosProduto(i: number, fotos: string[]) {
+    const atuais = imgs[i]?.urls ?? [];
+    const urls = [...atuais, ...fotos].slice(0, MAX_FOTOS);
+    setImgs((m) => ({ ...m, [i]: { ...m[i], urls, loading: false, motivo: undefined } }));
+    void salvarMockup({ index: i, fotos: urls });
   }
   async function gerarMockupIA(i: number, regenIaIndex: number | null = null) {
     if (iaBusy !== null) return;
@@ -1536,7 +1541,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           categoria={linhas[produtoChatIdx].categoria ?? pedido.categoria ?? null}
           linha={linhas[produtoChatIdx] as unknown as LinhaProduto}
           faltam={faltamDoProduto(linhas[produtoChatIdx], (imgs[produtoChatIdx]?.urls?.length ?? 0) > 0)}
-          onConcluir={(nova) => void concluirProdutoChat(produtoChatIdx as number, nova as unknown as Linha)}
+          onAtualizarLinha={(nova) => void atualizarLinhaProduto(produtoChatIdx as number, nova as unknown as Linha)}
+          onAnexarFotos={(fotos) => anexarFotosProduto(produtoChatIdx as number, fotos)}
           onFechar={() => setProdutoChatIdx(null)}
         />
       )}
