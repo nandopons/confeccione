@@ -133,7 +133,7 @@ const RespostaModeloSchema = z.object({
   mensagem: z.string().min(1),
   cores: CoresSchema.optional(),
   pedido: PedidoModeloSchema.default({ ...PEDIDO_VAZIO }),
-  fotosPorLinha: z.record(z.string(), z.array(z.number())).optional(),
+  fotosPorLinha: z.record(z.string(), z.array(z.number())).nullable().optional(),
 })
 
 const BlocoTextoSchema = z.object({ type: z.literal('text'), text: z.string() })
@@ -467,6 +467,7 @@ export async function POST(req: Request) {
     const obj = JSON.parse(extrairJson(texto))
     const r = RespostaModeloSchema.safeParse(obj)
     if (r.success) parsed = r.data
+    else console.error('[pedido/assistente] zod rejeitou a resposta:', JSON.stringify(r.error.issues).slice(0, 500))
   } catch (e) {
     console.error('[pedido/assistente] parse falhou — texto do modelo:', texto?.slice(0, 800), e)
     parsed = null
