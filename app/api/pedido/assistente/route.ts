@@ -206,7 +206,7 @@ REGRAS DE CONFIABILIDADE DO CONTATO:
 Quando tudo estiver coletado (linhas + contato), faça uma confirmação curta e simpática do resumo e diga que ele já pode prosseguir para ver a pré-visualização dos produtos.
 
 A cada resposta, devolva SOMENTE um JSON válido (sem markdown, sem cercas de código, sem texto fora dele), com o PEDIDO INTEIRO e atualizado neste formato exato:
-{"mensagem": string, "cores": {"termo": string, "opcoes": [{"nome": string, "hex": string}]} | null, "pedido": {"linhas": [{"modelo": string|null, "cor": string|null, "material": string|null, "publico": "feminino"|"masculino"|"infantil"|"unissex"|null, "total": number|null, "tamanhos": [{"tamanho": string, "qtd": number|null}], "estampado": boolean|null, "descricao": string|null}], "contato": {"nome": string|null, "telefone": string|null, "email": string|null, "cep": string|null, "complemento": string|null, "prazoDias": number|null}}}
+{"mensagem": string, "cores": {"termo": string, "opcoes": [{"nome": string, "hex": string}]} | null, "pedido": {"linhas": [{"modelo": string|null, "cor": string|null, "material": string|null, "publico": "feminino"|"masculino"|"infantil"|"unissex"|null, "total": number|null, "tamanhos": [{"tamanho": string, "qtd": number|null}], "estampado": boolean|null, "descricao": string|null}], "contato": {"nome": string|null, "telefone": string|null, "email": string|null, "cep": string|null, "complemento": string|null, "prazoDias": number|null}}, "fotosPorLinha": {"<índice da linha 0,1,2…>": [<números das fotos #1,#2… daquele produto>]} | null}
 
 Regras do JSON:
 - "mensagem" é só o que você fala com o cliente (a próxima pergunta ou a confirmação). Nunca coloque JSON dentro da mensagem.
@@ -219,6 +219,7 @@ Regras do JSON:
 - "prazoDias" (dentro de contato): número de dias de produção que o cliente precisa; null se ainda não perguntou.
 - "descricao" guarda detalhes úteis da linha: estampa/bordado, posição da arte (frente/costas/manga), observações.
 - Campos que você ainda não perguntou ficam null. Não preencha contato com placeholders.
+- "fotosPorLinha": preencha SOMENTE quando o cliente tiver enviado FOTOS de referência — mapeie o índice de cada linha do pedido para os números (#1, #2…) das fotos daquele produto; coloque cada foto na linha do produto que ela mostra. Nos turnos sem foto enviada, deixe null.
 - SEJA CONCISO no JSON: "descricao" com no máximo ~140 caracteres por linha (resuma; não repita modelo/cor/material/tamanhos que já estão nos outros campos). Em pedidos com MUITAS linhas, mantenha a "mensagem" curta — o JSON precisa caber INTEIRO na resposta.`
 
 // ----------------------------------------------------------------------------
