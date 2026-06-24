@@ -4,7 +4,7 @@
 // antes de seguir pro visualizador.
 import { createClient } from '@supabase/supabase-js'
 import SiteHeader from '@/app/components/SiteHeader'
-import AlinharCliente from './AlinharCliente'
+import AlinharCliente, { type LinhaInicial } from './AlinharCliente'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -44,7 +44,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   return (
     <main className="min-h-screen bg-[#F7F8F9] font-sans flex flex-col">
       <SiteHeader />
-      <AlinharCliente pedidoId={data.id} categoria={data.categoria ?? null} totalPecas={totalPecas} />
+      <AlinharCliente pedidoId={data.id} categoria={data.categoria ?? null} totalPecas={totalPecas} linhasIniciais={linhas as unknown as LinhaInicial[]} />
     </main>
   )
 }
