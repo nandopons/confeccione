@@ -220,12 +220,12 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   return (
     <div className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
       {/* CHAT */}
-      <div className="flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden min-h-[60vh]">
+      <div className="flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden h-[70vh]">
         <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
           <p className="text-gray-900 font-medium text-sm">💬 Vamos alinhar seu pedido</p>
           <button type="button" onClick={pular} className="text-xs text-gray-400 hover:text-[#0F6E56]">prefiro organizar eu mesmo →</button>
         </div>
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
           {turnos.map((t, i) => (
             <div key={i} className={"flex " + (t.role === "user" ? "justify-end" : "justify-start")}>
               <div className={"max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap " + (t.role === "user" ? "bg-[#1D9E75] text-white" : "bg-gray-100 text-gray-800")}>
