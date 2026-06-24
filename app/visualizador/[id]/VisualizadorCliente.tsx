@@ -916,54 +916,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 </span>
                 <span className="text-xs text-white/85 truncate max-w-[55%] capitalize">{[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ")}</span>
               </div>
-              {/* VISUALIZADOR — imagem enviada pelo cliente */}
-              <div className="relative bg-gray-50 border-b border-gray-100 flex items-center justify-center p-3 min-h-[200px]">
-                {(st.urls && st.urls.length > 0) ? (
-                  <div className="w-full">
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                      {st.urls.map((u, j) => (
-                        <div key={j} className="relative">
-                          <button type="button" onClick={() => setZoom(u)} className="block w-full" aria-label={`Ampliar foto ${j + 1}`}>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={u} alt={`foto ${j + 1}`} className="w-full h-40 object-contain rounded-lg border border-gray-200 bg-white cursor-zoom-in" />
-                          </button>
-                          <button type="button" onClick={() => removerFoto(i, j)} aria-label="Remover foto" className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/55 hover:bg-black/80 text-white text-base leading-none flex items-center justify-center">×</button>
-                          {(st.urls?.length ?? 0) > 1 && (j === 0 ? (
-                            <span className="absolute bottom-1.5 left-1.5 text-[10px] font-semibold bg-[#1D9E75] text-white rounded px-1.5 py-0.5">★ Capa</span>
-                          ) : (
-                            <button type="button" onClick={() => tornarCapa(i, j)} aria-label="Definir como capa" className="absolute bottom-1.5 left-1.5 text-[10px] font-medium bg-black/55 hover:bg-black/80 text-white rounded px-1.5 py-0.5">Tornar capa</button>
-                          ))}
-                        </div>
-                      ))}
-                      {st.urls.length < MAX_FOTOS && (
-                        <label className="h-40 rounded-lg border-2 border-dashed border-[#1D9E75]/50 hover:border-[#1D9E75] bg-[#E1F5EE]/30 hover:bg-[#E1F5EE]/60 text-[#0F6E56] flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors">
-                          <span className="text-3xl leading-none">＋</span>
-                          <span className="text-xs font-medium">Adicionar foto</span>
-                          <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onUploadVisualizador(e, i)} />
-                        </label>
-                      )}
-                    </div>
-                    {subindoIdx === i && <p className="text-xs text-gray-400 mt-2 text-center">enviando…</p>}
-                    <p className="text-[11px] text-gray-400 mt-2 text-center">{st.urls.length}/{MAX_FOTOS} fotos — toque no + pra adicionar mais.</p>
-                  </div>
-                ) : subindoIdx === i ? (
-                  <span className="text-xs text-gray-400">enviando suas fotos…</span>
-                ) : (
-                  <div className="text-center px-4 py-6 w-full max-w-md mx-auto">
-                    <ProdutoVetor id="generico" className="w-20 h-20 mx-auto mb-3 text-gray-300" />
-                    <p className="text-sm font-medium text-gray-800">Adicione as fotos desta peça</p>
-                    <p className="text-[11px] text-gray-400 mt-1 mb-4 leading-snug">Envie uma ou mais fotos/artes desta peça (até {MAX_FOTOS}).</p>
-                    <label className="inline-block bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors cursor-pointer text-center">
-                      📤 Enviar fotos
-                      <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onUploadVisualizador(e, i)} />
-                    </label>
-                    {st.motivo && <p className="text-[11px] text-red-500 mt-3">{st.motivo} — tenta de novo.</p>}
-                  </div>
-                )}
-              </div>
-
-              {/* DETALHES */}
-              <div className="p-5">
+              {/* CORPO — 2 colunas no desktop, empilha no mobile */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 items-start">
+                {/* INFO — 1ª no mobile, à direita no desktop */}
+                <div className="order-1 lg:order-2 p-5 min-w-0">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-gray-900 font-medium capitalize flex items-center gap-1.5">{corHex(l.cor) && <span className="w-3.5 h-3.5 rounded-full border border-black/10 inline-block shrink-0" style={{ backgroundColor: corHex(l.cor) as string }} />}{[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ") || "Produto"}</p>
@@ -1003,6 +959,79 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 )}
                 {l.descricao && <p className="text-sm text-gray-500 mt-3 leading-relaxed">{l.descricao}</p>}
 
+                {/* LISTA DE COLETA (Listas Externas) — o grupo informa os tamanhos */}
+                {!orcamentoDefinido && permiteListaTamanhos(pedido.categoria ?? (linhas.find((x) => x.categoria)?.categoria ?? null)) && (
+                  <ListaColeta
+                    pedidoId={pedido.id}
+                    linhaIndex={i}
+                    metaQtd={typeof l.total === "number" && l.total > 0 ? l.total : 0}
+                    onAtualizarLinha={(idx, tamanhos, total) => setLinhas((prev) => prev.map((l, k) => (k === idx ? { ...l, tamanhos, total } : l)))}
+                  />
+                )}
+
+                {/* AÇÕES — toolbar única: imagem à esquerda, produto à direita */}
+                <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
+                  <span className="flex-1 min-w-2" aria-hidden />
+                  {!orcamentoDefinido && (<>
+                  <button type="button" onClick={() => clonarProduto(i)} title="Clonar este modelo" className="inline-flex items-center gap-1.5 text-gray-500 hover:text-[#0F6E56] hover:bg-[#E1F5EE] text-sm px-3 py-2 rounded-lg transition-colors">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
+                    Clonar
+                  </button>
+                  <button type="button" onClick={() => excluir(i)} title="Excluir produto" className="inline-flex items-center gap-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 text-sm px-3 py-2 rounded-lg transition-colors">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                    Excluir
+                  </button>
+                  </>)}
+                </div>
+                </div>
+                {/* VISUALIZADOR + IA — abaixo no mobile, à esquerda no desktop */}
+                <div className="order-2 lg:order-1 min-w-0 border-t border-gray-100 lg:border-t-0 lg:border-r">
+              {/* VISUALIZADOR — imagem enviada pelo cliente */}
+              <div className="relative bg-gray-50 flex items-center justify-center p-3 min-h-[150px] lg:min-h-[200px]">
+                {(st.urls && st.urls.length > 0) ? (
+                  <div className="w-full">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {st.urls.map((u, j) => (
+                        <div key={j} className="relative">
+                          <button type="button" onClick={() => setZoom(u)} className="block w-full" aria-label={`Ampliar foto ${j + 1}`}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={u} alt={`foto ${j + 1}`} className="w-full h-40 object-contain rounded-lg border border-gray-200 bg-white cursor-zoom-in" />
+                          </button>
+                          <button type="button" onClick={() => removerFoto(i, j)} aria-label="Remover foto" className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/55 hover:bg-black/80 text-white text-base leading-none flex items-center justify-center">×</button>
+                          {(st.urls?.length ?? 0) > 1 && (j === 0 ? (
+                            <span className="absolute bottom-1.5 left-1.5 text-[10px] font-semibold bg-[#1D9E75] text-white rounded px-1.5 py-0.5">★ Capa</span>
+                          ) : (
+                            <button type="button" onClick={() => tornarCapa(i, j)} aria-label="Definir como capa" className="absolute bottom-1.5 left-1.5 text-[10px] font-medium bg-black/55 hover:bg-black/80 text-white rounded px-1.5 py-0.5">Tornar capa</button>
+                          ))}
+                        </div>
+                      ))}
+                      {st.urls.length < MAX_FOTOS && (
+                        <label className="h-40 rounded-lg border-2 border-dashed border-[#1D9E75]/50 hover:border-[#1D9E75] bg-[#E1F5EE]/30 hover:bg-[#E1F5EE]/60 text-[#0F6E56] flex flex-col items-center justify-center gap-1 cursor-pointer transition-colors">
+                          <span className="text-3xl leading-none">＋</span>
+                          <span className="text-xs font-medium">Adicionar foto</span>
+                          <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onUploadVisualizador(e, i)} />
+                        </label>
+                      )}
+                    </div>
+                    {subindoIdx === i && <p className="text-xs text-gray-400 mt-2 text-center">enviando…</p>}
+                    <p className="text-[11px] text-gray-400 mt-2 text-center">{st.urls.length}/{MAX_FOTOS} fotos — toque no + pra adicionar mais.</p>
+                  </div>
+                ) : subindoIdx === i ? (
+                  <span className="text-xs text-gray-400">enviando suas fotos…</span>
+                ) : (
+                  <div className="text-center px-4 py-4 w-full max-w-md mx-auto">
+                    <ProdutoVetor id="generico" className="w-14 h-14 mx-auto mb-2 text-gray-300" />
+                    <p className="text-sm font-medium text-gray-800">Adicione as fotos desta peça</p>
+                    <p className="text-[11px] text-gray-400 mt-1 mb-4 leading-snug">Envie uma ou mais fotos/artes desta peça (até {MAX_FOTOS}).</p>
+                    <label className="inline-block bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-3.5 py-2 rounded-lg transition-colors cursor-pointer text-center">
+                      📤 Enviar fotos
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onUploadVisualizador(e, i)} />
+                    </label>
+                    {st.motivo && <p className="text-[11px] text-red-500 mt-3">{st.motivo} — tenta de novo.</p>}
+                  </div>
+                )}
+              </div>
+                  <div className="px-4 pb-4 lg:px-5 lg:pb-5">
                 {/* MOCKUP COM IA */}
                 {!orcamentoDefinido && (() => {
                   const temArte = (st.urls?.length ?? 0) > 0;
@@ -1064,32 +1093,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     </div>
                   );
                 })()}
-
-                {/* LISTA DE COLETA (Listas Externas) — o grupo informa os tamanhos */}
-                {!orcamentoDefinido && permiteListaTamanhos(pedido.categoria ?? (linhas.find((x) => x.categoria)?.categoria ?? null)) && (
-                  <ListaColeta
-                    pedidoId={pedido.id}
-                    linhaIndex={i}
-                    metaQtd={typeof l.total === "number" && l.total > 0 ? l.total : 0}
-                    onAtualizarLinha={(idx, tamanhos, total) => setLinhas((prev) => prev.map((l, k) => (k === idx ? { ...l, tamanhos, total } : l)))}
-                  />
-                )}
-
-                {/* AÇÕES — toolbar única: imagem à esquerda, produto à direita */}
-                <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
-                  <span className="flex-1 min-w-2" aria-hidden />
-                  {!orcamentoDefinido && (<>
-                  <button type="button" onClick={() => clonarProduto(i)} title="Clonar este modelo" className="inline-flex items-center gap-1.5 text-gray-500 hover:text-[#0F6E56] hover:bg-[#E1F5EE] text-sm px-3 py-2 rounded-lg transition-colors">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
-                    Clonar
-                  </button>
-                  <button type="button" onClick={() => excluir(i)} title="Excluir produto" className="inline-flex items-center gap-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 text-sm px-3 py-2 rounded-lg transition-colors">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
-                    Excluir
-                  </button>
-                  </>)}
+                  </div>
                 </div>
-
               </div>
             </div>
           );
