@@ -78,6 +78,20 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return NextResponse.json({ error: 'O pedido precisa ter pelo menos um produto.' }, { status: 400 })
     }
     patch.linhas = linhasValidas
+    // Guard anti-embaralhamento: ao mudar as linhas, remove mockups órfãos
+    // (chaves cujo índice >= nº de linhas) pra imagem nunca aparecer no produto errado.
+    try {
+      const { data: atual } = await supabase.from('pedidos_assistente').select('mockups').eq('id', id).single()
+      const mk = (atual?.mockups ?? null) as Record<string, unknown> | null
+      if (mk && typeof mk === 'object') {
+        const limpo: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(mk)) {
+          const idx = Number(k)
+          if (Number.isInteger(idx) && idx >= 0 && idx < linhasValidas.length) limpo[k] = v
+        }
+        patch.mockups = limpo
+      }
+    } catch { /* nunca bloqueia o PATCH principal */ }
   }
   if (parsed.data.status) patch.status = parsed.data.status
   if (parsed.data.contato) {
