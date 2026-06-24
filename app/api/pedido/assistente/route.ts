@@ -163,10 +163,12 @@ const ContextoSchema = z.object({
   totalPecas: z.number().nullable().optional(),
   edicao: z.boolean().nullable().optional(),
   produtos: z.array(z.string()).nullable().optional(),
+  produtoResumo: z.string().nullable().optional(),
+  faltam: z.array(z.string()).nullable().optional(),
 }).nullable().optional()
 const BodySchema = z.object({
   messages: z.array(MensagemSchema),
-  modo: z.enum(['completo', 'alinhar']).optional(),
+  modo: z.enum(['completo', 'alinhar', 'produto']).optional(),
   contexto: ContextoSchema,
 })
 
@@ -413,13 +415,18 @@ export async function POST(req: Request) {
     systemBlocks.push({ type: 'text', text: textoCep })
   }
 
-  if (modo === 'alinhar') {
+  if (modo === 'alinhar' || modo === 'produto') {
+    const emProduto = modo === 'produto'
+    const produtoCtx = (contexto?.produtoResumo ?? '').trim()
+    const faltamTxt = (contexto?.faltam ?? []).filter(Boolean).join(', ')
     const produtosCtx = (contexto?.produtos ?? []).filter(Boolean)
     const emEdicao = Boolean(contexto?.edicao) || produtosCtx.length > 0
     const ctxTxt = contexto
       ? `O cliente JÁ sinalizou ${contexto.totalPecas ?? 'algumas'} peças${contexto.categoria ? ` da categoria "${contexto.categoria}"` : ''}.`
       : ''
-    const aberturaInstr = emEdicao
+    const aberturaInstr = emProduto
+      ? `FOCO EM UM ÚNICO PRODUTO${produtoCtx ? ` — ${produtoCtx}` : ''}. O cliente está só COMPLETANDO os detalhes desse produto pra gerar o visualizador. ${faltamTxt ? `Falta(m): ${faltamTxt}. ` : ''}Pergunte SÓ o que falta desse produto, uma coisa por vez, de forma curta e simpática. NUNCA pergunte sobre outros produtos, NUNCA crie produto novo, NUNCA mexa em quantidade/tamanhos se não foi pedido. Se a peça for ESTAMPADA/BORDADA, pergunte a DESCRIÇÃO da estampa/bordado (o que aplicar e onde) — NÃO exija arte/imagem (basta o cliente descrever, ex.: "símbolo da Nike branco no meio do peito"); grave isso em descricao. Devolva SEMPRE o pedido com APENAS esse 1 produto (a linha já vem preenchida no JSON). Quando estiver completo, faça um resuminho de 1 linha e diga que ele já pode tocar em "Concluir e gerar".`
+      : emEdicao
       ? `ATENÇÃO — MODO AJUSTE: o pedido JÁ TEM produtos cadastrados${produtosCtx.length ? ` (${produtosCtx.join('; ')})` : ''} e eles estão no JSON do pedido. O cliente abriu o chat pra AJUSTAR algo pontual, NÃO pra recomeçar. NUNCA apague, zere nem recrie os produtos que já existem. Abra CONFIRMANDO o que já existe e perguntando o que ele quer mudar (ex.: "Você já tem [resumo curto dos produtos]. O que você quer ajustar?"). Mexa SÓ no que ele pedir e devolva SEMPRE o pedido COMPLETO (todos os produtos), com apenas o ajuste aplicado. Só adicione um produto novo se ele pedir; só remova um produto se ele pedir explicitamente. `
       : `Abra a conversa puxando disso: pergunte quantos MODELOS diferentes ele quer produzir (ou qual modelo). Depois, por modelo: a(s) cor(es) — cor diferente vira linha separada — e a divisão por tamanho. `
     const alinhar =
