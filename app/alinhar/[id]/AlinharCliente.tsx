@@ -20,6 +20,7 @@ type Cores = { termo: string; opcoes: CorOpcao[] } | null;
 
 const PEDIDO_VAZIO: Pedido = { linhas: [], contato: {} };
 const MAX_FOTOS = 6;
+const MAX_COLETA = 12; // total de fotos de referência que o chat pode juntar (distribuídas entre os modelos)
 
 function corHex(s: string | null | undefined): string | null {
   const m = (s || "").match(/#([0-9a-fA-F]{6})/);
@@ -79,7 +80,9 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   const [cores, setCores] = useState<Cores>(null);
   const [concluindo, setConcluindo] = useState(false);
   const [anexos, setAnexos] = useState<string[]>([]);
-  const [fotosColetadas, setFotosColetadas] = useState<string[]>([]);
+  const [fotosColetadas, setFotosColetadas] = useState<{ id: number; url: string }[]>([]);
+  const [mapaFotos, setMapaFotos] = useState<Record<string, number[]> | null>(null);
+  const proxIdRef = useRef(1);
   const [subindo, setSubindo] = useState(false);
   const fimRef = useRef<HTMLDivElement | null>(null);
 
@@ -92,7 +95,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
     if (files.length === 0) return;
-    const espaco = Math.max(0, MAX_FOTOS - totalFotos);
+    const espaco = Math.max(0, MAX_COLETA - totalFotos);
     if (espaco === 0) { setErro(`Máximo de ${MAX_FOTOS} fotos.`); return; }
     setSubindo(true); setErro(null);
     try {
@@ -112,7 +115,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     const imgs = itens.filter((it) => it.type.startsWith("image/"));
     if (imgs.length === 0) return; // sem imagem: deixa colar texto normalmente
     e.preventDefault();
-    const espaco = Math.max(0, MAX_FOTOS - totalFotos);
+    const espaco = Math.max(0, MAX_COLETA - totalFotos);
     if (espaco === 0) { setErro(`Máximo de ${MAX_FOTOS} fotos.`); return; }
     setSubindo(true); setErro(null);
     try {
@@ -135,10 +138,12 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     setErro(null); setCores(null);
     const novos: Turno[] = [...turnos, { role: "user", display: texto, fotos: fotos.length ? fotos : undefined }];
     setTurnos(novos); setInput(""); setAnexos([]);
-    if (fotos.length) setFotosColetadas((p) => [...p, ...fotos].slice(0, MAX_FOTOS));
+    const novasColetadas = fotos.map((u) => ({ id: proxIdRef.current++, url: u }));
+    if (novasColetadas.length) setFotosColetadas((p) => [...p, ...novasColetadas].slice(0, MAX_COLETA));
     setEnviando(true);
     try {
-      const notaFoto = fotos.length ? `${texto ? " " : ""}(enviei ${fotos.length} foto${fotos.length > 1 ? "s" : ""} de referência do que quero produzir)` : "";
+      const nums = novasColetadas.map((c) => `#${c.id}`).join(", ");
+      const notaFoto = fotos.length ? `${texto ? " " : ""}(enviei a(s) foto(s) ${nums} de referência do que quero produzir)` : "";
       const textoOperador = (texto + notaFoto).trim() || "Enviei fotos de referência do que quero produzir.";
       const payloadMsgs = novos.map((t, i) => {
         if (t.role === "assistant") return { role: "assistant" as const, content: t.raw ?? t.display };
@@ -158,6 +163,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
       const novoPedido: Pedido = data.pedido ?? PEDIDO_VAZIO;
       setPedido(novoPedido);
       setCores(data.cores ?? null);
+      if (data.fotosPorLinha && typeof data.fotosPorLinha === "object") setMapaFotos(data.fotosPorLinha);
       const raw = JSON.stringify({ mensagem: data.mensagem, cores: data.cores ?? null, pedido: novoPedido });
       setTurnos([...novos, { role: "assistant", display: data.mensagem, raw }]);
     } catch {
@@ -169,8 +175,10 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     if (concluindo) return;
     setConcluindo(true);
     try {
-      if (temLinha) {
-        const linhas = pedido.linhas.filter(linhaCompleta).map((l) => ({
+      // Mantém o índice ORIGINAL de cada linha (o operador mapeou fotosPorLinha por esse índice).
+      const completas = pedido.linhas.map((l, oldIdx) => ({ l, oldIdx })).filter((x) => linhaCompleta(x.l));
+      if (completas.length) {
+        const linhas = completas.map(({ l }) => ({
           modelo: l.modelo, cor: l.cor, material: l.material, publico: l.publico ?? null,
           total: l.total, tamanhos: (l.tamanhos || []).filter((t) => t.tamanho),
           estampado: l.estampado ?? null, descricao: l.descricao ?? null,
@@ -181,12 +189,27 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
           body: JSON.stringify({ linhas, status: "em_visualizacao" }),
         });
       }
-      // Fotos de referência → primeira linha (o cliente pode reorganizar no visualizador).
-      if (fotosColetadas.length) {
-        await fetch(`/api/pedido/assistente/${pedidoId}/mockup`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ index: 0, fotos: fotosColetadas.slice(0, MAX_FOTOS) }),
+      // Distribui CADA foto pro modelo certo (mapa fotosPorLinha do operador, por id de foto).
+      if (fotosColetadas.length && completas.length) {
+        const urlPorId = new Map(fotosColetadas.map((c) => [c.id, c.url]));
+        const porNovoIdx: Record<number, string[]> = {};
+        const usados = new Set<number>();
+        completas.forEach(({ oldIdx }, novoIdx) => {
+          const ids = (mapaFotos?.[String(oldIdx)] ?? []).filter((id) => urlPorId.has(id));
+          if (ids.length) {
+            porNovoIdx[novoIdx] = ids.map((id) => urlPorId.get(id) as string);
+            ids.forEach((id) => usados.add(id));
+          }
         });
+        // Fotos que o operador não mapeou caem no 1º modelo (fallback — nunca some).
+        const sobra = fotosColetadas.filter((c) => !usados.has(c.id)).map((c) => c.url);
+        if (sobra.length) porNovoIdx[0] = [...(porNovoIdx[0] ?? []), ...sobra];
+        for (const [idx, urls] of Object.entries(porNovoIdx)) {
+          await fetch(`/api/pedido/assistente/${pedidoId}/mockup`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ index: Number(idx), fotos: urls.slice(0, MAX_FOTOS) }),
+          });
+        }
       }
     } catch { /* segue pro visualizador de qualquer forma */ }
     window.location.href = `/visualizador/${pedidoId}`;
