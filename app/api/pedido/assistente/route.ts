@@ -135,7 +135,29 @@ const RespostaModeloSchema = z.object({
   pedido: PedidoModeloSchema.default({ ...PEDIDO_VAZIO }),
 })
 
-const MensagemSchema = z.object({ role: z.enum(['user', 'assistant']), content: z.string() })
+const BlocoTextoSchema = z.object({ type: z.literal('text'), text: z.string() })
+const BlocoImagemSchema = z.object({ type: z.literal('image_url'), url: z.string() })
+const ConteudoSchema = z.union([z.string(), z.array(z.union([BlocoTextoSchema, BlocoImagemSchema]))])
+const MensagemSchema = z.object({ role: z.enum(['user', 'assistant']), content: ConteudoSchema })
+type Conteudo = z.infer<typeof ConteudoSchema>
+type ImgMedia = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+
+function textoDoConteudo(c: Conteudo): string {
+  if (typeof c === 'string') return c
+  return c.filter((b): b is { type: 'text'; text: string } => b.type === 'text').map((b) => b.text).join(' ')
+}
+function paraConteudoAnthropic(c: Conteudo): Anthropic.Messages.MessageParam['content'] {
+  if (typeof c === 'string') return c
+  const blocks: Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: ImgMedia; data: string } }> = []
+  for (const b of c) {
+    if (b.type === 'text') { if (b.text) blocks.push({ type: 'text', text: b.text }) }
+    else {
+      const m = /^data:(image\/(?:jpeg|png|gif|webp));base64,(.+)$/.exec(b.url)
+      if (m) blocks.push({ type: 'image', source: { type: 'base64', media_type: m[1] as ImgMedia, data: m[2] } })
+    }
+  }
+  return (blocks.length ? blocks : '') as Anthropic.Messages.MessageParam['content']
+}
 const ContextoSchema = z.object({
   categoria: z.string().nullable().optional(),
   totalPecas: z.number().nullable().optional(),
@@ -276,10 +298,10 @@ async function buscarCep(cep: string | null | undefined): Promise<EnderecoCep | 
 }
 
 // Extrai um CEP (8 dígitos) do texto mais recente do cliente.
-function extrairCepDasMensagens(messages: Array<{ role: string; content: string }>): string | null {
+function extrairCepDasMensagens(messages: Array<{ role: string; content: Conteudo }>): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role !== 'user') continue
-    const m = /\b(\d{5})-?\s?(\d{3})\b/.exec(messages[i].content)
+    const m = /\b(\d{5})-?\s?(\d{3})\b/.exec(textoDoConteudo(messages[i].content))
     if (m) return m[1] + m[2]
   }
   return null
@@ -316,12 +338,12 @@ function calcularFase(p: Pedido): 'produto' | 'contato' | 'completo' {
   return contatoOk ? 'completo' : 'contato'
 }
 
-function pedidoAnterior(messages: Array<{ role: string; content: string }>): Pedido {
+function pedidoAnterior(messages: Array<{ role: string; content: Conteudo }>): Pedido {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]
     if (m.role !== 'assistant') continue
     try {
-      const obj = JSON.parse(extrairJson(m.content))
+      const obj = JSON.parse(extrairJson(textoDoConteudo(m.content)))
       const r = RespostaModeloSchema.safeParse(obj)
       if (r.success) return normalizarPedido(r.data.pedido)
     } catch {
@@ -396,6 +418,7 @@ export async function POST(req: Request) {
     const alinhar =
       `MODO ALINHAR (importante): o CONTATO, ENDEREÇO e PRAZO JÁ FORAM COLETADOS antes desta conversa — NUNCA pergunte nome, telefone, e-mail, CEP, endereço nem prazo, e deixe os campos de contato como estão. Seu único trabalho aqui é DECOMPOR o pedido em linhas de produto (modelo, cor, tamanhos e tecido). ${ctxTxt} ` +
       `Abra a conversa puxando disso: pergunte quantos MODELOS diferentes ele quer produzir (ou qual modelo). Depois, por modelo: a(s) cor(es) — cor diferente vira linha separada — e a divisão por tamanho. Ao perguntar o MATERIAL/tecido, SUGIRA os tecidos típicos daquele produto (use a biblioteca abaixo) e deixe claro que ele pode indicar outro se preferir. ` +
+      `Se o cliente ENVIAR FOTO(S), ANALISE a imagem pra identificar o produto (modelo e, se der pra ver, cor/material) e já preencha a linha — confirme com ele ("vi que é um(a) ___, certo?") em vez de perguntar tudo do zero. ` +
       `Quando ele terminar de descrever todos os produtos, faça um resumo curto e simpático e diga que ele já pode tocar em "Concluir e ver os produtos" — NÃO peça contato.\n\n` +
       hintsTecidoTexto(contexto?.categoria ?? null)
     systemBlocks.push({ type: 'text', text: alinhar })
@@ -409,7 +432,7 @@ export async function POST(req: Request) {
       max_tokens: MAX_TOKENS,
       temperature: TEMPERATURE,
       system: systemBlocks,
-      messages: janela.map((m) => ({ role: m.role, content: m.content })),
+      messages: janela.map((m) => ({ role: m.role, content: paraConteudoAnthropic(m.content) })),
     })
     texto = textoDaResposta(resposta.content)
     if (resposta.stop_reason === 'max_tokens') {
