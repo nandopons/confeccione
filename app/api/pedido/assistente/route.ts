@@ -21,6 +21,7 @@ import { buscarEnderecoCep, type EnderecoCep } from '@/app/lib/cep'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { validarWhatsApp, normalizarWhatsApp } from '@/app/lib/phone'
+import { hintsTecidoTexto } from '@/app/lib/tecidos'
 
 export const runtime = 'nodejs'
 
@@ -135,7 +136,15 @@ const RespostaModeloSchema = z.object({
 })
 
 const MensagemSchema = z.object({ role: z.enum(['user', 'assistant']), content: z.string() })
-const BodySchema = z.object({ messages: z.array(MensagemSchema) })
+const ContextoSchema = z.object({
+  categoria: z.string().nullable().optional(),
+  totalPecas: z.number().nullable().optional(),
+}).nullable().optional()
+const BodySchema = z.object({
+  messages: z.array(MensagemSchema),
+  modo: z.enum(['completo', 'alinhar']).optional(),
+  contexto: ContextoSchema,
+})
 
 // ----------------------------------------------------------------------------
 // System prompt (pt-BR) — o assistente é a BALIZA do pedido
@@ -342,6 +351,8 @@ export async function POST(req: Request) {
   }
 
   const { messages } = body.data
+  const modo = body.data.modo ?? 'completo'
+  const contexto = body.data.contexto ?? null
 
   // Chat ilimitado pro cliente: em vez de barrar históricos longos, mandamos só
   // as últimas JANELA_MODELO mensagens ao modelo (o pedido inteiro é
@@ -376,6 +387,18 @@ export async function POST(req: Request) {
       ? `ENDEREÇO OFICIAL DO CEP ${cepAtual} (fonte oficial — use EXATAMENTE este, NUNCA invente rua/bairro/cidade): ${partes}. Ao confirmar o endereço com o cliente, use estes dados literais e peça só o número e complemento.`
       : `O CEP ${cepAtual} é um CEP ÚNICO da cidade ${partes} — não existe rua cadastrada por CEP nessa cidade. Confirme a cidade com o cliente e peça o ENDEREÇO COMPLETO num só passo: rua/avenida, número e complemento ou ponto de referência (grave tudo em complemento).`
     systemBlocks.push({ type: 'text', text: textoCep })
+  }
+
+  if (modo === 'alinhar') {
+    const ctxTxt = contexto
+      ? `O cliente JÁ sinalizou ${contexto.totalPecas ?? 'algumas'} peças${contexto.categoria ? ` da categoria "${contexto.categoria}"` : ''}.`
+      : ''
+    const alinhar =
+      `MODO ALINHAR (importante): o CONTATO, ENDEREÇO e PRAZO JÁ FORAM COLETADOS antes desta conversa — NUNCA pergunte nome, telefone, e-mail, CEP, endereço nem prazo, e deixe os campos de contato como estão. Seu único trabalho aqui é DECOMPOR o pedido em linhas de produto (modelo, cor, tamanhos e tecido). ${ctxTxt} ` +
+      `Abra a conversa puxando disso: pergunte quantos MODELOS diferentes ele quer produzir (ou qual modelo). Depois, por modelo: a(s) cor(es) — cor diferente vira linha separada — e a divisão por tamanho. Ao perguntar o MATERIAL/tecido, SUGIRA os tecidos típicos daquele produto (use a biblioteca abaixo) e deixe claro que ele pode indicar outro se preferir. ` +
+      `Quando ele terminar de descrever todos os produtos, faça um resumo curto e simpático e diga que ele já pode tocar em "Concluir e ver os produtos" — NÃO peça contato.\n\n` +
+      hintsTecidoTexto(contexto?.categoria ?? null)
+    systemBlocks.push({ type: 'text', text: alinhar })
   }
 
   let texto: string

@@ -1062,10 +1062,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       </div>
 
       {!orcamentoDefinido && (
-      <div className="mt-4">
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         <button type="button" onClick={() => setCatalogoOpen(true)} className="border-2 border-dashed border-gray-300 text-gray-600 hover:border-[#1D9E75] hover:text-[#0F6E56] text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">
           + Adicionar produto
         </button>
+        <a href={`/alinhar/${pedido.id}`} className="inline-flex items-center gap-1.5 text-[#0F6E56] hover:bg-[#E1F5EE] text-sm font-medium px-3 py-2.5 rounded-xl ring-1 ring-[#1D9E75]/30 transition-colors">💬 Alinhar por chat</a>
       </div>
       )}
 

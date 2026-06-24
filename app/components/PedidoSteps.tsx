@@ -140,7 +140,7 @@ export default function PedidoSteps() {
         w.dataLayer = w.dataLayer || [];
         w.dataLayer.push({ event: "generate_lead", pedido_id: String(data.id), pecas: qty, value: 1, currency: "BRL" });
       } catch { /* analytics nunca quebra o fluxo */ }
-      window.location.href = `/visualizador/${data.id}`;
+      window.location.href = `/alinhar/${data.id}`;
     } catch {
       setErro("Erro de conexão. Verifique sua internet e tente de novo.");
       setEnviando(false);
