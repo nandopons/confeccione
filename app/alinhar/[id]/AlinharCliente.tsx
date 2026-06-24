@@ -40,7 +40,6 @@ function fileToDataUrl(file: File): Promise<string> {
 }
 async function arquivoParaRef(file: File): Promise<string> {
   const dataUrl = await fileToDataUrl(file);
-  if (file.size <= 1_500_000) return dataUrl;
   const img = document.createElement("img");
   await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error("imagem inválida")); img.src = dataUrl; });
   const maxDim = 2000;
@@ -108,10 +107,15 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas }: { pe
     try {
       const notaFoto = fotos.length ? `${texto ? " " : ""}(enviei ${fotos.length} foto${fotos.length > 1 ? "s" : ""} de referência do que quero produzir)` : "";
       const textoOperador = (texto + notaFoto).trim() || "Enviei fotos de referência do que quero produzir.";
-      const payloadMsgs = novos.map((t, i) => ({
-        role: t.role,
-        content: t.role === "assistant" ? (t.raw ?? t.display) : (i === novos.length - 1 ? textoOperador : (t.display || "(fotos enviadas)")),
-      }));
+      const payloadMsgs = novos.map((t, i) => {
+        if (t.role === "assistant") return { role: "assistant" as const, content: t.raw ?? t.display };
+        if (i === novos.length - 1 && fotos.length) {
+          const blocos: Array<{ type: "image_url"; url: string } | { type: "text"; text: string }> = fotos.map((u) => ({ type: "image_url" as const, url: u }));
+          blocos.push({ type: "text", text: textoOperador });
+          return { role: "user" as const, content: blocos };
+        }
+        return { role: "user" as const, content: i === novos.length - 1 ? textoOperador : (t.display || "(fotos enviadas)") };
+      });
       const res = await fetch("/api/pedido/assistente", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: payloadMsgs, modo: "alinhar", contexto: { categoria, totalPecas } }),
