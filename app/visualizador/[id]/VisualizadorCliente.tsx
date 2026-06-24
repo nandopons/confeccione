@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import Link from "next/link";
 import ListaColeta from "./ListaColeta";
+import ProdutoChat, { type LinhaProduto } from "./ProdutoChat";
 
 export type Tamanho = { tamanho: string; qtd: number | null };
 export type Estampa = { posicao: string; tamanho: string };
@@ -446,6 +447,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
   // subir a própria arte / mockup
   const [subindoIdx, setSubindoIdx] = useState<number | null>(null);
+  const [produtoChatIdx, setProdutoChatIdx] = useState<number | null>(null);
 
   async function salvarMockup(payload: { index?: number; liso?: string | null; arte?: string | null; fotos?: string[] | null; resetAll?: boolean }) {
     try {
@@ -621,6 +623,24 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   function modeloCompleto(l: Linha): boolean {
     const qtd = (l.total ?? 0) > 0 ? (l.total as number) : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0);
     return !ehPlaceholder(l.modelo) && !ehPlaceholder(corLabel(l.cor)) && qtd > 0;
+  }
+  // O que ainda falta nesse produto pra liberar o mockup com IA (usado no chat por produto).
+  function faltamDoProduto(l: Linha, temArte: boolean): string[] {
+    const out: string[] = [];
+    if (ehPlaceholder(l.modelo)) out.push("o tipo da peça");
+    if (ehPlaceholder(corLabel(l.cor))) out.push("a cor");
+    const qtd = (l.total ?? 0) > 0 ? (l.total as number) : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0);
+    if (!(qtd > 0)) out.push("a quantidade");
+    const estampadoLinha = l.estampado === true || (l.estampas?.length ?? 0) > 0;
+    if (estampadoLinha && !temArte && ehPlaceholder(l.descricao)) out.push("a descrição da estampa/bordado");
+    return out;
+  }
+  async function concluirProdutoChat(i: number, nova: Linha) {
+    const novas = linhas.map((l, k) => (k === i ? { ...l, ...nova } : l));
+    setLinhas(novas);
+    setProdutoChatIdx(null);
+    await persistir(novas);
+    void gerarMockupIA(i);
   }
   async function gerarMockupIA(i: number, regenIaIndex: number | null = null) {
     if (iaBusy !== null) return;
@@ -983,8 +1003,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   const temArte = (st.urls?.length ?? 0) > 0;
                   const completo = modeloCompleto(l);
                   const estampadoLinha = l.estampado === true || (l.estampas?.length ?? 0) > 0;
-                  // Peça lisa pode gerar só com as infos do produto (sem arte).
-                  const liberado = completo && (temArte || !estampadoLinha);
+                  // Sem exigir arte: liso gera direto; estampada/bordada gera com a DESCRIÇÃO (ou arte enviada).
+                  const temDesc = !ehPlaceholder(l.descricao);
+                  const liberado = completo && (!estampadoLinha || temArte || temDesc);
+                  const faltam = faltamDoProduto(l, temArte);
                   const lista = iaImgs[i] || [];
                   const ajustandoEste = iaAjuste && iaAjuste.i === i;
                   return (
@@ -1029,9 +1051,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                           <p className="text-[11px] text-gray-400 mt-1">A IA usa as fotos/artes (quando houver) + os detalhes do modelo. Clique numa imagem gerada pra ajustar com outro texto.</p>
                         </div>
                       ) : (
-                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                          Pra gerar o mockup com IA, {!completo ? "complete os detalhes do modelo (toque em \u201cCompletar este produto\u201d) \u2014 ex.: tipo da pe\u00e7a e cor" : "esta pe\u00e7a tem estampa/bordado \u2014 envie ao menos uma arte/foto da estampa"}.
-                        </p>
+                        <div>
+                          <button type="button" onClick={() => setProdutoChatIdx(i)} className="inline-flex items-center gap-1.5 bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2 rounded-lg">✨ Gerar mockup com IA</button>
+                          <p className="text-[11px] text-gray-500 mt-1.5 leading-snug">Faltam alguns detalhes desse produto{faltam.length ? ` (${faltam.join(", ")})` : ""} — toque pra completar pelo chat rapidinho.</p>
+                        </div>
                       )}
                     </div>
                   );
@@ -1506,6 +1529,16 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             </div>
           </div>
         </div>
+      )}
+      {produtoChatIdx !== null && linhas[produtoChatIdx] && (
+        <ProdutoChat
+          pedidoId={pedido.id}
+          categoria={linhas[produtoChatIdx].categoria ?? pedido.categoria ?? null}
+          linha={linhas[produtoChatIdx] as unknown as LinhaProduto}
+          faltam={faltamDoProduto(linhas[produtoChatIdx], (imgs[produtoChatIdx]?.urls?.length ?? 0) > 0)}
+          onConcluir={(nova) => void concluirProdutoChat(produtoChatIdx as number, nova as unknown as Linha)}
+          onFechar={() => setProdutoChatIdx(null)}
+        />
       )}
       {zoom && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setZoom(null); }} role="dialog" aria-modal="true">
