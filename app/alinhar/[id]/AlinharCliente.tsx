@@ -13,6 +13,7 @@ type Linha = {
   estampado: boolean | null; descricao: string | null;
 };
 type Pedido = { linhas: Linha[]; contato: unknown };
+export type LinhaInicial = Partial<Omit<Linha, "tamanhos">> & { tamanhos?: Array<{ tamanho?: string | null; qtd?: number | null }> | null };
 type Turno = { role: "user" | "assistant"; display: string; raw?: string; fotos?: string[] };
 type CorOpcao = { nome: string; hex: string };
 type Cores = { termo: string; opcoes: CorOpcao[] } | null;
@@ -55,15 +56,26 @@ async function arquivoParaRef(file: File): Promise<string> {
   return cv.toDataURL("image/jpeg", 0.85);
 }
 
-export default function AlinharCliente({ pedidoId, categoria, totalPecas }: { pedidoId: string; categoria: string | null; totalPecas: number }) {
-  const abertura =
-    `Boa! ${totalPecas > 0 ? `Você sinalizou ${totalPecas} ${totalPecas === 1 ? "peça" : "peças"}${categoria ? ` de ${categoria}` : ""}. ` : ""}` +
-    `Pra deixar tudo organizado: quantos modelos diferentes você quer produzir? (ex.: só 1 modelo, ou camiseta + moletom…) — se já tiver fotos do que quer, pode me enviar pelo 📎.`;
-  const [turnos, setTurnos] = useState<Turno[]>([{ role: "assistant", display: abertura }]);
+export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhasIniciais = [] }: { pedidoId: string; categoria: string | null; totalPecas: number; linhasIniciais?: LinhaInicial[] }) {
+  const linhasBase: Linha[] = (linhasIniciais ?? []).map((l) => ({
+    modelo: l?.modelo ?? null, cor: l?.cor ?? null, material: l?.material ?? null,
+    publico: l?.publico ?? null, total: l?.total ?? null,
+    tamanhos: Array.isArray(l?.tamanhos) ? l!.tamanhos!.map((t) => ({ tamanho: t?.tamanho ?? "", qtd: t?.qtd ?? null })) : [],
+    estampado: l?.estampado ?? null, descricao: l?.descricao ?? null,
+  }));
+  const resumoProdutos = linhasBase.filter(linhaCompleta).map((l) => `${l.modelo}${corLabel(l.cor) ? ` ${corLabel(l.cor)}` : ""}${l.total ? ` (${l.total})` : ""}`);
+  const jaTem = resumoProdutos.length > 0;
+  const abertura = jaTem
+    ? `Seu pedido já tem: ${resumoProdutos.join(", ")}. O que você quer ajustar? Pode pedir pra mudar cor, tecido, tamanhos, quantidade, estampa, ou adicionar/remover um produto — eu mexo SÓ no que você pedir, o resto fica como está. 😊`
+    : `Boa! ${totalPecas > 0 ? `Você sinalizou ${totalPecas} ${totalPecas === 1 ? "peça" : "peças"}${categoria ? ` de ${categoria}` : ""}. ` : ""}` +
+      `Pra deixar tudo organizado: quantos modelos diferentes você quer produzir? (ex.: só 1 modelo, ou camiseta + moletom…) — se já tiver fotos do que quer, pode me enviar pelo 📎.`;
+  const pedidoInicial: Pedido = jaTem ? { linhas: linhasBase, contato: {} } : PEDIDO_VAZIO;
+  const aberturaRaw = jaTem ? JSON.stringify({ mensagem: abertura, cores: null, pedido: pedidoInicial }) : undefined;
+  const [turnos, setTurnos] = useState<Turno[]>([{ role: "assistant", display: abertura, raw: aberturaRaw }]);
   const [input, setInput] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [pedido, setPedido] = useState<Pedido>(PEDIDO_VAZIO);
+  const [pedido, setPedido] = useState<Pedido>(pedidoInicial);
   const [cores, setCores] = useState<Cores>(null);
   const [concluindo, setConcluindo] = useState(false);
   const [anexos, setAnexos] = useState<string[]>([]);
@@ -118,7 +130,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas }: { pe
       });
       const res = await fetch("/api/pedido/assistente", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: payloadMsgs, modo: "alinhar", contexto: { categoria, totalPecas } }),
+        body: JSON.stringify({ messages: payloadMsgs, modo: "alinhar", contexto: { categoria, totalPecas, edicao: jaTem, produtos: resumoProdutos } }),
       });
       const data = await res.json();
       if (!res.ok || !data?.mensagem) { setErro(data?.error || "Não consegui responder agora. Tenta de novo."); return; }

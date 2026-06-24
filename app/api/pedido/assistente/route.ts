@@ -161,6 +161,8 @@ function paraConteudoAnthropic(c: Conteudo): Anthropic.Messages.MessageParam['co
 const ContextoSchema = z.object({
   categoria: z.string().nullable().optional(),
   totalPecas: z.number().nullable().optional(),
+  edicao: z.boolean().nullable().optional(),
+  produtos: z.array(z.string()).nullable().optional(),
 }).nullable().optional()
 const BodySchema = z.object({
   messages: z.array(MensagemSchema),
@@ -412,15 +414,22 @@ export async function POST(req: Request) {
   }
 
   if (modo === 'alinhar') {
+    const produtosCtx = (contexto?.produtos ?? []).filter(Boolean)
+    const emEdicao = Boolean(contexto?.edicao) || produtosCtx.length > 0
     const ctxTxt = contexto
       ? `O cliente JÁ sinalizou ${contexto.totalPecas ?? 'algumas'} peças${contexto.categoria ? ` da categoria "${contexto.categoria}"` : ''}.`
       : ''
+    const aberturaInstr = emEdicao
+      ? `ATENÇÃO — MODO AJUSTE: o pedido JÁ TEM produtos cadastrados${produtosCtx.length ? ` (${produtosCtx.join('; ')})` : ''} e eles estão no JSON do pedido. O cliente abriu o chat pra AJUSTAR algo pontual, NÃO pra recomeçar. NUNCA apague, zere nem recrie os produtos que já existem. Abra CONFIRMANDO o que já existe e perguntando o que ele quer mudar (ex.: "Você já tem [resumo curto dos produtos]. O que você quer ajustar?"). Mexa SÓ no que ele pedir e devolva SEMPRE o pedido COMPLETO (todos os produtos), com apenas o ajuste aplicado. Só adicione um produto novo se ele pedir; só remova um produto se ele pedir explicitamente. `
+      : `Abra a conversa puxando disso: pergunte quantos MODELOS diferentes ele quer produzir (ou qual modelo). Depois, por modelo: a(s) cor(es) — cor diferente vira linha separada — e a divisão por tamanho. `
     const alinhar =
-      `MODO ALINHAR (importante): o CONTATO, ENDEREÇO e PRAZO JÁ FORAM COLETADOS antes desta conversa — NUNCA pergunte nome, telefone, e-mail, CEP, endereço nem prazo, e deixe os campos de contato como estão. Seu único trabalho aqui é DECOMPOR o pedido em linhas de produto (modelo, cor, tamanhos e tecido). ${ctxTxt} ` +
-      `Abra a conversa puxando disso: pergunte quantos MODELOS diferentes ele quer produzir (ou qual modelo). Depois, por modelo: a(s) cor(es) — cor diferente vira linha separada — e a divisão por tamanho. Ao perguntar o MATERIAL/tecido, SUGIRA os tecidos típicos daquele produto (use a biblioteca abaixo) e deixe claro que ele pode indicar outro se preferir. ` +
+      `MODO ALINHAR (importante): o CONTATO, ENDEREÇO e PRAZO JÁ FORAM COLETADOS antes desta conversa — NUNCA pergunte nome, telefone, e-mail, CEP, endereço nem prazo, e deixe os campos de contato como estão. Seu trabalho aqui é organizar o pedido em linhas de produto (modelo, cor, tamanhos e tecido). ${ctxTxt} ` +
+      aberturaInstr +
+      `Ao perguntar o MATERIAL/tecido, SUGIRA os tecidos típicos daquele produto (use a biblioteca abaixo) e deixe claro que ele pode indicar outro se preferir. ` +
       `REGRA DE CAMPOS (siga à risca): o campo "modelo" é SÓ o tipo da peça (ex.: "moletom", "calça wide leg", "camiseta") — NUNCA coloque tecido, material, cor ou gramatura no "modelo". O tecido vai SEMPRE no campo "material". Ex.: cliente diz "moletom de algodão rosa" → modelo:"moletom", cor:"rosa", material:"algodão"; "calça wide leg de moletom" → modelo:"calça wide leg", material:"moletom". ` +
+      `REGRA DE TÉCNICA (importante): estampa FULL PRINT / sublimação total SÓ funciona em POLIÉSTER (ou tecidos com alto teor de poliéster) — NÃO funciona em algodão. Se o cliente pedir full print / sublimação total em algodão (ou num produto que ele disse ser de algodão), avise gentilmente que essa técnica exige poliéster e ofereça trocar o tecido pra poliéster (ou dry/poliamida); deixe claro que estampa LOCALIZADA (silk, DTF, transfer) funciona em algodão normalmente. ` +
       `Se o cliente ENVIAR FOTO(S), ANALISE a imagem pra identificar o(s) produto(s), a cor e (quando der pra ver) o material. Se a foto mostrar um CONJUNTO/look com MAIS DE UMA peça (ex.: calça wide leg + casaco/moletom com zíper), NÃO assuma uma peça só: diga quais peças você viu e PERGUNTE se ele quer produzir o CONJUNTO COMPLETO (aí cada peça vira uma linha) ou só uma delas — só crie as linhas depois que ele confirmar. Se for uma peça só, confirme ("vi que é um(a) ___, certo?") e já preencha. ` +
-      `Quando ele terminar de descrever todos os produtos, faça um resumo curto e simpático e diga que ele já pode tocar em "Concluir e ver os produtos" — NÃO peça contato.\n\n` +
+      `Quando ele terminar ${emEdicao ? 'o ajuste' : 'de descrever os produtos'}, faça um resumo curto e simpático e diga que ele já pode tocar em "Concluir e ver os produtos" — NÃO peça contato.\n\n` +
       hintsTecidoTexto(contexto?.categoria ?? null)
     systemBlocks.push({ type: 'text', text: alinhar })
   }
