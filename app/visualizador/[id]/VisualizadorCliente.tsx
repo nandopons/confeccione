@@ -414,6 +414,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [zoom, setZoom] = useState<string | null>(null);
   // Acordeão mobile: só 1 card expandido por vez (no lg+ todos ficam abertos).
   const [abertoIdx, setAbertoIdx] = useState(0);
+  const [clonadoIdx, setClonadoIdx] = useState<number | null>(null);
 
   // confirmação / pagamento
   const [confirmStep, setConfirmStep] = useState<"idle" | "form" | "feito">("idle");
@@ -573,6 +574,13 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     setLinhas(novas);
     setImgs(novasImgs);
     setIaImgs(novasIa);
+    const novoIdx = i + 1;
+    setAbertoIdx(novoIdx);
+    setClonadoIdx(novoIdx);
+    if (typeof window !== "undefined") {
+      setTimeout(() => { document.querySelector(`[data-card-idx="${novoIdx}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }); }, 90);
+      setTimeout(() => setClonadoIdx(null), 1900);
+    }
     void persistir(novas);
     void reSalvarTodosMockups(novasImgs, novasIa);
   }
@@ -905,11 +913,18 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 
       <PerguntasCliente pedidoId={pedido.id} />
 
+      {clonadoIdx !== null && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 bg-[#0F6E56] text-white text-sm font-medium px-4 py-2.5 rounded-full shadow-lg flex items-center gap-2 pointer-events-none" role="status">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+          Modelo clonado
+        </div>
+      )}
+
       <div className="space-y-7">
         {linhas.map((l, i) => {
           const st = imgs[i] || {};
           return (
-            <div key={i} className="bg-white border border-gray-200 rounded-2xl shadow-md ring-1 ring-gray-900/5 overflow-hidden">
+            <div key={i} data-card-idx={i} className={"bg-white border rounded-2xl overflow-hidden scroll-mt-16 transition-all duration-500 " + (clonadoIdx === i ? "border-[#1D9E75] ring-2 ring-[#1D9E75] shadow-xl shadow-[#1D9E75]/20" : "border-gray-200 ring-1 ring-gray-900/5 shadow-md")}>
               {/* CABEÇALHO DO MODELO — toca pra abrir (acordeão mobile) */}
               <div role="button" onClick={(e) => { setAbertoIdx(i); if (typeof window !== "undefined" && window.innerWidth < 1024) { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 80); } }} className="scroll-mt-16 flex items-center justify-between gap-2 px-4 py-2.5 bg-[#0F6E56] text-white cursor-pointer lg:cursor-default select-none">
                 <span className="inline-flex items-center gap-2 font-semibold text-sm">
