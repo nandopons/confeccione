@@ -81,24 +81,29 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const l = linhas[index]
   if (!l) return NextResponse.json({ erro: 'Produto não encontrado' }, { status: 404 })
 
-  // Gate: detalhes mínimos + ao menos 1 arte.
+  // Gate: detalhes mínimos + (arte OU descrição) para peça estampada/bordada.
   const mapa: Mapa = pedido.mockups && typeof pedido.mockups === 'object' ? { ...pedido.mockups } : {}
   const mk: Mockup = { ...(mapa[String(index)] || {}) }
   const artesUrls = Array.isArray(mk.fotos) ? mk.fotos.filter((x) => typeof x === 'string' && x.length > 0) : []
   const estampado = l.estampado === true || (l.estampas?.length ?? 0) > 0
+  const instrTxt = (instrucoes || '').trim()
+  const temDescricao = !ehPlaceholder(l.descricao)
+  const temReferencia = artesUrls.length > 0 || temDescricao || instrTxt.length > 0
 
   if (ehPlaceholder(l.modelo) || ehPlaceholder(corLimpa(l.cor)) || qtd(l) <= 0) {
     return NextResponse.json({ erro: 'Complete os detalhes do modelo (tipo da peça, cor e quantidade) antes de gerar o mockup com IA.' }, { status: 422 })
   }
-  // Peça LISA pode ser gerada só com as infos do produto (tipo, cor, tecido,
-  // descrição). Peça com estampa/bordado exige ao menos uma arte/foto.
-  if (estampado && artesUrls.length === 0) {
-    return NextResponse.json({ erro: 'Esta peça tem estampa/bordado — envie ao menos uma arte/foto antes de gerar o mockup.' }, { status: 422 })
+  // Peça LISA gera só com as infos do produto. Peça com estampa/bordado gera
+  // mesmo SEM o arquivo da arte: a gente aproxima a partir da DESCRIÇÃO (ou das
+  // instruções do cliente). Só bloqueia quando NÃO há arte NEM descrição/instrução.
+  if (estampado && !temReferencia) {
+    return NextResponse.json({ erro: 'Pra gerar a estampa/bordado, envie uma arte/foto OU descreva a estampa pelo chat do produto.' }, { status: 422 })
   }
 
   const artes: ImagemEntrada[] = []
   for (const u of artesUrls) { const e = parseDataUrl(u); if (e) artes.push(e) }
-  if (estampado && artes.length === 0) return NextResponse.json({ erro: 'Artes inválidas' }, { status: 400 })
+  // Sem arquivo de arte válido, seguimos com a aproximação por descrição —
+  // não bloqueamos mais a geração de peça estampada por falta de imagem.
 
   const ctxProd = [
     l.modelo,
@@ -109,7 +114,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const iaAtual: IAItem[] = Array.isArray(mk.ia) ? mk.ia.slice() : []
   const ajustando = typeof regenIaIndex === 'number' && iaAtual[regenIaIndex]
-  const instr = instrucoes.trim()
+  const instr = instrTxt
 
   // A peça é LISA (sem nada aplicado) quando o modelo NÃO é estampado/bordado,
   // ou quando o cliente pede explicitamente "sem estampa/logo" / "lisa". Nesse
@@ -118,6 +123,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const pedeLisa = /sem\s*(estampa|logo|logotipo|marca|arte|print|bordad|aplica|emblema|selo)|totalmente\s*lis|\blis[ao]s?\b/i.test(instr)
   const semAplicacao = !estampado || pedeLisa
   const SEM_APLICACAO_REGRA = 'A peça é LISA: NÃO adicione logo, estampa, bordado, emblema, selo/etiqueta redonda, marca nem texto. Não invente nenhum logotipo. Se houver algo aplicado, remova.'
+  // Estampada SEM o arquivo da arte: a IA cria a estampa a partir da DESCRIÇÃO.
+  const aproximarPelaDescricao = estampado && artes.length === 0
 
   let imagens: ImagemEntrada[]
   let prompt: string
@@ -128,11 +135,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       'A PRIMEIRA imagem é um mockup já gerado deste produto.',
       semAplicacao
         ? 'As imagens seguintes são apenas REFERÊNCIA do tipo de peça (não são logo).'
-        : 'As imagens seguintes são a logo/arte enviada pelo cliente.',
+        : (artes.length > 0
+            ? 'As imagens seguintes são a logo/arte enviada pelo cliente.'
+            : 'Não há arquivo de arte: a estampa/bordado deve ser criada a partir da descrição.'),
       `Ajuste o mockup conforme o pedido do cliente: ${instr || 'melhore o realismo mantendo o produto.'}`,
       `Produto: ${ctxProd}.`,
       corLimpa(l.cor) ? `Mantenha a peça na cor "${corLimpa(l.cor)}".` : '',
       semAplicacao ? SEM_APLICACAO_REGRA : '',
+      aproximarPelaDescricao && l.descricao && l.descricao.trim() ? `Estampa/bordado a representar (aproximação): ${l.descricao.trim()}.` : '',
       'Mantenha um mockup realista de produto, fundo branco uniforme, boa iluminação. Devolva apenas a imagem final.',
     ].filter(Boolean).join(' ')
   } else if (semAplicacao) {
@@ -150,6 +160,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       refLinha,
       SEM_APLICACAO_REGRA,
       instr ? `Observações do cliente: ${instr}.` : '',
+      'Mostre o produto em vista frontal (e traseira, se as instruções mencionarem as costas), com a peça inteira e bem enquadrada.',
+      'Fundo branco uniforme, iluminação de estúdio, sem texto extra. Devolva apenas a imagem final.',
+    ].filter(Boolean).join(' ')
+  } else if (aproximarPelaDescricao) {
+    // Estampada/bordada SEM arquivo de arte: criamos uma APROXIMAÇÃO da estampa
+    // a partir da descrição (e das instruções) do cliente.
+    imagens = artes // vazio
+    prompt = [
+      `Crie um mockup de produto realista: ${ctxProd}.`,
+      corLimpa(l.cor) ? `IMPORTANTE: a peça (tecido) DEVE ser exatamente na cor "${corLimpa(l.cor)}".` : '',
+      materialDaLinha(l) ? `Tecido: ${materialDaLinha(l)}.` : '',
+      'Não há arquivo de arte enviado — gere uma APROXIMAÇÃO da estampa/bordado a partir da descrição do cliente.',
+      l.descricao && l.descricao.trim() ? `Descrição da estampa/bordado: ${l.descricao.trim()}.` : '',
+      instr ? `Instruções de aplicação: ${instr}.` : '',
+      'Aplique a estampa/bordado de forma proporcional e bem posicionada na peça, com bom senso.',
       'Mostre o produto em vista frontal (e traseira, se as instruções mencionarem as costas), com a peça inteira e bem enquadrada.',
       'Fundo branco uniforme, iluminação de estúdio, sem texto extra. Devolva apenas a imagem final.',
     ].filter(Boolean).join(' ')

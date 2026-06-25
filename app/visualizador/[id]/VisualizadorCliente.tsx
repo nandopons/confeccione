@@ -1059,6 +1059,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                       )}
                       {liberado ? (
                         <div>
+                          {estampadoLinha && !temArte && (
+                            <p className="text-[11px] text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-2 leading-snug">
+                              Sem o arquivo da arte a gente gera uma aproximação a partir da descrição — se tiver o arquivo, suba pra ficar fiel.
+                            </p>
+                          )}
                           {ajustandoEste && <p className="text-[11px] text-[#0F6E56] mb-1">Ajustando o mockup selecionado — descreva o que mudar.</p>}
                           <textarea
                             value={iaInstr[i] ?? ""}
