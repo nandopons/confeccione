@@ -28,6 +28,8 @@ type Oferta = {
   prazoDias: number | null
   cidade?: string | null
   uf?: string | null
+  cep?: string | null
+  bairro?: string | null
   pago?: boolean
   orcamentoStatus?: string | null
   contatoCliente?: { nome: string | null; telefone: string | null; email: string | null; cidade: string | null; uf: string | null } | null
@@ -61,6 +63,9 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
   const [enviando, setEnviando] = useState<null | 'aceitar' | 'recusar'>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<number | null>(null)
+
+  const localPedido = [oferta.cidade, oferta.uf].filter(Boolean).join('/')
+  const destinoFrete = [localPedido, oferta.cep ? `CEP ${oferta.cep}` : ''].filter(Boolean).join(' — ')
 
   async function responder(acao: 'aceitar' | 'recusar') {
     setEnviando(acao)
@@ -98,8 +103,8 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
         {oferta.prazoDias ? (
           <p className="text-sm text-[#0F6E56] font-medium mt-1">⏱️ Prazo de produção: {oferta.prazoDias} dias — a partir da confirmação do pagamento.</p>
         ) : null}
-        {(oferta.cidade || oferta.uf) && (
-          <p className="text-sm text-gray-600 mt-1">📍 Local do pedido: <span className="font-medium text-gray-800">{[oferta.cidade, oferta.uf].filter(Boolean).join('/')}</span></p>
+        {(localPedido || oferta.cep) && (
+          <p className="text-sm text-gray-600 mt-1">📍 Destino do frete: <span className="font-medium text-gray-800">{destinoFrete}</span></p>
         )}
         <p className="text-sm text-gray-500 mt-1">
           {oferta.pago
@@ -283,8 +288,8 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
             ) : (
               <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
                 <p className="text-sm text-amber-800">🔒 Os dados de contato do cliente são liberados <strong>após o pagamento</strong>. Defina o orçamento — assim que o cliente pagar, nome, telefone e e-mail aparecem aqui. Até lá, use o canal de perguntas (mediado pela Confeccione).</p>
-                {(oferta.cidade || oferta.uf) && (
-                  <p className="text-sm text-amber-800 mt-1">📍 Local do pedido: <strong>{[oferta.cidade, oferta.uf].filter(Boolean).join('/')}</strong></p>
+                {(localPedido || oferta.cep) && (
+                  <p className="text-sm text-amber-800 mt-1">📍 Destino do frete: <strong>{destinoFrete}</strong></p>
                 )}
               </div>
             )}
@@ -461,4 +466,3 @@ function PerguntasFornecedor({ ofertaId }: { ofertaId: string }) {
     </div>
   )
 }
-
