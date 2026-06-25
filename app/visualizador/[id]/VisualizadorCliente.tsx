@@ -415,6 +415,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   // Acordeão mobile: só 1 card expandido por vez (no lg+ todos ficam abertos).
   const [abertoIdx, setAbertoIdx] = useState(0);
   const [clonadoIdx, setClonadoIdx] = useState<number | null>(null);
+  // Lista de coleta: discreta no rodapé do card; só expande quando o cliente clica.
+  const [listaAbertaIdx, setListaAbertaIdx] = useState<number | null>(null);
 
   // confirmação / pagamento
   const [confirmStep, setConfirmStep] = useState<"idle" | "form" | "feito">("idle");
@@ -992,15 +994,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   </div>
                 )}
 
-                {/* LISTA DE COLETA (Listas Externas) — o grupo informa os tamanhos */}
-                {!orcamentoDefinido && permiteListaTamanhos(pedido.categoria ?? (linhas.find((x) => x.categoria)?.categoria ?? null)) && (
-                  <ListaColeta
-                    pedidoId={pedido.id}
-                    linhaIndex={i}
-                    metaQtd={typeof l.total === "number" && l.total > 0 ? l.total : 0}
-                    onAtualizarLinha={(idx, tamanhos, total) => setLinhas((prev) => prev.map((l, k) => (k === idx ? { ...l, tamanhos, total } : l)))}
-                  />
-                )}
+                {/* LISTA DE COLETA — agora vive de forma discreta no rodapé do card (botão + painel). */}
                 </div>
                 {/* VISUALIZADOR + IA — abaixo no mobile, à esquerda no desktop */}
                 <div className="order-2 lg:order-1 min-w-0 border-t border-gray-100 lg:border-t-0 lg:border-r">
@@ -1123,6 +1117,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
               <div className="px-5 py-3 border-t border-gray-100 flex flex-wrap items-center gap-2">
                 <span className="flex-1 min-w-2" aria-hidden />
                 {!orcamentoDefinido && (<>
+                {permiteListaTamanhos(pedido.categoria ?? (linhas.find((x) => x.categoria)?.categoria ?? null)) && (
+                <button type="button" onClick={() => setListaAbertaIdx(listaAbertaIdx === i ? null : i)} title="Lista de coleta (o grupo informa os tamanhos)" aria-expanded={listaAbertaIdx === i} className={"inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg transition-colors " + (listaAbertaIdx === i ? "text-[#0F6E56] bg-[#E1F5EE]" : "text-gray-500 hover:text-[#0F6E56] hover:bg-[#E1F5EE]")}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8 6h13" /><path d="M8 12h13" /><path d="M8 18h13" /><path d="M3 6h.01" /><path d="M3 12h.01" /><path d="M3 18h.01" /></svg>
+                  Lista de coleta
+                </button>
+                )}
                 <button type="button" onClick={() => clonarProduto(i)} title="Clonar este modelo" className="inline-flex items-center gap-1.5 text-gray-500 hover:text-[#0F6E56] hover:bg-[#E1F5EE] text-sm px-3 py-2 rounded-lg transition-colors">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
                   Clonar
@@ -1133,6 +1133,17 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 </button>
                 </>)}
               </div>
+              {/* PAINEL: Lista de coleta — só aparece quando o cliente abre pelo botão do rodapé */}
+              {!orcamentoDefinido && listaAbertaIdx === i && permiteListaTamanhos(pedido.categoria ?? (linhas.find((x) => x.categoria)?.categoria ?? null)) && (
+                <div className="px-5 pb-5 border-t border-gray-100">
+                  <ListaColeta
+                    pedidoId={pedido.id}
+                    linhaIndex={i}
+                    metaQtd={typeof l.total === "number" && l.total > 0 ? l.total : 0}
+                    onAtualizarLinha={(idx, tamanhos, total) => setLinhas((prev) => prev.map((l, k) => (k === idx ? { ...l, tamanhos, total } : l)))}
+                  />
+                </div>
+              )}
               </div>
             </div>
           );
