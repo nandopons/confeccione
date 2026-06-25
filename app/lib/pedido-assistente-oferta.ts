@@ -372,18 +372,19 @@ async function notificarFornecedorAceite(ofertaId: string, pedidoId: string, for
   try {
     const [{ data: forn }, { data: pedido }] = await Promise.all([
       supabaseAdmin.from('leads_fornecedores').select('nome, whatsapp').eq('id', fornecedorId).maybeSingle<{ nome: string | null; whatsapp: string | null }>(),
-      supabaseAdmin.from('pedidos_assistente').select('nome, telefone, email, cidade, uf, pagamento_status').eq('id', pedidoId).maybeSingle<{ nome: string | null; telefone: string | null; email: string | null; cidade: string | null; uf: string | null; pagamento_status: string | null }>(),
+      supabaseAdmin.from('pedidos_assistente').select('nome, telefone, email, cidade, uf, cep, pagamento_status').eq('id', pedidoId).maybeSingle<{ nome: string | null; telefone: string | null; email: string | null; cidade: string | null; uf: string | null; cep: string | null; pagamento_status: string | null }>(),
     ])
     if (!forn?.whatsapp || !pedido) return
 
     const linkOrcamento = `${SITE_URL}/fornecedor/oferta/${ofertaId}/orcamento`
     const local = [pedido.cidade, pedido.uf].filter(Boolean).join('/')
+    const destino = [local, pedido.cep ? `CEP ${pedido.cep}` : ''].filter(Boolean).join(' — ')
     const mensagem = pedido.pagamento_status === 'pago'
       ? `🎉 *Pedido assumido!*\n\n✅ Este pedido já está pago — pode iniciar a produção. Os dados de contato do cliente já estão liberados na página do pedido.`
       : (
         `🎉 *Pedido assumido!*\n\n` +
         `Você assumiu este pedido.` +
-        (local ? `\n📍 Entrega: ${local} (use pra calcular o frete)` : '') +
+        (destino ? `\n📍 Destino do frete: ${destino} (use pra calcular o frete)` : '') +
         `\n\n💰 *Agora defina o orçamento final* (seu valor por produto + frete). O cliente recebe pra aprovar e pagar:\n${linkOrcamento}` +
         `\n\n🔒 Os dados de contato do cliente são liberados *após o pagamento*.`
       )
@@ -604,6 +605,8 @@ export type OfertaDetalheFornecedor = {
   prazoDias: number | null
   cidade: string | null
   uf: string | null
+  cep: string | null
+  bairro: string | null
   pago: boolean
   orcamentoStatus: string | null
   contatoCliente: ContatoClienteOferta | null
@@ -623,7 +626,7 @@ export async function carregarOfertaParaFornecedor(
 
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, linhas, imagens, mockups, pagamento_status, orcamento_status, prazo_dias, nome, telefone, email, cidade, uf')
+    .select('id, linhas, imagens, mockups, pagamento_status, orcamento_status, prazo_dias, nome, telefone, email, cidade, uf, cep, bairro')
     .eq('id', oferta.pedido_id)
     .maybeSingle<{
       id: string
@@ -638,6 +641,8 @@ export async function carregarOfertaParaFornecedor(
       email: string | null
       cidade: string | null
       uf: string | null
+      cep: string | null
+      bairro: string | null
     }>()
   if (!pedido) return null
 
@@ -679,6 +684,8 @@ export async function carregarOfertaParaFornecedor(
     prazoDias: pedido.prazo_dias ?? null,
     cidade: pedido.cidade ?? null,
     uf: pedido.uf ?? null,
+    cep: pedido.cep ?? null,
+    bairro: pedido.bairro ?? null,
     pago: pedido.pagamento_status === 'pago',
     orcamentoStatus: pedido.orcamento_status ?? null,
     contatoCliente: pedido.pagamento_status === 'pago'
@@ -734,6 +741,10 @@ export type OrcamentoFornecedorDados = {
   pago: boolean
   definidoEm: string | null
   portfolio: PortfolioMidia[]
+  cidade: string | null
+  uf: string | null
+  cep: string | null
+  bairro: string | null
 }
 
 function qtdDaLinha(l: LinhaPedido): number {
@@ -752,7 +763,7 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
 
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, nome, linhas, prazo_dias, pagamento_status, orcamento_status, orcamento_definido_em, frete_centavos')
+    .select('id, nome, linhas, prazo_dias, pagamento_status, orcamento_status, orcamento_definido_em, frete_centavos, cidade, uf, cep, bairro')
     .eq('id', oferta.pedido_id)
     .maybeSingle<{
       id: string
@@ -763,6 +774,10 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
       orcamento_status: string | null
       orcamento_definido_em: string | null
       frete_centavos: number | null
+      cidade: string | null
+      uf: string | null
+      cep: string | null
+      bairro: string | null
     }>()
   if (!pedido) return null
 
@@ -807,6 +822,10 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
     pago: pedido.pagamento_status === 'pago',
     definidoEm: pedido.orcamento_definido_em ?? null,
     portfolio: Array.isArray(oferta.portfolio_midias) ? oferta.portfolio_midias : [],
+    cidade: pedido.cidade ?? null,
+    uf: pedido.uf ?? null,
+    cep: pedido.cep ?? null,
+    bairro: pedido.bairro ?? null,
   }
 }
 

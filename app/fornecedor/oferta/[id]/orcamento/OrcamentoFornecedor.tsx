@@ -36,6 +36,8 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
   const [feito, setFeito] = useState<{ valorCliente: number; repasse: number } | null>(null)
   const [erro, setErro] = useState<string | null>(null)
 
+  const localDestino = [dados.cidade, dados.uf].filter(Boolean).join('/')
+
   const calc = useMemo(() => {
     let produtos = 0
     let valido = dados.itens.length > 0
@@ -85,6 +87,9 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
         {dados.prazoDias ? (
           <p className="text-xs text-[#0F6E56] font-medium mt-2">⏱️ Prazo de produção combinado: {dados.prazoDias} dias (a partir do pagamento).</p>
         ) : null}
+        {(dados.cep || localDestino) && (
+          <p className="text-xs text-gray-600 font-medium mt-2">📍 Destino do frete: {[localDestino, dados.bairro, dados.cep ? `CEP ${dados.cep}` : ''].filter(Boolean).join(' — ')}</p>
+        )}
       </div>
 
       {dados.pago ? (
@@ -134,6 +139,9 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
             ))}
 
             <div className="rounded-lg bg-gray-50 border border-gray-100 px-4 py-3">
+              {(dados.cep || localDestino) && (
+                <p className="text-[11px] text-gray-600 font-medium mb-2">📍 Destino do frete: {[localDestino, dados.bairro, dados.cep ? `CEP ${dados.cep}` : ''].filter(Boolean).join(' — ')}</p>
+              )}
               <label className="text-xs text-gray-500">
                 Frete — quanto você quer receber pelo envio (R$)
                 <input
