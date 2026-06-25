@@ -368,7 +368,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
           <div ref={fimRef} />
         </div>
         {/* gatilho mobile do resumo — slim bar logo acima do input */}
-        <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => setSheetAberto(true)}
+        <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => { inputRef.current?.blur(); setAlturaTeclado(null); setSheetAberto(true); }}
           className="lg:hidden mx-3 mt-3 shrink-0 flex items-center justify-center gap-1.5 rounded-full bg-[#E1F5EE] text-[#0F6E56] text-sm font-medium px-4 py-2.5 shadow-sm hover:shadow active:scale-[0.99] transition">
           📋 Resumo do pedido{qtdProdutos > 0 ? ` · ${qtdProdutos} ${qtdProdutos === 1 ? "produto" : "produtos"}` : ""}
         </button>
