@@ -412,6 +412,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [iaErro, setIaErro] = useState<Record<number, string | null>>({});
   const [iaAjuste, setIaAjuste] = useState<{ i: number; idx: number } | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
+  // Acordeão mobile: só 1 card expandido por vez (no lg+ todos ficam abertos).
+  const [abertoIdx, setAbertoIdx] = useState(0);
 
   // confirmação / pagamento
   const [confirmStep, setConfirmStep] = useState<"idle" | "form" | "feito">("idle");
@@ -908,14 +910,19 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           const st = imgs[i] || {};
           return (
             <div key={i} className="bg-white border border-gray-200 rounded-2xl shadow-md ring-1 ring-gray-900/5 overflow-hidden">
-              {/* CABEÇALHO DO MODELO */}
-              <div className="flex items-center justify-between gap-2 px-4 py-2.5 bg-[#0F6E56] text-white">
+              {/* CABEÇALHO DO MODELO — toca pra abrir (acordeão mobile) */}
+              <div role="button" onClick={() => setAbertoIdx(i)} className="flex items-center justify-between gap-2 px-4 py-2.5 bg-[#0F6E56] text-white cursor-pointer lg:cursor-default select-none">
                 <span className="inline-flex items-center gap-2 font-semibold text-sm">
                   <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full bg-white/20 text-[11px] font-bold">{i + 1}</span>
                   Modelo {i + 1}
                 </span>
-                <span className="text-xs text-white/85 truncate max-w-[55%] capitalize">{[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ")}</span>
+                <span className="inline-flex items-center gap-2 max-w-[60%]">
+                  <span className="text-xs text-white/85 truncate capitalize">{[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ")}</span>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={"shrink-0 transition-transform lg:hidden " + (i === abertoIdx ? "rotate-180" : "")}><path d="m6 9 6 6 6-6" /></svg>
+                </span>
               </div>
+              {/* CORPO COLAPSÁVEL — no mobile só o card aberto aparece; no lg+ todos abertos */}
+              <div className={(i === abertoIdx ? "block" : "hidden") + " lg:block"}>
               {/* CORPO — 2 colunas no desktop, empilha no mobile */}
               <div className="grid grid-cols-1 lg:grid-cols-2 items-start">
                 {/* INFO — 1ª no mobile, à direita no desktop */}
@@ -1094,6 +1101,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   Excluir
                 </button>
                 </>)}
+              </div>
               </div>
             </div>
           );
