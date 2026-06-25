@@ -879,7 +879,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             href={`/api/pedido/assistente/${pedido.id}/resumo-pdf`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-[#0F6E56] bg-[#E1F5EE] hover:bg-[#cdeee2] px-3 py-1.5 rounded-lg ring-1 ring-[#1D9E75]/25 transition-colors"
+            className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-[#0F6E56] border border-gray-200 hover:border-[#1D9E75] rounded-lg px-3 py-1.5 transition-colors"
             title="Baixar um PDF com o resumo do pedido"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M5 21h14" /></svg>
@@ -893,7 +893,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         <div className="mt-3 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">Este pedido foi cancelado.</div>
       )}
       <p className="text-gray-500 text-sm mt-1 mb-6">
-        Para cada produto, envie uma ou mais fotos/artes. {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
+        {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
       </p>
 
       {!orcamentoDefinido && (
@@ -911,7 +911,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           return (
             <div key={i} className="bg-white border border-gray-200 rounded-2xl shadow-md ring-1 ring-gray-900/5 overflow-hidden">
               {/* CABEÇALHO DO MODELO — toca pra abrir (acordeão mobile) */}
-              <div role="button" onClick={() => setAbertoIdx(i)} className="flex items-center justify-between gap-2 px-4 py-2.5 bg-[#0F6E56] text-white cursor-pointer lg:cursor-default select-none">
+              <div role="button" onClick={(e) => { setAbertoIdx(i); if (typeof window !== "undefined" && window.innerWidth < 1024) { const el = e.currentTarget; setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 80); } }} className="scroll-mt-16 flex items-center justify-between gap-2 px-4 py-2.5 bg-[#0F6E56] text-white cursor-pointer lg:cursor-default select-none">
                 <span className="inline-flex items-center gap-2 font-semibold text-sm">
                   <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full bg-white/20 text-[11px] font-bold">{i + 1}</span>
                   Modelo {i + 1}
@@ -928,14 +928,17 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 {/* INFO — 1ª no mobile, à direita no desktop */}
                 <div className="order-1 lg:order-2 p-5 min-w-0">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-gray-900 font-medium capitalize flex items-center gap-1.5">{corHex(l.cor) && <span className="w-3.5 h-3.5 rounded-full border border-black/10 inline-block shrink-0" style={{ backgroundColor: corHex(l.cor) as string }} />}{[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ") || "Produto"}</p>
-                    {(() => {
-                      const obj = OBJETIVOS_MATERIAL.find((o) => o.id === l.objetivo_material);
-                      const txt = [obj?.label, l.material].filter(Boolean).join(" · ");
-                      return txt ? <p className="text-sm text-gray-500 mt-0.5">Tecido: {txt}</p> : null;
-                    })()}
-                    {l.categoria && <p className="text-xs text-gray-400 mt-0.5">Categoria: {l.categoria}</p>}
+                    <div className="mt-2 space-y-1.5">
+                      {(() => {
+                        const obj = OBJETIVOS_MATERIAL.find((o) => o.id === l.objetivo_material);
+                        const txt = [obj?.label, l.material].filter(Boolean).join(" · ");
+                        return txt ? <p className="text-sm"><span className="text-gray-500">Tecido:</span> <span className="text-gray-800">{txt}</span></p> : null;
+                      })()}
+                      {l.publico && <p className="text-sm"><span className="text-gray-500">Público:</span> <span className="text-gray-800">{({ feminino: "Feminino", masculino: "Masculino", infantil: "Infantil", unissex: "Unissex" } as Record<string, string>)[l.publico] ?? l.publico}</span></p>}
+                      {l.categoria && <p className="text-sm"><span className="text-gray-500">Categoria:</span> <span className="text-gray-800">{l.categoria}</span></p>}
+                    </div>
                   </div>
                   {l.total ? <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full shrink-0">{l.total} un.</span> : null}
                 </div>
@@ -951,12 +954,15 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 )}
 
                 {l.tamanhos.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-3">
-                    {l.tamanhos.map((t, j) => (
-                      <span key={j} className="bg-gray-50 border border-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-md">
-                        {t.tamanho.toUpperCase()}{t.qtd ? ` · ${t.qtd}` : ""}
-                      </span>
-                    ))}
+                  <div className="mt-3">
+                    <p className="text-sm text-gray-500 mb-1.5">Tamanho:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {l.tamanhos.map((t, j) => (
+                        <span key={j} className="bg-gray-50 border border-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-md">
+                          {t.tamanho.toUpperCase()}{t.qtd ? ` · ${t.qtd}` : ""}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
                 {acabamentoLabel(l) && (
@@ -964,7 +970,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs px-2 py-0.5 rounded-md">{acabamentoLabel(l)}</span>
                   </div>
                 )}
-                {l.descricao && <p className="text-sm text-gray-500 mt-3 leading-relaxed">{l.descricao}</p>}
+                {l.descricao && !ehPlaceholder(l.descricao) && (
+                  <div className="mt-3">
+                    <p className="text-sm text-gray-500 mb-0.5">Descrição:</p>
+                    <p className="text-sm text-gray-800 leading-relaxed">{l.descricao}</p>
+                  </div>
+                )}
 
                 {/* LISTA DE COLETA (Listas Externas) — o grupo informa os tamanhos */}
                 {!orcamentoDefinido && permiteListaTamanhos(pedido.categoria ?? (linhas.find((x) => x.categoria)?.categoria ?? null)) && (
@@ -1207,14 +1218,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         </div>
       ) : null}
 
-      {/* GARANTIA CONFECCIONE */}
-      <div className="mt-3 bg-[#E1F5EE]/60 border border-[#1D9E75]/20 rounded-xl p-3 flex items-start gap-2">
-        <span aria-hidden className="text-[#0F6E56] leading-none">🔒</span>
-        <p className="text-xs text-[#0F6E56] leading-relaxed">
-          <strong>Pagamento garantido pela Confeccione.</strong> A gente segura o valor e só repassa pro fornecedor quando você confirmar que recebeu o pedido em conformidade. Após o pagamento, liberamos os visualizadores dos seus produtos pra você baixar.
-        </p>
-      </div>
-
       {/* CONTATO + AVANÇAR */}
       <div className="mt-8 bg-white border border-gray-200 rounded-2xl shadow-sm p-5">
         {(contato.nome || contato.email) && (
@@ -1327,6 +1330,14 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 : <>Revise os produtos acima e clique em <strong className="text-gray-600">Confirmar pedido</strong> — a gente encontra o fornecedor ideal.</>}
           </p>
         )}
+      </div>
+
+      {/* GARANTIA CONFECCIONE */}
+      <div className="mt-3 bg-[#E1F5EE]/60 border border-[#1D9E75]/20 rounded-xl p-3 flex items-start gap-2">
+        <span aria-hidden className="text-[#0F6E56] leading-none">🔒</span>
+        <p className="text-xs text-[#0F6E56] leading-relaxed">
+          <strong>Pagamento garantido pela Confeccione.</strong> A gente segura o valor e só repassa pro fornecedor quando você confirmar que recebeu o pedido em conformidade. Após o pagamento, liberamos os visualizadores dos seus produtos pra você baixar.
+        </p>
       </div>
 
       {!pago && pedido.status !== "cancelado" && (
