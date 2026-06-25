@@ -968,21 +968,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                     onAtualizarLinha={(idx, tamanhos, total) => setLinhas((prev) => prev.map((l, k) => (k === idx ? { ...l, tamanhos, total } : l)))}
                   />
                 )}
-
-                {/* AÇÕES — toolbar única: imagem à esquerda, produto à direita */}
-                <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2">
-                  <span className="flex-1 min-w-2" aria-hidden />
-                  {!orcamentoDefinido && (<>
-                  <button type="button" onClick={() => clonarProduto(i)} title="Clonar este modelo" className="inline-flex items-center gap-1.5 text-gray-500 hover:text-[#0F6E56] hover:bg-[#E1F5EE] text-sm px-3 py-2 rounded-lg transition-colors">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
-                    Clonar
-                  </button>
-                  <button type="button" onClick={() => excluir(i)} title="Excluir produto" className="inline-flex items-center gap-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 text-sm px-3 py-2 rounded-lg transition-colors">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
-                    Excluir
-                  </button>
-                  </>)}
-                </div>
                 </div>
                 {/* VISUALIZADOR + IA — abaixo no mobile, à esquerda no desktop */}
                 <div className="order-2 lg:order-1 min-w-0 border-t border-gray-100 lg:border-t-0 lg:border-r">
@@ -1095,6 +1080,20 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 })()}
                   </div>
                 </div>
+              </div>
+              {/* AÇÕES — toolbar única: imagem à esquerda, produto à direita */}
+              <div className="px-5 py-3 border-t border-gray-100 flex flex-wrap items-center gap-2">
+                <span className="flex-1 min-w-2" aria-hidden />
+                {!orcamentoDefinido && (<>
+                <button type="button" onClick={() => clonarProduto(i)} title="Clonar este modelo" className="inline-flex items-center gap-1.5 text-gray-500 hover:text-[#0F6E56] hover:bg-[#E1F5EE] text-sm px-3 py-2 rounded-lg transition-colors">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg>
+                  Clonar
+                </button>
+                <button type="button" onClick={() => excluir(i)} title="Excluir produto" className="inline-flex items-center gap-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 text-sm px-3 py-2 rounded-lg transition-colors">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                  Excluir
+                </button>
+                </>)}
               </div>
             </div>
           );
