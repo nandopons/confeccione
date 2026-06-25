@@ -84,12 +84,14 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   const [mapaFotos, setMapaFotos] = useState<Record<string, number[]> | null>(null);
   const proxIdRef = useRef(1);
   const [subindo, setSubindo] = useState(false);
+  const [sheetAberto, setSheetAberto] = useState(false);
   const fimRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { fimRef.current?.scrollIntoView({ behavior: "smooth" }); }, [turnos, enviando, anexos]);
 
   const temLinha = pedido.linhas.some(linhaCompleta);
   const totalFotos = fotosColetadas.length + anexos.length;
+  const qtdProdutos = pedido.linhas.length;
 
   async function onAnexar(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -217,6 +219,46 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
 
   function pular() { window.location.href = `/visualizador/${pedidoId}`; }
 
+  // Conteúdo do resumo compartilhado entre a coluna desktop e o bottom-sheet mobile.
+  const resumoMiolo = () => (
+    <div className="space-y-3">
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-4">
+        <p className="text-sm font-medium text-gray-900 mb-2">Seu pedido</p>
+        {pedido.linhas.length === 0 ? (
+          <p className="text-xs text-gray-400">Os produtos vão aparecendo aqui conforme a gente conversa.</p>
+        ) : (
+          <ul className="space-y-2">
+            {pedido.linhas.map((l, i) => (
+              <li key={i} className="border border-gray-100 rounded-lg p-2.5">
+                <div className="flex items-center gap-1.5">
+                  {corHex(l.cor) && <span className="h-3.5 w-3.5 rounded-full border border-black/10 shrink-0" style={{ backgroundColor: corHex(l.cor) as string }} />}
+                  <span className="text-sm text-gray-800 capitalize">{[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ") || "produto"}</span>
+                  {l.total ? <span className="ml-auto text-xs text-gray-500">{l.total} un.</span> : null}
+                </div>
+                {l.material && <p className="text-[11px] text-gray-500 mt-0.5">Tecido: {l.material}</p>}
+                {l.tamanhos.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {l.tamanhos.map((t, j) => (
+                      <span key={j} className="bg-gray-50 border border-gray-200 text-gray-600 text-[10px] px-1.5 py-0.5 rounded">{t.tamanho.toUpperCase()}{t.qtd ? ` · ${t.qtd}` : ""}</span>
+                    ))}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {fotosColetadas.length > 0 && (
+          <p className="text-[11px] text-[#0F6E56] mt-2">📎 {fotosColetadas.length} foto{fotosColetadas.length > 1 ? "s" : ""} de referência anexada{fotosColetadas.length > 1 ? "s" : ""}.</p>
+        )}
+      </div>
+      <button type="button" onClick={() => void concluir()} disabled={concluindo}
+        className="w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-4 py-3 rounded-xl">
+        {concluindo ? "Salvando…" : temLinha ? "Concluir e ver os produtos →" : "Ir para os produtos →"}
+      </button>
+      <button type="button" onClick={pular} className="w-full text-xs text-gray-400 hover:text-[#0F6E56]">organizar eu mesmo na página de produtos</button>
+    </div>
+  );
+
   return (
     <div className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
       {/* CHAT */}
@@ -256,6 +298,11 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
           {erro && <p className="text-xs text-red-600">{erro}</p>}
           <div ref={fimRef} />
         </div>
+        {/* gatilho mobile do resumo — slim bar logo acima do input */}
+        <button type="button" onClick={() => setSheetAberto(true)}
+          className="lg:hidden mx-3 mt-3 flex items-center justify-center gap-1.5 rounded-full bg-[#E1F5EE] text-[#0F6E56] text-sm font-medium px-4 py-2.5 shadow-sm hover:shadow active:scale-[0.99] transition">
+          📋 Resumo do pedido{qtdProdutos > 0 ? ` · ${qtdProdutos} ${qtdProdutos === 1 ? "produto" : "produtos"}` : ""}
+        </button>
         <div className="border-t border-gray-100 p-3">
           {/* tray de anexos */}
           {(anexos.length > 0 || subindo) && (
@@ -290,43 +337,27 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
         </div>
       </div>
 
-      {/* RESUMO + AÇÕES */}
-      <aside className="lg:sticky lg:top-6 self-start space-y-3">
-        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-4">
-          <p className="text-sm font-medium text-gray-900 mb-2">Seu pedido</p>
-          {pedido.linhas.length === 0 ? (
-            <p className="text-xs text-gray-400">Os produtos vão aparecendo aqui conforme a gente conversa.</p>
-          ) : (
-            <ul className="space-y-2">
-              {pedido.linhas.map((l, i) => (
-                <li key={i} className="border border-gray-100 rounded-lg p-2.5">
-                  <div className="flex items-center gap-1.5">
-                    {corHex(l.cor) && <span className="h-3.5 w-3.5 rounded-full border border-black/10 shrink-0" style={{ backgroundColor: corHex(l.cor) as string }} />}
-                    <span className="text-sm text-gray-800 capitalize">{[l.modelo, corLabel(l.cor)].filter(Boolean).join(" · ") || "produto"}</span>
-                    {l.total ? <span className="ml-auto text-xs text-gray-500">{l.total} un.</span> : null}
-                  </div>
-                  {l.material && <p className="text-[11px] text-gray-500 mt-0.5">Tecido: {l.material}</p>}
-                  {l.tamanhos.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {l.tamanhos.map((t, j) => (
-                        <span key={j} className="bg-gray-50 border border-gray-200 text-gray-600 text-[10px] px-1.5 py-0.5 rounded">{t.tamanho.toUpperCase()}{t.qtd ? ` · ${t.qtd}` : ""}</span>
-                      ))}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-          {fotosColetadas.length > 0 && (
-            <p className="text-[11px] text-[#0F6E56] mt-2">📎 {fotosColetadas.length} foto{fotosColetadas.length > 1 ? "s" : ""} de referência anexada{fotosColetadas.length > 1 ? "s" : ""}.</p>
-          )}
-        </div>
-        <button type="button" onClick={() => void concluir()} disabled={concluindo}
-          className="w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-4 py-3 rounded-xl">
-          {concluindo ? "Salvando…" : temLinha ? "Concluir e ver os produtos →" : "Ir para os produtos →"}
-        </button>
-        <button type="button" onClick={pular} className="w-full text-xs text-gray-400 hover:text-[#0F6E56]">organizar eu mesmo na página de produtos</button>
+      {/* RESUMO + AÇÕES (desktop) */}
+      <aside className="hidden lg:block lg:sticky lg:top-6 self-start">
+        {resumoMiolo()}
       </aside>
+
+      {/* RESUMO — bottom-sheet (mobile) */}
+      {sheetAberto && (
+        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setSheetAberto(false)} />
+          <div className="absolute inset-x-0 bottom-0 bg-white rounded-t-2xl shadow-xl max-h-[72vh] flex flex-col">
+            <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-gray-200" />
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+              <p className="text-sm font-medium text-gray-900">Resumo do pedido</p>
+              <button type="button" onClick={() => setSheetAberto(false)} aria-label="Fechar" className="h-8 w-8 rounded-full hover:bg-gray-100 text-gray-500 text-xl leading-none flex items-center justify-center">×</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {resumoMiolo()}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
