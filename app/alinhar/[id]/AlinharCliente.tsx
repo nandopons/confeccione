@@ -281,8 +281,8 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
 
   function pular() { window.location.href = `/visualizador/${pedidoId}`; }
 
-  // Conteúdo do resumo compartilhado entre a coluna desktop e o bottom-sheet mobile.
-  const resumoMiolo = () => (
+  // Lista de produtos do resumo (parte que ROLA no bottom-sheet mobile).
+  const resumoLista = () => (
     <div className="space-y-3">
       <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-4">
         <p className="text-sm font-medium text-gray-900 mb-2">Seu pedido</p>
@@ -313,12 +313,18 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
           <p className="text-[11px] text-[#0F6E56] mt-2">📎 {fotosColetadas.length} foto{fotosColetadas.length > 1 ? "s" : ""} de referência anexada{fotosColetadas.length > 1 ? "s" : ""}.</p>
         )}
       </div>
+    </div>
+  );
+
+  // Ações do resumo (botão Concluir + link organizar). No mobile ficam FIXAS no rodapé do sheet.
+  const resumoAcoes = () => (
+    <>
       <button type="button" onClick={() => void concluir()} disabled={concluindo}
         className="w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-4 py-3 rounded-xl">
         {concluindo ? "Salvando…" : temLinha ? "Concluir e ver os produtos →" : "Ir para os produtos →"}
       </button>
       <button type="button" onClick={pular} className="w-full text-xs text-gray-400 hover:text-[#0F6E56]">organizar eu mesmo na página de produtos</button>
-    </div>
+    </>
   );
 
   return (
@@ -405,7 +411,10 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
 
       {/* RESUMO + AÇÕES (desktop) */}
       <aside className="hidden lg:block lg:sticky lg:top-6 self-start">
-        {resumoMiolo()}
+        <div className="space-y-3">
+          {resumoLista()}
+          {resumoAcoes()}
+        </div>
       </aside>
 
       {/* RESUMO — bottom-sheet (mobile) */}
@@ -413,13 +422,16 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
         <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
           <div className="absolute inset-0 bg-black/40" onClick={() => setSheetAberto(false)} />
           <div className="absolute inset-x-0 bottom-0 bg-white rounded-t-2xl shadow-xl max-h-[72vh] flex flex-col">
-            <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-gray-200" />
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-gray-200 shrink-0" />
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 shrink-0">
               <p className="text-sm font-medium text-gray-900">Resumo do pedido</p>
               <button type="button" onClick={() => setSheetAberto(false)} aria-label="Fechar" className="h-8 w-8 rounded-full hover:bg-gray-100 text-gray-500 text-xl leading-none flex items-center justify-center">×</button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              {resumoMiolo()}
+            <div className="flex-1 overflow-y-auto px-4 py-3">
+              {resumoLista()}
+            </div>
+            <div className="shrink-0 border-t border-gray-100 p-4 bg-white space-y-2">
+              {resumoAcoes()}
             </div>
           </div>
         </div>
