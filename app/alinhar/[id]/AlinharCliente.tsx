@@ -86,8 +86,65 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   const [subindo, setSubindo] = useState(false);
   const [sheetAberto, setSheetAberto] = useState(false);
   const fimRef = useRef<HTMLDivElement | null>(null);
+  const listaRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  // Altura do card quando o teclado virtual está aberto (mobile). null = padrão (lg:h-[70vh]).
+  const [alturaTeclado, setAlturaTeclado] = useState<number | null>(null);
 
-  useEffect(() => { fimRef.current?.scrollIntoView({ behavior: "smooth" }); }, [turnos, enviando, anexos]);
+  // Rola apenas o container de mensagens (nunca a janela) — evita o "pulo" da
+  // página ao enviar.
+  useEffect(() => {
+    const el = listaRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    else fimRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [turnos, enviando, anexos]);
+
+  // Teclado virtual (mobile): encolhe o card pra caber exatamente no espaço
+  // visível acima do teclado, mantendo o input sempre à vista — sensação de app.
+  // Desktop (lg) nunca entra aqui (guard innerWidth) e mantém lg:h-[70vh].
+  useEffect(() => {
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    if (!vv) return;
+    const ajustar = () => {
+      if (window.innerWidth >= 1024) { setAlturaTeclado(null); return; }
+      const tecladoAberto = vv.height < window.innerHeight - 120;
+      if (tecladoAberto && document.activeElement === inputRef.current && cardRef.current) {
+        const rect = cardRef.current.getBoundingClientRect();
+        const disponivel = vv.height + vv.offsetTop - rect.top - 10;
+        setAlturaTeclado(Math.max(240, Math.min(Math.round(disponivel), 620)));
+        requestAnimationFrame(() => {
+          const el = listaRef.current;
+          if (el) el.scrollTop = el.scrollHeight;
+        });
+      } else {
+        setAlturaTeclado(null);
+      }
+    };
+    vv.addEventListener("resize", ajustar);
+    vv.addEventListener("scroll", ajustar);
+    return () => {
+      vv.removeEventListener("resize", ajustar);
+      vv.removeEventListener("scroll", ajustar);
+    };
+  }, []);
+
+  // Ao focar o input no mobile, alinha o chat com o topo da tela (deixa o
+  // máximo de espaço útil acima do teclado que vai abrir).
+  function aoFocarInput() {
+    if (typeof window === "undefined" || window.innerWidth >= 1024) return;
+    setTimeout(() => {
+      cardRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }, 350);
+  }
+
+  // Textarea cresce com o conteúdo (até ~4 linhas) e volta ao normal ao limpar.
+  function autoSize() {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 112) + "px";
+  }
 
   const temLinha = pedido.linhas.some(linhaCompleta);
   const totalFotos = fotosColetadas.length + anexos.length;
@@ -140,6 +197,11 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     setErro(null); setCores(null);
     const novos: Turno[] = [...turnos, { role: "user", display: texto, fotos: fotos.length ? fotos : undefined }];
     setTurnos(novos); setInput(""); setAnexos([]);
+    // limpa a altura do textarea após enviar e mantém o teclado aberto no mobile.
+    if (textoForcado === undefined) {
+      const el = inputRef.current;
+      if (el) { el.style.height = "auto"; el.focus(); }
+    }
     const novasColetadas = fotos.map((u) => ({ id: proxIdRef.current++, url: u }));
     if (novasColetadas.length) setFotosColetadas((p) => [...p, ...novasColetadas].slice(0, MAX_COLETA));
     setEnviando(true);
@@ -262,12 +324,12 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   return (
     <div className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
       {/* CHAT */}
-      <div className="flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden h-[70vh]">
-        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+      <div ref={cardRef} style={alturaTeclado ? { height: alturaTeclado } : undefined} className="flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden h-[70vh] lg:h-[70vh] scroll-mt-2 transition-[height] duration-200 ease-out">
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between shrink-0">
           <p className="text-gray-900 font-medium text-sm">💬 Vamos alinhar seu pedido</p>
           <button type="button" onClick={pular} className="text-xs text-gray-400 hover:text-[#0F6E56]">prefiro organizar eu mesmo →</button>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
+        <div ref={listaRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
           {turnos.map((t, i) => (
             <div key={i} className={"flex " + (t.role === "user" ? "justify-end" : "justify-start")}>
               <div className={"max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap " + (t.role === "user" ? "bg-[#1D9E75] text-white" : "bg-gray-100 text-gray-800")}>
@@ -299,11 +361,11 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
           <div ref={fimRef} />
         </div>
         {/* gatilho mobile do resumo — slim bar logo acima do input */}
-        <button type="button" onClick={() => setSheetAberto(true)}
-          className="lg:hidden mx-3 mt-3 flex items-center justify-center gap-1.5 rounded-full bg-[#E1F5EE] text-[#0F6E56] text-sm font-medium px-4 py-2.5 shadow-sm hover:shadow active:scale-[0.99] transition">
+        <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => setSheetAberto(true)}
+          className="lg:hidden mx-3 mt-3 shrink-0 flex items-center justify-center gap-1.5 rounded-full bg-[#E1F5EE] text-[#0F6E56] text-sm font-medium px-4 py-2.5 shadow-sm hover:shadow active:scale-[0.99] transition">
           📋 Resumo do pedido{qtdProdutos > 0 ? ` · ${qtdProdutos} ${qtdProdutos === 1 ? "produto" : "produtos"}` : ""}
         </button>
-        <div className="border-t border-gray-100 p-3">
+        <div className="border-t border-gray-100 p-3 shrink-0">
           {/* tray de anexos */}
           {(anexos.length > 0 || subindo) && (
             <div className="flex flex-wrap gap-2 mb-2">
@@ -318,18 +380,22 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
             </div>
           )}
           <div className="flex items-end gap-2">
-            <label className={"shrink-0 h-11 w-11 rounded-full border border-gray-300 flex items-center justify-center cursor-pointer hover:bg-gray-50 " + (totalFotos >= MAX_FOTOS ? "opacity-40 pointer-events-none" : "")} aria-label="Anexar fotos" title="Anexar fotos do que você quer produzir">
+            <label onPointerDown={(e) => e.preventDefault()} className={"shrink-0 h-11 w-11 rounded-full border border-gray-300 flex items-center justify-center cursor-pointer hover:bg-gray-50 " + (totalFotos >= MAX_FOTOS ? "opacity-40 pointer-events-none" : "")} aria-label="Anexar fotos" title="Anexar fotos do que você quer produzir">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
               <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onAnexar(e)} />
             </label>
             <textarea
-              value={input} onChange={(e) => setInput(e.target.value)}
+              ref={inputRef}
+              value={input} onChange={(e) => { setInput(e.target.value); autoSize(); }}
+              onFocus={aoFocarInput}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void enviar(); } }}
               onPaste={(e) => void onColar(e)}
               rows={1} placeholder="Escreva ou cole uma foto aqui…" enterKeyHint="send"
-              className="flex-1 resize-none border border-gray-300 rounded-xl px-3 py-2.5 text-[16px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75] max-h-28"
+              autoCapitalize="sentences" autoCorrect="on" spellCheck
+              style={{ scrollbarWidth: "none" }}
+              className="flex-1 resize-none border border-gray-300 rounded-xl px-3 py-2.5 text-base text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75] max-h-28 overflow-y-auto [&::-webkit-scrollbar]:hidden"
             />
-            <button type="button" onClick={() => void enviar()} disabled={enviando || (!input.trim() && anexos.length === 0)}
+            <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => void enviar()} disabled={enviando || (!input.trim() && anexos.length === 0)}
               className="shrink-0 h-11 w-11 rounded-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-40 text-white flex items-center justify-center" aria-label="Enviar">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4Z" /></svg>
             </button>
