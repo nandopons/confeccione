@@ -298,6 +298,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
                   {l.total ? <span className="ml-auto text-xs text-gray-500">{l.total} un.</span> : null}
                 </div>
                 {l.material && <p className="text-[11px] text-gray-500 mt-0.5">Tecido: {l.material}</p>}
+                {l.publico && <p className="text-[11px] text-gray-500 mt-0.5">Público: {({ feminino: "Feminino", masculino: "Masculino", infantil: "Infantil", unissex: "Unissex" } as Record<string, string>)[l.publico] ?? l.publico}</p>}
                 {l.tamanhos.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {l.tamanhos.map((t, j) => (
