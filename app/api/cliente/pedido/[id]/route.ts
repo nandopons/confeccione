@@ -50,7 +50,9 @@ async function pedidoDoCliente(id: string, contaId: string) {
   return data;
 }
 
-// PATCH /api/cliente/pedido/[id] — edita o pedido (só enquanto buscando_fornecedor).
+// PATCH /api/cliente/pedido/[id] — edita o pedido (buscando ou em negociação;
+// concluído fica travado).
+const STATUS_EDITAVEL = ['buscando_fornecedor', 'em_negociacao'];
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -61,8 +63,8 @@ export async function PATCH(
   const { id } = await params;
   const pedido = await pedidoDoCliente(id, contaId);
   if (!pedido) return Response.json({ error: 'Pedido não encontrado' }, { status: 404 });
-  if (pedido.status !== 'buscando_fornecedor') {
-    return Response.json({ error: 'Só dá pra editar enquanto procura uma confecção' }, { status: 409 });
+  if (!STATUS_EDITAVEL.includes(pedido.status)) {
+    return Response.json({ error: 'Não dá pra editar um pedido concluído' }, { status: 409 });
   }
 
   let body: { tipo?: unknown; quantidade?: unknown; estado?: unknown; prazo?: unknown; descricao?: unknown };
