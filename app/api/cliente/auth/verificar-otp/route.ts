@@ -29,7 +29,7 @@ import {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export async function POST(req: Request) {
-  let body: { email?: string; codigo?: string }
+  let body: { email?: string; codigo?: string; client?: string }
   try {
     body = await req.json()
   } catch {
@@ -146,5 +146,12 @@ export async function POST(req: Request) {
     maxAge: SESSAO_DURACAO_DIAS * 24 * 60 * 60,
   })
 
-  return NextResponse.json({ ok: true })
+  // 8. App mobile não usa cookie: quando sinalizado (header X-Client: mobile OU
+  //    body { client: 'mobile' }), devolve TAMBÉM o token cru. Mesmo token já
+  //    setado no cookie — sem nova sessão. Sem o sinal, resposta idêntica à web.
+  const ehMobile =
+    req.headers.get('x-client')?.toLowerCase() === 'mobile' ||
+    (body.client ?? '').toLowerCase() === 'mobile'
+
+  return NextResponse.json(ehMobile ? { ok: true, token } : { ok: true })
 }
