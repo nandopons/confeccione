@@ -12,6 +12,26 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { getContaAtual } from '@/app/lib/cliente-auth'
+import { getContaId } from '@/lib/mobileAuth'
+
+const PERFIL_COLS =
+  'id, nome, email, whatsapp, plano, cep, numero, complemento, logradouro, bairro, cidade, uf'
+
+// GET /api/cliente/perfil — dados do perfil do cliente logado (cookie ou Bearer).
+export async function GET(req: Request) {
+  const contaId = (await getContaAtual())?.id ?? (await getContaId(req))
+  if (!contaId) {
+    return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 })
+  }
+  const { data, error } = await supabaseAdmin
+    .from('contas_clientes')
+    .select(PERFIL_COLS)
+    .eq('id', contaId)
+    .maybeSingle()
+  if (error) return NextResponse.json({ erro: error.message }, { status: 500 })
+  if (!data) return NextResponse.json({ erro: 'Conta não encontrada' }, { status: 404 })
+  return NextResponse.json(data)
+}
 
 const NOME_MAX = 100
 const CEP_MAX = 9
@@ -30,8 +50,9 @@ const CAMPOS_ENDERECO: Array<{ chave: string; max: number }> = [
 ]
 
 export async function POST(req: Request) {
-  const conta = await getContaAtual()
-  if (!conta) {
+  // cookie (web) com fallback no Bearer (app mobile)
+  const contaId = (await getContaAtual())?.id ?? (await getContaId(req))
+  if (!contaId) {
     return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 })
   }
 
@@ -114,7 +135,7 @@ export async function POST(req: Request) {
   const { data: contaAtualizada, error } = await supabaseAdmin
     .from('contas_clientes')
     .update(atualizacao)
-    .eq('id', conta.id)
+    .eq('id', contaId)
     .select('*')
     .single()
 
