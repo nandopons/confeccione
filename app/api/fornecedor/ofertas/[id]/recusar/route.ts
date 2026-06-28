@@ -17,6 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getFornecedorAtual } from '@/app/lib/auth-server'
+import { getFornecedorSessao } from '@/lib/mobileAuth'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
 import { processarProximaAgendadaSeHouver } from '@/app/lib/fila'
@@ -27,11 +28,11 @@ const supabase = createClient(
 )
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // 1. Autenticação
-  const fornecedor = await getFornecedorAtual()
+  // 1. Autenticação — cookie (web) com fallback no Bearer (app mobile).
+  const fornecedor = (await getFornecedorAtual()) ?? (await getFornecedorSessao(req))
   if (!fornecedor) {
     return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 })
   }

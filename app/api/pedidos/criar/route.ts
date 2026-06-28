@@ -4,6 +4,7 @@ import { criarEDispararOferta } from '@/app/lib/ofertas'
 import { emailConfirmacaoCliente } from '@/app/lib/email'
 import { normalizarWhatsApp, validarWhatsApp } from '@/app/lib/phone'
 import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
+import { getContaSessao } from '@/lib/mobileAuth'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
 import { loginComEmailUrl } from '@/app/lib/url'
@@ -18,8 +19,9 @@ export async function POST(req: Request) {
   const body = await req.json()
 
   // Cliente autenticado (sessão): dados pessoais vêm da conta, não do body.
-  // Anônimo (home): conta = null → comportamento original intacto.
-  const conta = await getContaAtual()
+  // Cookie (web) com fallback no Bearer (app mobile). Anônimo (home, sem
+  // nenhum dos dois): conta = null → comportamento original intacto.
+  const conta = (await getContaAtual()) ?? (await getContaSessao(req))
 
   const tipo = body.tipo
   const quantidade = body.quantidade
