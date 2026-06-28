@@ -37,3 +37,84 @@ export async function GET(
 
   return Response.json({ ...pedido, fornecedor });
 }
+
+// Editar/excluir só são permitidos ANTES de uma confecção aceitar — depois mudaria
+// (ou apagaria) um acordo já em andamento.
+async function pedidoDoCliente(id: string, contaId: string) {
+  const { data } = await supabaseAdmin
+    .from('pedidos')
+    .select('id, status')
+    .eq('id', id)
+    .eq('conta_id', contaId)
+    .maybeSingle();
+  return data;
+}
+
+// PATCH /api/cliente/pedido/[id] — edita o pedido (só enquanto buscando_fornecedor).
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const contaId = await getContaId(req);
+  if (!contaId) return unauthorized();
+
+  const { id } = await params;
+  const pedido = await pedidoDoCliente(id, contaId);
+  if (!pedido) return Response.json({ error: 'Pedido não encontrado' }, { status: 404 });
+  if (pedido.status !== 'buscando_fornecedor') {
+    return Response.json({ error: 'Só dá pra editar enquanto procura uma confecção' }, { status: 409 });
+  }
+
+  let body: { tipo?: unknown; quantidade?: unknown; estado?: unknown; prazo?: unknown; descricao?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: 'payload inválido' }, { status: 400 });
+  }
+
+  const upd: Record<string, unknown> = {};
+  if (typeof body.tipo === 'string' && body.tipo.trim()) upd.tipo = body.tipo.trim();
+  if (typeof body.quantidade === 'number' && body.quantidade > 0) upd.quantidade = body.quantidade;
+  if (typeof body.estado === 'string' && body.estado.trim()) upd.estado = body.estado.trim().toUpperCase().slice(0, 2);
+  if (typeof body.prazo === 'string' && body.prazo.trim()) upd.prazo = body.prazo.trim();
+  if ('descricao' in body) upd.descricao = body.descricao ? String(body.descricao).trim() : null;
+
+  if (Object.keys(upd).length === 0) {
+    return Response.json({ error: 'Nada para atualizar' }, { status: 400 });
+  }
+
+  const { error } = await supabaseAdmin
+    .from('pedidos')
+    .update(upd)
+    .eq('id', id)
+    .eq('conta_id', contaId);
+
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+  return Response.json({ ok: true });
+}
+
+// DELETE /api/cliente/pedido/[id] — exclui o pedido (só enquanto buscando_fornecedor).
+// Ofertas e mensagens saem por ON DELETE CASCADE.
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const contaId = await getContaId(req);
+  if (!contaId) return unauthorized();
+
+  const { id } = await params;
+  const pedido = await pedidoDoCliente(id, contaId);
+  if (!pedido) return Response.json({ error: 'Pedido não encontrado' }, { status: 404 });
+  if (pedido.status !== 'buscando_fornecedor') {
+    return Response.json({ error: 'Não dá pra excluir um pedido que já tem confecção' }, { status: 409 });
+  }
+
+  const { error } = await supabaseAdmin
+    .from('pedidos')
+    .delete()
+    .eq('id', id)
+    .eq('conta_id', contaId);
+
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+  return Response.json({ ok: true });
+}
