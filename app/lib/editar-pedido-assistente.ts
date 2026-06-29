@@ -13,6 +13,7 @@ type Linha = {
   material: string | null;
   total: number;
   tamanhos: TamanhoQtd[];
+  publico: string | null;
   estampado: boolean;
   estampas: string[];
   acabamentos: string[];
@@ -46,6 +47,7 @@ function limparLinha(raw: unknown): Linha | null {
     material: str(o.material),
     total: tamanhos.reduce((s, t) => s + t.qtd, 0),
     tamanhos,
+    publico: str(o.publico),
     estampado: !!o.estampado,
     estampas: strArr(o.estampas),
     acabamentos: strArr(o.acabamentos),
