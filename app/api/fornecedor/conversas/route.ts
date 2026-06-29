@@ -1,4 +1,5 @@
 import { getFornecedorId, unauthorized, supabaseAdmin } from '@/lib/mobileAuth';
+import { primeiroNome } from '@/app/lib/nome';
 
 // GET /api/fornecedor/conversas — só os pedidos ACEITOS por este fornecedor que
 // já têm mensagem (chat iniciado), com prévia da última mensagem.
@@ -41,7 +42,7 @@ export async function GET(req: Request) {
 
   const { data: pedidos } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, categoria, linhas')
+    .select('id, categoria, nome, uf, cidade, linhas')
     .in('id', comChat);
   const pById = new Map((pedidos ?? []).map((p) => [p.id, p]));
 
@@ -53,6 +54,9 @@ export async function GET(req: Request) {
       return {
         pedido_id: pid,
         categoria: p?.categoria ?? null,
+        cliente_nome: primeiroNome(p?.nome ?? '') || null, // só 1º nome (contato completo segue protegido até o pagamento)
+        cidade: p?.cidade ?? null,
+        uf: p?.uf ?? null,
         n_modelos: linhas.length,
         total_pecas: linhas.reduce((s, l) => s + (l.total ?? 0), 0),
         ultima_msg: previa(m),
