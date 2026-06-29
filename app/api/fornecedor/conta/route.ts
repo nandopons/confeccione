@@ -1,6 +1,8 @@
 import { getFornecedorId, unauthorized, supabaseAdmin } from '@/lib/mobileAuth';
+import { getPortfolio } from '@/app/lib/portfolio-fornecedor';
 
-// GET /api/fornecedor/conta — plano, cota e gating do fornecedor logado.
+// GET /api/fornecedor/conta — perfil/vitrine do fornecedor logado.
+//   (Sem plano/créditos — monetização é por comissão no pedido.)
 export async function GET(req: Request) {
   const fornecedorId = await getFornecedorId(req);
   if (!fornecedorId) return unauthorized();
@@ -8,7 +10,7 @@ export async function GET(req: Request) {
   const { data: f, error } = await supabaseAdmin
     .from('leads_fornecedores')
     .select(
-      'id, nome, cidade, estado, plano, plano_expira_em, creditos_extras, aprovacao_status, pausado_em',
+      'id, nome, cidade, estado, cep, cpf_cnpj, whatsapp, instagram, site, descricao_livre, aprovacao_status, pausado_em',
     )
     .eq('id', fornecedorId)
     .maybeSingle();
@@ -16,18 +18,62 @@ export async function GET(req: Request) {
   if (error) return Response.json({ error: error.message }, { status: 500 });
   if (!f) return Response.json({ error: 'Fornecedor não encontrado' }, { status: 404 });
 
-  // Soma dos créditos avulsos ainda disponíveis e não expirados (FIFO no consumo).
-  const { data: creditos } = await supabaseAdmin
-    .from('creditos_avulsos')
-    .select('quantidade_disponivel, expira_em, esgotado_em')
-    .eq('fornecedor_id', fornecedorId)
-    .is('esgotado_em', null)
-    .gt('expira_em', new Date().toISOString());
+  const portfolio = await getPortfolio(fornecedorId);
 
-  const creditos_avulsos_disponiveis = (creditos ?? []).reduce(
-    (sum: number, c: any) => sum + (c.quantidade_disponivel ?? 0),
-    0,
-  );
+  return Response.json({
+    id: f.id,
+    nome: f.nome,
+    cidade: f.cidade,
+    estado: f.estado,
+    cnpj: f.cpf_cnpj,
+    cep: f.cep,
+    whatsapp: f.whatsapp,
+    instagram: f.instagram,
+    site: f.site,
+    descricao: f.descricao_livre,
+    aprovacao_status: f.aprovacao_status,
+    pausado_em: f.pausado_em,
+    portfolio,
+  });
+}
 
-  return Response.json({ ...f, creditos_avulsos_disponiveis });
+// PATCH /api/fornecedor/conta — atualiza o perfil/vitrine.
+// Aceita { nome?, cnpj?, whatsapp?, instagram?, site?, descricao? }.
+const CAMPOS: Record<string, string> = {
+  nome: 'nome',
+  whatsapp: 'whatsapp',
+  instagram: 'instagram',
+  site: 'site',
+  cnpj: 'cpf_cnpj',
+  cep: 'cep',
+  descricao: 'descricao_livre',
+};
+
+export async function PATCH(req: Request) {
+  const fornecedorId = await getFornecedorId(req);
+  if (!fornecedorId) return unauthorized();
+
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: 'payload inválido' }, { status: 400 });
+  }
+
+  const update: Record<string, string> = {};
+  for (const [campo, coluna] of Object.entries(CAMPOS)) {
+    const v = body[campo];
+    if (typeof v === 'string') update[coluna] = v.trim();
+  }
+  if (Object.keys(update).length === 0) {
+    return Response.json({ error: 'nada para atualizar' }, { status: 400 });
+  }
+
+  const { error } = await supabaseAdmin
+    .from('leads_fornecedores')
+    .update(update)
+    .eq('id', fornecedorId);
+
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+  return Response.json({ ok: true });
 }

@@ -1,4 +1,4 @@
-import { getContaId, unauthorized, supabaseAdmin } from '@/lib/mobileAuth';
+import { getFornecedorId, unauthorized, supabaseAdmin } from '@/lib/mobileAuth';
 import {
   MENSAGEM_SELECT,
   type MensagemRow,
@@ -6,25 +6,22 @@ import {
   publicarMensagens,
 } from '@/app/lib/mensagens-anexos';
 
-// Chat in-app do pedido (lado CLIENTE).
-//   GET  → lista as mensagens do pedido (cliente + fornecedor), com URL assinada
-//          curta pra cada anexo (áudio/imagem/arquivo).
-//   POST → envia uma mensagem como cliente. Aceita:
-//            • JSON  { conteudo }                     → mensagem de texto
-//            • multipart/form-data { file, tipo?, conteudo?, duracao_ms? }
-//              → mensagem de mídia (áudio/imagem/arquivo)
-// Só libera quando o pedido é do cliente logado E já tem fornecedor (em
-// negociação/concluído) — antes do aceite não há com quem conversar.
+// Chat in-app do pedido (lado FORNECEDOR).
+//   GET  → lista as mensagens do pedido (cliente + fornecedor), com URL assinada.
+//   POST → envia mensagem como fornecedor. JSON { conteudo } (texto) ou
+//          multipart { file, tipo?, conteudo?, duracao_ms? } (mídia).
+// Só libera se o pedido foi ACEITO por este fornecedor (fornecedor_aceito_id) e
+// está em negociação/concluído. Espelha o lado cliente trocando auth + autor.
 
 const STATUS_COM_CONVERSA = ['em_negociacao', 'concluido'];
 const CONTEUDO_MAX = 2000;
 
-async function pedidoDoCliente(id: string, contaId: string) {
+async function pedidoDoFornecedor(id: string, fornecedorId: string) {
   const { data } = await supabaseAdmin
     .from('pedidos')
-    .select('id, conta_id, status, fornecedor_aceito_id')
+    .select('id, status, fornecedor_aceito_id')
     .eq('id', id)
-    .eq('conta_id', contaId)
+    .eq('fornecedor_aceito_id', fornecedorId)
     .maybeSingle();
   return data;
 }
@@ -33,14 +30,14 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const contaId = await getContaId(req);
-  if (!contaId) return unauthorized();
+  const fornecedorId = await getFornecedorId(req);
+  if (!fornecedorId) return unauthorized();
 
   const { id } = await params;
-  const pedido = await pedidoDoCliente(id, contaId);
+  const pedido = await pedidoDoFornecedor(id, fornecedorId);
   if (!pedido) return Response.json({ error: 'Pedido não encontrado' }, { status: 404 });
   if (!STATUS_COM_CONVERSA.includes(pedido.status)) {
-    return Response.json({ error: 'A conversa abre quando uma confecção aceita o pedido' }, { status: 409 });
+    return Response.json({ error: 'Conversa indisponível' }, { status: 409 });
   }
 
   const { data, error } = await supabaseAdmin
@@ -57,24 +54,21 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const contaId = await getContaId(req);
-  if (!contaId) return unauthorized();
+  const fornecedorId = await getFornecedorId(req);
+  if (!fornecedorId) return unauthorized();
 
   const { id } = await params;
-  const pedido = await pedidoDoCliente(id, contaId);
+  const pedido = await pedidoDoFornecedor(id, fornecedorId);
   if (!pedido) return Response.json({ error: 'Pedido não encontrado' }, { status: 404 });
   if (!STATUS_COM_CONVERSA.includes(pedido.status)) {
-    return Response.json({ error: 'A conversa abre quando uma confecção aceita o pedido' }, { status: 409 });
+    return Response.json({ error: 'Conversa indisponível' }, { status: 409 });
   }
 
   const contentType = req.headers.get('content-type') ?? '';
-
-  // -------- mídia (multipart) --------
   if (contentType.includes('multipart/form-data')) {
-    return enviarMidia(req, id, 'cliente');
+    return enviarMidia(req, id, 'fornecedor');
   }
 
-  // -------- texto (JSON) --------
   let body: { conteudo?: string };
   try {
     body = await req.json();
@@ -89,7 +83,7 @@ export async function POST(
 
   const { data, error } = await supabaseAdmin
     .from('mensagens_pedido')
-    .insert({ pedido_id: id, autor: 'cliente', tipo: 'texto', conteudo })
+    .insert({ pedido_id: id, autor: 'fornecedor', tipo: 'texto', conteudo })
     .select(MENSAGEM_SELECT)
     .single();
 
