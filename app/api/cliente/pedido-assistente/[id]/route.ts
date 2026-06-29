@@ -1,4 +1,5 @@
 import { getContaId, unauthorized, supabaseAdmin } from '@/lib/mobileAuth';
+import { aplicarEdicaoLinhas, ORCAMENTO_BLOQUEADO } from '@/app/lib/editar-pedido-assistente';
 
 // GET /api/cliente/pedido-assistente/[id] — detalhe do pedido RICO (por modelo)
 // do cliente logado. Mapeia pedidos_assistente pro shape PedidoRico do app.
@@ -53,4 +54,25 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     orcamento,
     fornecedor: null,
   });
+}
+
+// PATCH /api/cliente/pedido-assistente/[id] — cliente dono edita as linhas/prazo
+// durante o alinhamento. Bloqueado depois do orçamento fechado (D2).
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const contaId = await getContaId(req);
+  if (!contaId) return unauthorized();
+
+  const { id } = await params;
+  const { data: p } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, orcamento_status')
+    .eq('id', id)
+    .eq('conta_id', contaId)
+    .maybeSingle();
+  if (!p) return Response.json({ error: 'Pedido não encontrado' }, { status: 404 });
+  if (ORCAMENTO_BLOQUEADO.has(p.orcamento_status ?? '')) {
+    return Response.json({ error: 'O orçamento já foi enviado — recuse o orçamento pra voltar a editar.' }, { status: 409 });
+  }
+
+  return aplicarEdicaoLinhas(req, id);
 }
