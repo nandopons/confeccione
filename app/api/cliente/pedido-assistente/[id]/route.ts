@@ -11,7 +11,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const { data: p, error } = await supabaseAdmin
     .from('pedidos_assistente')
     .select(
-      'id, codigo, categoria, status, criado_em, prazo_dias, linhas, cep, logradouro, numero, complemento, bairro, cidade, uf, orcamento_status, repasse_centavos, frete_centavos',
+      'id, codigo, categoria, status, criado_em, prazo_dias, linhas, cep, logradouro, numero, complemento, bairro, cidade, uf, orcamento_status, valor_centavos, repasse_centavos, frete_centavos, orcamento_itens',
     )
     .eq('id', id)
     .eq('conta_id', contaId)
@@ -20,9 +20,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (error) return Response.json({ error: error.message }, { status: 500 });
   if (!p) return Response.json({ error: 'Pedido não encontrado' }, { status: 404 });
 
+  // valor_centavos (coluna) = preço do cliente cobrado pelo ASAAS (líquido + Seguro 3%).
+  // itens = detalhamento por modelo + extras + seguro (quando há); null = orçamento antigo.
   const orcamento = p.orcamento_status
-    ? { status: p.orcamento_status, valor_centavos: p.repasse_centavos ?? null, frete_centavos: p.frete_centavos ?? null }
-    : { status: 'pendente', valor_centavos: null, frete_centavos: null };
+    ? { status: p.orcamento_status, valor_centavos: p.valor_centavos ?? p.repasse_centavos ?? null, frete_centavos: p.frete_centavos ?? null, itens: p.orcamento_itens ?? null }
+    : { status: 'pendente', valor_centavos: null, frete_centavos: null, itens: null };
 
   // Chat abre quando uma confecção aceitou o pedido.
   const { data: ofertaAceita } = await supabaseAdmin

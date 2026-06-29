@@ -23,7 +23,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const { data: p, error } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, nome, uf, cidade, cep, categoria, prazo_dias, status, orcamento_status, repasse_centavos, frete_centavos, linhas')
+    .select('id, nome, uf, cidade, cep, categoria, prazo_dias, status, orcamento_status, repasse_centavos, frete_centavos, orcamento_itens, linhas')
     .eq('id', id)
     .maybeSingle();
 
@@ -31,9 +31,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!p) return Response.json({ error: 'Pedido não encontrado' }, { status: 404 });
 
   const linhas: LinhaResumo[] = Array.isArray(p.linhas) ? p.linhas : [];
+  // Pro fornecedor, valor_centavos = repasse (LÍQUIDO que ele recebe). itens traz
+  // o detalhamento (produção por modelo + extras + frete, líquidos).
   const orcamento = p.orcamento_status
-    ? { status: p.orcamento_status, valor_centavos: p.repasse_centavos ?? null, frete_centavos: p.frete_centavos ?? null }
-    : { status: 'pendente', valor_centavos: null, frete_centavos: null };
+    ? { status: p.orcamento_status, valor_centavos: p.repasse_centavos ?? null, frete_centavos: p.frete_centavos ?? null, itens: p.orcamento_itens ?? null }
+    : { status: 'pendente', valor_centavos: null, frete_centavos: null, itens: null };
 
   return Response.json({
     pedido_id: p.id,
