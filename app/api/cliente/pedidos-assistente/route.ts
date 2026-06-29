@@ -1,5 +1,46 @@
 import { getContaId, unauthorized, supabaseAdmin } from '@/lib/mobileAuth';
 
+// Normaliza o status do pedido_assistente pro modelo de status do app
+// (buscando_fornecedor | em_negociacao | concluido).
+function statusApp(s: string | null): 'buscando_fornecedor' | 'em_negociacao' | 'concluido' {
+  if (s === 'em_alinhamento' || s === 'orcado' || s === 'completo') return 'em_negociacao';
+  if (s === 'fechado' || s === 'concluido') return 'concluido';
+  return 'buscando_fornecedor'; // buscando_fornecedor | confirmado | em_visualizacao | null
+}
+
+type LinhaResumo = { total?: number };
+
+// GET /api/cliente/pedidos-assistente — lista (resumo) dos pedidos ricos do cliente.
+export async function GET(req: Request) {
+  const contaId = await getContaId(req);
+  if (!contaId) return unauthorized();
+
+  const { data, error } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, codigo, categoria, status, criado_em, prazo_dias, linhas')
+    .eq('conta_id', contaId)
+    .neq('status', 'cancelado')
+    .order('criado_em', { ascending: false });
+
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+
+  const lista = (data ?? []).map((p) => {
+    const linhas: LinhaResumo[] = Array.isArray(p.linhas) ? p.linhas : [];
+    return {
+      id: p.id,
+      codigo: p.codigo ?? null,
+      categoria: p.categoria,
+      status: statusApp(p.status),
+      criado_em: p.criado_em,
+      prazo_dias: p.prazo_dias,
+      n_modelos: linhas.length,
+      total_pecas: linhas.reduce((s, l) => s + (l.total ?? 0), 0),
+    };
+  });
+
+  return Response.json(lista);
+}
+
 // POST /api/cliente/pedidos-assistente — cria um pedido RICO (por modelo) a
 // partir do app. Sem disparo de oferta: entra em "buscando_fornecedor" e o
 // match/chat/orçamento seguem o novo fluxo. Endereço/contato vêm da conta.
