@@ -1,5 +1,6 @@
 import { getFornecedorId, unauthorized, supabaseAdmin } from '@/lib/mobileAuth';
 import { primeiroNome } from '@/app/lib/nome';
+import { aplicarEdicaoLinhas, ORCAMENTO_BLOQUEADO } from '@/app/lib/editar-pedido-assistente';
 
 // GET /api/fornecedor/pedido-assistente/[id] — contexto do pedido pro fornecedor
 // que ACEITOU (resumo do pedido + norte no chat). Só PRIMEIRO NOME do cliente +
@@ -47,4 +48,33 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     orcamento,
     status: p.status,
   });
+}
+
+// PATCH /api/fornecedor/pedido-assistente/[id] — fornecedor que ACEITOU edita as
+// linhas/prazo durante o alinhamento. Bloqueado depois do orçamento fechado (D2).
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const fornecedorId = await getFornecedorId(req);
+  if (!fornecedorId) return unauthorized();
+
+  const { id } = await params;
+  const { data: oferta } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id')
+    .eq('pedido_id', id)
+    .eq('fornecedor_id', fornecedorId)
+    .eq('status', 'aceita')
+    .maybeSingle();
+  if (!oferta) return Response.json({ error: 'Você não está nesta negociação' }, { status: 409 });
+
+  const { data: p } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, orcamento_status')
+    .eq('id', id)
+    .maybeSingle();
+  if (!p) return Response.json({ error: 'Pedido não encontrado' }, { status: 404 });
+  if (ORCAMENTO_BLOQUEADO.has(p.orcamento_status ?? '')) {
+    return Response.json({ error: 'Orçamento já foi enviado — não dá pra editar o pedido agora.' }, { status: 409 });
+  }
+
+  return aplicarEdicaoLinhas(req, id);
 }
