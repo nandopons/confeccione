@@ -117,6 +117,7 @@ export async function enviarMidia(
   req: Request,
   pedidoId: string,
   autor: 'cliente' | 'fornecedor',
+  table: 'mensagens_pedido' | 'mensagens_pedido_assistente' = 'mensagens_pedido',
 ): Promise<Response> {
   let form: FormData
   try {
@@ -151,7 +152,7 @@ export async function enviarMidia(
   }
 
   const { data, error } = await supabaseAdmin
-    .from('mensagens_pedido')
+    .from(table)
     .insert({
       pedido_id: pedidoId,
       autor,

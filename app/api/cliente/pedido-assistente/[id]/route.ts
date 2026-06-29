@@ -23,7 +23,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     ? { status: p.orcamento_status, valor_centavos: p.repasse_centavos ?? null, frete_centavos: p.frete_centavos ?? null }
     : { status: 'pendente', valor_centavos: null, frete_centavos: null };
 
+  // Chat abre quando uma confecção aceitou o pedido.
+  const { data: ofertaAceita } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id')
+    .eq('pedido_id', id)
+    .eq('status', 'aceita')
+    .maybeSingle();
+
   return Response.json({
+    chat_aberto: !!ofertaAceita,
     id: p.id,
     codigo: p.codigo ?? null,
     categoria: p.categoria,
