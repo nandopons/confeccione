@@ -1,6 +1,6 @@
 import { getFornecedorId, unauthorized, supabaseAdmin } from '@/lib/mobileAuth';
 import { primeiroNome } from '@/app/lib/nome';
-import { aplicarEdicaoLinhas, ORCAMENTO_BLOQUEADO } from '@/app/lib/editar-pedido-assistente';
+import { aplicarEdicaoLinhas, STATUS_BLOQUEADO } from '@/app/lib/editar-pedido-assistente';
 
 // GET /api/fornecedor/pedido-assistente/[id] — contexto do pedido pro fornecedor
 // que ACEITOU (resumo do pedido + norte no chat). Só PRIMEIRO NOME do cliente +
@@ -68,13 +68,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const { data: p } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, orcamento_status')
+    .select('id, status, orcamento_status')
     .eq('id', id)
     .maybeSingle();
   if (!p) return Response.json({ error: 'Pedido não encontrado' }, { status: 404 });
-  if (ORCAMENTO_BLOQUEADO.has(p.orcamento_status ?? '')) {
-    return Response.json({ error: 'Orçamento já foi enviado — não dá pra editar o pedido agora.' }, { status: 409 });
+  if (STATUS_BLOQUEADO.has(p.status ?? '')) {
+    return Response.json({ error: 'Este pedido já foi finalizado.' }, { status: 409 });
   }
 
-  return aplicarEdicaoLinhas(req, id);
+  return aplicarEdicaoLinhas(req, id, p.orcamento_status);
 }

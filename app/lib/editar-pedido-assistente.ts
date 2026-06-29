@@ -1,8 +1,9 @@
 import { supabaseAdmin } from '@/lib/mobileAuth';
 
-// Estados de orçamento em que o pedido NÃO pode mais ser editado (D2): depois de
-// enviado/aceito/pago o pedido trava. Recusa volta pra 'recusado' → reabre edição.
-export const ORCAMENTO_BLOQUEADO = new Set(['definido', 'aceito', 'pago']);
+// Estados do PEDIDO em que ele NÃO pode mais ser editado: já finalizado ou
+// cancelado. Enquanto está em negociação (inclusive com orçamento 'definido'),
+// os dois lados seguem editando até fechar — editar reabre o orçamento.
+export const STATUS_BLOQUEADO = new Set(['completo', 'cancelado']);
 
 type TamanhoQtd = { tamanho: string; qtd: number };
 type Linha = {
@@ -64,9 +65,11 @@ function parsePrazo(v: unknown): number | null {
 
 /**
  * Aplica a edição de linhas/prazo num pedido_assistente. O caller já validou
- * permissão e gating de status — aqui só sanitiza o corpo e grava.
+ * permissão e gating de status — aqui só sanitiza o corpo e grava. Se as linhas
+ * mudaram e já havia orçamento 'definido', reabre o orçamento (mantém os valores
+ * como rascunho) pra não ficar um orçamento inconsistente com o pedido novo.
  */
-export async function aplicarEdicaoLinhas(req: Request, pedidoId: string): Promise<Response> {
+export async function aplicarEdicaoLinhas(req: Request, pedidoId: string, orcamentoStatusAtual?: string | null): Promise<Response> {
   let body: Record<string, unknown>;
   try {
     body = (await req.json()) as Record<string, unknown>;
@@ -81,6 +84,10 @@ export async function aplicarEdicaoLinhas(req: Request, pedidoId: string): Promi
     const linhas = body.linhas.map(limparLinha).filter((x): x is Linha => !!x);
     if (linhas.length === 0) return Response.json({ error: 'Inclua ao menos um modelo com quantidade.' }, { status: 400 });
     patch.linhas = linhas;
+    // Mexeu nos modelos depois de um orçamento fechado → reabre pra re-orçar.
+    if (orcamentoStatusAtual === 'definido') {
+      patch.orcamento_status = 'aguardando_fornecedor';
+    }
   }
 
   if ('prazo_dias' in body) {
