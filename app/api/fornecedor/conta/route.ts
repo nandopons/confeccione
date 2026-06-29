@@ -10,7 +10,7 @@ export async function GET(req: Request) {
   const { data: f, error } = await supabaseAdmin
     .from('leads_fornecedores')
     .select(
-      'id, nome, cidade, estado, cpf_cnpj, whatsapp, instagram, site, descricao_livre, aprovacao_status, pausado_em',
+      'id, nome, cidade, estado, cep, cpf_cnpj, whatsapp, instagram, site, descricao_livre, aprovacao_status, pausado_em',
     )
     .eq('id', fornecedorId)
     .maybeSingle();
@@ -26,6 +26,7 @@ export async function GET(req: Request) {
     cidade: f.cidade,
     estado: f.estado,
     cnpj: f.cpf_cnpj,
+    cep: f.cep,
     whatsapp: f.whatsapp,
     instagram: f.instagram,
     site: f.site,
@@ -44,6 +45,7 @@ const CAMPOS: Record<string, string> = {
   instagram: 'instagram',
   site: 'site',
   cnpj: 'cpf_cnpj',
+  cep: 'cep',
   descricao: 'descricao_livre',
 };
 
