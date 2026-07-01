@@ -109,7 +109,7 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
         <p className="text-sm text-gray-500 mt-1">
           {oferta.pago
             ? 'Pedido já pago. Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.'
-            : 'Ao assumir, VOCÊ define o orçamento final (produtos + frete). Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.'}
+            : 'Ao assumir, você recebe o contato do cliente na hora pra alinhar os detalhes — depois define o orçamento final (produtos + frete) pela plataforma. Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.'}
         </p>
       </div>
 
@@ -267,7 +267,7 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
               </button>
             </div>
             <p className="text-xs text-gray-400 mt-3 text-center">
-              Ao assumir, a Confeccione entra em contato com os detalhes de produção e entrega.
+              Ao assumir, você recebe o contato do cliente na hora pra alinhar os detalhes.
             </p>
           </>
         )}
@@ -284,12 +284,16 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
                 {(oferta.contatoCliente.cidade || oferta.contatoCliente.uf) && (
                   <p className="text-sm text-gray-700">📍 {[oferta.contatoCliente.cidade, oferta.contatoCliente.uf].filter(Boolean).join('/')}</p>
                 )}
+                {!oferta.pago && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-3 leading-snug">
+                    ⚠️ Alinhe os detalhes à vontade, mas o orçamento e o pagamento precisam ser feitos aqui na Confeccione — combinar por fora tira o suporte e a garantia de pagamento.
+                  </p>
+                )}
               </div>
             ) : (
               <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
-                <p className="text-sm text-amber-800">🔒 Os dados de contato do cliente são liberados <strong>após o pagamento</strong>. Defina o orçamento — assim que o cliente pagar, nome, telefone e e-mail aparecem aqui. Até lá, use o canal de perguntas (mediado pela Confeccione).</p>
                 {(localPedido || oferta.cep) && (
-                  <p className="text-sm text-amber-800 mt-1">📍 Destino do frete: <strong>{destinoFrete}</strong></p>
+                  <p className="text-sm text-amber-800">📍 Destino do frete: <strong>{destinoFrete}</strong></p>
                 )}
               </div>
             )}
@@ -309,7 +313,9 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
         )}
       </div>
 
-      {(status === 'ofertada' || status === 'aceita') && (
+      {/* Perguntas mediadas: só faz sentido ANTES do aceite — depois, o
+          contato direto (acima) substitui esse canal. */}
+      {status === 'ofertada' && (
         <PerguntasFornecedor ofertaId={oferta.ofertaId} />
       )}
 
