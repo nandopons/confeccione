@@ -68,6 +68,7 @@ export type PedidoVis = {
   frete_centavos?: number | null;
   pagamento_status?: string | null;
   fornecedor_nome?: string | null;
+  fornecedor_whatsapp?: string | null;
   codigo?: string | null;
   oferta_id?: string | null;
   fornecedor_portfolio?: PortfolioMidiaVis[];
@@ -1209,11 +1210,34 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             <p className="text-sm text-[#0F6E56] font-medium mt-3">Pagamento confirmado ✅ — pedido em produção.</p>
           )}
         </div>
+      ) : confirmadoEm && pedido.fornecedor_nome ? (
+        <div className="mt-6 bg-white border-2 border-[#1D9E75]/40 rounded-2xl shadow-sm p-5">
+          <p className="text-sm font-semibold text-gray-900">🏭 Fornecedor definido!</p>
+          <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">
+            <strong className="text-gray-900">{pedido.fornecedor_nome}</strong> vai atender seu pedido. Já pode combinar cores, prazos e detalhes direto por lá.
+          </p>
+          {pedido.fornecedor_whatsapp && (
+            <a
+              href={`https://wa.me/55${pedido.fornecedor_whatsapp.replace(/\D/g, "").replace(/^55/, "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 inline-flex items-center gap-2 bg-[#25D366] hover:brightness-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
+            >
+              💬 Falar no WhatsApp — {telBR(pedido.fornecedor_whatsapp)}
+            </a>
+          )}
+          <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            <p className="text-xs text-amber-800 leading-relaxed">
+              ⚠️ <strong>Importante:</strong> peça pro fornecedor lançar o orçamento e finalize o pagamento aqui pela Confeccione — nunca fora da plataforma. Assim a gente dá suporte ao seu pedido do início ao fim e garante seu dinheiro até você confirmar que recebeu tudo certinho.
+            </p>
+          </div>
+          {confirmadoMsg && <p className="text-[11px] text-[#0F6E56] bg-[#E1F5EE] rounded-lg px-3 py-2 mt-3">Resumo enviado pro seu e-mail. ✉️</p>}
+        </div>
       ) : confirmadoEm ? (
         <div className="mt-6 bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-2xl p-5">
           <p className="text-sm font-semibold text-[#0F6E56]">🔎 Pedido confirmado — buscando o fornecedor ideal</p>
           <p className="text-xs text-[#0F6E56]/80 mt-1.5 leading-relaxed">
-            Nosso time está selecionando o melhor fornecedor pras suas peças. Assim que ele preparar o <strong>orçamento final</strong> (produtos + frete), você recebe por <strong>e-mail e WhatsApp</strong> — e só paga se aprovar. Enquanto isso, pode continuar ajustando as artes por aqui.
+            Nosso time está selecionando o melhor fornecedor pras suas peças. Assim que alguém assumir, você recebe o contato pra alinhar os detalhes — e o <strong>orçamento final</strong> (produtos + frete) chega por <strong>e-mail e WhatsApp</strong>, e só paga se aprovar. Enquanto isso, pode continuar ajustando as artes por aqui.
           </p>
           {confirmadoMsg && <p className="text-[11px] text-[#0F6E56] bg-white/60 rounded-lg px-3 py-2 mt-3">Resumo enviado pro seu e-mail. ✉️</p>}
         </div>
