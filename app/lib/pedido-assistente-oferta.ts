@@ -5,19 +5,28 @@ import { pedidoTemListaAbertaIncompleta } from '@/app/lib/listas-externas'
 // ============================================================================
 // Oferta de pedidos CONFIRMADOS (pedidos_assistente) a fornecedores escolhidos
 // no admin. Modelo novo (jun/2026): o cliente confirma SEM preço; o fornecedor
-// que aceitar recebe o contato do cliente + um link pra DEFINIR O ORÇAMENTO
-// FINAL (líquido por produto + frete). O sistema converte pro preço do cliente
-// (+3% de taxa embutida), avisa o cliente por e-mail e WhatsApp, e a cobrança
-// só é gerada quando o cliente clica em pagar.
+// que aceitar recebe IMEDIATAMENTE o contato do cliente (e vice-versa) pra
+// alinhar os detalhes — e um link pra DEFINIR O ORÇAMENTO FINAL (líquido por
+// produto + frete) quando estiverem combinados. O sistema converte pro preço
+// do cliente (+3% de taxa embutida), avisa o cliente por e-mail e WhatsApp, e
+// a cobrança só é gerada quando o cliente clica em pagar.
 //
 // Compat: pedidos pagos do fluxo antigo também aparecem na fila (legado).
-// Privacidade: o contato do cliente NUNCA vai pro fornecedor antes do aceite.
+// Privacidade: o contato do cliente só vai pro fornecedor DEPOIS do aceite —
+// nunca antes (enquanto a oferta ainda está 'ofertada' pra outros fornecedores
+// também, ela é anônima). A partir do aceite, os dois lados recebem o
+// contato um do outro e são orientados a orçar/pagar pela Confeccione (jul/2026 —
+// decisão do Fernando: trocar contato no aceite em vez de só depois do
+// pagamento; a segurança contra desintermediação passa a ser o aviso, não
+// mais a barreira técnica). O canal "Perguntas mediadas" (perguntas_oferta)
+// continua existindo só ENQUANTO a oferta está 'ofertada' — depois do aceite
+// o contato direto substitui.
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
 import { enviarMensagem } from './zapi'
 import { SITE_URL, ofertaFornecedorUrl } from './url'
-import { emailOfertaPedidoAssistente } from './email'
+import { emailOfertaPedidoAssistente, emailFornecedorDefinido } from './email'
 import { enviarEmailOrcamentoFinal } from './email-pedido'
 import { atualizarValorCobrancaPix } from './pedido-pagamento'
 import { calcularOrcamento, type PesquisaPreco } from './orcamento'
@@ -366,43 +375,85 @@ export async function ofertarPedido(
 }
 
 // ---------------------------------------------------------------------------
-// Aceite: notifica o fornecedor com o CONTATO DO CLIENTE + link do orçamento.
+// Aceite: troca os contatos NA HORA (cliente <-> fornecedor) pelos dois lados
+// e orienta a orçar/pagar pela Confeccione. Antes (até jul/2026) o contato do
+// cliente só era liberado após o pagamento — mudou por decisão do Fernando:
+// o fornecedor precisa poder alinhar detalhes com o cliente ANTES de montar o
+// orçamento. A proteção contra "combinar por fora" deixou de ser técnica
+// (esconder contato) e passou a ser o aviso explícito nas duas mensagens.
 // ---------------------------------------------------------------------------
-async function notificarFornecedorAceite(ofertaId: string, pedidoId: string, fornecedorId: string): Promise<void> {
+async function notificarAceiteEContatos(ofertaId: string, pedidoId: string, fornecedorId: string): Promise<void> {
   try {
     const [{ data: forn }, { data: pedido }] = await Promise.all([
       supabaseAdmin.from('leads_fornecedores').select('nome, whatsapp').eq('id', fornecedorId).maybeSingle<{ nome: string | null; whatsapp: string | null }>(),
       supabaseAdmin.from('pedidos_assistente').select('nome, telefone, email, cidade, uf, cep, pagamento_status').eq('id', pedidoId).maybeSingle<{ nome: string | null; telefone: string | null; email: string | null; cidade: string | null; uf: string | null; cep: string | null; pagamento_status: string | null }>(),
     ])
-    if (!forn?.whatsapp || !pedido) return
+    if (!pedido) return
 
+    const pago = pedido.pagamento_status === 'pago'
     const linkOrcamento = `${SITE_URL}/fornecedor/oferta/${ofertaId}/orcamento`
     const local = [pedido.cidade, pedido.uf].filter(Boolean).join('/')
     const destino = [local, pedido.cep ? `CEP ${pedido.cep}` : ''].filter(Boolean).join(' — ')
-    const mensagem = pedido.pagamento_status === 'pago'
-      ? `🎉 *Pedido assumido!*\n\n✅ Este pedido já está pago — pode iniciar a produção. Os dados de contato do cliente já estão liberados na página do pedido.`
-      : (
+
+    // → para o FORNECEDOR: contato do cliente na hora.
+    if (forn?.whatsapp) {
+      const msg =
         `🎉 *Pedido assumido!*\n\n` +
-        `Você assumiu este pedido.` +
-        (destino ? `\n📍 Destino do frete: ${destino} (use pra calcular o frete)` : '') +
-        `\n\n💰 *Agora defina o orçamento final* (seu valor por produto + frete). O cliente recebe pra aprovar e pagar:\n${linkOrcamento}` +
-        `\n\n🔒 Os dados de contato do cliente são liberados *após o pagamento*.`
-      )
-    await enviarMensagem(forn.whatsapp, mensagem)
+        `Contato do cliente pra alinhar os detalhes:\n` +
+        `👤 ${pedido.nome ?? 'Cliente Confeccione'}\n` +
+        (pedido.telefone ? `📱 ${telBR(pedido.telefone)}\n` : '') +
+        (pedido.email ? `✉️ ${pedido.email}\n` : '') +
+        (destino ? `📍 ${destino}\n` : '') +
+        (pago
+          ? `\n✅ Este pedido já está pago — pode iniciar a produção assim que combinar os detalhes.`
+          : `\n💰 Depois de alinhar, *defina o orçamento final* (produtos + frete) aqui — é assim que o cliente paga com segurança pela Confeccione:\n${linkOrcamento}\n\n⚠️ Reforce com o cliente: o orçamento e o pagamento precisam ser feitos pela plataforma. Combinar e cobrar por fora tira o suporte e a garantia de pagamento da Confeccione (e é contra os termos de uso).`)
+      await enviarMensagem(forn.whatsapp, msg)
+    }
+
+    // → para o CLIENTE: contato do fornecedor + aviso de segurança (WhatsApp).
+    if (pedido.telefone && forn) {
+      const msg =
+        `🧵 *Confeccione — fornecedor definido!*\n\n` +
+        `Quem vai atender seu pedido:\n` +
+        `🏭 ${forn.nome ?? 'Confecção parceira'}\n` +
+        (forn.whatsapp ? `📱 ${telBR(forn.whatsapp)}\n` : '') +
+        `\nVocê já pode combinar os detalhes (cores, prazos, dúvidas) direto com a confecção.\n\n` +
+        (pago
+          ? `✅ Seu pagamento já está confirmado e garantido pela Confeccione até você aprovar o recebimento.`
+          : `⚠️ *Importante:* peça pro fornecedor lançar o orçamento e finalize o pagamento aqui pela Confeccione — não fora da plataforma. Assim a gente dá suporte ao seu pedido do início ao fim e garante seu dinheiro até você confirmar que recebeu tudo certinho.`)
+      await enviarMensagem(pedido.telefone, msg)
+    }
+    if (pedido.email && forn) {
+      try {
+        await emailFornecedorDefinido({
+          email: pedido.email,
+          nome: pedido.nome,
+          fornecedorNome: forn.nome,
+          fornecedorWhatsapp: forn.whatsapp,
+          pago,
+          link: `${SITE_URL}/visualizador/${pedidoId}`,
+        })
+      } catch (e) {
+        console.error('[oferta] e-mail de fornecedor definido falhou', pedidoId, e)
+      }
+    }
   } catch (e) {
     console.error('[oferta] notificação de aceite falhou', ofertaId, e)
   }
 }
 
-// Pedido PAGO → revela os contatos dos dois lados (cliente <-> fornecedor),
-// um pra cada via WhatsApp. Só aqui os dados pessoais são trocados.
+// Pedido PAGO (transição, via webhook ASAAS) → hoje os contatos já foram
+// trocados no ACEITE (ver notificarAceiteEContatos acima); esta função só
+// confirma o pagamento pros dois lados e libera a produção — não repete os
+// dados de contato (já conhecidos). Mantida como função separada porque o
+// gatilho (transição pra 'pago') é diferente do gatilho de aceite.
 export async function revelarContatosPedidoPago(pedidoId: string): Promise<void> {
   try {
     const { data: pedido } = await supabaseAdmin
       .from('pedidos_assistente')
-      .select('id, nome, telefone, email, cidade, uf')
+      .select('id, nome, telefone')
       .eq('id', pedidoId)
-      .maybeSingle<{ id: string; nome: string | null; telefone: string | null; email: string | null; cidade: string | null; uf: string | null }>()
+      .maybeSingle<{ id: string; nome: string | null; telefone: string | null }>()
     if (!pedido) return
 
     const { data: oferta } = await supabaseAdmin
@@ -412,33 +463,22 @@ export async function revelarContatosPedidoPago(pedidoId: string): Promise<void>
       .eq('status', 'aceita')
       .maybeSingle<{ id: string; leads_fornecedores: { nome: string | null; whatsapp: string | null } | null }>()
     const forn = oferta?.leads_fornecedores ?? null
-    const local = [pedido.cidade, pedido.uf].filter(Boolean).join('/')
 
-    // → para o FORNECEDOR: contato do cliente + libera produção
+    // → para o FORNECEDOR: libera produção (contato já tinha sido enviado no aceite).
     if (forn?.whatsapp) {
-      const msg =
-        `✅ *Pagamento confirmado!*\n\n` +
-        `O cliente pagou — *pode iniciar a produção*.\n\n` +
-        `Contato do cliente pra combinar produção e entrega:\n` +
-        `👤 ${pedido.nome ?? 'Cliente Confeccione'}\n` +
-        (pedido.telefone ? `📱 ${telBR(pedido.telefone)}\n` : '') +
-        (pedido.email ? `✉️ ${pedido.email}\n` : '') +
-        (local ? `📍 ${local}` : '')
+      const msg = `✅ *Pagamento confirmado!*\n\nO cliente pagou — *pode iniciar a produção*. Qualquer coisa, o contato do cliente já está com você desde que assumiu o pedido.`
       await enviarMensagem(forn.whatsapp, msg)
     }
 
-    // → para o CLIENTE: quem vai produzir + contato do fornecedor
+    // → para o CLIENTE: confirma pagamento (contato do fornecedor já tinha ido no aceite).
     if (pedido.telefone && forn) {
       const msg =
         `✅ *Pagamento confirmado!*\n\n` +
-        `Quem vai produzir o seu pedido:\n` +
-        `🏭 ${forn.nome ?? 'Confecção parceira'}\n` +
-        (forn.whatsapp ? `📱 ${telBR(forn.whatsapp)}\n` : '') +
-        `\nVocê pode combinar os detalhes direto com a confecção. O pagamento fica garantido pela Confeccione até você confirmar o recebimento. 💚`
+        `*${forn.nome ?? 'A confecção'}* já pode iniciar a produção do seu pedido. O pagamento fica garantido pela Confeccione até você confirmar o recebimento. 💚`
       await enviarMensagem(pedido.telefone, msg)
     }
   } catch (e) {
-    console.error('[oferta] revelar contatos (pago) falhou', pedidoId, e)
+    console.error('[oferta] confirmação de pagamento falhou', pedidoId, e)
   }
 }
 
@@ -486,7 +526,7 @@ export async function definirStatusOferta(
         .eq('id', oferta.pedido_id)
     }
 
-    await notificarFornecedorAceite(ofertaId, oferta.pedido_id, oferta.fornecedor_id)
+    await notificarAceiteEContatos(ofertaId, oferta.pedido_id, oferta.fornecedor_id)
   }
 
   return { ok: true }
@@ -688,7 +728,9 @@ export async function carregarOfertaParaFornecedor(
     bairro: pedido.bairro ?? null,
     pago: pedido.pagamento_status === 'pago',
     orcamentoStatus: pedido.orcamento_status ?? null,
-    contatoCliente: pedido.pagamento_status === 'pago'
+    // Contato liberado assim que a oferta é aceita (não depende mais do
+    // pagamento) — decisão jul/2026, ver comentário no topo do arquivo.
+    contatoCliente: aceita
       ? { nome: pedido.nome, telefone: pedido.telefone, email: pedido.email, cidade: pedido.cidade, uf: pedido.uf }
       : null,
     linkOrcamento: aceita ? `/fornecedor/oferta/${oferta.id}/orcamento` : null,

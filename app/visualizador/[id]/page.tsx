@@ -60,18 +60,21 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     }
   }
 
-  // Fornecedor da oferta aceita (mostrado no orçamento final).
+  // Fornecedor da oferta aceita — mostrado assim que aceita (contato pra
+  // alinhar detalhes) e depois no orçamento final.
   let fornecedorNome: string | null = null
+  let fornecedorWhatsapp: string | null = null
   let ofertaId: string | null = null
   let fornecedorPortfolio: unknown[] = []
   if (pedido) {
     const { data: oferta } = await supabase
       .from('ofertas_pedido_assistente')
-      .select('id, status, portfolio_midias, leads_fornecedores(nome)')
+      .select('id, status, portfolio_midias, leads_fornecedores(nome, whatsapp)')
       .eq('pedido_id', pedido.id)
       .eq('status', 'aceita')
-      .maybeSingle<{ id: string; status: string; portfolio_midias: unknown[] | null; leads_fornecedores: { nome: string | null } | null }>()
+      .maybeSingle<{ id: string; status: string; portfolio_midias: unknown[] | null; leads_fornecedores: { nome: string | null; whatsapp: string | null } | null }>()
     fornecedorNome = oferta?.leads_fornecedores?.nome ?? null
+    fornecedorWhatsapp = oferta?.leads_fornecedores?.whatsapp ?? null
     ofertaId = oferta?.id ?? null
     fornecedorPortfolio = Array.isArray(oferta?.portfolio_midias) ? oferta!.portfolio_midias : []
   }
@@ -90,7 +93,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           </Link>
         </div>
       ) : (
-        <VisualizadorCliente pedido={{ ...(pedido as PedidoVis), fornecedor_nome: fornecedorNome, oferta_id: ofertaId, fornecedor_portfolio: fornecedorPortfolio as PedidoVis['fornecedor_portfolio'] }} />
+        <VisualizadorCliente pedido={{ ...(pedido as PedidoVis), fornecedor_nome: fornecedorNome, fornecedor_whatsapp: fornecedorWhatsapp, oferta_id: ofertaId, fornecedor_portfolio: fornecedorPortfolio as PedidoVis['fornecedor_portfolio'] }} />
       )}
       <SiteFooter />
     </main>

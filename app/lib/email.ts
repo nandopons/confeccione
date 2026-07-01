@@ -776,6 +776,59 @@ ${SITE_URL}`
   await enviarEmail({ to: params.email, subject, html, text })
 }
 
+// ─── Fornecedor definido (aceite): notifica o CLIENTE com o contato do
+// fornecedor + aviso reforçado de orçar/pagar pela Confeccione. Enviado no
+// mesmo momento que a oferta é aceita — não espera o pagamento.
+export async function emailFornecedorDefinido(params: {
+  email: string
+  nome: string | null
+  fornecedorNome: string | null
+  fornecedorWhatsapp: string | null
+  pago: boolean
+  link: string
+}): Promise<void> {
+  const nome = escapeHtml(params.nome || 'tudo bem?')
+  const fornecedorNome = escapeHtml(params.fornecedorNome || 'Confecção parceira')
+  const whatsFmt = formatarWhatsappBR(params.fornecedorWhatsapp || '')
+  const subject = params.pago ? 'Seu fornecedor já foi definido — pedido em produção 🧵' : 'Seu fornecedor foi definido! Confira o contato 🧵'
+  const html = layout(
+    `
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">Oi, ${nome} 🧵</h1>
+    <p style="margin:0 0 16px;color:#555;line-height:1.5;">Um fornecedor assumiu o seu pedido na Confeccione. Você já pode combinar cores, prazos e detalhes direto com ele:</p>
+    <div style="background:#f6f8f7;border-left:3px solid #1D9E75;padding:14px 18px;margin:20px 0;border-radius:6px;">
+      <div style="color:#0F6E56;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-bottom:6px;">Quem vai produzir</div>
+      <div style="color:#1f2937;font-size:16px;font-weight:600;">${fornecedorNome}</div>
+      ${whatsFmt ? `<div style="color:#1f2937;font-size:15px;margin-top:4px;">📱 ${escapeHtml(whatsFmt)}</div>` : ''}
+    </div>
+    ${params.pago
+      ? `<p style="margin:0 0 16px;color:#0F6E56;font-weight:600;">✅ Seu pagamento já está confirmado e garantido pela Confeccione até você aprovar o recebimento.</p>`
+      : `<div style="background:#fff8e6;border-left:3px solid #d97706;padding:14px 18px;margin:20px 0;border-radius:6px;">
+          <p style="margin:0;color:#92400e;font-size:14px;line-height:1.6;"><strong>Importante:</strong> peça pro fornecedor lançar o orçamento e finalize o pagamento aqui pela Confeccione — nunca fora da plataforma. Assim a gente dá suporte ao seu pedido do início ao fim e garante seu dinheiro até você confirmar que recebeu tudo certinho.</p>
+        </div>`
+    }
+    <div style="text-align:center;margin:24px 0;">
+      <a href="${params.link}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;padding:14px 28px;border-radius:10px;font-weight:bold;">Acompanhar meu pedido</a>
+    </div>
+    <p style="margin:8px 0 0;color:#888;font-size:13px;">Dúvidas? Responda este e-mail ou chame no WhatsApp (81) 99578-2077.</p>
+    `,
+    params.pago ? 'Fornecedor definido — pedido em produção.' : 'Fornecedor definido — combine os detalhes e finalize o pagamento pela Confeccione.'
+  )
+  const text = `Oi, ${params.nome || ''}
+
+Um fornecedor assumiu o seu pedido na Confeccione: ${params.fornecedorNome || 'Confecção parceira'}${whatsFmt ? ` (${whatsFmt})` : ''}.
+
+${params.pago
+  ? 'Seu pagamento já está confirmado e garantido pela Confeccione até você aprovar o recebimento.'
+  : 'Importante: peça pro fornecedor lançar o orçamento e finalize o pagamento aqui pela Confeccione, nunca fora da plataforma — assim a gente garante suporte e o seu dinheiro até você confirmar o recebimento.'}
+
+Acompanhe seu pedido:
+${params.link}
+
+Confeccione
+${SITE_URL}`
+  await enviarEmail({ to: params.email, subject, html, text })
+}
+
 // ─── Email: link da lista de coleta (Listas Externas) ──────────
 export async function emailLinkColeta(params: {
   email: string
