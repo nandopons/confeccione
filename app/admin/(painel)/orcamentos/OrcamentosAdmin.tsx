@@ -79,8 +79,10 @@ export default function OrcamentosAdmin() {
   const [itens, setItens] = useState<LinhaItem[]>([{ ...LINHA_VAZIA }])
   const [frete, setFrete] = useState('')
   const [observacoes, setObservacoes] = useState('')
+  const [gerarCobranca, setGerarCobranca] = useState(true)
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+  const [cobrancaAviso, setCobrancaAviso] = useState<string | null>(null)
   const [gerado, setGerado] = useState<OrcamentoPDFDados | null>(null)
 
   function atualizarItem(indice: number, mudanca: Partial<LinhaItem>) {
@@ -136,6 +138,18 @@ export default function OrcamentosAdmin() {
       })
     }
 
+    if (gerarCobranca) {
+      const doc = clienteDocumento.replace(/\D/g, '')
+      if (!clienteNome.trim()) {
+        setErro('Pra gerar a cobrança, informe o nome do cliente.')
+        return
+      }
+      if (doc.length !== 11 && doc.length !== 14) {
+        setErro('Pra gerar a cobrança, informe CPF (11 dígitos) ou CNPJ (14).')
+        return
+      }
+    }
+
     setEnviando(true)
     try {
       const resposta = await fetch('/api/admin/orcamentos', {
@@ -149,6 +163,7 @@ export default function OrcamentosAdmin() {
           observacoes: observacoes.trim() || undefined,
           data_orcamento: dataOrcamento || undefined,
           validade: validade || undefined,
+          gerar_cobranca: gerarCobranca,
         }),
       })
       const corpo = await resposta.json().catch(() => null)
@@ -156,6 +171,7 @@ export default function OrcamentosAdmin() {
         setErro(corpo?.erro ?? `Erro ao gerar orçamento (HTTP ${resposta.status}).`)
         return
       }
+      setCobrancaAviso(typeof corpo.cobranca_erro === 'string' ? corpo.cobranca_erro : null)
       setGerado(corpo.orcamento as OrcamentoPDFDados)
     } catch {
       setErro('Falha de rede ao gerar o orçamento. Tente de novo.')
@@ -167,6 +183,8 @@ export default function OrcamentosAdmin() {
   function novoOrcamento() {
     setGerado(null)
     setErro(null)
+    setCobrancaAviso(null)
+    setGerarCobranca(true)
     setClienteNome('')
     setClienteDocumento('')
     setDataOrcamento(hojeISO())
@@ -186,6 +204,24 @@ export default function OrcamentosAdmin() {
           Total <strong className="text-gray-800">{brl(gerado.total_centavos)}</strong>
           {gerado.cliente_nome ? <> · {gerado.cliente_nome}</> : null}
         </div>
+        {cobrancaAviso ? (
+          <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+            {cobrancaAviso}
+          </div>
+        ) : null}
+        {gerado.asaas_invoice_url ? (
+          <div className="mt-2 text-xs text-gray-500">
+            Cobrança criada no Asaas —{' '}
+            <a
+              href={gerado.asaas_invoice_url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[#1D9E75] underline"
+            >
+              link de pagamento
+            </a>
+          </div>
+        ) : null}
         <div className="mt-5 flex items-center justify-center gap-3">
           <BaixarPDF orcamento={gerado} />
           <button
@@ -357,6 +393,22 @@ export default function OrcamentosAdmin() {
             className={inputCls}
           />
         </div>
+
+        {/* Cobrança Asaas */}
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={gerarCobranca}
+            onChange={(e) => setGerarCobranca(e.target.checked)}
+            className="mt-0.5 accent-[#1D9E75]"
+          />
+          <span className="text-sm text-gray-700">
+            Gerar cobrança no Asaas (QR PIX no PDF + link PIX/cartão)
+            <span className="block text-xs text-gray-400">
+              Exige nome e CPF/CNPJ do cliente. Pagamento até o vencimento tem 3% de desconto.
+            </span>
+          </span>
+        </label>
 
         {/* Totais + ação */}
         <div className="border-t border-gray-100 pt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
