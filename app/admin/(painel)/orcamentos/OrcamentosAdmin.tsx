@@ -211,14 +211,23 @@ export default function OrcamentosAdmin() {
         ) : null}
         {gerado.asaas_invoice_url ? (
           <div className="mt-2 text-xs text-gray-500">
-            Cobrança criada no Asaas —{' '}
+            Cobrança PIX criada no Asaas —{' '}
             <a
-              href={gerado.asaas_invoice_url}
+              href={`/orcamento/${gerado.id}/pix`}
               target="_blank"
               rel="noreferrer"
               className="text-[#1D9E75] underline"
             >
-              link de pagamento
+              página de pagamento
+            </a>
+            {' · '}
+            <a
+              href={gerado.asaas_invoice_url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-gray-400 underline"
+            >
+              fatura Asaas
             </a>
           </div>
         ) : null}
@@ -403,9 +412,9 @@ export default function OrcamentosAdmin() {
             className="mt-0.5 accent-[#1D9E75]"
           />
           <span className="text-sm text-gray-700">
-            Gerar cobrança no Asaas (QR PIX no PDF + link PIX/cartão)
+            Gerar cobrança PIX no Asaas (QR + página de cópia no PDF)
             <span className="block text-xs text-gray-400">
-              Exige nome e CPF/CNPJ do cliente. Pagamento até o vencimento tem 3% de desconto.
+              Exige nome e CPF/CNPJ do cliente. PIX até o vencimento tem 3% de desconto.
             </span>
           </span>
         </label>
