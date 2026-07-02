@@ -39,6 +39,14 @@ export type OrcamentoPDFDados = {
   numero: string
   cliente_nome: string | null
   cliente_documento: string | null
+  cliente_email?: string | null
+  cep?: string | null
+  logradouro?: string | null
+  endereco_numero?: string | null
+  endereco_complemento?: string | null
+  bairro?: string | null
+  cidade?: string | null
+  uf?: string | null
   itens: ItemOrcamento[]
   frete_centavos: number
   subtotal_centavos: number
@@ -68,6 +76,20 @@ function brl(centavos: number): string {
 function dataBR(iso: string): string {
   const [ano, mes, dia] = iso.split('-')
   return `${dia}/${mes}/${ano}`
+}
+
+function cepBR(digitos: string): string {
+  return digitos.length === 8 ? `${digitos.slice(0, 5)}-${digitos.slice(5)}` : digitos
+}
+
+/** Monta a linha de entrega com as partes que existirem. */
+function linhaEntrega(o: OrcamentoPDFDados): string | null {
+  const rua = o.logradouro
+    ? `${o.logradouro}${o.endereco_numero ? `, ${o.endereco_numero}` : ''}${o.endereco_complemento ? ` — ${o.endereco_complemento}` : ''}`
+    : null
+  const cidadeUf = o.cidade ? `${o.cidade}${o.uf ? `/${o.uf}` : ''}` : null
+  const partes = [rua, o.bairro, cidadeUf, o.cep ? `CEP ${cepBR(o.cep)}` : null].filter(Boolean)
+  return partes.length > 0 ? partes.join(' · ') : null
 }
 
 const VERDE = '#1D9E75'
@@ -243,7 +265,11 @@ export function OrcamentoPDF({ orcamento }: { orcamento: OrcamentoPDFDados }) {
           <Text style={s.meta}>
             Cliente: {orcamento.cliente_nome}
             {orcamento.cliente_documento ? ` — ${orcamento.cliente_documento}` : ''}
+            {orcamento.cliente_email ? ` — ${orcamento.cliente_email}` : ''}
           </Text>
+        ) : null}
+        {linhaEntrega(orcamento) ? (
+          <Text style={s.meta}>Entrega: {linhaEntrega(orcamento)}</Text>
         ) : null}
 
         {/* Tabela de itens */}
