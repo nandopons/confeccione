@@ -4,7 +4,11 @@
 //
 // POST — cria um orçamento:
 //   { cliente_nome?, cliente_documento?, itens[], frete_centavos?,
-//     observacoes?, data_orcamento?, validade? }
+//     observacoes?, data_orcamento?, validade?, gerar_cobranca? }
+//
+// gerar_cobranca=true → cria cobrança ASAAS (UNDEFINED, desconto 3% até o
+// vencimento) e grava QR PIX/link no registro. Exige nome + CPF/CNPJ.
+// Falha na cobrança NÃO desfaz o orçamento — retorna cobranca_erro.
 //
 // Valores SEMPRE em centavos (integer), padrão do projeto.
 // numero (ORC-<ano>-<seq>) é gerado pelo DEFAULT da coluna no Postgres
@@ -18,6 +22,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
+import { criarCobrancaOrcamento } from '@/app/lib/orcamento-cobranca'
+import { apenasDigitos } from '@/app/lib/cpf-cnpj'
 
 export const dynamic = 'force-dynamic'
 
@@ -122,6 +128,24 @@ export async function POST(req: NextRequest) {
   const observacoes =
     typeof body.observacoes === 'string' && body.observacoes.trim() ? body.observacoes.trim() : null
 
+  // ---- cobrança ASAAS (opcional) ----------------------------------------
+  const gerar_cobranca = body.gerar_cobranca === true
+  if (gerar_cobranca) {
+    if (!cliente_nome) {
+      return NextResponse.json(
+        { erro: 'Informe o nome do cliente pra gerar a cobrança.' },
+        { status: 400 }
+      )
+    }
+    const doc = cliente_documento ? apenasDigitos(cliente_documento) : ''
+    if (doc.length !== 11 && doc.length !== 14) {
+      return NextResponse.json(
+        { erro: 'CPF (11 dígitos) ou CNPJ (14) válido é obrigatório pra gerar a cobrança.' },
+        { status: 400 }
+      )
+    }
+  }
+
   // ---- totais ------------------------------------------------------------
   const subtotal_centavos = itens.reduce((soma, item) => soma + item.subtotal_centavos, 0)
   const total_centavos = subtotal_centavos + frete_centavos
@@ -148,5 +172,45 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ erro: 'Erro ao salvar orçamento.' }, { status: 500 })
   }
 
-  return NextResponse.json({ orcamento: data }, { status: 201 })
+  // ---- cobrança ASAAS + QR PIX (não desfaz o orçamento se falhar) --------
+  let orcamento = data
+  let cobranca_erro: string | null = null
+  if (gerar_cobranca) {
+    try {
+      const cobranca = await criarCobrancaOrcamento({
+        orcamentoId: data.id,
+        numero: data.numero,
+        nome: cliente_nome as string,
+        cpfCnpj: cliente_documento as string,
+        valorCentavos: total_centavos,
+        vencimento: typeof validade === 'string' && validade ? validade : null,
+      })
+      const { data: atualizado, error: updErr } = await supabaseAdmin
+        .from('orcamentos')
+        .update({
+          asaas_customer_id: cobranca.customerId,
+          asaas_payment_id: cobranca.paymentId,
+          asaas_invoice_url: cobranca.invoiceUrl,
+          pix_copia_cola: cobranca.copiaCola,
+          pix_qr_imagem: cobranca.qrImagem,
+          cobranca_vencimento: cobranca.vencimento,
+        })
+        .eq('id', data.id)
+        .select()
+        .single()
+      if (updErr || !atualizado) {
+        throw new Error(updErr?.message ?? 'update do orçamento com dados da cobrança falhou')
+      }
+      orcamento = atualizado
+    } catch (err) {
+      console.error('[admin/orcamentos] cobrança ASAAS falhou:', err)
+      cobranca_erro =
+        'Orçamento salvo, mas a cobrança ASAAS falhou — o PDF sai sem PIX. Tente gerar de novo ou cobre manualmente.'
+    }
+  }
+
+  return NextResponse.json(
+    { orcamento, ...(cobranca_erro ? { cobranca_erro } : {}) },
+    { status: 201 }
+  )
 }
