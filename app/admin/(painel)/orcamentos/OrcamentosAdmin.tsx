@@ -74,6 +74,14 @@ const labelCls = 'block text-xs font-medium text-gray-500 mb-1'
 export default function OrcamentosAdmin() {
   const [clienteNome, setClienteNome] = useState('')
   const [clienteDocumento, setClienteDocumento] = useState('')
+  const [clienteEmail, setClienteEmail] = useState('')
+  const [cep, setCep] = useState('')
+  const [logradouro, setLogradouro] = useState('')
+  const [enderecoNumero, setEnderecoNumero] = useState('')
+  const [enderecoComplemento, setEnderecoComplemento] = useState('')
+  const [bairro, setBairro] = useState('')
+  const [cidade, setCidade] = useState('')
+  const [ufEstado, setUfEstado] = useState('')
   const [dataOrcamento, setDataOrcamento] = useState(hojeISO())
   const [validade, setValidade] = useState('')
   const [itens, setItens] = useState<LinhaItem[]>([{ ...LINHA_VAZIA }])
@@ -84,6 +92,32 @@ export default function OrcamentosAdmin() {
   const [erro, setErro] = useState<string | null>(null)
   const [cobrancaAviso, setCobrancaAviso] = useState<string | null>(null)
   const [gerado, setGerado] = useState<OrcamentoPDFDados | null>(null)
+
+  /** CEP completo → preenche endereço via ViaCEP (só campos ainda vazios;
+   *  o server resolve de novo com fallback BrasilAPI na criação). */
+  async function aoMudarCep(valor: string) {
+    setCep(valor)
+    const digs = valor.replace(/\D/g, '')
+    if (digs.length !== 8) return
+    try {
+      const r = await fetch(`https://viacep.com.br/ws/${digs}/json/`)
+      if (!r.ok) return
+      const j = (await r.json()) as {
+        erro?: boolean | string
+        logradouro?: string
+        bairro?: string
+        localidade?: string
+        uf?: string
+      }
+      if (j.erro) return
+      setLogradouro((atual) => atual || j.logradouro || '')
+      setBairro((atual) => atual || j.bairro || '')
+      setCidade((atual) => atual || j.localidade || '')
+      setUfEstado((atual) => atual || j.uf || '')
+    } catch {
+      // sem drama — o server tenta de novo com fallback
+    }
+  }
 
   function atualizarItem(indice: number, mudanca: Partial<LinhaItem>) {
     setItens((atual) => atual.map((linha, i) => (i === indice ? { ...linha, ...mudanca } : linha)))
@@ -158,6 +192,14 @@ export default function OrcamentosAdmin() {
         body: JSON.stringify({
           cliente_nome: clienteNome.trim() || undefined,
           cliente_documento: clienteDocumento.trim() || undefined,
+          cliente_email: clienteEmail.trim() || undefined,
+          cep: cep.trim() || undefined,
+          logradouro: logradouro.trim() || undefined,
+          endereco_numero: enderecoNumero.trim() || undefined,
+          endereco_complemento: enderecoComplemento.trim() || undefined,
+          bairro: bairro.trim() || undefined,
+          cidade: cidade.trim() || undefined,
+          uf: ufEstado.trim() || undefined,
           itens: itensCorpo,
           frete_centavos: paraCentavos(frete) ?? 0,
           observacoes: observacoes.trim() || undefined,
@@ -187,6 +229,14 @@ export default function OrcamentosAdmin() {
     setGerarCobranca(true)
     setClienteNome('')
     setClienteDocumento('')
+    setClienteEmail('')
+    setCep('')
+    setLogradouro('')
+    setEnderecoNumero('')
+    setEnderecoComplemento('')
+    setBairro('')
+    setCidade('')
+    setUfEstado('')
     setDataOrcamento(hojeISO())
     setValidade('')
     setItens([{ ...LINHA_VAZIA }])
@@ -275,6 +325,85 @@ export default function OrcamentosAdmin() {
             />
           </div>
         </div>
+
+        {/* Email + Entrega */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className={labelCls}>Email do cliente (opcional)</label>
+            <input
+              value={clienteEmail}
+              onChange={(e) => setClienteEmail(e.target.value)}
+              type="email"
+              placeholder="cliente@email.com"
+              className={inputCls}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>CEP de entrega (opcional)</label>
+            <input
+              value={cep}
+              onChange={(e) => aoMudarCep(e.target.value)}
+              inputMode="numeric"
+              placeholder="00000-000"
+              className={inputCls}
+            />
+          </div>
+        </div>
+        {cep.replace(/\D/g, '').length === 8 && (
+          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+            <div className="col-span-2 sm:col-span-4">
+              <label className={labelCls}>Logradouro</label>
+              <input
+                value={logradouro}
+                onChange={(e) => setLogradouro(e.target.value)}
+                placeholder="Rua / avenida"
+                className={inputCls}
+              />
+            </div>
+            <div className="col-span-1 sm:col-span-1">
+              <label className={labelCls}>Número</label>
+              <input
+                value={enderecoNumero}
+                onChange={(e) => setEnderecoNumero(e.target.value)}
+                placeholder="123"
+                className={inputCls}
+              />
+            </div>
+            <div className="col-span-1 sm:col-span-1">
+              <label className={labelCls}>Compl.</label>
+              <input
+                value={enderecoComplemento}
+                onChange={(e) => setEnderecoComplemento(e.target.value)}
+                placeholder="Sala 4"
+                className={inputCls}
+              />
+            </div>
+            <div className="col-span-2 sm:col-span-2">
+              <label className={labelCls}>Bairro</label>
+              <input
+                value={bairro}
+                onChange={(e) => setBairro(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div className="col-span-1 sm:col-span-3">
+              <label className={labelCls}>Cidade</label>
+              <input
+                value={cidade}
+                onChange={(e) => setCidade(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div className="col-span-1 sm:col-span-1">
+              <label className={labelCls}>UF</label>
+              <input
+                value={ufEstado}
+                onChange={(e) => setUfEstado(e.target.value.toUpperCase().slice(0, 2))}
+                className={inputCls}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Datas */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

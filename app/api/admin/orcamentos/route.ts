@@ -24,6 +24,7 @@ import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { criarCobrancaOrcamento } from '@/app/lib/orcamento-cobranca'
 import { apenasDigitos } from '@/app/lib/cpf-cnpj'
+import { buscarEnderecoCep } from '@/app/lib/cep'
 
 export const dynamic = 'force-dynamic'
 
@@ -128,6 +129,42 @@ export async function POST(req: NextRequest) {
   const observacoes =
     typeof body.observacoes === 'string' && body.observacoes.trim() ? body.observacoes.trim() : null
 
+  // ---- email + endereço de entrega ---------------------------------------
+  const cliente_email =
+    typeof body.cliente_email === 'string' && body.cliente_email.trim()
+      ? body.cliente_email.trim()
+      : null
+  if (cliente_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cliente_email)) {
+    return NextResponse.json({ erro: 'Email do cliente inválido.' }, { status: 400 })
+  }
+
+  const cepDigitos =
+    typeof body.cep === 'string' && body.cep.trim() ? apenasDigitos(body.cep) : ''
+  if (cepDigitos && cepDigitos.length !== 8) {
+    return NextResponse.json({ erro: 'CEP inválido (8 dígitos).' }, { status: 400 })
+  }
+
+  const campoTexto = (v: unknown): string | null =>
+    typeof v === 'string' && v.trim() ? v.trim() : null
+
+  let logradouro = campoTexto(body.logradouro)
+  let bairro = campoTexto(body.bairro)
+  let cidade = campoTexto(body.cidade)
+  let uf = campoTexto(body.uf)
+  const endereco_numero = campoTexto(body.endereco_numero)
+  const endereco_complemento = campoTexto(body.endereco_complemento)
+
+  // CEP presente e endereço incompleto → resolve server-side (ViaCEP/BrasilAPI)
+  if (cepDigitos && (!logradouro || !cidade)) {
+    const resolvido = await buscarEnderecoCep(cepDigitos)
+    if (resolvido) {
+      logradouro = logradouro ?? resolvido.logradouro
+      bairro = bairro ?? resolvido.bairro
+      cidade = cidade ?? resolvido.cidade
+      uf = uf ?? resolvido.uf
+    }
+  }
+
   // ---- cobrança ASAAS (opcional) ----------------------------------------
   const gerar_cobranca = body.gerar_cobranca === true
   if (gerar_cobranca) {
@@ -156,6 +193,14 @@ export async function POST(req: NextRequest) {
     .insert({
       cliente_nome,
       cliente_documento,
+      cliente_email,
+      cep: cepDigitos || null,
+      logradouro,
+      endereco_numero,
+      endereco_complemento,
+      bairro,
+      cidade,
+      uf,
       itens,
       frete_centavos,
       subtotal_centavos,
@@ -182,6 +227,7 @@ export async function POST(req: NextRequest) {
         numero: data.numero,
         nome: cliente_nome as string,
         cpfCnpj: cliente_documento as string,
+        email: cliente_email,
         valorCentavos: total_centavos,
         vencimento: typeof validade === 'string' && validade ? validade : null,
       })

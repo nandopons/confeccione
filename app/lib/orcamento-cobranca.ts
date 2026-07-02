@@ -14,11 +14,16 @@ import { apenasDigitos } from './cpf-cnpj'
 
 export const DESCONTO_PIX_PERCENTUAL = 3
 
-async function criarOuObterCustomer(nome: string, cpfCnpj: string): Promise<string> {
+async function criarOuObterCustomer(
+  nome: string,
+  cpfCnpj: string,
+  email: string | null
+): Promise<string> {
   const cpf = apenasDigitos(cpfCnpj)
   const personType = cpf.length === 11 ? 'FISICA' : 'JURIDICA'
 
   // reusa customer existente com o mesmo CPF/CNPJ (evita duplicar no ASAAS)
+  // — nesse caso o email informado NÃO sobrescreve o do customer existente.
   try {
     const existente = await asaasFetch<{ data: Array<{ id: string }> }>('/customers', {
       query: { cpfCnpj: cpf },
@@ -32,6 +37,7 @@ async function criarOuObterCustomer(nome: string, cpfCnpj: string): Promise<stri
     method: 'POST',
     body: {
       name: nome,
+      email: email || undefined,
       cpfCnpj: cpf,
       personType,
       notificationDisabled: true,
@@ -54,11 +60,12 @@ export async function criarCobrancaOrcamento(input: {
   numero: string
   nome: string
   cpfCnpj: string
+  email?: string | null
   valorCentavos: number
   /** YYYY-MM-DD; default: hoje + 7 dias */
   vencimento?: string | null
 }): Promise<CobrancaOrcamento> {
-  const customerId = await criarOuObterCustomer(input.nome, input.cpfCnpj)
+  const customerId = await criarOuObterCustomer(input.nome, input.cpfCnpj, input.email ?? null)
 
   let vencimento = input.vencimento ?? undefined
   if (!vencimento) {
