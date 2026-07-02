@@ -189,9 +189,7 @@ export function OrcamentoPDF({ orcamento }: { orcamento: OrcamentoPDFDados }) {
 
         {/* Dados da empresa */}
         <View style={s.empresa}>
-          <Text style={s.empresaLinha}>
-            {EMPRESA.razaoSocial} — CNPJ {EMPRESA.cnpj}
-          </Text>
+          <Text style={s.empresaLinha}>CNPJ {EMPRESA.cnpj}</Text>
           <Text style={s.empresaLinha}>
             {EMPRESA.site} · {EMPRESA.email}
           </Text>
