@@ -3,9 +3,9 @@
 // Gera a cobrança ASAAS de um ORÇAMENTO avulso do admin (/admin/orcamentos).
 //
 // Espelha pedido-pagamento.ts: cria/reaproveita o customer pelo CPF/CNPJ e
-// abre cobrança billingType UNDEFINED (cliente escolhe PIX ou cartão no
-// checkout ASAAS), com DESCONTO DE 3% até o vencimento — na prática, quem
-// paga no PIX na hora leva o desconto. Não persiste — quem grava é a rota
+// abre cobrança billingType PIX (pura — sem opção de cartão) com DESCONTO
+// DE 3% até o vencimento. Como o único método é PIX, o desconto é
+// efetivamente "só no PIX". Não persiste — quem grava é a rota
 // /api/admin/orcamentos.
 // ============================================================================
 
@@ -71,12 +71,12 @@ export async function criarCobrancaOrcamento(input: {
     method: 'POST',
     body: {
       customer: customerId,
-      billingType: 'UNDEFINED', // cliente escolhe PIX ou cartão no checkout ASAAS
+      billingType: 'PIX', // PIX puro — sem cartão; o desconto abaixo só existe no PIX
       value: centavosParaReais(input.valorCentavos),
       dueDate: vencimento,
       description: `Confeccione - Orçamento ${input.numero}`,
       externalReference: input.orcamentoId,
-      // 3% de desconto pra pagamento até o vencimento (PIX paga na hora e leva).
+      // 3% de desconto pra pagamento até o vencimento.
       discount: {
         value: DESCONTO_PIX_PERCENTUAL,
         type: 'PERCENTAGE',
