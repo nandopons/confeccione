@@ -35,6 +35,7 @@ export type ItemOrcamento = {
 }
 
 export type OrcamentoPDFDados = {
+  id: string
   numero: string
   cliente_nome: string | null
   cliente_documento: string | null
@@ -162,7 +163,19 @@ const s = StyleSheet.create({
   pagValorPix: { fontFamily: 'Helvetica-Bold', color: VERDE },
   pagRotulo: { fontSize: 8, color: '#555555', marginTop: 6 },
   pagCopiaCola: { fontSize: 6.5, color: '#555555', marginTop: 2, lineHeight: 1.4 },
-  pagLink: { fontSize: 8.5, color: '#1D9E75', marginTop: 6, textDecoration: 'underline' },
+  pagLink: { fontSize: 8.5, color: '#555555', marginTop: 6, textDecoration: 'underline' },
+  pagBotaoCopiar: {
+    fontSize: 10,
+    fontFamily: 'Helvetica-Bold',
+    color: '#FFFFFF',
+    backgroundColor: VERDE,
+    borderRadius: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    marginTop: 8,
+    textDecoration: 'none',
+    alignSelf: 'flex-start',
+  },
   rodape: {
     position: 'absolute',
     bottom: 28,
@@ -305,15 +318,18 @@ export function OrcamentoPDF({ orcamento }: { orcamento: OrcamentoPDFDados }) {
                   </Text>{' '}
                   ({DESCONTO_PAGAMENTO_PERCENTUAL}% de desconto)
                 </Text>
+                <Link style={s.pagBotaoCopiar} src={`https://${EMPRESA.site}/orcamento/${orcamento.id}/pix`}>
+                  Copiar código PIX com 1 clique
+                </Link>
                 {orcamento.pix_copia_cola ? (
                   <>
-                    <Text style={s.pagRotulo}>PIX copia e cola:</Text>
+                    <Text style={s.pagRotulo}>Ou use o PIX copia e cola:</Text>
                     <Text style={s.pagCopiaCola}>{orcamento.pix_copia_cola}</Text>
                   </>
                 ) : null}
                 {orcamento.asaas_invoice_url ? (
                   <Link style={s.pagLink} src={orcamento.asaas_invoice_url}>
-                    Pagar online (PIX ou cartão): {orcamento.asaas_invoice_url}
+                    Ver fatura no Asaas
                   </Link>
                 ) : null}
               </View>
