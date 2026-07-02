@@ -18,6 +18,7 @@ import {
   View,
   Text,
   Image,
+  Link,
   Svg,
   Path,
   Circle,
@@ -44,7 +45,16 @@ export type OrcamentoPDFDados = {
   observacoes: string | null
   data_orcamento: string // YYYY-MM-DD
   validade: string | null // YYYY-MM-DD
+  // Cobrança ASAAS (opcionais — presentes quando gerada junto com o orçamento)
+  asaas_invoice_url?: string | null
+  pix_copia_cola?: string | null
+  pix_qr_imagem?: string | null // PNG base64, sem prefixo data:
+  cobranca_vencimento?: string | null // YYYY-MM-DD
 }
+
+/** Espelha DESCONTO_PIX_PERCENTUAL de orcamento-cobranca.ts (não importar —
+ *  aquele módulo puxa env server-side e este componente roda no browser). */
+const DESCONTO_PAGAMENTO_PERCENTUAL = 3
 
 function brl(centavos: number): string {
   return (centavos / 100).toLocaleString('pt-BR', {
@@ -138,6 +148,21 @@ const s = StyleSheet.create({
   },
   obsTitulo: { marginTop: 18, fontFamily: 'Helvetica-Bold', fontSize: 10 },
   obsTexto: { marginTop: 4, fontSize: 9.5, color: '#333333', lineHeight: 1.5 },
+  pagamento: {
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: '#DDDDDD',
+    borderRadius: 3,
+    padding: 10,
+  },
+  pagTitulo: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
+  pagLinhas: { flex: 1, marginLeft: 12 },
+  pagQr: { width: 92, height: 92 },
+  pagDestaque: { fontSize: 9.5, marginTop: 2 },
+  pagValorPix: { fontFamily: 'Helvetica-Bold', color: VERDE },
+  pagRotulo: { fontSize: 8, color: '#555555', marginTop: 6 },
+  pagCopiaCola: { fontSize: 6.5, color: '#555555', marginTop: 2, lineHeight: 1.4 },
+  pagLink: { fontSize: 8.5, color: '#1D9E75', marginTop: 6, textDecoration: 'underline' },
   rodape: {
     position: 'absolute',
     bottom: 28,
@@ -250,6 +275,50 @@ export function OrcamentoPDF({ orcamento }: { orcamento: OrcamentoPDFDados }) {
             <Text style={s.obsTitulo}>Observações</Text>
             <Text style={s.obsTexto}>{orcamento.observacoes}</Text>
           </>
+        ) : null}
+
+        {/* Pagamento (cobrança ASAAS gerada junto com o orçamento) */}
+        {orcamento.pix_qr_imagem || orcamento.asaas_invoice_url ? (
+          <View style={s.pagamento} wrap={false}>
+            <Text style={s.pagTitulo}>Pagamento</Text>
+            <View style={{ flexDirection: 'row', marginTop: 8 }}>
+              {orcamento.pix_qr_imagem ? (
+                // eslint-disable-next-line jsx-a11y/alt-text -- Image do react-pdf não tem alt
+                <Image
+                  style={s.pagQr}
+                  src={`data:image/png;base64,${orcamento.pix_qr_imagem}`}
+                />
+              ) : null}
+              <View style={s.pagLinhas}>
+                <Text style={s.pagDestaque}>
+                  No PIX
+                  {orcamento.cobranca_vencimento
+                    ? ` até ${dataBR(orcamento.cobranca_vencimento)}`
+                    : ''}
+                  :{' '}
+                  <Text style={s.pagValorPix}>
+                    {brl(
+                      Math.round(
+                        orcamento.total_centavos * (1 - DESCONTO_PAGAMENTO_PERCENTUAL / 100)
+                      )
+                    )}
+                  </Text>{' '}
+                  ({DESCONTO_PAGAMENTO_PERCENTUAL}% de desconto)
+                </Text>
+                {orcamento.pix_copia_cola ? (
+                  <>
+                    <Text style={s.pagRotulo}>PIX copia e cola:</Text>
+                    <Text style={s.pagCopiaCola}>{orcamento.pix_copia_cola}</Text>
+                  </>
+                ) : null}
+                {orcamento.asaas_invoice_url ? (
+                  <Link style={s.pagLink} src={orcamento.asaas_invoice_url}>
+                    Pagar online (PIX ou cartão): {orcamento.asaas_invoice_url}
+                  </Link>
+                ) : null}
+              </View>
+            </View>
+          </View>
         ) : null}
 
         {/* Rodapé fixo */}
