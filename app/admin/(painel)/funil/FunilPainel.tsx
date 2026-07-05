@@ -39,11 +39,15 @@ type Dados = {
   assistido: {
     criados: number
     pelaMetade: ItemLista[]
+    buscandoFornecedor: ItemLista[]
+    emNegociacao: ItemLista[]
     aguardandoPagamento: ItemLista[]
-    pagos: ItemLista[]
+    emProducao: ItemLista[]
+    finalizados: ItemLista[]
     cancelados: number
     receitaPagaCentavos: number
     receitaAguardandoCentavos: number
+    ofertasNoAr: number
   }
   classico: {
     criados: number
@@ -53,7 +57,6 @@ type Dados = {
     concluidos: ItemLista[]
     ofertas: { enviadas: number; aceitas: number; recusadas: number; expiradas: number }
   }
-  fornecedor: { encaminhados: ItemLista[]; aceitos: ItemLista[]; perdidos: number }
   contato: { waConversas: ItemLista[]; cadastros: ItemLista[] }
 }
 
@@ -73,10 +76,10 @@ type Aresta = { de: string; para: string; n?: number; tom?: 'verde' | 'ambar' | 
 
 // -------------------------------------------------------------- helpers
 // Coordenadas do "mundo" do canvas (pan/zoom livre — margens generosas).
-const COL_X = [20, 260, 500, 740, 980, 1220]
-const W = 200
-const W_MINI = 200
-const MUNDO_W = 1440
+const COL_X = [20, 250, 480, 710, 940, 1170, 1400]
+const W = 190
+const W_MINI = 190
+const MUNDO_W = 1610
 const MUNDO_H = 1000
 
 function brl(centavos: number | null | undefined): string {
@@ -376,7 +379,7 @@ export default function FunilPainel() {
       },
     })
 
-    // C3 — pedidos
+    // C3 — pedidos criados + quem não avançou
     nos.push({
       id: 'pa_criados',
       col: 3,
@@ -387,10 +390,41 @@ export default function FunilPainel() {
       tom: 'neutro',
       drill: {
         titulo: 'Pedidos montados no chat',
-        itens: [...dados.assistido.pelaMetade, ...dados.assistido.aguardandoPagamento, ...dados.assistido.pagos],
+        itens: [
+          ...dados.assistido.pelaMetade,
+          ...dados.assistido.buscandoFornecedor,
+          ...dados.assistido.emNegociacao,
+          ...dados.assistido.aguardandoPagamento,
+          ...dados.assistido.emProducao,
+          ...dados.assistido.finalizados,
+        ],
         vazio: 'Nenhum pedido montado no período.',
         verHref: '/admin/pedidos-pagos',
       },
+    })
+    nos.push({
+      id: 'pela_metade',
+      col: 3,
+      y: 300,
+      titulo: '⚠ Pela metade',
+      valor: dados.assistido.pelaMetade.length,
+      sub: 'não confirmou — retomar contato',
+      tom: 'ambar',
+      drill: {
+        titulo: 'Pedidos pela metade — dá pra resgatar',
+        itens: dados.assistido.pelaMetade,
+        vazio: 'Ninguém largou pedido no meio. 🎉',
+        verHref: '/admin/pedidos-pagos',
+      },
+    })
+    nos.push({
+      id: 'pa_cancel',
+      col: 3,
+      y: 470,
+      titulo: 'Cancelados',
+      valor: dados.assistido.cancelados,
+      tom: 'cinza',
+      mini: true,
     })
     nos.push({
       id: 'classico',
@@ -408,145 +442,123 @@ export default function FunilPainel() {
       },
     })
 
-    // C4 — status
+    // C4 — fornecedor entra em cena
     nos.push({
-      id: 'pela_metade',
+      id: 'buscando_forn',
       col: 4,
-      y: 76,
-      titulo: '⚠ Pela metade',
-      valor: dados.assistido.pelaMetade.length,
-      sub: 'montou e não pagou',
+      y: 100,
+      titulo: '⏳ Buscando fornecedor',
+      valor: dados.assistido.buscandoFornecedor.length,
+      sub: `${dados.assistido.ofertasNoAr} oferta${dados.assistido.ofertasNoAr === 1 ? '' : 's'} no ar aguardando aceite`,
       tom: 'ambar',
       drill: {
-        titulo: 'Pedidos pela metade — dá pra resgatar',
-        itens: dados.assistido.pelaMetade,
-        vazio: 'Ninguém largou pedido no meio. 🎉',
+        titulo: 'Confirmados sem fornecedor — oferte!',
+        itens: dados.assistido.buscandoFornecedor,
+        vazio: 'Nenhum pedido esperando fornecedor. 🎉',
         verHref: '/admin/pedidos-pagos',
       },
     })
     nos.push({
-      id: 'aguardando_pgto',
+      id: 'negociacao_pa',
       col: 4,
-      y: 236,
-      titulo: '💳 Aguardando pgto',
-      valor: dados.assistido.aguardandoPagamento.length,
-      sub: `${brl(dados.assistido.receitaAguardandoCentavos)} em aberto`,
-      tom: 'ambar',
+      y: 300,
+      titulo: '🤝 Em negociação',
+      valor: dados.assistido.emNegociacao.length,
+      sub: 'contato liberado · orçamento pendente',
+      tom: 'neutro',
       drill: {
-        titulo: 'Confirmaram e ainda não pagaram — cobre!',
-        itens: dados.assistido.aguardandoPagamento,
-        vazio: 'Ninguém aguardando pagamento. 🎉',
+        titulo: 'Negociando — fornecedor precisa formalizar o orçamento',
+        itens: dados.assistido.emNegociacao,
+        vazio: 'Nenhuma negociação em aberto.',
         verHref: '/admin/pedidos-pagos',
       },
     })
     nos.push({
-      id: 'pa_pago',
-      col: 4,
-      y: 396,
-      titulo: '💰 Pago (Asaas)',
-      valor: dados.assistido.pagos.length,
-      sub: brl(dados.assistido.receitaPagaCentavos),
-      tom: 'verde',
-      drill: {
-        titulo: 'Pagamentos confirmados pelo Asaas',
-        itens: dados.assistido.pagos,
-        vazio: 'Nenhum pagamento confirmado no período.',
-        verHref: '/admin/pedidos-pagos',
-      },
-    })
-    nos.push({
-      id: 'pa_cancel',
-      col: 4,
-      y: 532,
-      titulo: 'Cancelados',
-      valor: dados.assistido.cancelados,
-      tom: 'cinza',
-      mini: true,
-    })
-    nos.push({
-      id: 'negociacao',
+      id: 'classico_and',
       col: 4,
       y: 630,
-      titulo: 'Em negociação',
-      valor: dados.classico.negociacao.length,
-      sub: 'fornecedor aceitou',
-      tom: 'verde',
+      titulo: 'Clássico em andamento',
+      valor: dados.classico.buscando.length + dados.classico.negociacao.length,
+      tom: 'cinza',
+      mini: true,
       drill: {
-        titulo: 'Pedidos em negociação',
-        itens: dados.classico.negociacao,
-        vazio: 'Nenhum pedido em negociação no período.',
-        verHref: '/admin/pedidos',
-      },
-    })
-    nos.push({
-      id: 'buscando',
-      col: 4,
-      y: 780,
-      titulo: '⏳ Buscando fornecedor',
-      valor: dados.classico.buscando.length,
-      sub: 'aguardando aceite',
-      tom: 'ambar',
-      drill: {
-        titulo: 'Pedidos buscando fornecedor',
-        itens: dados.classico.buscando,
-        vazio: 'Nenhum pedido esperando fornecedor.',
+        titulo: 'Pedidos clássicos em andamento',
+        itens: [...dados.classico.buscando, ...dados.classico.negociacao],
+        vazio: 'Nenhum pedido clássico em andamento.',
         verHref: '/admin/pedidos',
       },
     })
     nos.push({
       id: 'expirado',
       col: 4,
-      y: 916,
+      y: 740,
       titulo: 'Expirados',
       valor: dados.classico.expirados,
       tom: 'cinza',
       mini: true,
     })
 
-    // C5 — fornecedor / desfecho
+    // C5 — dinheiro na mesa
     nos.push({
-      id: 'encaminhado',
+      id: 'aguardando_pgto',
       col: 5,
       y: 100,
-      titulo: 'Enviado a fornecedor',
-      valor: dados.fornecedor.encaminhados.length,
-      sub: 'aguardando aceite',
-      tom: 'neutro',
+      titulo: '💳 Aguardando pgto',
+      valor: dados.assistido.aguardandoPagamento.length,
+      sub: `${brl(dados.assistido.receitaAguardandoCentavos)} em aberto`,
+      tom: 'ambar',
       drill: {
-        titulo: 'Ofertas aguardando o fornecedor',
-        itens: dados.fornecedor.encaminhados,
-        vazio: 'Nenhuma oferta pendente com fornecedor.',
+        titulo: 'Orçamento na mão do cliente — cobre o PIX!',
+        itens: dados.assistido.aguardandoPagamento,
+        vazio: 'Nenhum orçamento aguardando pagamento.',
         verHref: '/admin/pedidos-pagos',
       },
     })
     nos.push({
-      id: 'aceito',
+      id: 'classico_conc',
       col: 5,
-      y: 264,
-      titulo: '✓ Em produção',
-      valor: dados.fornecedor.aceitos.length,
-      sub: 'fornecedor aceitou',
-      tom: 'verde',
-      drill: {
-        titulo: 'Fechados — quem está produzindo',
-        itens: dados.fornecedor.aceitos,
-        vazio: 'Nenhum fechamento com fornecedor no período.',
-        verHref: '/admin/pedidos-pagos',
-      },
-    })
-    nos.push({
-      id: 'concluido',
-      col: 5,
-      y: 649,
-      titulo: 'Concluídos',
+      y: 630,
+      titulo: 'Clássico concluídos',
       valor: dados.classico.concluidos.length,
-      tom: 'verde',
+      tom: 'cinza',
       mini: true,
       drill: {
-        titulo: 'Pedidos concluídos',
+        titulo: 'Pedidos clássicos concluídos',
         itens: dados.classico.concluidos,
-        vazio: 'Nenhum pedido concluído no período.',
+        vazio: 'Nenhum pedido clássico concluído.',
         verHref: '/admin/pedidos',
+      },
+    })
+
+    // C6 — pós-pagamento
+    nos.push({
+      id: 'producao',
+      col: 6,
+      y: 100,
+      titulo: '🏭 Em produção',
+      valor: dados.assistido.emProducao.length,
+      sub: `${brl(dados.assistido.receitaPagaCentavos)} pagos (Asaas)`,
+      tom: 'verde',
+      drill: {
+        titulo: 'Pagos — fornecedor produzindo',
+        itens: dados.assistido.emProducao,
+        vazio: 'Nada em produção no período.',
+        verHref: '/admin/pedidos-pagos',
+      },
+    })
+    nos.push({
+      id: 'finalizado',
+      col: 6,
+      y: 300,
+      titulo: '✅ Finalizados',
+      valor: dados.assistido.finalizados.length,
+      sub: 'entregues ao cliente',
+      tom: 'verde',
+      drill: {
+        titulo: 'Pedidos finalizados — entregues',
+        itens: dados.assistido.finalizados,
+        vazio: 'Nenhum pedido finalizado ainda — marque no admin quando entregar.',
+        verHref: '/admin/pedidos-pagos',
       },
     })
 
@@ -557,20 +569,16 @@ export default function FunilPainel() {
       { de: 'visitantes', para: 'cadastros', n: dados.acoes.cadastros },
       { de: 'assistente', para: 'pa_criados', n: dados.assistido.criados },
       { de: 'pa_criados', para: 'pela_metade', n: dados.assistido.pelaMetade.length, tom: 'ambar' },
-      { de: 'pa_criados', para: 'aguardando_pgto', n: dados.assistido.aguardandoPagamento.length, tom: 'ambar' },
-      { de: 'aguardando_pgto', para: 'pa_pago', n: dados.assistido.pagos.length, tom: 'verde' },
       { de: 'pa_criados', para: 'pa_cancel', n: dados.assistido.cancelados, tom: 'cinza' },
+      { de: 'pa_criados', para: 'buscando_forn', n: dados.assistido.buscandoFornecedor.length, tom: 'ambar' },
+      { de: 'buscando_forn', para: 'negociacao_pa', n: dados.assistido.emNegociacao.length },
+      { de: 'negociacao_pa', para: 'aguardando_pgto', n: dados.assistido.aguardandoPagamento.length, tom: 'ambar' },
+      { de: 'aguardando_pgto', para: 'producao', n: dados.assistido.emProducao.length, tom: 'verde' },
+      { de: 'producao', para: 'finalizado', n: dados.assistido.finalizados.length, tom: 'verde' },
       { de: 'cadastros', para: 'classico', n: dados.classico.criados },
-      { de: 'classico', para: 'negociacao', n: dados.classico.negociacao.length, tom: 'verde' },
-      { de: 'classico', para: 'buscando', n: dados.classico.buscando.length, tom: 'ambar' },
+      { de: 'classico', para: 'classico_and', n: dados.classico.buscando.length + dados.classico.negociacao.length, tom: 'cinza' },
       { de: 'classico', para: 'expirado', n: dados.classico.expirados, tom: 'cinza' },
-      {
-        de: 'pa_pago',
-        para: 'encaminhado',
-        n: dados.fornecedor.encaminhados.length + dados.fornecedor.aceitos.length + dados.fornecedor.perdidos,
-      },
-      { de: 'encaminhado', para: 'aceito', n: dados.fornecedor.aceitos.length, tom: 'verde' },
-      { de: 'negociacao', para: 'concluido', n: dados.classico.concluidos.length, tom: 'verde' },
+      { de: 'classico_and', para: 'classico_conc', n: dados.classico.concluidos.length, tom: 'verde' },
     ]
 
     return { nos, arestas, alturaSvg: MUNDO_H }
@@ -595,7 +603,7 @@ export default function FunilPainel() {
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Funil</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Do clique ao fornecedor — clique nos cartões pra ver quem está em cada etapa.
+            Do clique à entrega — clique nos cartões pra ver quem está em cada etapa.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -635,9 +643,9 @@ export default function FunilPainel() {
           {[
             { r: 'Pedidos criados', v: String(dados.assistido.criados + dados.classico.criados) },
             { r: 'Pela metade', v: String(dados.assistido.pelaMetade.length), tom: 'ambar' },
+            { r: 'Em negociação', v: String(dados.assistido.buscandoFornecedor.length + dados.assistido.emNegociacao.length) },
             { r: 'Aguardando pgto', v: brl(dados.assistido.receitaAguardandoCentavos), tom: 'ambar' },
             { r: 'Receita paga (Asaas)', v: brl(dados.assistido.receitaPagaCentavos), tom: 'verde' },
-            { r: 'Em produção', v: String(dados.fornecedor.aceitos.length), tom: 'verde' },
           ].map((k, i) => (
             <div key={i} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
               <p className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">{k.r}</p>
@@ -689,7 +697,7 @@ export default function FunilPainel() {
             <g transform={`translate(${vista.x} ${vista.y}) scale(${vista.k})`}>
 
             {/* títulos das colunas — faixa própria, nenhum cartão sobe até aqui */}
-            {['ORIGEM', 'SITE', 'AÇÃO', 'PEDIDO', 'STATUS', 'FORNECEDOR'].map((t, i) => (
+            {['ORIGEM', 'SITE', 'AÇÃO', 'PEDIDO', 'FORNECEDOR', 'PAGAMENTO', 'ENTREGA'].map((t, i) => (
               <g key={t}>
                 <text x={COL_X[i] + W / 2} y={34} textAnchor="middle" fontSize="11" letterSpacing="2.5" fill="#94A3B8" fontWeight="700">
                   {t}

@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
         .limit(20000),
       supabaseAdmin
         .from('pedidos_assistente')
-        .select('id, codigo, nome, telefone, email, status, pagamento_status, valor_centavos, linhas, criado_em, confirmado_em')
+        .select('id, codigo, nome, telefone, email, status, pagamento_status, orcamento_status, finalizado_em, valor_centavos, linhas, criado_em, confirmado_em')
         .gte('criado_em', desde)
         .order('criado_em', { ascending: false })
         .limit(500),
@@ -155,6 +155,16 @@ export async function GET(req: NextRequest) {
   for (const f of fornecedoresQ.data ?? []) nomeFornecedor.set(f.id, f.nome ?? 'Fornecedor')
 
   const pas = pasQ.data ?? []
+
+  // Fornecedor aceito por pedido (contato já liberado no aceite — PR #241).
+  const opasTodas = opasQ.data ?? []
+  const fornAceitoPorPedido = new Map<string, string>()
+  for (const o of opasTodas) {
+    if (o.status === 'aceita' && !fornAceitoPorPedido.has(o.pedido_id)) {
+      fornAceitoPorPedido.set(o.pedido_id, nomeFornecedor.get(o.fornecedor_id) ?? 'Fornecedor')
+    }
+  }
+
   const paItem = (p: (typeof pas)[number]) => {
     const { resumo, pecas } = resumoLinhas(p.linhas)
     return {
@@ -164,43 +174,40 @@ export async function GET(req: NextRequest) {
       telefone: p.telefone ?? null,
       resumo,
       pecas,
+      fornecedor: fornAceitoPorPedido.get(p.id) ?? null,
       valorCentavos: p.valor_centavos ?? null,
       status: p.status,
       criadoEm: p.criado_em,
     }
   }
+
+  // ------------------------------------------------- etapas do fluxo ideal
+  // pela metade → buscando fornecedor → em negociação (aceite; contato
+  // liberado) → aguardando pagamento (orçamento formalizado pelo fornecedor)
+  // → em produção (pago no Asaas) → finalizado (entregue).
+  const ehPago = (p: (typeof pas)[number]) => p.pagamento_status === 'pago'
   const pelaMetade = pas.filter((p) => p.status === 'em_visualizacao' || p.status === 'completo').map(paItem)
-  // Receita SÓ é real quando o webhook do Asaas confirma (pagamento_status='pago').
-  // "confirmado" sem pagamento = cliente fechou, mas ainda não pagou.
-  const pagos = pas.filter((p) => p.pagamento_status === 'pago').map(paItem)
-  const aguardandoPagamento = pas
-    .filter((p) => p.status === 'confirmado' && p.pagamento_status !== 'pago')
-    .map(paItem)
   const cancelados = pas.filter((p) => p.status === 'cancelado').length
-  const receitaPagaCentavos = pas
-    .filter((p) => p.pagamento_status === 'pago')
-    .reduce((acc, p) => acc + (p.valor_centavos ?? 0), 0)
+  const finalizados = pas.filter((p) => ehPago(p) && p.finalizado_em != null).map(paItem)
+  const emProducao = pas.filter((p) => ehPago(p) && p.finalizado_em == null).map(paItem)
+  // Orçamento formalizado pelo fornecedor (orcamento_status='definido') e não pago.
+  const aguardandoPagamento = pas
+    .filter((p) => !ehPago(p) && p.status === 'confirmado' && p.orcamento_status === 'definido')
+    .map(paItem)
+  // Fornecedor aceitou (negociação aberta), orçamento ainda não formalizado.
+  const emNegociacao = pas
+    .filter((p) => !ehPago(p) && p.status === 'confirmado' && p.orcamento_status !== 'definido' && fornAceitoPorPedido.has(p.id))
+    .map(paItem)
+  // Confirmado, nenhum fornecedor aceitou ainda.
+  const buscandoFornecedor = pas
+    .filter((p) => !ehPago(p) && p.status === 'confirmado' && p.orcamento_status !== 'definido' && !fornAceitoPorPedido.has(p.id))
+    .map(paItem)
+  // Receita SÓ é real quando o Asaas confirma (webhook/reconciliação).
+  const receitaPagaCentavos = pas.filter(ehPago).reduce((acc, p) => acc + (p.valor_centavos ?? 0), 0)
   const receitaAguardandoCentavos = pas
-    .filter((p) => p.status === 'confirmado' && p.pagamento_status !== 'pago')
+    .filter((p) => !ehPago(p) && p.status === 'confirmado' && p.orcamento_status === 'definido')
     .reduce((acc, p) => acc + (p.valor_centavos ?? 0), 0)
-
-  const nomePA = new Map<string, string>()
-  for (const p of pas) nomePA.set(p.id, p.nome ?? 'Cliente')
-
-  // --------------------------------------- encaminhamento a fornecedor
-  const opas = opasQ.data ?? []
-  const opaItem = (o: (typeof opas)[number]) => ({
-    id: o.id,
-    pedidoId: o.pedido_id, // deep-link do drill abre o PEDIDO, não a oferta
-    cliente: nomePA.get(o.pedido_id) ?? 'Cliente',
-    fornecedor: nomeFornecedor.get(o.fornecedor_id) ?? 'Fornecedor',
-    valorCentavos: o.valor_repasse_centavos ?? null,
-    status: o.status,
-    criadoEm: o.criado_em,
-  })
-  const encaminhados = opas.filter((o) => o.status === 'ofertada').map(opaItem)
-  const aceitosForn = opas.filter((o) => o.status === 'aceita').map(opaItem)
-  const opaPerdidas = opas.filter((o) => o.status === 'recusada' || o.status === 'cancelada').length
+  const ofertasNoAr = opasTodas.filter((o) => o.status === 'ofertada').length
 
   // --------------------------------------------------- pedidos clássicos
   const pedidos = pedidosQ.data ?? []
@@ -250,11 +257,15 @@ export async function GET(req: NextRequest) {
     assistido: {
       criados: pas.length,
       pelaMetade,
+      buscandoFornecedor,
+      emNegociacao,
       aguardandoPagamento,
-      pagos,
+      emProducao,
+      finalizados,
       cancelados,
       receitaPagaCentavos,
       receitaAguardandoCentavos,
+      ofertasNoAr,
     },
     classico: {
       criados: pedidos.length,
@@ -268,11 +279,6 @@ export async function GET(req: NextRequest) {
         recusadas: contarOfertas('recusada'),
         expiradas: contarOfertas('expirada'),
       },
-    },
-    fornecedor: {
-      encaminhados,
-      aceitos: aceitosForn,
-      perdidos: opaPerdidas,
     },
     contato: { waConversas, cadastros },
   })
