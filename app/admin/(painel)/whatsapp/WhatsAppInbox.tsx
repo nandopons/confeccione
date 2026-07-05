@@ -72,12 +72,32 @@ type RapidaPreset = {
   descricao: string
   corpo: string
   botoes?: { id: string; titulo: string }[]
+  /** botão que abre um link (CTA URL) — texto ≤ 20 chars */
+  urlBotao?: { texto: string; url: string }
+  /** true → envia o texto direto, sem passar pelo composer */
+  enviarDireto?: boolean
   /** true → só preenche o composer (deixa editar antes de enviar) */
   preencher?: boolean
 }
 
 // Mensagens rápidas do composer. Botões: máx 3, títulos ≤ 20 chars (limite Meta).
 const RAPIDAS: RapidaPreset[] = [
+  {
+    id: 'sobre_confeccione',
+    rotulo: 'O que é a Confeccione',
+    descricao: 'Apresentação — envia direto',
+    corpo:
+      'A Confeccione é um marketplace que conecta quem precisa fabricar roupas a fornecedores de confecção qualificados. 🧵\n\nVocê conta o que quer produzir (tipo de peça, quantidade e prazo) e a gente encontra o fornecedor certo pra você — do orçamento até a entrega, com tudo acompanhado por aqui.\n\nSem caçar fábrica no escuro: você fala com a gente e a gente resolve.',
+    enviarDireto: true,
+  },
+  {
+    id: 'pedido_site',
+    rotulo: 'Fazer pedido pelo site',
+    descricao: 'Convite com botão pro site',
+    corpo:
+      'Bora tirar sua produção do papel? 🚀\n\nFaz teu pedido pelo nosso site — leva menos de 2 minutos e a gente já começa a buscar o fornecedor ideal pra sua peça.',
+    urlBotao: { texto: 'Fazer meu pedido', url: 'https://www.confeccione.com.br/?utm_source=whatsapp&utm_medium=atendimento' },
+  },
   {
     id: 'menu',
     rotulo: 'Menu de atendimento',
@@ -513,20 +533,32 @@ export function WhatsAppInbox() {
   async function enviarRapida(preset: RapidaPreset) {
     setRapidasAberto(false)
     if (!ativaId || enviando) return
-    if (preset.preencher || !preset.botoes) {
+
+    // Sem envio automático → só preenche o composer pra editar.
+    if (preset.preencher || (!preset.botoes && !preset.urlBotao && !preset.enviarDireto)) {
       setTexto(preset.corpo)
       return
     }
+
+    const payload: Record<string, unknown> = { conversaId: ativaId }
+    if (preset.urlBotao) {
+      payload.botaoUrl = { corpo: preset.corpo, texto: preset.urlBotao.texto, url: preset.urlBotao.url }
+    } else if (preset.botoes) {
+      payload.botoes = { corpo: preset.corpo, botoes: preset.botoes }
+    } else {
+      payload.texto = preset.corpo
+    }
+
     setEnviando(true)
     setErro(null)
     try {
       const res = await fetch('/api/admin/whatsapp/enviar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversaId: ativaId, botoes: { corpo: preset.corpo, botoes: preset.botoes } }),
+        body: JSON.stringify(payload),
       })
       const data = await res.json().catch(() => null)
-      if (!res.ok) setErro(data?.erro ?? 'Falha ao enviar mensagem com botões')
+      if (!res.ok) setErro(data?.erro ?? 'Falha ao enviar mensagem rápida')
       await carregarMensagens(ativaId)
       await carregarConversas(busca || undefined)
     } finally {
@@ -790,6 +822,7 @@ export function WhatsAppInbox() {
                                   <span className="block text-[13px] font-medium text-neutral-900">
                                     {r.rotulo}
                                     {r.botoes && <span className="ml-1.5 text-[10px] font-semibold text-[#1D9E75]">{r.botoes.length} botões</span>}
+                                    {r.urlBotao && <span className="ml-1.5 text-[10px] font-semibold text-[#1D9E75]">🔗 link</span>}
                                   </span>
                                   <span className="block text-[11.5px] text-neutral-500">{r.descricao}</span>
                                 </button>
