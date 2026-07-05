@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 type Estampa = { posicao?: string | null; tamanho?: string | null }
@@ -140,6 +140,9 @@ export default function PedidosPagosAdmin() {
   const [entregaEdit, setEntregaEdit] = useState<string | null>(null)
   const [entregaForm, setEntregaForm] = useState<{ cep: string; numero: string; complemento: string }>({ cep: '', numero: '', complemento: '' })
   const [salvandoEntrega, setSalvandoEntrega] = useState(false)
+  // Deep-link ?pedido=<id> (vindo do popup do Funil): abre, rola e destaca o card.
+  const [destacado, setDestacado] = useState<string | null>(null)
+  const deepLinkRef = useRef(false)
 
   async function carregar() {
     setCarregando(true)
@@ -157,6 +160,33 @@ export default function PedidosPagosAdmin() {
     }
   }
   useEffect(() => { carregar() }, [])
+
+  // Deep-link do Funil: com a lista carregada, expande o pedido pedido na URL,
+  // rola até ele e dá um destaque temporário. Roda uma única vez.
+  useEffect(() => {
+    if (deepLinkRef.current || pedidos.length === 0) return
+    deepLinkRef.current = true
+    let alvo: string | null = null
+    try {
+      alvo = new URLSearchParams(window.location.search).get('pedido')
+    } catch {
+      /* */
+    }
+    if (!alvo || !pedidos.some((p) => p.id === alvo)) return
+    setChip('todos') // garante que o card não está escondido por filtro
+    void abrir(alvo)
+    setDestacado(alvo)
+    setTimeout(() => {
+      document.getElementById(`pedido-${alvo}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 200)
+    setTimeout(() => setDestacado(null), 5000)
+    try {
+      window.history.replaceState(null, '', '/admin/pedidos-pagos')
+    } catch {
+      /* */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedidos])
 
   function toggleForn(pedidoId: string, fid: string) {
     setSelecao((prev) => {
@@ -324,7 +354,16 @@ export default function PedidosPagosAdmin() {
           const d = det[p.id]
           const expandido = aberto === p.id
           return (
-            <div key={p.id} className="rounded-lg border border-gray-200 bg-white p-3.5">
+            <div
+              key={p.id}
+              id={`pedido-${p.id}`}
+              className={
+                'rounded-lg border bg-white p-3.5 transition-all scroll-mt-4 ' +
+                (destacado === p.id
+                  ? 'border-[#1D9E75] ring-2 ring-[#1D9E75]/40 shadow-lg'
+                  : 'border-gray-200')
+              }
+            >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="text-sm text-gray-500">{p.codigo ? <span className="font-semibold text-gray-700">Nº {p.codigo}</span> : null}{p.codigo ? ' · ' : ''}{data(p.criado_em)} · {p.nome || 'Sem nome'} · {p.cep || 'sem CEP'}</div>

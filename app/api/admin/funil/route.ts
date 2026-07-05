@@ -191,6 +191,7 @@ export async function GET(req: NextRequest) {
   const opas = opasQ.data ?? []
   const opaItem = (o: (typeof opas)[number]) => ({
     id: o.id,
+    pedidoId: o.pedido_id, // deep-link do drill abre o PEDIDO, não a oferta
     cliente: nomePA.get(o.pedido_id) ?? 'Cliente',
     fornecedor: nomeFornecedor.get(o.fornecedor_id) ?? 'Fornecedor',
     valorCentavos: o.valor_repasse_centavos ?? null,
