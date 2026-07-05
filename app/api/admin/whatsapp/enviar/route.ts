@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import {
+  enviarBotaoUrl,
   enviarBotoes,
   enviarMidiaPorId,
   enviarTemplate,
@@ -168,6 +169,7 @@ export async function POST(req: NextRequest) {
     texto?: string
     template?: { nome?: string; idioma?: string }
     botoes?: { corpo?: string; botoes?: BotaoResposta[] }
+    botaoUrl?: { corpo?: string; texto?: string; url?: string }
   }
   try {
     body = await req.json()
@@ -180,6 +182,21 @@ export async function POST(req: NextRequest) {
 
   const conversa = await dadosConversa(conversaId)
   if (!conversa) return NextResponse.json({ erro: 'Conversa não encontrada' }, { status: 404 })
+
+  // ---------------------------------------------------------------- botão de link (CTA URL)
+  if (body.botaoUrl) {
+    const corpo = (body.botaoUrl.corpo ?? '').trim()
+    const textoBotao = (body.botaoUrl.texto ?? '').trim()
+    const url = (body.botaoUrl.url ?? '').trim()
+    if (!corpo || !textoBotao || !/^https:\/\//.test(url)) {
+      return NextResponse.json({ erro: 'Botão de link precisa de corpo, texto e URL https' }, { status: 400 })
+    }
+    const resultado = await enviarBotaoUrl(conversa.waId, corpo, textoBotao, url)
+    const corpoRegistro = `${corpo}\n▸ ${textoBotao}`
+    const msgId = await registrarSaida({ conversaId, resultado, tipo: 'interactive', corpo: corpoRegistro })
+    if (!resultado.ok) return NextResponse.json({ erro: resultado.erro, mensagemId: msgId }, { status: 502 })
+    return NextResponse.json({ ok: true, mensagemId: msgId })
+  }
 
   // ---------------------------------------------------------------- botões
   if (body.botoes) {
