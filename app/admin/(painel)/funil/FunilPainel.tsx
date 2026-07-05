@@ -38,9 +38,11 @@ type Dados = {
   assistido: {
     criados: number
     pelaMetade: ItemLista[]
-    confirmados: ItemLista[]
+    aguardandoPagamento: ItemLista[]
+    pagos: ItemLista[]
     cancelados: number
-    receitaCentavos: number
+    receitaPagaCentavos: number
+    receitaAguardandoCentavos: number
   }
   classico: {
     criados: number
@@ -74,7 +76,7 @@ const COL_X = [20, 260, 500, 740, 980, 1220]
 const W = 200
 const W_MINI = 200
 const MUNDO_W = 1440
-const MUNDO_H = 880
+const MUNDO_H = 1000
 
 function brl(centavos: number | null | undefined): string {
   if (!centavos) return '—'
@@ -384,7 +386,7 @@ export default function FunilPainel() {
       tom: 'neutro',
       drill: {
         titulo: 'Pedidos montados no chat',
-        itens: [...dados.assistido.pelaMetade, ...dados.assistido.confirmados],
+        itens: [...dados.assistido.pelaMetade, ...dados.assistido.aguardandoPagamento, ...dados.assistido.pagos],
         vazio: 'Nenhum pedido montado no período.',
         verHref: '/admin/pedidos-pagos',
       },
@@ -422,24 +424,39 @@ export default function FunilPainel() {
       },
     })
     nos.push({
-      id: 'pa_pago',
+      id: 'aguardando_pgto',
       col: 4,
       y: 236,
-      titulo: 'Pago / confirmado',
-      valor: dados.assistido.confirmados.length,
-      sub: brl(dados.assistido.receitaCentavos),
+      titulo: '💳 Aguardando pgto',
+      valor: dados.assistido.aguardandoPagamento.length,
+      sub: `${brl(dados.assistido.receitaAguardandoCentavos)} em aberto`,
+      tom: 'ambar',
+      drill: {
+        titulo: 'Confirmaram e ainda não pagaram — cobre!',
+        itens: dados.assistido.aguardandoPagamento,
+        vazio: 'Ninguém aguardando pagamento. 🎉',
+        verHref: '/admin/pedidos-pagos',
+      },
+    })
+    nos.push({
+      id: 'pa_pago',
+      col: 4,
+      y: 396,
+      titulo: '💰 Pago (Asaas)',
+      valor: dados.assistido.pagos.length,
+      sub: brl(dados.assistido.receitaPagaCentavos),
       tom: 'verde',
       drill: {
-        titulo: 'Pedidos confirmados (pagos)',
-        itens: dados.assistido.confirmados,
-        vazio: 'Nenhum pagamento no período.',
+        titulo: 'Pagamentos confirmados pelo Asaas',
+        itens: dados.assistido.pagos,
+        vazio: 'Nenhum pagamento confirmado no período.',
         verHref: '/admin/pedidos-pagos',
       },
     })
     nos.push({
       id: 'pa_cancel',
       col: 4,
-      y: 392,
+      y: 532,
       titulo: 'Cancelados',
       valor: dados.assistido.cancelados,
       tom: 'cinza',
@@ -448,7 +465,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'negociacao',
       col: 4,
-      y: 510,
+      y: 630,
       titulo: 'Em negociação',
       valor: dados.classico.negociacao.length,
       sub: 'fornecedor aceitou',
@@ -463,7 +480,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'buscando',
       col: 4,
-      y: 660,
+      y: 780,
       titulo: '⏳ Buscando fornecedor',
       valor: dados.classico.buscando.length,
       sub: 'aguardando aceite',
@@ -478,7 +495,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'expirado',
       col: 4,
-      y: 800,
+      y: 916,
       titulo: 'Expirados',
       valor: dados.classico.expirados,
       tom: 'cinza',
@@ -519,7 +536,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'concluido',
       col: 5,
-      y: 529,
+      y: 649,
       titulo: 'Concluídos',
       valor: dados.classico.concluidos.length,
       tom: 'verde',
@@ -539,7 +556,8 @@ export default function FunilPainel() {
       { de: 'visitantes', para: 'cadastros', n: dados.acoes.cadastros },
       { de: 'assistente', para: 'pa_criados', n: dados.assistido.criados },
       { de: 'pa_criados', para: 'pela_metade', n: dados.assistido.pelaMetade.length, tom: 'ambar' },
-      { de: 'pa_criados', para: 'pa_pago', n: dados.assistido.confirmados.length, tom: 'verde' },
+      { de: 'pa_criados', para: 'aguardando_pgto', n: dados.assistido.aguardandoPagamento.length, tom: 'ambar' },
+      { de: 'aguardando_pgto', para: 'pa_pago', n: dados.assistido.pagos.length, tom: 'verde' },
       { de: 'pa_criados', para: 'pa_cancel', n: dados.assistido.cancelados, tom: 'cinza' },
       { de: 'cadastros', para: 'classico', n: dados.classico.criados },
       { de: 'classico', para: 'negociacao', n: dados.classico.negociacao.length, tom: 'verde' },
@@ -568,10 +586,6 @@ export default function FunilPainel() {
     return { x: COL_X[n.col], y: n.y + h / 2 }
   }
 
-  const taxaPedido =
-    dados && dados.site.sessoes > 0
-      ? Math.round(((dados.assistido.criados + dados.classico.criados) / dados.site.sessoes) * 100)
-      : null
 
   return (
     <div>
@@ -619,10 +633,10 @@ export default function FunilPainel() {
           </div>
           {[
             { r: 'Pedidos criados', v: String(dados.assistido.criados + dados.classico.criados) },
-            { r: 'Visita → pedido', v: taxaPedido === null ? '—' : `${taxaPedido}%` },
             { r: 'Pela metade', v: String(dados.assistido.pelaMetade.length), tom: 'ambar' },
+            { r: 'Aguardando pgto', v: brl(dados.assistido.receitaAguardandoCentavos), tom: 'ambar' },
+            { r: 'Receita paga (Asaas)', v: brl(dados.assistido.receitaPagaCentavos), tom: 'verde' },
             { r: 'Em produção', v: String(dados.fornecedor.aceitos.length), tom: 'verde' },
-            { r: 'Receita confirmada', v: brl(dados.assistido.receitaCentavos), tom: 'verde' },
           ].map((k, i) => (
             <div key={i} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
               <p className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">{k.r}</p>
