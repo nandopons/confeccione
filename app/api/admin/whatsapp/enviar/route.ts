@@ -167,7 +167,7 @@ export async function POST(req: NextRequest) {
   let body: {
     conversaId?: string
     texto?: string
-    template?: { nome?: string; idioma?: string }
+    template?: { nome?: string; idioma?: string; variaveis?: string[] }
     botoes?: { corpo?: string; botoes?: BotaoResposta[] }
     botaoUrl?: { corpo?: string; texto?: string; url?: string }
   }
@@ -214,7 +214,13 @@ export async function POST(req: NextRequest) {
   }
 
   if (body.template?.nome) {
-    const resultado = await enviarTemplate(conversa.waId, body.template.nome, body.template.idioma ?? 'pt_BR')
+    // Variáveis do corpo ({{1}}, {{2}}, …) → componente body da Cloud API.
+    const variaveis = (body.template.variaveis ?? []).map((v) => String(v ?? '').trim()).filter(Boolean)
+    const components =
+      variaveis.length > 0
+        ? [{ type: 'body', parameters: variaveis.map((v) => ({ type: 'text', text: v })) }]
+        : undefined
+    const resultado = await enviarTemplate(conversa.waId, body.template.nome, body.template.idioma ?? 'pt_BR', components)
     const msgId = await registrarSaida({
       conversaId,
       resultado,

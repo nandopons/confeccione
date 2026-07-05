@@ -550,10 +550,19 @@ export function WhatsAppInbox({
     setErro(null)
     setModalTemplates(false)
     try {
+      // Templates com {{1}} no corpo → preenche com o 1º nome do contato
+      // (ex.: retomar_pedido, pedido_recebido). Sem nome → "cliente".
+      const precisaNome = /\{\{\s*1\s*\}\}/.test(t.bodyPreview || '')
+      const primeiroNome = (ativa?.contato.nome || '').trim().split(/\s+/)[0] || 'cliente'
+      const template: { nome: string; idioma: string; variaveis?: string[] } = {
+        nome: t.name,
+        idioma: t.language,
+        ...(precisaNome ? { variaveis: [primeiroNome] } : {}),
+      }
       const res = await fetch('/api/admin/whatsapp/enviar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversaId: ativaId, template: { nome: t.name, idioma: t.language } }),
+        body: JSON.stringify({ conversaId: ativaId, template }),
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) setErro(data?.erro ?? 'Falha ao enviar template')
