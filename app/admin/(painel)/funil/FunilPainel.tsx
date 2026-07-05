@@ -27,7 +27,13 @@ type ItemLista = {
 
 type Dados = {
   dias: number
-  site: { sessoes: number; pageviews: number; origens: { fonte: string; sessoes: number }[] }
+  site: {
+    sessoes: number
+    pageviews: number
+    origens: { fonte: string; sessoes: number }[]
+    visitasPorDia: { dia: string; sessoes: number }[]
+    hoje: number
+  }
   acoes: { assistenteIniciado: number; pedidoEnviadoEventos: number; whatsapp: number; cadastros: number }
   assistido: {
     criados: number
@@ -79,6 +85,38 @@ function tempoRelativo(iso: string): string {
   if (h < 24) return `há ${h}h`
   const d = Math.floor(h / 24)
   return d === 1 ? 'ontem' : `há ${d} dias`
+}
+
+/** Barras de visitantes por dia (mostra até os últimos 30 dias do período). */
+function SparklineVisitas({ serie }: { serie: { dia: string; sessoes: number }[] }) {
+  const dadosSerie = serie.slice(-30)
+  if (dadosSerie.length === 0) return null
+  const max = Math.max(1, ...dadosSerie.map((d) => d.sessoes))
+  const lg = 100 / dadosSerie.length
+  const rotulo = (d: string) => {
+    const [, m, dia] = d.split('-')
+    return `${dia}/${m}`
+  }
+  return (
+    <svg viewBox="0 0 100 30" className="w-full h-9 mt-1.5" preserveAspectRatio="none" aria-hidden>
+      {dadosSerie.map((d, i) => {
+        const h = d.sessoes === 0 ? 1.5 : Math.max(3, (d.sessoes / max) * 28)
+        return (
+          <rect
+            key={d.dia}
+            x={i * lg + lg * 0.15}
+            y={30 - h}
+            width={lg * 0.7}
+            height={h}
+            rx={0.8}
+            fill={d.sessoes === 0 ? '#E2E8F0' : '#1D9E75'}
+          >
+            <title>{`${rotulo(d.dia)}: ${d.sessoes} visitante${d.sessoes === 1 ? '' : 's'}`}</title>
+          </rect>
+        )
+      })}
+    </svg>
+  )
 }
 
 function rotuloFonte(f: string): string {
@@ -151,7 +189,7 @@ export default function FunilPainel() {
       })
     })
     if (origens.length === 0) {
-      nos.push({ id: 'o_nada', col: 0, y: 200, titulo: 'Sem tráfego ainda', valor: 0, tom: 'cinza', mini: true })
+      nos.push({ id: 'o_nada', col: 0, y: 200, titulo: 'Aguardando visitas…', valor: 0, tom: 'cinza', mini: true })
     }
 
     // C1 — site
@@ -161,7 +199,7 @@ export default function FunilPainel() {
       y: 208,
       titulo: 'Visitantes',
       valor: dados.site.sessoes,
-      sub: `${dados.site.pageviews} páginas vistas`,
+      sub: `${dados.site.pageviews} pág. vistas · hoje ${dados.site.hoje}`,
       tom: 'escuro',
     })
 
@@ -270,7 +308,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'pa_cancel',
       col: 4,
-      y: 262,
+      y: 272,
       titulo: 'Cancelados',
       valor: dados.assistido.cancelados,
       tom: 'cinza',
@@ -279,7 +317,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'negociacao',
       col: 4,
-      y: 356,
+      y: 368,
       titulo: 'Em negociação',
       valor: dados.classico.negociacao.length,
       sub: 'fornecedor aceitou',
@@ -294,7 +332,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'buscando',
       col: 4,
-      y: 476,
+      y: 496,
       titulo: '⏳ Buscando fornecedor',
       valor: dados.classico.buscando.length,
       sub: 'aguardando aceite',
@@ -309,7 +347,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'expirado',
       col: 4,
-      y: 588,
+      y: 608,
       titulo: 'Expirados',
       valor: dados.classico.expirados,
       tom: 'cinza',
@@ -350,7 +388,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'concluido',
       col: 5,
-      y: 356,
+      y: 387,
       titulo: 'Concluídos',
       valor: dados.classico.concluidos.length,
       tom: 'verde',
@@ -385,7 +423,7 @@ export default function FunilPainel() {
       { de: 'negociacao', para: 'concluido', n: dados.classico.concluidos.length, tom: 'verde' },
     ]
 
-    return { nos, arestas, alturaSvg: 656 }
+    return { nos, arestas, alturaSvg: 676 }
   }, [dados])
 
   const mapaNos = useMemo(() => new Map(nos.map((n) => [n.id, n])), [nos])
@@ -435,9 +473,20 @@ export default function FunilPainel() {
 
       {/* ------------------------------------------------ KPIs */}
       {dados && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 mb-6">
+          {/* Visitantes — destaque com barras por dia */}
+          <div className="col-span-2 bg-[#0E1814] border border-black/40 rounded-xl px-4 py-3">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-[11px] uppercase tracking-wide text-white/40 font-medium">Visitantes no site</p>
+              <p className="text-[11px] text-[#6EE7B7] font-medium shrink-0">hoje: {dados.site.hoje}</p>
+            </div>
+            <div className="flex items-baseline gap-2 mt-0.5">
+              <p className="text-2xl font-semibold text-white leading-none">{dados.site.sessoes}</p>
+              <p className="text-[11px] text-white/40">{dados.site.pageviews} páginas vistas · {dados.dias}d</p>
+            </div>
+            <SparklineVisitas serie={dados.site.visitasPorDia} />
+          </div>
           {[
-            { r: 'Visitantes', v: String(dados.site.sessoes) },
             { r: 'Pedidos criados', v: String(dados.assistido.criados + dados.classico.criados) },
             { r: 'Visita → pedido', v: taxaPedido === null ? '—' : `${taxaPedido}%` },
             { r: 'Pela metade', v: String(dados.assistido.pelaMetade.length), tom: 'ambar' },
@@ -487,7 +536,7 @@ export default function FunilPainel() {
               </text>
             ))}
 
-            {/* arestas */}
+            {/* arestas — fluxo zerado fica sutil (sem pill, sem animação) */}
             {arestas.map((a, i) => {
               const de = mapaNos.get(a.de)
               const para = mapaNos.get(a.para)
@@ -496,11 +545,21 @@ export default function FunilPainel() {
               const p2 = centroEsquerda(para)
               const midX = (p1.x + p2.x) / 2
               const cor = COR_ARESTA[a.tom ?? 'cinza']
+              const vazia = typeof a.n === 'number' && a.n === 0
               const d = `M ${p1.x} ${p1.y} C ${midX} ${p1.y}, ${midX} ${p2.y}, ${p2.x} ${p2.y}`
               return (
                 <g key={i}>
-                  <path d={d} fill="none" stroke={cor} strokeWidth="2.4" strokeLinecap="round" strokeDasharray="0.1 9" className="fluxo" opacity="0.9" />
-                  {typeof a.n === 'number' && (
+                  <path
+                    d={d}
+                    fill="none"
+                    stroke={vazia ? '#CBD5E1' : cor}
+                    strokeWidth={vazia ? 1.6 : 2.4}
+                    strokeLinecap="round"
+                    strokeDasharray="0.1 9"
+                    className={vazia ? undefined : 'fluxo'}
+                    opacity={vazia ? 0.45 : 0.9}
+                  />
+                  {typeof a.n === 'number' && a.n > 0 && (
                     <g>
                       <rect x={midX - 17} y={(p1.y + p2.y) / 2 - 11} width="34" height="20" rx="10" fill="white" stroke={cor} strokeWidth="1.2" />
                       <text x={midX} y={(p1.y + p2.y) / 2 + 3.5} textAnchor="middle" fontSize="11" fontWeight="700" fill={cor === COR_ARESTA.cinza ? '#64748B' : cor}>
@@ -526,8 +585,8 @@ export default function FunilPainel() {
                   <rect x={COL_X[n.col]} y={n.y} width={n.mini ? W_MINI : W} height={h} rx="14" fill={c.fundo} stroke={c.borda} strokeWidth={n.tom === 'cinza' ? 1.2 : 1.8} />
                   {n.mini ? (
                     <>
-                      <text x={COL_X[n.col] + 14} y={n.y + 28} fontSize="12" fill={c.texto} fontWeight="500">
-                        {n.titulo}
+                      <text x={COL_X[n.col] + 14} y={n.y + 28} fontSize="11.5" fill={c.texto} fontWeight="500">
+                        {n.titulo.slice(0, 21)}
                       </text>
                       <text x={COL_X[n.col] + W - 14} y={n.y + 30} fontSize="16" fill={c.texto} fontWeight="700" textAnchor="end">
                         {n.valor}
@@ -535,20 +594,20 @@ export default function FunilPainel() {
                     </>
                   ) : (
                     <>
-                      <text x={COL_X[n.col] + 14} y={n.y + 24} fontSize="12" fill={n.tom === 'escuro' ? '#9DB4AA' : '#64748B'} fontWeight="500">
-                        {n.titulo}
+                      <text x={COL_X[n.col] + 14} y={n.y + 23} fontSize="11.5" fill={n.tom === 'escuro' ? '#9DB4AA' : '#64748B'} fontWeight="600">
+                        {n.titulo.slice(0, 24)}
                       </text>
-                      <text x={COL_X[n.col] + 14} y={n.y + 54} fontSize="26" fill={c.texto} fontWeight="700">
+                      <text x={COL_X[n.col] + 14} y={n.y + 55} fontSize="28" fill={c.texto} fontWeight="700">
                         {n.valor}
                       </text>
                       {n.sub && (
-                        <text x={COL_X[n.col] + 14} y={n.y + 72} fontSize="10.5" fill={n.tom === 'escuro' ? '#9DB4AA' : '#94A3B8'}>
-                          {n.sub}
+                        <text x={COL_X[n.col] + 14} y={n.y + 73} fontSize="10.5" fill={n.tom === 'escuro' ? '#9DB4AA' : '#94A3B8'}>
+                          {n.sub.slice(0, 30)}
                         </text>
                       )}
                       {clicavel && (
-                        <text x={COL_X[n.col] + W - 12} y={n.y + 24} fontSize="11" fill={n.tom === 'escuro' ? '#9DB4AA' : '#94A3B8'} textAnchor="end">
-                          ver ›
+                        <text x={COL_X[n.col] + W - 11} y={n.y + 57} fontSize="15" fill={n.tom === 'escuro' ? '#9DB4AA' : '#B4C0CC'} textAnchor="end" fontWeight="700">
+                          ›
                         </text>
                       )}
                     </>
