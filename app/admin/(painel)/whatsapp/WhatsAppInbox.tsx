@@ -371,7 +371,17 @@ function PainelContexto({ ctx }: { ctx: Contexto | null }) {
   )
 }
 
-export function WhatsAppInbox() {
+export function WhatsAppInbox({
+  abrirTelefone,
+  abrirNome,
+  abrirTexto,
+}: {
+  /** Deep-link: telefone da conversa a abrir/criar ao carregar. */
+  abrirTelefone?: string
+  abrirNome?: string
+  /** Texto pré-preenchido no composer (não envia sozinho). */
+  abrirTexto?: string
+} = {}) {
   const [conversas, setConversas] = useState<Conversa[]>([])
   const [carregouLista, setCarregouLista] = useState(false)
   const [busca, setBusca] = useState('')
@@ -392,6 +402,29 @@ export function WhatsAppInbox() {
   const inputArquivoRef = useRef<HTMLInputElement>(null)
   const ativaIdRef = useRef<string | null>(null)
   ativaIdRef.current = ativaId
+  const deepLinkFeito = useRef(false)
+
+  // ------------------------------------------------- deep-link (?abrir=…)
+  useEffect(() => {
+    if (!abrirTelefone || deepLinkFeito.current) return
+    deepLinkFeito.current = true
+    ;(async () => {
+      try {
+        const res = await fetch('/api/admin/whatsapp/conversas/abrir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ telefone: abrirTelefone, nome: abrirNome }),
+        })
+        const data = await res.json().catch(() => null)
+        if (res.ok && data?.conversaId) {
+          setAtivaId(data.conversaId)
+          if (abrirTexto) setTexto(abrirTexto)
+          // Limpa a query da URL pra F5 não reabrir/preencher de novo.
+          window.history.replaceState(null, '', '/admin/whatsapp')
+        }
+      } catch { /* segue sem deep-link */ }
+    })()
+  }, [abrirTelefone, abrirNome, abrirTexto])
 
   const ativa = useMemo(() => conversas.find((c) => c.id === ativaId) ?? null, [conversas, ativaId])
   const janela = useMemo(() => restanteJanela(ativa?.ultima_msg_contato_em ?? null), [ativa, mensagens.length])
