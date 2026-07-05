@@ -11,6 +11,8 @@
 // ============================================================================
 
 import { useEffect, useRef, useState } from "react";
+import { track } from "@/app/lib/rastreio";
+import { WHATSAPP_SUPORTE_FORMATADO } from "@/app/lib/contatos";
 
 type Tamanho = { tamanho: string; qtd: number | null };
 type Linha = {
@@ -74,6 +76,8 @@ export default function PedidoAssistente() {
   const [protocolo, setProtocolo] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
   const salvoRef = useRef(false);
+  // Funil (/admin/funil): marca o 1º engajamento real com o assistente.
+  const trackIniciadoRef = useRef(false);
   const [endCep, setEndCep] = useState("");
   const [endNumero, setEndNumero] = useState("");
   const [endComplemento, setEndComplemento] = useState("");
@@ -175,6 +179,8 @@ export default function PedidoAssistente() {
         const novoId = String(data.protocolo ?? data.id ?? "");
         salvoRef.current = true;
         setProtocolo(novoId);
+        // Funil: pedido salvo (liga a sessão anônima ao pedido criado).
+        track("pedido_enviado", { referenciaId: novoId });
         try {
           const w = window as unknown as { dataLayer?: Record<string, unknown>[] };
           w.dataLayer = w.dataLayer || [];
@@ -268,6 +274,11 @@ export default function PedidoAssistente() {
   async function enviar(textoForcado?: string) {
     const texto = (textoForcado ?? input).trim();
     if (!texto || enviando) return;
+    // Funil: primeira mensagem do visitante = assistente iniciado.
+    if (!trackIniciadoRef.current) {
+      trackIniciadoRef.current = true;
+      track("assistente_iniciado");
+    }
     setErro(null);
     setCoresSugeridas(null);
 
@@ -343,7 +354,7 @@ export default function PedidoAssistente() {
     }
     const id = salvoRef.current ? protocolo : await salvarPedido(pedido);
     if (!id) {
-      setErro("Não consegui gerar a proposta agora. Tente de novo em instantes — se persistir, chama a gente no WhatsApp (81) 99593-2695.");
+      setErro(`Não consegui gerar a proposta agora. Tente de novo em instantes — se persistir, chama a gente no WhatsApp ${WHATSAPP_SUPORTE_FORMATADO}.`);
       return;
     }
     // grava CEP + número no pedido antes de seguir (pro cálculo de frete)
