@@ -251,6 +251,19 @@ export default function FunilPainel() {
   }
 
   function aoSoltar(e: React.PointerEvent<HTMLDivElement>) {
+    // Clique (sem arrasto) → hit-test manual nos nós. Necessário porque o
+    // setPointerCapture do canvas redireciona o evento de click pro wrapper,
+    // então o onClick dos <g> nunca dispararia.
+    if (ponteiros.current.size === 1 && !moveu.current && vista && wrapRef.current) {
+      const rect = wrapRef.current.getBoundingClientRect()
+      const wx = (e.clientX - rect.left - vista.x) / vista.k
+      const wy = (e.clientY - rect.top - vista.y) / vista.k
+      const alvo = nos.find((n) => {
+        const h = n.mini ? 46 : 84
+        return wx >= COL_X[n.col] && wx <= COL_X[n.col] + W && wy >= n.y && wy <= n.y + h
+      })
+      if (alvo?.drill) setDrill(alvo.drill)
+    }
     ponteiros.current.delete(e.pointerId)
     if (ponteiros.current.size < 2) pinchDist.current = null
     if (ponteiros.current.size === 0) {
@@ -258,6 +271,16 @@ export default function FunilPainel() {
       setArrastando(false)
     }
   }
+
+  // Esc fecha o popup de detalhe.
+  useEffect(() => {
+    if (!drill) return
+    const f = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDrill(null)
+    }
+    window.addEventListener('keydown', f)
+    return () => window.removeEventListener('keydown', f)
+  }, [drill])
 
   const carregar = useCallback(async (d: number) => {
     setCarregando(true)
@@ -701,14 +724,8 @@ export default function FunilPainel() {
               const h = n.mini ? 46 : 84
               const clicavel = !!n.drill
               return (
-                <g
-                  key={n.id}
-                  className={clicavel ? 'no-clicavel' : undefined}
-                  onClick={() => {
-                    if (moveu.current) return // era um arrasto, não um clique
-                    if (n.drill) setDrill(n.drill)
-                  }}
-                >
+                // clique real é resolvido por hit-test no pointerup do canvas
+                <g key={n.id} className={clicavel ? 'no-clicavel' : undefined}>
                   <rect x={COL_X[n.col]} y={n.y} width={n.mini ? W_MINI : W} height={h} rx="14" fill={c.fundo} stroke={c.borda} strokeWidth={n.tom === 'cinza' ? 1.2 : 1.8} />
                   {n.mini ? (
                     <>
@@ -791,11 +808,11 @@ export default function FunilPainel() {
         cadastros vêm direto do banco no período selecionado.
       </p>
 
-      {/* ------------------------------------------------ drawer drill-down */}
+      {/* ------------------------------------------------ popup drill-down */}
       {drill && (
-        <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setDrill(null)} />
-          <div className="absolute inset-y-0 right-0 w-full max-w-md bg-white shadow-2xl flex flex-col">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setDrill(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[82vh] flex flex-col overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
               <p className="text-sm font-semibold text-gray-900">{drill.titulo}</p>
               <button
