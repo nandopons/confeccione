@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Manrope } from "next/font/google";
 import Script from "next/script";
+import Rastreio from "./components/Rastreio";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -58,6 +59,8 @@ export default function RootLayout({
             style={{ display: "none", visibility: "hidden" }}
           />
         </noscript>
+        {/* Tracker 1st-party do funil (/admin/funil) — pageviews do site público. */}
+        <Rastreio />
         {children}
       </body>
     </html>

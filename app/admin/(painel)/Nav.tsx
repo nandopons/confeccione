@@ -58,6 +58,13 @@ const SECOES: Secao[] = [
     titulo: 'Vendas',
     itens: [
       {
+        href: '/admin/funil',
+        label: 'Funil',
+        icone: (
+          <Ico d="M3 4h18l-7 8.5V19l-4 2.5v-9L3 4z" />
+        ),
+      },
+      {
         href: '/admin/pedidos',
         label: 'Pedidos',
         icone: (
