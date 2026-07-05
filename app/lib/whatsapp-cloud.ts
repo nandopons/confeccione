@@ -91,6 +91,35 @@ export async function enviarTexto(waId: string, texto: string): Promise<EnvioRes
   })
 }
 
+export type BotaoResposta = { id: string; titulo: string }
+
+/**
+ * Mensagem interativa com botões de resposta rápida (máx. 3 — limite da Meta).
+ * Só funciona dentro da janela de 24h. O clique do cliente volta pelo webhook
+ * como mensagem `interactive.button_reply` (título vira o corpo).
+ */
+export async function enviarBotoes(
+  waId: string,
+  corpo: string,
+  botoes: BotaoResposta[]
+): Promise<EnvioResultado> {
+  const buttons = botoes.slice(0, 3).map((b) => ({
+    type: 'reply' as const,
+    // Limites da Meta: id ≤ 256 chars, title ≤ 20 chars.
+    reply: { id: b.id.slice(0, 256), title: b.titulo.slice(0, 20) },
+  }))
+  if (buttons.length === 0) return { ok: false, erro: 'Nenhum botão informado' }
+  return await postMessages({
+    to: waId,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: corpo.slice(0, 1024) },
+      action: { buttons },
+    },
+  })
+}
+
 /** Mídia já upada na Meta (via uploadMidia) — imagem, áudio, vídeo, documento. */
 export async function enviarMidiaPorId(
   waId: string,
