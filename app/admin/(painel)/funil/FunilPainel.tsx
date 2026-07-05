@@ -74,7 +74,7 @@ const COL_X = [20, 260, 500, 740, 980, 1220]
 const W = 200
 const W_MINI = 200
 const MUNDO_W = 1440
-const MUNDO_H = 760
+const MUNDO_H = 880
 
 function brl(centavos: number | null | undefined): string {
   if (!centavos) return '—'
@@ -289,7 +289,7 @@ export default function FunilPainel() {
       nos.push({
         id: `o_${o.fonte}`,
         col: 0,
-        y: 150 + i * 68,
+        y: 200 + i * 74,
         titulo: rotuloFonte(o.fonte),
         valor: o.sessoes,
         tom: 'cinza',
@@ -297,14 +297,14 @@ export default function FunilPainel() {
       })
     })
     if (origens.length === 0) {
-      nos.push({ id: 'o_nada', col: 0, y: 300, titulo: 'Aguardando visitas…', valor: 0, tom: 'cinza', mini: true })
+      nos.push({ id: 'o_nada', col: 0, y: 340, titulo: 'Aguardando visitas…', valor: 0, tom: 'cinza', mini: true })
     }
 
     // C1 — site
     nos.push({
       id: 'visitantes',
       col: 1,
-      y: 258,
+      y: 300,
       titulo: 'Visitantes',
       valor: dados.site.sessoes,
       sub: `${dados.site.pageviews} pág. vistas · hoje ${dados.site.hoje}`,
@@ -315,7 +315,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'assistente',
       col: 2,
-      y: 64,
+      y: 100,
       titulo: 'Assistente iniciado',
       valor: dados.acoes.assistenteIniciado,
       sub: 'começou a montar pedido',
@@ -324,7 +324,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'whatsapp',
       col: 2,
-      y: 318,
+      y: 380,
       titulo: 'Conversas WhatsApp',
       valor: dados.acoes.whatsapp,
       sub: 'novas no inbox oficial',
@@ -338,7 +338,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'cadastros',
       col: 2,
-      y: 528,
+      y: 630,
       titulo: 'Cadastros',
       valor: dados.acoes.cadastros,
       sub: 'contas de cliente criadas',
@@ -354,7 +354,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'pa_criados',
       col: 3,
-      y: 64,
+      y: 100,
       titulo: 'Pedido montado (chat)',
       valor: dados.assistido.criados,
       sub: 'salvos pelo assistente',
@@ -369,7 +369,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'classico',
       col: 3,
-      y: 528,
+      y: 630,
       titulo: 'Pedido direto',
       valor: dados.classico.criados,
       sub: 'formulário / painel cliente',
@@ -386,7 +386,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'pela_metade',
       col: 4,
-      y: 12,
+      y: 76,
       titulo: '⚠ Pela metade',
       valor: dados.assistido.pelaMetade.length,
       sub: 'montou e não pagou',
@@ -401,7 +401,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'pa_pago',
       col: 4,
-      y: 168,
+      y: 236,
       titulo: 'Pago / confirmado',
       valor: dados.assistido.confirmados.length,
       sub: brl(dados.assistido.receitaCentavos),
@@ -416,7 +416,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'pa_cancel',
       col: 4,
-      y: 306,
+      y: 392,
       titulo: 'Cancelados',
       valor: dados.assistido.cancelados,
       tom: 'cinza',
@@ -425,7 +425,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'negociacao',
       col: 4,
-      y: 428,
+      y: 510,
       titulo: 'Em negociação',
       valor: dados.classico.negociacao.length,
       sub: 'fornecedor aceitou',
@@ -440,7 +440,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'buscando',
       col: 4,
-      y: 566,
+      y: 660,
       titulo: '⏳ Buscando fornecedor',
       valor: dados.classico.buscando.length,
       sub: 'aguardando aceite',
@@ -455,7 +455,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'expirado',
       col: 4,
-      y: 692,
+      y: 800,
       titulo: 'Expirados',
       valor: dados.classico.expirados,
       tom: 'cinza',
@@ -466,7 +466,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'encaminhado',
       col: 5,
-      y: 64,
+      y: 100,
       titulo: 'Enviado a fornecedor',
       valor: dados.fornecedor.encaminhados.length,
       sub: 'aguardando aceite',
@@ -481,7 +481,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'aceito',
       col: 5,
-      y: 214,
+      y: 264,
       titulo: '✓ Em produção',
       valor: dados.fornecedor.aceitos.length,
       sub: 'fornecedor aceitou',
@@ -496,7 +496,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'concluido',
       col: 5,
-      y: 447,
+      y: 529,
       titulo: 'Concluídos',
       valor: dados.classico.concluidos.length,
       tom: 'verde',
@@ -650,11 +650,14 @@ export default function FunilPainel() {
             `}</style>
             <g transform={`translate(${vista.x} ${vista.y}) scale(${vista.k})`}>
 
-            {/* títulos das colunas */}
+            {/* títulos das colunas — faixa própria, nenhum cartão sobe até aqui */}
             {['ORIGEM', 'SITE', 'AÇÃO', 'PEDIDO', 'STATUS', 'FORNECEDOR'].map((t, i) => (
-              <text key={t} x={COL_X[i] + W / 2} y={30} textAnchor="middle" fontSize="10.5" letterSpacing="2" fill="#94A3B8" fontWeight="600">
-                {t}
-              </text>
+              <g key={t}>
+                <text x={COL_X[i] + W / 2} y={34} textAnchor="middle" fontSize="11" letterSpacing="2.5" fill="#94A3B8" fontWeight="700">
+                  {t}
+                </text>
+                <line x1={COL_X[i] + 24} y1={46} x2={COL_X[i] + W - 24} y2={46} stroke="#E2E8F0" strokeWidth="1.5" strokeLinecap="round" />
+              </g>
             ))}
 
             {/* arestas — fluxo zerado fica sutil (sem pill, sem animação) */}
