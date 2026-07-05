@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
         .limit(20000),
       supabaseAdmin
         .from('pedidos_assistente')
-        .select('id, codigo, nome, telefone, email, status, valor_centavos, linhas, criado_em, confirmado_em')
+        .select('id, codigo, nome, telefone, email, status, pagamento_status, valor_centavos, linhas, criado_em, confirmado_em')
         .gte('criado_em', desde)
         .order('criado_em', { ascending: false })
         .limit(500),
@@ -170,10 +170,18 @@ export async function GET(req: NextRequest) {
     }
   }
   const pelaMetade = pas.filter((p) => p.status === 'em_visualizacao' || p.status === 'completo').map(paItem)
-  const confirmados = pas.filter((p) => p.status === 'confirmado').map(paItem)
+  // Receita SÓ é real quando o webhook do Asaas confirma (pagamento_status='pago').
+  // "confirmado" sem pagamento = cliente fechou, mas ainda não pagou.
+  const pagos = pas.filter((p) => p.pagamento_status === 'pago').map(paItem)
+  const aguardandoPagamento = pas
+    .filter((p) => p.status === 'confirmado' && p.pagamento_status !== 'pago')
+    .map(paItem)
   const cancelados = pas.filter((p) => p.status === 'cancelado').length
-  const receitaCentavos = pas
-    .filter((p) => p.status === 'confirmado')
+  const receitaPagaCentavos = pas
+    .filter((p) => p.pagamento_status === 'pago')
+    .reduce((acc, p) => acc + (p.valor_centavos ?? 0), 0)
+  const receitaAguardandoCentavos = pas
+    .filter((p) => p.status === 'confirmado' && p.pagamento_status !== 'pago')
     .reduce((acc, p) => acc + (p.valor_centavos ?? 0), 0)
 
   const nomePA = new Map<string, string>()
@@ -241,9 +249,11 @@ export async function GET(req: NextRequest) {
     assistido: {
       criados: pas.length,
       pelaMetade,
-      confirmados,
+      aguardandoPagamento,
+      pagos,
       cancelados,
-      receitaCentavos,
+      receitaPagaCentavos,
+      receitaAguardandoCentavos,
     },
     classico: {
       criados: pedidos.length,
