@@ -31,6 +31,7 @@ type Pedido = {
   cep: string | null
   valor_centavos: number | null
   pagamento_status?: string | null
+  finalizado_em?: string | null
   confirmado_em?: string | null
   orcamento_status?: string | null
   status?: string | null
@@ -96,13 +97,14 @@ const STATUS_COR: Record<Oferta['status'], string> = {
   cancelada: 'bg-gray-100 text-gray-500',
 }
 
-type FiltroChip = 'todos' | 'ofertar' | 'oferta' | 'aceitos' | 'pagos' | 'incompletos'
+type FiltroChip = 'todos' | 'ofertar' | 'oferta' | 'aceitos' | 'pagos' | 'finalizados' | 'incompletos'
 const FILTROS: { id: FiltroChip; label: string }[] = [
   { id: 'todos', label: 'Todos' },
   { id: 'ofertar', label: 'Para ofertar' },
   { id: 'oferta', label: 'Em oferta' },
   { id: 'aceitos', label: 'Aceitos' },
   { id: 'pagos', label: 'Pagos' },
+  { id: 'finalizados', label: 'Finalizados' },
   { id: 'incompletos', label: 'Incompletos' },
 ]
 
@@ -116,6 +118,7 @@ function casaFiltro(p: Pedido, f: FiltroChip): boolean {
     case 'oferta': return temOfertada
     case 'aceitos': return temAceita
     case 'pagos': return pago
+    case 'finalizados': return p.finalizado_em != null
     case 'incompletos': return p.status !== 'completo'
     default: return true
   }
@@ -140,8 +143,9 @@ export default function PedidosPagosAdmin() {
   const [entregaEdit, setEntregaEdit] = useState<string | null>(null)
   const [entregaForm, setEntregaForm] = useState<{ cep: string; numero: string; complemento: string }>({ cep: '', numero: '', complemento: '' })
   const [salvandoEntrega, setSalvandoEntrega] = useState(false)
-  // Deep-link ?pedido=<id> (vindo do popup do Funil): abre, rola e destaca o card.
-  const [destacado, setDestacado] = useState<string | null>(null)
+  // Deep-link ?pedido=<id> (vindo do popup do Funil): traz o card pro TOPO da
+  // lista, já expandido e destacado (scroll programático não é confiável aqui).
+  const [fixado, setFixado] = useState<string | null>(null)
   const deepLinkRef = useRef(false)
 
   async function carregar() {
@@ -161,8 +165,8 @@ export default function PedidosPagosAdmin() {
   }
   useEffect(() => { carregar() }, [])
 
-  // Deep-link do Funil: com a lista carregada, expande o pedido pedido na URL,
-  // rola até ele e dá um destaque temporário. Roda uma única vez.
+  // Deep-link do Funil: com a lista carregada, fixa o pedido da URL no topo
+  // da lista, já expandido e com destaque. Roda uma única vez.
   useEffect(() => {
     if (deepLinkRef.current || pedidos.length === 0) return
     deepLinkRef.current = true
@@ -173,13 +177,9 @@ export default function PedidosPagosAdmin() {
       /* */
     }
     if (!alvo || !pedidos.some((p) => p.id === alvo)) return
-    setChip('todos') // garante que o card não está escondido por filtro
+    setChip('todos')
     void abrir(alvo)
-    setDestacado(alvo)
-    setTimeout(() => {
-      document.getElementById(`pedido-${alvo}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 200)
-    setTimeout(() => setDestacado(null), 5000)
+    setFixado(alvo)
     try {
       window.history.replaceState(null, '', '/admin/pedidos-pagos')
     } catch {
@@ -187,6 +187,27 @@ export default function PedidosPagosAdmin() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pedidos])
+
+  async function finalizar(id: string, desfazer: boolean) {
+    if (!desfazer && !confirm('Marcar este pedido como finalizado (entregue ao cliente)?')) return
+    setAgindo(id + 'finalizar')
+    setAviso(null)
+    try {
+      const r = await fetch('/api/admin/pedidos-assistente/finalizar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, desfazer }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.erro || 'Falha ao finalizar')
+      setPedidos((ps) => ps.map((x) => (x.id === id ? { ...x, finalizado_em: j.finalizadoEm ?? null } : x)))
+      setAviso(desfazer ? 'Pedido voltou pra "em produção".' : 'Pedido finalizado. 🎉')
+    } catch (e: any) {
+      setAviso(e.message || 'Erro')
+    } finally {
+      setAgindo(null)
+    }
+  }
 
   function toggleForn(pedidoId: string, fid: string) {
     setSelecao((prev) => {
@@ -309,7 +330,10 @@ export default function PedidosPagosAdmin() {
     finally { setAgindo(null) }
   }
 
-  const visiveis = pedidos.filter((p) => casaFiltro(p, chip))
+  const filtrados = pedidos.filter((p) => casaFiltro(p, chip))
+  // Pedido vindo do funil vai pro topo da lista (independente do filtro).
+  const pedidoFixado = fixado ? pedidos.find((p) => p.id === fixado) ?? null : null
+  const visiveis = pedidoFixado ? [pedidoFixado, ...filtrados.filter((p) => p.id !== fixado)] : filtrados
 
   return (
     <div>
@@ -359,11 +383,17 @@ export default function PedidosPagosAdmin() {
               id={`pedido-${p.id}`}
               className={
                 'rounded-lg border bg-white p-3.5 transition-all scroll-mt-4 ' +
-                (destacado === p.id
+                (fixado === p.id
                   ? 'border-[#1D9E75] ring-2 ring-[#1D9E75]/40 shadow-lg'
                   : 'border-gray-200')
               }
             >
+              {fixado === p.id && (
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs text-[#0F6E56] bg-[#E1F5EE]/70 rounded-md px-2.5 py-1.5">
+                  <span>📌 Pedido aberto pelo funil — trazido pro topo da lista.</span>
+                  <button onClick={() => setFixado(null)} className="underline hover:no-underline shrink-0">voltar à ordem normal</button>
+                </div>
+              )}
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="text-sm text-gray-500">{p.codigo ? <span className="font-semibold text-gray-700">Nº {p.codigo}</span> : null}{p.codigo ? ' · ' : ''}{data(p.criado_em)} · {p.nome || 'Sem nome'} · {p.cep || 'sem CEP'}</div>
@@ -377,8 +407,8 @@ export default function PedidosPagosAdmin() {
                   {p.prazo_dias ? <div className="text-sm text-[#0F6E56]">⏱️ Prazo: {p.prazo_dias} dias (a partir do pagamento)</div> : null}
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  <span className={'text-xs px-2 py-1 rounded-full ' + (p.pagamento_status === 'pago' ? 'bg-green-100 text-green-800' : p.orcamento_status === 'definido' ? 'bg-amber-100 text-amber-800' : p.orcamento_status === 'aguardando_fornecedor' ? 'bg-blue-100 text-blue-800' : p.status !== 'completo' ? 'bg-gray-100 text-gray-500' : 'bg-gray-100 text-gray-600')}>
-                    {p.pagamento_status === 'pago' ? 'Pago' : p.orcamento_status === 'definido' ? 'Orçamento enviado' : p.orcamento_status === 'aguardando_fornecedor' ? 'Com fornecedor' : p.status !== 'completo' ? 'Incompleto' : 'Aguardando oferta'}
+                  <span className={'text-xs px-2 py-1 rounded-full ' + (p.finalizado_em ? 'bg-[#0E1814] text-white' : p.pagamento_status === 'pago' ? 'bg-green-100 text-green-800' : p.orcamento_status === 'definido' ? 'bg-amber-100 text-amber-800' : p.orcamento_status === 'aguardando_fornecedor' ? 'bg-blue-100 text-blue-800' : p.status !== 'completo' ? 'bg-gray-100 text-gray-500' : 'bg-gray-100 text-gray-600')}>
+                    {p.finalizado_em ? '✅ Finalizado' : p.pagamento_status === 'pago' ? 'Pago' : p.orcamento_status === 'definido' ? 'Orçamento enviado' : p.orcamento_status === 'aguardando_fornecedor' ? 'Com fornecedor' : p.status !== 'completo' ? 'Incompleto' : 'Aguardando oferta'}
                   </span>
                   {aceita && (
                     <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">
@@ -418,6 +448,24 @@ export default function PedidosPagosAdmin() {
                 <button onClick={() => abrirEntrega(p)} className={'text-sm px-3 py-1.5 rounded-md border ' + (p.cep ? 'border-gray-200 text-gray-700 hover:bg-gray-50' : 'border-[#1D9E75]/40 text-[#0F6E56] hover:bg-[#E1F5EE]/60')}>
                   {p.cep ? '📍 Editar entrega' : '📍 Lançar CEP/endereço'}
                 </button>
+                {p.pagamento_status === 'pago' && !p.finalizado_em && (
+                  <button
+                    onClick={() => finalizar(p.id, false)}
+                    disabled={agindo === p.id + 'finalizar'}
+                    className="text-sm px-3 py-1.5 rounded-md bg-[#1D9E75] text-white hover:bg-[#178A64] disabled:opacity-50"
+                  >
+                    {agindo === p.id + 'finalizar' ? 'Finalizando…' : '✅ Marcar finalizado'}
+                  </button>
+                )}
+                {p.finalizado_em && (
+                  <button
+                    onClick={() => finalizar(p.id, true)}
+                    disabled={agindo === p.id + 'finalizar'}
+                    className="text-sm px-2 py-1.5 text-gray-400 hover:text-gray-600 underline"
+                  >
+                    desfazer finalizado
+                  </button>
+                )}
               </div>
               {entregaEdit === p.id && (
                 <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
