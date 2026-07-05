@@ -6,6 +6,7 @@ import { normalizarWhatsApp, validarWhatsApp } from '@/app/lib/phone'
 import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
 import { getContaSessao } from '@/lib/mobileAuth'
 import { enviarMensagem } from '@/app/lib/zapi'
+import { notificarPedidoRecebido } from '@/app/lib/whatsapp-notify'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
 import { loginComEmailUrl } from '@/app/lib/url'
 import { primeiroNome } from '@/app/lib/nome'
@@ -128,29 +129,40 @@ export async function POST(req: Request) {
     }
   }
 
-  // WhatsApp de confirmação ao cliente, jogando-o pro painel.
-  // Só dispara com whatsapp válido; await, mas failure-soft.
+  // WhatsApp de confirmação ao cliente. Preferência: número OFICIAL
+  // (Meta Cloud API, template `pedido_recebido` — utility, registra no inbox).
+  // Fallback transitório: Z-API (número antigo) enquanto o template não está
+  // aprovado ou se o envio oficial falhar. Failure-soft nos dois caminhos.
   if (validarWhatsApp(whatsapp)) {
-    const tipoDesc = tipoLabel[tipo] ?? tipo
-    const linhaPedido = [
-      `*${tipoDesc}*`,
-      typeof quantidade === 'number' ? `${quantidade} peças` : null,
-      estado || null,
-    ]
-      .filter(Boolean)
-      .join(' · ')
-    const mensagemCliente =
-      `✅ *Confeccione — Pedido recebido*\n\n` +
-      `Olá *${primeiroNome(nome)}*!\n\n` +
-      `Recebemos seu pedido:\n${linhaPedido}\n\n` +
-      `Em breve enviamos para fornecedores compatíveis. Avisaremos quando alguém aceitar.\n\n` +
-      `Enquanto isso, você pode acompanhar tudo pelo seu painel — inclusive subir referências, modelagens ou logomarcas:\n\n` +
-      `🔗 ${loginComEmailUrl(email)}\n\n` +
-      `— Confeccione`
-    try {
-      await enviarMensagem(normalizarWhatsApp(whatsapp), mensagemCliente)
-    } catch (err) {
-      console.error('whatsapp confirmação cliente falhou:', err)
+    const protocoloCurto = data.id.slice(0, 8).toUpperCase()
+    const enviadoOficial = await notificarPedidoRecebido({
+      telefone: normalizarWhatsApp(whatsapp),
+      nome: primeiroNome(nome),
+      protocolo: protocoloCurto,
+    })
+
+    if (!enviadoOficial) {
+      const tipoDesc = tipoLabel[tipo] ?? tipo
+      const linhaPedido = [
+        `*${tipoDesc}*`,
+        typeof quantidade === 'number' ? `${quantidade} peças` : null,
+        estado || null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+      const mensagemCliente =
+        `✅ *Confeccione — Pedido recebido*\n\n` +
+        `Olá *${primeiroNome(nome)}*!\n\n` +
+        `Recebemos seu pedido:\n${linhaPedido}\n\n` +
+        `Em breve enviamos para fornecedores compatíveis. Avisaremos quando alguém aceitar.\n\n` +
+        `Enquanto isso, você pode acompanhar tudo pelo seu painel — inclusive subir referências, modelagens ou logomarcas:\n\n` +
+        `🔗 ${loginComEmailUrl(email)}\n\n` +
+        `— Confeccione`
+      try {
+        await enviarMensagem(normalizarWhatsApp(whatsapp), mensagemCliente)
+      } catch (err) {
+        console.error('whatsapp confirmação cliente falhou:', err)
+      }
     }
   }
 
