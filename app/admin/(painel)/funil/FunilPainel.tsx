@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 // ----------------------------------------------------------------- tipos
 type ItemLista = {
   id: string
+  pedidoId?: string | null
   nome: string
   telefone?: string | null
   email?: string | null
@@ -873,10 +874,10 @@ export default function FunilPainel() {
                       )}
                       {drill.verHref && (
                         <a
-                          href={drill.verHref}
+                          href={`${drill.verHref}?pedido=${encodeURIComponent(it.pedidoId ?? it.id)}`}
                           className="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg px-3 py-1.5 bg-white transition-colors"
                         >
-                          Ver na tela de pedidos
+                          Ver pedido
                         </a>
                       )}
                     </div>
