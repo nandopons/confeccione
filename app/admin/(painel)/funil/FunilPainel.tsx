@@ -8,7 +8,7 @@
 // cai direto no inbox oficial: /admin/whatsapp?abrir=<tel>&nome=<nome>).
 // ============================================================================
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 // ----------------------------------------------------------------- tipos
 type ItemLista = {
@@ -69,9 +69,12 @@ type No = {
 type Aresta = { de: string; para: string; n?: number; tom?: 'verde' | 'ambar' | 'cinza' }
 
 // -------------------------------------------------------------- helpers
-const COL_X = [15, 220, 425, 630, 835, 1046]
-const W = 176
-const W_MINI = 176
+// Coordenadas do "mundo" do canvas (pan/zoom livre — margens generosas).
+const COL_X = [20, 260, 500, 740, 980, 1220]
+const W = 200
+const W_MINI = 200
+const MUNDO_W = 1440
+const MUNDO_H = 760
 
 function brl(centavos: number | null | undefined): string {
   if (!centavos) return '—'
@@ -151,6 +154,111 @@ export default function FunilPainel() {
   const [erro, setErro] = useState<string | null>(null)
   const [drill, setDrill] = useState<NonNullable<No['drill']> | null>(null)
 
+  // ----------------------------------------------- canvas pan/zoom
+  // vista = translate(x,y) + scale(k) do mundo dentro do container.
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [vista, setVista] = useState<{ x: number; y: number; k: number } | null>(null)
+  const [arrastando, setArrastando] = useState(false)
+  const ponteiros = useRef(new Map<number, { x: number; y: number }>())
+  const arrasto = useRef<{ px: number; py: number; vx: number; vy: number } | null>(null)
+  const moveu = useRef(false)
+  const pinchDist = useRef<number | null>(null)
+
+  const encaixar = useCallback(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const k = Math.min(el.clientWidth / (MUNDO_W + 60), el.clientHeight / (MUNDO_H + 60))
+    const kk = Math.min(Math.max(k, 0.25), 1.4)
+    setVista({ k: kk, x: (el.clientWidth - MUNDO_W * kk) / 2, y: (el.clientHeight - MUNDO_H * kk) / 2 })
+  }, [])
+
+  // Fit inicial (e quando os dados chegam pela primeira vez).
+  useEffect(() => {
+    if (dados && !vista) encaixar()
+  }, [dados, vista, encaixar])
+
+  // Zoom no scroll, centrado no cursor (listener não-passivo pra travar o scroll da página).
+  useEffect(() => {
+    const el = wrapRef.current
+    if (!el) return
+    const aoRolar = (e: WheelEvent) => {
+      e.preventDefault()
+      setVista((v) => {
+        if (!v) return v
+        const rect = el.getBoundingClientRect()
+        const mx = e.clientX - rect.left
+        const my = e.clientY - rect.top
+        const k = Math.min(Math.max(v.k * Math.exp(-e.deltaY * 0.0016), 0.2), 3)
+        return { k, x: mx - ((mx - v.x) * k) / v.k, y: my - ((my - v.y) * k) / v.k }
+      })
+    }
+    el.addEventListener('wheel', aoRolar, { passive: false })
+    return () => el.removeEventListener('wheel', aoRolar)
+  }, [])
+
+  function zoomBotao(fator: number) {
+    setVista((v) => {
+      const el = wrapRef.current
+      if (!v || !el) return v
+      const cx = el.clientWidth / 2
+      const cy = el.clientHeight / 2
+      const k = Math.min(Math.max(v.k * fator, 0.2), 3)
+      return { k, x: cx - ((cx - v.x) * k) / v.k, y: cy - ((cy - v.y) * k) / v.k }
+    })
+  }
+
+  function aoPressionar(e: React.PointerEvent<HTMLDivElement>) {
+    wrapRef.current?.setPointerCapture?.(e.pointerId)
+    ponteiros.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (ponteiros.current.size === 1 && vista) {
+      moveu.current = false
+      arrasto.current = { px: e.clientX, py: e.clientY, vx: vista.x, vy: vista.y }
+      setArrastando(true)
+    } else {
+      arrasto.current = null // dois dedos = pinch
+    }
+  }
+
+  function aoMover(e: React.PointerEvent<HTMLDivElement>) {
+    if (!ponteiros.current.has(e.pointerId)) return
+    ponteiros.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const pts = [...ponteiros.current.values()]
+    if (pts.length === 2) {
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+      if (pinchDist.current !== null && dist > 0) {
+        const fator = dist / pinchDist.current
+        setVista((v) => {
+          const el = wrapRef.current
+          if (!v || !el) return v
+          const rect = el.getBoundingClientRect()
+          const cx = (pts[0].x + pts[1].x) / 2 - rect.left
+          const cy = (pts[0].y + pts[1].y) / 2 - rect.top
+          const k = Math.min(Math.max(v.k * fator, 0.2), 3)
+          return { k, x: cx - ((cx - v.x) * k) / v.k, y: cy - ((cy - v.y) * k) / v.k }
+        })
+      }
+      pinchDist.current = dist
+      moveu.current = true
+      return
+    }
+    const a = arrasto.current
+    if (a) {
+      const dx = e.clientX - a.px
+      const dy = e.clientY - a.py
+      if (Math.abs(dx) + Math.abs(dy) > 4) moveu.current = true
+      setVista((v) => (v ? { ...v, x: a.vx + dx, y: a.vy + dy } : v))
+    }
+  }
+
+  function aoSoltar(e: React.PointerEvent<HTMLDivElement>) {
+    ponteiros.current.delete(e.pointerId)
+    if (ponteiros.current.size < 2) pinchDist.current = null
+    if (ponteiros.current.size === 0) {
+      arrasto.current = null
+      setArrastando(false)
+    }
+  }
+
   const carregar = useCallback(async (d: number) => {
     setCarregando(true)
     setErro(null)
@@ -169,7 +277,7 @@ export default function FunilPainel() {
     void carregar(dias)
   }, [dias, carregar])
 
-  const { nos, arestas, alturaSvg } = useMemo(() => {
+  const { nos, arestas } = useMemo(() => {
     const vazio = { nos: [] as No[], arestas: [] as Aresta[], alturaSvg: 640 }
     if (!dados) return vazio
 
@@ -181,7 +289,7 @@ export default function FunilPainel() {
       nos.push({
         id: `o_${o.fonte}`,
         col: 0,
-        y: 128 + i * 62,
+        y: 150 + i * 68,
         titulo: rotuloFonte(o.fonte),
         valor: o.sessoes,
         tom: 'cinza',
@@ -189,14 +297,14 @@ export default function FunilPainel() {
       })
     })
     if (origens.length === 0) {
-      nos.push({ id: 'o_nada', col: 0, y: 200, titulo: 'Aguardando visitas…', valor: 0, tom: 'cinza', mini: true })
+      nos.push({ id: 'o_nada', col: 0, y: 300, titulo: 'Aguardando visitas…', valor: 0, tom: 'cinza', mini: true })
     }
 
     // C1 — site
     nos.push({
       id: 'visitantes',
       col: 1,
-      y: 208,
+      y: 258,
       titulo: 'Visitantes',
       valor: dados.site.sessoes,
       sub: `${dados.site.pageviews} pág. vistas · hoje ${dados.site.hoje}`,
@@ -207,7 +315,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'assistente',
       col: 2,
-      y: 52,
+      y: 64,
       titulo: 'Assistente iniciado',
       valor: dados.acoes.assistenteIniciado,
       sub: 'começou a montar pedido',
@@ -216,7 +324,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'whatsapp',
       col: 2,
-      y: 252,
+      y: 318,
       titulo: 'Conversas WhatsApp',
       valor: dados.acoes.whatsapp,
       sub: 'novas no inbox oficial',
@@ -230,7 +338,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'cadastros',
       col: 2,
-      y: 430,
+      y: 528,
       titulo: 'Cadastros',
       valor: dados.acoes.cadastros,
       sub: 'contas de cliente criadas',
@@ -246,7 +354,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'pa_criados',
       col: 3,
-      y: 52,
+      y: 64,
       titulo: 'Pedido montado (chat)',
       valor: dados.assistido.criados,
       sub: 'salvos pelo assistente',
@@ -261,7 +369,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'classico',
       col: 3,
-      y: 430,
+      y: 528,
       titulo: 'Pedido direto',
       valor: dados.classico.criados,
       sub: 'formulário / painel cliente',
@@ -278,7 +386,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'pela_metade',
       col: 4,
-      y: 6,
+      y: 12,
       titulo: '⚠ Pela metade',
       valor: dados.assistido.pelaMetade.length,
       sub: 'montou e não pagou',
@@ -293,7 +401,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'pa_pago',
       col: 4,
-      y: 140,
+      y: 168,
       titulo: 'Pago / confirmado',
       valor: dados.assistido.confirmados.length,
       sub: brl(dados.assistido.receitaCentavos),
@@ -308,7 +416,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'pa_cancel',
       col: 4,
-      y: 272,
+      y: 306,
       titulo: 'Cancelados',
       valor: dados.assistido.cancelados,
       tom: 'cinza',
@@ -317,7 +425,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'negociacao',
       col: 4,
-      y: 368,
+      y: 428,
       titulo: 'Em negociação',
       valor: dados.classico.negociacao.length,
       sub: 'fornecedor aceitou',
@@ -332,7 +440,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'buscando',
       col: 4,
-      y: 496,
+      y: 566,
       titulo: '⏳ Buscando fornecedor',
       valor: dados.classico.buscando.length,
       sub: 'aguardando aceite',
@@ -347,7 +455,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'expirado',
       col: 4,
-      y: 608,
+      y: 692,
       titulo: 'Expirados',
       valor: dados.classico.expirados,
       tom: 'cinza',
@@ -358,7 +466,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'encaminhado',
       col: 5,
-      y: 52,
+      y: 64,
       titulo: 'Enviado a fornecedor',
       valor: dados.fornecedor.encaminhados.length,
       sub: 'aguardando aceite',
@@ -373,7 +481,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'aceito',
       col: 5,
-      y: 186,
+      y: 214,
       titulo: '✓ Em produção',
       valor: dados.fornecedor.aceitos.length,
       sub: 'fornecedor aceitou',
@@ -388,7 +496,7 @@ export default function FunilPainel() {
     nos.push({
       id: 'concluido',
       col: 5,
-      y: 387,
+      y: 447,
       titulo: 'Concluídos',
       valor: dados.classico.concluidos.length,
       tom: 'verde',
@@ -423,7 +531,7 @@ export default function FunilPainel() {
       { de: 'negociacao', para: 'concluido', n: dados.classico.concluidos.length, tom: 'verde' },
     ]
 
-    return { nos, arestas, alturaSvg: 676 }
+    return { nos, arestas, alturaSvg: MUNDO_H }
   }, [dados])
 
   const mapaNos = useMemo(() => new Map(nos.map((n) => [n.id, n])), [nos])
@@ -508,30 +616,43 @@ export default function FunilPainel() {
         </div>
       )}
 
-      {/* ------------------------------------------------ mapa */}
-      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-x-auto relative">
+      {/* ------------------------------------------------ mapa (canvas pan/zoom) */}
+      <div
+        ref={wrapRef}
+        onPointerDown={aoPressionar}
+        onPointerMove={aoMover}
+        onPointerUp={aoSoltar}
+        onPointerCancel={aoSoltar}
+        className={
+          'border border-gray-200 rounded-2xl shadow-sm relative overflow-hidden select-none ' +
+          (arrastando ? 'cursor-grabbing' : 'cursor-grab')
+        }
+        style={{
+          height: 'min(76vh, 840px)',
+          minHeight: 460,
+          touchAction: 'none',
+          background: 'radial-gradient(#E2E8F0 1.1px, transparent 1.1px) 0 0 / 22px 22px, #FFFFFF',
+        }}
+      >
         {carregando && (
           <div className="absolute inset-0 bg-white/60 flex items-center justify-center z-10 text-sm text-gray-500">
             Carregando funil…
           </div>
         )}
         {erro && !carregando && <div className="p-6 text-sm text-red-600">{erro}</div>}
-        {dados && (
-          <svg
-            viewBox={`0 0 1240 ${alturaSvg}`}
-            className="min-w-[1080px] w-full h-auto block"
-            style={{ background: 'radial-gradient(#E2E8F0 1px, transparent 1px)', backgroundSize: '22px 22px' }}
-          >
+        {dados && vista && (
+          <svg className="w-full h-full block">
             <style>{`
               .fluxo { animation: fluir 1.4s linear infinite; }
               @keyframes fluir { to { stroke-dashoffset: -18; } }
               .no-clicavel { cursor: pointer; }
               .no-clicavel:hover rect { filter: brightness(0.97); }
             `}</style>
+            <g transform={`translate(${vista.x} ${vista.y}) scale(${vista.k})`}>
 
             {/* títulos das colunas */}
             {['ORIGEM', 'SITE', 'AÇÃO', 'PEDIDO', 'STATUS', 'FORNECEDOR'].map((t, i) => (
-              <text key={t} x={COL_X[i] + W / 2} y={26} textAnchor="middle" fontSize="10.5" letterSpacing="2" fill="#94A3B8" fontWeight="600">
+              <text key={t} x={COL_X[i] + W / 2} y={30} textAnchor="middle" fontSize="10.5" letterSpacing="2" fill="#94A3B8" fontWeight="600">
                 {t}
               </text>
             ))}
@@ -580,7 +701,10 @@ export default function FunilPainel() {
                 <g
                   key={n.id}
                   className={clicavel ? 'no-clicavel' : undefined}
-                  onClick={() => n.drill && setDrill(n.drill)}
+                  onClick={() => {
+                    if (moveu.current) return // era um arrasto, não um clique
+                    if (n.drill) setDrill(n.drill)
+                  }}
                 >
                   <rect x={COL_X[n.col]} y={n.y} width={n.mini ? W_MINI : W} height={h} rx="14" fill={c.fundo} stroke={c.borda} strokeWidth={n.tom === 'cinza' ? 1.2 : 1.8} />
                   {n.mini ? (
@@ -615,8 +739,48 @@ export default function FunilPainel() {
                 </g>
               )
             })}
+            </g>
           </svg>
         )}
+
+        {/* controles de zoom */}
+        {dados && (
+          <div
+            className="absolute bottom-3 right-3 z-10 flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => zoomBotao(1.3)}
+              aria-label="Aproximar"
+              className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-50 text-lg font-semibold"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={() => zoomBotao(1 / 1.3)}
+              aria-label="Afastar"
+              className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-50 text-lg font-semibold border-t border-gray-100"
+            >
+              −
+            </button>
+            <button
+              type="button"
+              onClick={encaixar}
+              aria-label="Encaixar na tela"
+              title="Encaixar na tela"
+              className="w-9 h-9 flex items-center justify-center text-gray-500 hover:bg-gray-50 border-t border-gray-100"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" />
+              </svg>
+            </button>
+          </div>
+        )}
+        <p className="absolute bottom-3 left-4 z-10 text-[11px] text-gray-400 pointer-events-none">
+          scroll = zoom · arraste = mover · clique no cartão = detalhe
+        </p>
       </div>
 
       <p className="text-[11px] text-gray-400 mt-3">
