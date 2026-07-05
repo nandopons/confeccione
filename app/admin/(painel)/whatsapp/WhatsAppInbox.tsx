@@ -49,6 +49,82 @@ type Mensagem = {
 
 type Template = { name: string; language: string; category: string; bodyPreview: string }
 
+type PedidoResumo = {
+  id: string
+  tipo: string | null
+  quantidade: number | null
+  estado: string | null
+  status: string | null
+  criado_em: string | null
+}
+
+type Contexto = {
+  contato: { id: string; wa_id: string; nome: string | null }
+  cliente: { id: string; nome: string | null; email: string | null; cidade: string | null; uf: string | null; plano: string | null; criado_em: string | null } | null
+  fornecedor: { id: string; nome: string | null; cidade: string | null; estado: string | null; status: string | null; aprovacao_status: string | null; tipos_produto: string[] | string | null; plano: string | null } | null
+  pedidosVigentes: PedidoResumo[]
+  pedidosAnteriores: PedidoResumo[]
+}
+
+type RapidaPreset = {
+  id: string
+  rotulo: string
+  descricao: string
+  corpo: string
+  botoes?: { id: string; titulo: string }[]
+  /** true → só preenche o composer (deixa editar antes de enviar) */
+  preencher?: boolean
+}
+
+// Mensagens rápidas do composer. Botões: máx 3, títulos ≤ 20 chars (limite Meta).
+const RAPIDAS: RapidaPreset[] = [
+  {
+    id: 'menu',
+    rotulo: 'Menu de atendimento',
+    descricao: 'Triagem com 3 botões',
+    corpo: 'Oi! 👋 Aqui é a Confeccione. Como a gente pode te ajudar hoje?',
+    botoes: [
+      { id: 'menu_pedido', titulo: 'Fazer um pedido' },
+      { id: 'menu_acompanhar', titulo: 'Acompanhar pedido' },
+      { id: 'menu_atendente', titulo: 'Falar com atendente' },
+    ],
+  },
+  {
+    id: 'retomar_orcamento',
+    rotulo: 'Retomar orçamento',
+    descricao: 'Esquenta quem parou de responder',
+    corpo: 'Ficou alguma dúvida sobre o orçamento que a gente conversou? Posso te mandar atualizado. 😉',
+    botoes: [
+      { id: 'orc_quero', titulo: 'Quero o orçamento' },
+      { id: 'orc_duvida', titulo: 'Tenho uma dúvida' },
+    ],
+  },
+  {
+    id: 'confirmar_producao',
+    rotulo: 'Confirmar produção',
+    descricao: 'Fechamento com 2 botões',
+    corpo: 'Podemos seguir com a produção do seu pedido? ✂️',
+    botoes: [
+      { id: 'prod_seguir', titulo: 'Pode seguir' },
+      { id: 'prod_ajustar', titulo: 'Quero ajustar' },
+    ],
+  },
+  {
+    id: 'grade_tamanhos',
+    rotulo: 'Pedir grade de tamanhos',
+    descricao: 'Preenche o texto pra você editar',
+    corpo: 'Pra fechar a produção, me confirma a grade de tamanhos? (ex.: 10 P, 20 M, 10 G) 📏',
+    preencher: true,
+  },
+]
+
+const STATUS_PEDIDO_LABEL: Record<string, { rotulo: string; cor: string }> = {
+  buscando_fornecedor: { rotulo: 'Buscando fornecedor', cor: 'bg-amber-50 text-amber-700' },
+  em_negociacao: { rotulo: 'Em negociação', cor: 'bg-sky-50 text-sky-700' },
+  concluido: { rotulo: 'Concluído', cor: 'bg-emerald-50 text-emerald-700' },
+  expirado_sem_resposta: { rotulo: 'Expirado', cor: 'bg-neutral-100 text-neutral-500' },
+}
+
 const JANELA_MS = 24 * 60 * 60 * 1000
 
 function formatarTelefone(waId: string): string {
@@ -68,6 +144,16 @@ function dataLegivel(iso: string): string {
   if (d.toDateString() === hoje.toDateString()) return 'Hoje'
   if (d.toDateString() === ontem.toDateString()) return 'Ontem'
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+function idadeCurta(iso: string | null): string {
+  if (!iso) return ''
+  const dias = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
+  if (dias <= 0) return 'hoje'
+  if (dias === 1) return 'há 1 dia'
+  if (dias < 30) return `há ${dias} dias`
+  const meses = Math.floor(dias / 30)
+  return meses === 1 ? 'há 1 mês' : `há ${meses} meses`
 }
 
 function restanteJanela(ultimaMsgContato: string | null): { aberta: boolean; rotulo: string } {
@@ -152,7 +238,117 @@ function CorpoMensagem({ m }: { m: Mensagem }) {
   if (m.tipo === 'template') {
     return <p className="italic">{m.corpo ?? `Template: ${m.template_nome}`}</p>
   }
+  if (m.tipo === 'interactive' && m.direcao === 'saida' && m.corpo) {
+    // Corpo gravado como texto + linhas "▸ Botão" → renderiza os botões como chips.
+    const linhas = m.corpo.split('\n')
+    const chips = linhas.filter((l) => l.startsWith('▸ ')).map((l) => l.slice(2))
+    const textoCorpo = linhas.filter((l) => !l.startsWith('▸ ')).join('\n').trim()
+    return (
+      <div className="space-y-2">
+        {textoCorpo && <p className="whitespace-pre-wrap break-words">{textoCorpo}</p>}
+        {chips.length > 0 && (
+          <div className="flex flex-col gap-1 pt-1 border-t border-black/5">
+            {chips.map((c) => (
+              <span key={c} className="text-center text-[12.5px] font-medium text-[#1D9E75] bg-white/70 rounded-lg px-2 py-1.5">
+                {c}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
   return legenda ?? <p className="italic text-neutral-500">[{m.tipo}]</p>
+}
+
+function CardPedido({ p, esmaecido }: { p: PedidoResumo; esmaecido?: boolean }) {
+  const st = STATUS_PEDIDO_LABEL[p.status ?? ''] ?? { rotulo: p.status ?? '—', cor: 'bg-neutral-100 text-neutral-500' }
+  const aba = p.status === 'em_negociacao' ? 'em_negociacao' : p.status === 'concluido' ? 'concluido' : 'precisa_atencao'
+  return (
+    <a
+      href={`/admin/pedidos?aba=${aba}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={
+        'block rounded-xl border border-neutral-200 px-3 py-2.5 hover:border-[#1D9E75] hover:shadow-sm transition ' +
+        (esmaecido ? 'opacity-60' : 'bg-white')
+      }
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[13px] font-medium text-neutral-900 truncate">
+          {p.tipo ?? 'Pedido'}{p.quantidade ? ` · ${p.quantidade} un` : ''}
+        </span>
+        <span className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded ${st.cor}`}>{st.rotulo}</span>
+      </div>
+      <p className="text-[11.5px] text-neutral-500 mt-0.5">
+        {p.estado ? `${p.estado} · ` : ''}{idadeCurta(p.criado_em)}
+      </p>
+    </a>
+  )
+}
+
+function PainelContexto({ ctx }: { ctx: Contexto | null }) {
+  if (!ctx) {
+    return <p className="p-4 text-[12.5px] text-neutral-400">Carregando contexto…</p>
+  }
+  const tiposProduto = Array.isArray(ctx.fornecedor?.tipos_produto)
+    ? ctx.fornecedor?.tipos_produto.join(', ')
+    : ctx.fornecedor?.tipos_produto ?? null
+  return (
+    <div className="p-4 space-y-5 overflow-y-auto">
+      {/* perfil */}
+      <div>
+        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400 mb-2">Contato</h3>
+        {ctx.cliente && (
+          <div className="rounded-xl bg-sky-50/60 border border-sky-100 px-3 py-2.5 mb-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700 mb-0.5">Cliente</p>
+            <p className="text-[13px] font-medium text-neutral-900 truncate">{ctx.cliente.nome ?? '—'}</p>
+            <p className="text-[11.5px] text-neutral-500 truncate">
+              {[ctx.cliente.cidade && ctx.cliente.uf ? `${ctx.cliente.cidade}/${ctx.cliente.uf}` : ctx.cliente.cidade, ctx.cliente.plano ? `plano ${ctx.cliente.plano}` : null].filter(Boolean).join(' · ') || ctx.cliente.email || '—'}
+            </p>
+          </div>
+        )}
+        {ctx.fornecedor && (
+          <div className="rounded-xl bg-violet-50/60 border border-violet-100 px-3 py-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 mb-0.5">Fornecedor</p>
+            <p className="text-[13px] font-medium text-neutral-900 truncate">{ctx.fornecedor.nome ?? '—'}</p>
+            <p className="text-[11.5px] text-neutral-500 truncate">
+              {[ctx.fornecedor.cidade && ctx.fornecedor.estado ? `${ctx.fornecedor.cidade}/${ctx.fornecedor.estado}` : ctx.fornecedor.cidade, tiposProduto].filter(Boolean).join(' · ') || '—'}
+            </p>
+          </div>
+        )}
+        {!ctx.cliente && !ctx.fornecedor && (
+          <p className="text-[12.5px] text-neutral-500">
+            Sem cadastro vinculado — contato novo, só do WhatsApp.
+          </p>
+        )}
+      </div>
+
+      {/* pedidos vigentes */}
+      <div>
+        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400 mb-2">
+          Pedidos vigentes {ctx.pedidosVigentes.length > 0 && `(${ctx.pedidosVigentes.length})`}
+        </h3>
+        {ctx.pedidosVigentes.length === 0 ? (
+          <p className="text-[12.5px] text-neutral-400">Nenhum pedido em andamento.</p>
+        ) : (
+          <div className="space-y-2">
+            {ctx.pedidosVigentes.map((p) => <CardPedido key={p.id} p={p} />)}
+          </div>
+        )}
+      </div>
+
+      {/* anteriores */}
+      {ctx.pedidosAnteriores.length > 0 && (
+        <div>
+          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400 mb-2">Anteriores</h3>
+          <div className="space-y-2">
+            {ctx.pedidosAnteriores.map((p) => <CardPedido key={p.id} p={p} esmaecido />)}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function WhatsAppInbox() {
@@ -168,6 +364,9 @@ export function WhatsAppInbox() {
   const [erro, setErro] = useState<string | null>(null)
   const [templates, setTemplates] = useState<Template[] | null>(null)
   const [modalTemplates, setModalTemplates] = useState(false)
+  const [contexto, setContexto] = useState<Contexto | null>(null)
+  const [painelMobileAberto, setPainelMobileAberto] = useState(false)
+  const [rapidasAberto, setRapidasAberto] = useState(false)
 
   const fimRef = useRef<HTMLDivElement>(null)
   const inputArquivoRef = useRef<HTMLInputElement>(null)
@@ -222,6 +421,26 @@ export function WhatsAppInbox() {
     setErro(null)
     carregarMensagens(ativaId).finally(() => setCarregandoThread(false))
   }, [ativaId, carregarMensagens])
+
+  // ------------------------------------------------------------- contexto
+  useEffect(() => {
+    if (!ativaId) {
+      setContexto(null)
+      return
+    }
+    setContexto(null)
+    setPainelMobileAberto(false)
+    let cancelado = false
+    fetch(`/api/admin/whatsapp/conversas/${ativaId}/contexto`, { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelado && data && ativaIdRef.current === ativaId) setContexto(data)
+      })
+      .catch(() => { /* painel fica vazio; não bloqueia o chat */ })
+    return () => {
+      cancelado = true
+    }
+  }, [ativaId])
 
   useEffect(() => {
     if (!ativaId) return
@@ -291,6 +510,30 @@ export function WhatsAppInbox() {
     }
   }
 
+  async function enviarRapida(preset: RapidaPreset) {
+    setRapidasAberto(false)
+    if (!ativaId || enviando) return
+    if (preset.preencher || !preset.botoes) {
+      setTexto(preset.corpo)
+      return
+    }
+    setEnviando(true)
+    setErro(null)
+    try {
+      const res = await fetch('/api/admin/whatsapp/enviar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversaId: ativaId, botoes: { corpo: preset.corpo, botoes: preset.botoes } }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) setErro(data?.erro ?? 'Falha ao enviar mensagem com botões')
+      await carregarMensagens(ativaId)
+      await carregarConversas(busca || undefined)
+    } finally {
+      setEnviando(false)
+    }
+  }
+
   async function abrirModalTemplates() {
     setModalTemplates(true)
     if (templates === null) {
@@ -333,7 +576,7 @@ export function WhatsAppInbox() {
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
               placeholder="Buscar por nome ou número…"
-              className="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-[13.5px] outline-none focus:border-[#1D9E75] focus:bg-white"
+              className="w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-[13.5px] outline-none focus:border-[#1D9E75] focus:bg-white placeholder:text-neutral-500"
             />
           </div>
           <div className="flex-1 overflow-y-auto">
@@ -420,6 +663,17 @@ export function WhatsAppInbox() {
                 >
                   {janela.rotulo}
                 </span>
+                <button
+                  onClick={() => setPainelMobileAberto(true)}
+                  className="xl:hidden shrink-0 w-9 h-9 rounded-full text-neutral-500 hover:bg-neutral-100 flex items-center justify-center"
+                  title="Contexto do contato"
+                  aria-label="Contexto do contato"
+                >
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 11v5M12 8v.01" />
+                  </svg>
+                </button>
               </header>
 
               {/* mensagens */}
@@ -507,6 +761,43 @@ export function WhatsAppInbox() {
                           <path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.65 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48" />
                         </svg>
                       </button>
+                      <div className="relative shrink-0">
+                        <button
+                          onClick={() => setRapidasAberto((v) => !v)}
+                          className={
+                            'w-10 h-10 rounded-full flex items-center justify-center transition-colors ' +
+                            (rapidasAberto ? 'bg-[#1D9E75]/10 text-[#1D9E75]' : 'text-neutral-500 hover:bg-neutral-100')
+                          }
+                          title="Mensagens rápidas"
+                          aria-label="Mensagens rápidas"
+                        >
+                          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M13 2L4.09 12.35a.6.6 0 0 0 .46.99H11l-1 8.66L18.91 11.65a.6.6 0 0 0-.46-.99H13l1-8.66z" />
+                          </svg>
+                        </button>
+                        {rapidasAberto && (
+                          <>
+                            <div className="fixed inset-0 z-30" onClick={() => setRapidasAberto(false)} />
+                            <div className="absolute bottom-12 left-1/2 -translate-x-1/2 lg:left-0 lg:translate-x-0 z-40 w-[290px] rounded-2xl bg-white border border-neutral-200 shadow-xl overflow-hidden">
+                              <p className="px-3.5 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">Mensagens rápidas</p>
+                              {RAPIDAS.map((r) => (
+                                <button
+                                  key={r.id}
+                                  onClick={() => enviarRapida(r)}
+                                  disabled={enviando}
+                                  className="w-full text-left px-3.5 py-2.5 hover:bg-neutral-50 disabled:opacity-50"
+                                >
+                                  <span className="block text-[13px] font-medium text-neutral-900">
+                                    {r.rotulo}
+                                    {r.botoes && <span className="ml-1.5 text-[10px] font-semibold text-[#1D9E75]">{r.botoes.length} botões</span>}
+                                  </span>
+                                  <span className="block text-[11.5px] text-neutral-500">{r.descricao}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
                       <textarea
                         value={texto}
                         onChange={(e) => setTexto(e.target.value)}
@@ -515,7 +806,7 @@ export function WhatsAppInbox() {
                         }}
                         placeholder={anexo ? 'Legenda (opcional)…' : 'Escreva uma mensagem…'}
                         rows={1}
-                        className="flex-1 resize-none rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-[13.5px] outline-none focus:border-[#1D9E75] focus:bg-white max-h-32"
+                        className="flex-1 resize-none rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-2.5 text-[13.5px] text-neutral-900 outline-none focus:border-[#1D9E75] focus:bg-white max-h-32 placeholder:text-neutral-500"
                         style={{ minHeight: 42 }}
                       />
                       <button
@@ -538,7 +829,30 @@ export function WhatsAppInbox() {
             </>
           )}
         </section>
+
+        {/* ------------------------------------------------ contexto (desktop) */}
+        {ativa && (
+          <aside className="hidden xl:flex w-[290px] shrink-0 border-l border-neutral-200 bg-white flex-col min-h-0">
+            <div className="px-4 pt-4 pb-2 border-b border-neutral-100">
+              <h2 className="text-[13px] font-semibold text-neutral-900">Contexto</h2>
+            </div>
+            <PainelContexto ctx={contexto} />
+          </aside>
+        )}
       </div>
+
+      {/* ------------------------------------------------ contexto (mobile/tablet) */}
+      {painelMobileAberto && ativa && (
+        <div className="fixed inset-0 z-50 xl:hidden bg-black/40 flex justify-end" onClick={() => setPainelMobileAberto(false)}>
+          <div className="bg-white w-full max-w-[340px] h-full flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-neutral-100 flex items-center justify-between">
+              <h2 className="text-[15px] font-semibold">Contexto</h2>
+              <button onClick={() => setPainelMobileAberto(false)} className="text-neutral-400 hover:text-neutral-700" aria-label="Fechar">✕</button>
+            </div>
+            <PainelContexto ctx={contexto} />
+          </div>
+        </div>
+      )}
 
       {/* ------------------------------------------------ modal templates */}
       {modalTemplates && (
