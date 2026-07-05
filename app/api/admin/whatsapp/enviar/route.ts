@@ -16,10 +16,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import {
+  enviarBotoes,
   enviarMidiaPorId,
   enviarTemplate,
   enviarTexto,
   uploadMidia,
+  type BotaoResposta,
   type EnvioResultado,
   type MidiaTipo,
 } from '@/app/lib/whatsapp-cloud'
@@ -78,7 +80,7 @@ async function registrarSaida(params: {
     .single()
 
   const preview =
-    tipo === 'text' ? (corpo ?? '').slice(0, 120)
+    tipo === 'text' || tipo === 'interactive' ? (corpo ?? '').slice(0, 120)
     : tipo === 'image' ? '📷 Foto'
     : tipo === 'audio' ? '🎤 Áudio'
     : tipo === 'video' ? '🎬 Vídeo'
@@ -161,7 +163,12 @@ export async function POST(req: NextRequest) {
   // -------------------------------------------------------------------------
   // JSON → texto ou template
   // -------------------------------------------------------------------------
-  let body: { conversaId?: string; texto?: string; template?: { nome?: string; idioma?: string } }
+  let body: {
+    conversaId?: string
+    texto?: string
+    template?: { nome?: string; idioma?: string }
+    botoes?: { corpo?: string; botoes?: BotaoResposta[] }
+  }
   try {
     body = await req.json()
   } catch {
@@ -173,6 +180,21 @@ export async function POST(req: NextRequest) {
 
   const conversa = await dadosConversa(conversaId)
   if (!conversa) return NextResponse.json({ erro: 'Conversa não encontrada' }, { status: 404 })
+
+  // ---------------------------------------------------------------- botões
+  if (body.botoes) {
+    const corpo = (body.botoes.corpo ?? '').trim()
+    const botoes = (body.botoes.botoes ?? []).filter((b) => b?.id && b?.titulo).slice(0, 3)
+    if (!corpo || botoes.length === 0) {
+      return NextResponse.json({ erro: 'Mensagem de botões precisa de corpo e 1–3 botões' }, { status: 400 })
+    }
+    const resultado = await enviarBotoes(conversa.waId, corpo, botoes)
+    // Guarda os botões no corpo (linhas "▸ …") pro histórico do inbox renderizar como chips.
+    const corpoRegistro = `${corpo}\n${botoes.map((b) => `▸ ${b.titulo}`).join('\n')}`
+    const msgId = await registrarSaida({ conversaId, resultado, tipo: 'interactive', corpo: corpoRegistro })
+    if (!resultado.ok) return NextResponse.json({ erro: resultado.erro, mensagemId: msgId }, { status: 502 })
+    return NextResponse.json({ ok: true, mensagemId: msgId })
+  }
 
   if (body.template?.nome) {
     const resultado = await enviarTemplate(conversa.waId, body.template.nome, body.template.idioma ?? 'pt_BR')
