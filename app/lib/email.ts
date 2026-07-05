@@ -707,11 +707,11 @@ export async function emailLembretePedido(params: { email: string; nome: string 
     <div style="text-align:center;margin:24px 0;">
       <a href="${params.link}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;padding:14px 28px;border-radius:10px;font-weight:bold;">Continuar meu pedido</a>
     </div>
-    <p style="margin:8px 0 0;color:#888;font-size:13px;">Qualquer dúvida, é só responder este e-mail ou chamar no WhatsApp (81) 99578-2077.</p>
+    <p style="margin:8px 0 0;color:#888;font-size:13px;">Qualquer dúvida, é só responder este e-mail ou chamar no WhatsApp (81) 99593-2695.</p>
     `,
     'Seu pedido está quase lá — finalize em 1 minuto.'
   )
-  const text = `Oi, ${params.nome || ''}\n\nVocê começou um pedido na Confeccione e ainda não finalizou. Continue aqui:\n${params.link}\n\nDúvidas? WhatsApp (81) 99578-2077.\nConfeccione`
+  const text = `Oi, ${params.nome || ''}\n\nVocê começou um pedido na Confeccione e ainda não finalizou. Continue aqui:\n${params.link}\n\nDúvidas? WhatsApp (81) 99593-2695.\nConfeccione`
   await enviarEmail({ to: params.email, subject, html, text })
 }
 
@@ -809,7 +809,7 @@ export async function emailFornecedorDefinido(params: {
     <div style="text-align:center;margin:24px 0;">
       <a href="${params.link}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;padding:14px 28px;border-radius:10px;font-weight:bold;">Acompanhar meu pedido</a>
     </div>
-    <p style="margin:8px 0 0;color:#888;font-size:13px;">Dúvidas? Responda este e-mail ou chame no WhatsApp (81) 99578-2077.</p>
+    <p style="margin:8px 0 0;color:#888;font-size:13px;">Dúvidas? Responda este e-mail ou chame no WhatsApp (81) 99593-2695.</p>
     `,
     params.pago ? 'Fornecedor definido — pedido em produção.' : 'Fornecedor definido — combine os detalhes e finalize o pagamento pela Confeccione.'
   )

@@ -117,7 +117,7 @@ export async function enviarEmailPedidoRecebido(p: {
       </td></tr></table>
 
       <p style="font-size:12px;color:#555;margin:20px 0 0;line-height:1.6;">💡 <strong>Dica:</strong> acesse seu painel em <a href="${linkPainel}" style="color:#0F6E56;">confeccione.com.br/cliente/login</a> (entre com este e-mail) pra acompanhar todos os seus pedidos num lugar só.</p>
-      <p style="font-size:12px;color:#999;margin:14px 0 0;line-height:1.5;">Dúvidas? Responda este e-mail ou fale no WhatsApp (81) 99578-2077.</p>`
+      <p style="font-size:12px;color:#999;margin:14px 0 0;line-height:1.5;">Dúvidas? Responda este e-mail ou fale no WhatsApp (81) 99593-2695.</p>`
 
   const text = `Recebemos seu pedido #${id8}!\n\nEstamos encontrando o fornecedor ideal pras suas peças. Você vai receber o orçamento final por e-mail e WhatsApp — e só paga se aprovar.\n\nAcompanhe: ${linkVis}\nSeu painel: ${linkPainel}\n\nConfeccione`
 
@@ -159,7 +159,7 @@ export async function enviarEmailOrcamentoFinal(p: {
       </td></tr></table>
 
       <p style="font-size:12px;color:#555;margin:20px 0 0;line-height:1.6;">🔒 <strong>Pagamento garantido pela Confeccione:</strong> seguramos o valor e só repassamos ao fornecedor quando você confirmar que recebeu tudo em conformidade.</p>
-      <p style="font-size:12px;color:#999;margin:14px 0 0;line-height:1.5;">Dúvidas? Responda este e-mail ou fale no WhatsApp (81) 99578-2077.</p>`
+      <p style="font-size:12px;color:#999;margin:14px 0 0;line-height:1.5;">Dúvidas? Responda este e-mail ou fale no WhatsApp (81) 99593-2695.</p>`
 
   const text = `Seu orçamento saiu! Pedido #${id8}${p.fornecedorNome ? ` — fornecedor: ${p.fornecedorNome}` : ''}\n\nProdutos: ${brl(produtos)}\nFrete: ${frete > 0 ? brl(frete) : 'incluso'}\nTotal: ${brl(p.totalCentavos)}\n\nVer e pagar: ${linkVis}\n\nConfeccione`
 
@@ -212,7 +212,7 @@ export async function enviarEmailPedidoPix(p: {
         <a href="${p.invoiceUrl}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;font-size:15px;font-weight:bold;padding:12px 28px;border-radius:10px;">Pagar (PIX ou cartão)</a>
       </td></tr></table>
 
-      <p style="font-size:12px;color:#999;margin:14px 0 0;line-height:1.5;">Dúvidas? Responda este e-mail ou fale no WhatsApp (81) 99578-2077.</p>`
+      <p style="font-size:12px;color:#999;margin:14px 0 0;line-height:1.5;">Dúvidas? Responda este e-mail ou fale no WhatsApp (81) 99593-2695.</p>`
 
   const text = `Cobrança do pedido #${id8}\n\nTotal: ${brl(p.totalCentavos)}\n\nPagar via PIX:\n${p.copiaCola ?? p.invoiceUrl}\n\nPágina de pagamento: ${p.invoiceUrl}\n\nConfeccione`
 
