@@ -7,15 +7,15 @@
 /**
  * WhatsApp de suporte público da Confeccione.
  * Formato E.164 sem o "+", pronto pra concatenar em https://wa.me/{numero}.
- * Apresentação visual: (81) 99578-2077.
+ * Apresentação visual: (81) 99593-2695.
  */
-export const WHATSAPP_SUPORTE = "5581995782077"
+export const WHATSAPP_SUPORTE = "5581995932695"
 
 /**
  * Versão formatada pra exibição (com parênteses e hífen).
  * Use em texto visível pro usuário.
  */
-export const WHATSAPP_SUPORTE_FORMATADO = "(81) 99578-2077"
+export const WHATSAPP_SUPORTE_FORMATADO = "(81) 99593-2695"
 
 /**
  * Helper que monta link wa.me opcionalmente com mensagem pré-preenchida.

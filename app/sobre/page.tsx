@@ -91,7 +91,7 @@ export default function SobrePage() {
                 contato@confeccione.com.br
               </a>
             </li>
-            <li>(81) 99578-2077 (WhatsApp)</li>
+            <li>(81) 99593-2695 (WhatsApp)</li>
           </ul>
         </section>
       </div>

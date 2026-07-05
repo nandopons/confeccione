@@ -120,6 +120,30 @@ export async function enviarBotoes(
   })
 }
 
+/**
+ * Mensagem interativa com botão de LINK (CTA URL) — abre o site ao tocar.
+ * Só funciona dentro da janela de 24h. display_text ≤ 20 chars.
+ */
+export async function enviarBotaoUrl(
+  waId: string,
+  corpo: string,
+  textoBotao: string,
+  url: string
+): Promise<EnvioResultado> {
+  return await postMessages({
+    to: waId,
+    type: 'interactive',
+    interactive: {
+      type: 'cta_url',
+      body: { text: corpo.slice(0, 1024) },
+      action: {
+        name: 'cta_url',
+        parameters: { display_text: textoBotao.slice(0, 20), url },
+      },
+    },
+  })
+}
+
 /** Mídia já upada na Meta (via uploadMidia) — imagem, áudio, vídeo, documento. */
 export async function enviarMidiaPorId(
   waId: string,
