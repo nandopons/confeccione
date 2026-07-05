@@ -99,7 +99,7 @@ export default function SiteFooter() {
                   className={linkCls}
                 >
                   <IconWhatsApp className="shrink-0 opacity-70" />
-                  (81) 99578-2077
+                  (81) 99593-2695
                 </a>
               </li>
               <li>

@@ -343,7 +343,7 @@ export default function PedidoAssistente() {
     }
     const id = salvoRef.current ? protocolo : await salvarPedido(pedido);
     if (!id) {
-      setErro("Não consegui gerar a proposta agora. Tente de novo em instantes — se persistir, chama a gente no WhatsApp (81) 99578-2077.");
+      setErro("Não consegui gerar a proposta agora. Tente de novo em instantes — se persistir, chama a gente no WhatsApp (81) 99593-2695.");
       return;
     }
     // grava CEP + número no pedido antes de seguir (pro cálculo de frete)
