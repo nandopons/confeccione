@@ -112,6 +112,10 @@ export async function GET(req: NextRequest) {
   let pageviews = 0
   const sessoesAssistente = new Set<string>()
   let eventosPedidoEnviado = 0
+  // Visitantes únicos por dia (fuso de Recife — "hoje" do Fernando).
+  const diaDe = (iso: string) =>
+    new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'America/Recife' })
+  const sessoesPorDia = new Map<string, Set<string>>()
   for (const e of eventos) {
     const fonte = classificarFonte(e.utm_source, e.referrer)
     if (e.tipo === 'pageview') {
@@ -119,6 +123,10 @@ export async function GET(req: NextRequest) {
       if (!sessoes.has(e.sessao_id)) sessoes.set(e.sessao_id, fonte)
       // utm chegou depois da 1ª página? mantém a 1ª classificação não-direta
       else if (sessoes.get(e.sessao_id) === 'direto' && fonte !== 'direto') sessoes.set(e.sessao_id, fonte)
+      const dia = diaDe(e.criado_em)
+      const set = sessoesPorDia.get(dia) ?? new Set<string>()
+      set.add(e.sessao_id)
+      sessoesPorDia.set(dia, set)
     } else if (e.tipo === 'assistente_iniciado') {
       sessoesAssistente.add(e.sessao_id)
       if (!sessoes.has(e.sessao_id)) sessoes.set(e.sessao_id, fonte)
@@ -131,6 +139,16 @@ export async function GET(req: NextRequest) {
   const origens = [...porFonte.entries()]
     .map(([fonte, n]) => ({ fonte, sessoes: n }))
     .sort((a, b) => b.sessoes - a.sessoes)
+
+  // Série contínua (zeros incluídos) do período, mais antiga → hoje.
+  const visitasPorDia: { dia: string; sessoes: number }[] = []
+  for (let i = dias - 1; i >= 0; i--) {
+    const dia = diaDe(new Date(Date.now() - i * 86400_000).toISOString())
+    if (visitasPorDia.length && visitasPorDia[visitasPorDia.length - 1].dia === dia) continue
+    visitasPorDia.push({ dia, sessoes: sessoesPorDia.get(dia)?.size ?? 0 })
+  }
+  const hojeStr = diaDe(new Date().toISOString())
+  const visitantesHoje = sessoesPorDia.get(hojeStr)?.size ?? 0
 
   // ------------------------------------------------- pedidos assistidos
   const nomeFornecedor = new Map<string, string>()
@@ -213,7 +231,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     dias,
-    site: { sessoes: sessoes.size, pageviews, origens },
+    site: { sessoes: sessoes.size, pageviews, origens, visitasPorDia, hoje: visitantesHoje },
     acoes: {
       assistenteIniciado: sessoesAssistente.size,
       pedidoEnviadoEventos: eventosPedidoEnviado,
