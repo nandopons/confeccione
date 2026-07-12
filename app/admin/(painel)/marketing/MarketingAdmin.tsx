@@ -357,14 +357,14 @@ export default function MarketingAdmin({
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <p className="text-sm font-semibold text-gray-900 mb-1">Disparo de oferta em massa</p>
           <p className="text-xs text-gray-500 mb-3">
-            Escreva a oferta, filtre o segmento e veja a prévia antes de confirmar. Use <code className="bg-gray-100 px-1 rounded">#nome</code> pro primeiro nome do cliente.
+            Escreva a oferta, filtre o segmento e veja a prévia antes de confirmar. Use <code className="bg-gray-100 px-1 rounded">#nome</code> pro primeiro nome do cliente e <code className="bg-gray-100 px-1 rounded">#link</code> pro link direto do pedido dele (visualizador).
           </p>
 
           <textarea
             value={dMensagem}
             onChange={(e) => { setDMensagem(e.target.value); setDPrevia(null) }}
             rows={3}
-            placeholder="Oi, #nome! Essa semana liberamos uma condição especial pra fechar seu pedido. Quer que eu te mande os detalhes? 😊"
+            placeholder="Oi, #nome! Essa semana liberamos uma condição especial pra fechar seu pedido. Continua de onde parou: #link 😊"
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-[#1D9E75] resize-y"
           />
 

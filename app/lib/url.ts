@@ -23,6 +23,11 @@ export function loginComEmailUrl(email: string): string {
   return `${SITE_URL}/cliente/login?email=${encodeURIComponent(email)}`
 }
 
+/** Página pública do pedido do assistente (mockups + continuar/pagar). */
+export function visualizadorPedidoUrl(pedidoId: string): string {
+  return `${SITE_URL}/visualizador/${pedidoId}`
+}
+
 export function ofertaFornecedorUrl(ofertaId: string): string {
   return `${SITE_URL}/fornecedor/oferta/${ofertaId}`
 }

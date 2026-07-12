@@ -21,6 +21,8 @@ import {
   enviarMidiaPorId,
   enviarTemplate,
   enviarTexto,
+  listarTemplates,
+  sufixoVisualizadorPedido,
   uploadMidia,
   type BotaoResposta,
   type EnvioResultado,
@@ -40,12 +42,37 @@ function tipoPorMime(mime: string): MidiaTipo {
 async function dadosConversa(conversaId: string) {
   const { data } = await supabaseAdmin
     .from('wa_conversas')
-    .select('id, contato:wa_contatos!inner (wa_id)')
+    .select('id, contato:wa_contatos!inner (wa_id, cliente_id)')
     .eq('id', conversaId)
     .maybeSingle()
-  const contato = data?.contato as { wa_id: string } | { wa_id: string }[] | undefined
-  const waId = Array.isArray(contato) ? contato[0]?.wa_id : contato?.wa_id
-  return waId ? { waId } : null
+  type ContatoSel = { wa_id: string; cliente_id: string | null }
+  const contato = data?.contato as ContatoSel | ContatoSel[] | undefined
+  const c = Array.isArray(contato) ? contato[0] : contato
+  return c?.wa_id ? { waId: c.wa_id, clienteId: c.cliente_id ?? null } : null
+}
+
+/**
+ * Pedido do assistente vinculado ao contato — pro botão de URL dinâmica dos
+ * templates de retomada (visualizador/{{1}}). Vínculo: telefone terminando
+ * nos últimos 8 dígitos do wa_id e/ou conta do cliente. Prefere o pedido mais
+ * recente ainda não pago (é o que faz sentido "retomar").
+ */
+async function pedidoAssistenteDoContato(waId: string, clienteId: string | null): Promise<string | null> {
+  const ultimos8 = waId.replace(/\D/g, '').slice(-8)
+  const filtros: string[] = []
+  if (ultimos8.length === 8) filtros.push(`telefone.like.%${ultimos8}`)
+  if (clienteId) filtros.push(`conta_id.eq.${clienteId}`)
+  if (filtros.length === 0) return null
+
+  const { data } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, pagamento_status, criado_em')
+    .or(filtros.join(','))
+    .order('criado_em', { ascending: false })
+    .limit(10)
+  const lista = (data ?? []) as Array<{ id: string; pagamento_status: string | null }>
+  const aberto = lista.find((p) => p.pagamento_status !== 'pago')
+  return (aberto ?? lista[0])?.id ?? null
 }
 
 async function registrarSaida(params: {
@@ -216,11 +243,37 @@ export async function POST(req: NextRequest) {
   if (body.template?.nome) {
     // Variáveis do corpo ({{1}}, {{2}}, …) → componente body da Cloud API.
     const variaveis = (body.template.variaveis ?? []).map((v) => String(v ?? '').trim()).filter(Boolean)
-    const components =
-      variaveis.length > 0
-        ? [{ type: 'body', parameters: variaveis.map((v) => ({ type: 'text', text: v })) }]
-        : undefined
-    const resultado = await enviarTemplate(conversa.waId, body.template.nome, body.template.idioma ?? 'pt_BR', components)
+    const components: unknown[] = []
+    if (variaveis.length > 0) {
+      components.push({ type: 'body', parameters: variaveis.map((v) => ({ type: 'text', text: v })) })
+    }
+
+    // Botão de URL dinâmica (ex.: retomar_pedido_v3 → visualizador/{{1}}):
+    // resolve o pedido do assistente DESTE contato e injeta o id no botão —
+    // cada cliente cai direto no próprio pedido.
+    const def = (await listarTemplates()).find((t) => t.name === body.template!.nome)
+    if (def?.urlDinamica) {
+      const pedidoId = await pedidoAssistenteDoContato(conversa.waId, conversa.clienteId)
+      if (!pedidoId) {
+        return NextResponse.json(
+          { erro: 'Esse template leva ao pedido do cliente, mas não achei pedido do assistente vinculado a este contato.' },
+          { status: 400 }
+        )
+      }
+      components.push({
+        type: 'button',
+        sub_type: 'url',
+        index: def.urlDinamica.index,
+        parameters: [{ type: 'text', text: sufixoVisualizadorPedido(pedidoId) }],
+      })
+    }
+
+    const resultado = await enviarTemplate(
+      conversa.waId,
+      body.template.nome,
+      body.template.idioma ?? 'pt_BR',
+      components.length > 0 ? components : undefined
+    )
     const msgId = await registrarSaida({
       conversaId,
       resultado,

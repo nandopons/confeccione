@@ -18,6 +18,8 @@
 // - Sempre await antes de retornar (regra Vercel serverless).
 // ============================================================================
 
+import { visualizadorPedidoUrl } from './url'
+
 const GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v23.0'
 
 function credenciais() {
@@ -174,6 +176,53 @@ export async function enviarTemplate(
   return await postMessages({ to: waId, type: 'template', template })
 }
 
+// ─────────────────────────────────────────────────────────────
+// Retomada de pedido (marketing oficial)
+// Template retomar_pedido_v3: corpo com {{1}} = primeiro nome e botão
+// "Continuar meu pedido" com URL dinâmica visualizador/{{1}} — cada
+// cliente cai direto no PRÓPRIO pedido. Criado pela rota one-shot
+// /api/admin/whatsapp/criar-templates-retomada.
+// ─────────────────────────────────────────────────────────────
+
+export const TEMPLATE_RETOMADA_PEDIDO = 'retomar_pedido_v3'
+
+/** Sufixo que a Meta cola na URL base do botão (id do pedido + UTMs). */
+export function sufixoVisualizadorPedido(pedidoId: string): string {
+  return `${pedidoId}?utm_source=whatsapp&utm_medium=template&utm_campaign=retomar_pedido`
+}
+
+/** Corpo renderizado do template — pro histórico (contatos_marketing/inbox). */
+export function corpoRetomadaPedido(nome: string | null, pedidoId: string): string {
+  const primeiro = (nome ?? '').trim().split(/\s+/)[0] || 'cliente'
+  return (
+    `Oi, ${primeiro}! 👋 Vi que você começou um pedido aqui na Confeccione e ele ficou salvo no meio do caminho. ` +
+    `Toca no botão pra abrir o seu pedido e continuar de onde parou — leva menos de 2 minutos. 🧵\n` +
+    `▸ Continuar meu pedido → ${visualizadorPedidoUrl(pedidoId)}`
+  )
+}
+
+/**
+ * Envia a retomada de pedido pelo número OFICIAL (Meta), fora da janela de
+ * 24h — é template de marketing pago (~R$0,31/msg). Botão de URL dinâmica
+ * fica no índice 0 do template (ver criar-templates-retomada).
+ */
+export async function enviarTemplateRetomadaPedido(
+  telefone: string,
+  nome: string | null,
+  pedidoId: string
+): Promise<EnvioResultado> {
+  const primeiro = (nome ?? '').trim().split(/\s+/)[0] || 'cliente'
+  return await enviarTemplate(normalizarWaId(telefone), TEMPLATE_RETOMADA_PEDIDO, 'pt_BR', [
+    { type: 'body', parameters: [{ type: 'text', text: primeiro }] },
+    {
+      type: 'button',
+      sub_type: 'url',
+      index: 0,
+      parameters: [{ type: 'text', text: sufixoVisualizadorPedido(pedidoId) }],
+    },
+  ])
+}
+
 /** Marca mensagem recebida como lida (✓✓ azul pro cliente). Fire-safe. */
 export async function marcarComoLida(wamid: string): Promise<boolean> {
   const { token, phoneId } = credenciais()
@@ -259,6 +308,17 @@ export type TemplateAprovado = {
   language: string
   category: string
   bodyPreview: string
+  /** Maior índice {{n}} no corpo (0 = sem variáveis). */
+  bodyVars: number
+  /** Botão de URL com sufixo dinâmico {{1}} (ex.: visualizador/{{1}}) — índice do botão + URL base. */
+  urlDinamica: { index: number; base: string } | null
+}
+
+/** Maior índice de variável {{n}} num texto de template. */
+function contarVariaveis(texto: string): number {
+  let max = 0
+  for (const m of texto.matchAll(/\{\{\s*(\d+)\s*\}\}/g)) max = Math.max(max, Number(m[1]))
+  return max
 }
 
 /** Lista templates APROVADOS da WABA (pra UI oferecer fora da janela de 24h). */
@@ -272,14 +332,22 @@ export async function listarTemplates(): Promise<TemplateAprovado[]> {
     )
     const data = await res.json().catch(() => null)
     if (!res.ok || !Array.isArray(data?.data)) return []
-    type ComponenteRaw = { type?: string; text?: string }
+    type BotaoRaw = { type?: string; text?: string; url?: string }
+    type ComponenteRaw = { type?: string; text?: string; buttons?: BotaoRaw[] }
     type TemplateRaw = { name: string; language: string; category: string; components?: ComponenteRaw[] }
-    return (data.data as TemplateRaw[]).map((t) => ({
-      name: t.name,
-      language: t.language,
-      category: t.category,
-      bodyPreview: t.components?.find((c) => c.type === 'BODY')?.text || '',
-    }))
+    return (data.data as TemplateRaw[]).map((t) => {
+      const corpo = t.components?.find((c) => c.type === 'BODY')?.text || ''
+      const botoes = t.components?.find((c) => c.type === 'BUTTONS')?.buttons ?? []
+      const iUrl = botoes.findIndex((b) => b.type === 'URL' && /\{\{\s*1\s*\}\}/.test(b.url ?? ''))
+      return {
+        name: t.name,
+        language: t.language,
+        category: t.category,
+        bodyPreview: corpo,
+        bodyVars: contarVariaveis(corpo),
+        urlDinamica: iUrl >= 0 ? { index: iUrl, base: botoes[iUrl].url ?? '' } : null,
+      }
+    })
   } catch (err) {
     console.error('[wa-cloud] listarTemplates exception', { err })
     return []

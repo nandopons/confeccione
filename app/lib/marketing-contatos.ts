@@ -6,7 +6,10 @@
 // (pedidos_assistente): lembrete/feedback manuais, nutrição automática e
 // ofertas em massa. Origem 'manual' (botões do admin) ou 'automatico' (cron).
 //
-// Nutrição automática (executarNutricao) — travas anti-spam:
+// Nutrição automática (executarNutricao) — envia o template OFICIAL de
+// retomada (Meta Cloud API, retomar_pedido_v3): corpo com o nome e botão
+// que leva cada lead direto ao PRÓPRIO pedido no visualizador. Template de
+// marketing pago (~R$0,31/msg) — as travas anti-spam abaixo valem dobrado:
 //   - só fases não pagas e com telefone
 //   - lead parado há >= dias_parado (atualizado_em ?? criado_em)
 //   - menos de max_toques contatos registrados no total
@@ -14,13 +17,16 @@
 //   - no máximo NUTRICAO_MAX_POR_RODADA envios por execução
 // Config em marketing_config (linha única id=1); toggle padrão DESLIGADO.
 //
-// Disparo em massa (executarDisparo): mensagem custom com placeholder #nome
-// pra um segmento (fase/UF/busca). Fluxo em 2 passos no painel: prévia →
+// Disparo em massa (executarDisparo): mensagem custom com placeholders #nome
+// e #link (link direto pro pedido do lead no visualizador) pra um segmento
+// (fase/UF/busca). Fluxo em 2 passos no painel: prévia →
 // confirmação. Cap DISPARO_MAX_POR_RODADA por rodada (repete pra continuar).
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
 import { enviarMensagem } from './zapi'
+import { corpoRetomadaPedido, enviarTemplateRetomadaPedido } from './whatsapp-cloud'
+import { visualizadorPedidoUrl } from './url'
 import { listarLeadsMarketing, type FaseLead, type LeadMarketing } from './marketing'
 
 export type TipoContato = 'lembrete' | 'nutricao' | 'oferta' | 'feedback'
@@ -137,10 +143,6 @@ export async function salvarConfigNutricao(c: ConfigNutricao): Promise<void> {
 // Nutrição automática
 // ─────────────────────────────────────────────────────────────
 
-export function mensagemReativacao(nome: string | null): string {
-  return `Oi${nome ? ', ' + nome.split(' ')[0] : ''}! Vi que você realizou um pedido em nosso site. Gostaria de ajuda para finalizar? 😊`
-}
-
 export type ResultadoNutricao = {
   ativa: boolean
   candidatos: number
@@ -189,16 +191,16 @@ export async function executarNutricao(opts?: { forcar?: boolean }): Promise<Res
   let enviados = 0
   let erros = 0
   for (const l of alvo) {
-    const msg = mensagemReativacao(l.nome)
     let ok = false
     try {
-      ok = await enviarMensagem(l.telefone!, msg)
+      ok = (await enviarTemplateRetomadaPedido(l.telefone!, l.nome, l.id)).ok
     } catch {
       ok = false
     }
     if (ok) {
       enviados++
-      await registrarContato(l.id, { tipo: 'nutricao', origem: 'automatico', mensagem: msg })
+      // Histórico guarda o corpo renderizado do template (o que o lead viu).
+      await registrarContato(l.id, { tipo: 'nutricao', origem: 'automatico', mensagem: corpoRetomadaPedido(l.nome, l.id) })
     } else {
       erros++
     }
@@ -234,11 +236,15 @@ export function filtrarLeadsDisparo(leads: LeadMarketing[], f: FiltroDisparo): L
   })
 }
 
-/** Substitui #nome pelo primeiro nome; sem nome, remove o placeholder limpo. */
-export function aplicarTemplate(msg: string, nome: string | null): string {
+/**
+ * Substitui #nome pelo primeiro nome (sem nome, remove o placeholder limpo)
+ * e #link pelo link direto do pedido do lead no visualizador.
+ */
+export function aplicarTemplate(msg: string, nome: string | null, link?: string): string {
   const primeiro = (nome ?? '').trim().split(/\s+/)[0] ?? ''
-  if (primeiro) return msg.split('#nome').join(primeiro)
-  return msg.replace(/ ?,? ?#nome/g, '').replace(/ {2,}/g, ' ')
+  let out = primeiro ? msg.split('#nome').join(primeiro) : msg.replace(/ ?,? ?#nome/g, '').replace(/ {2,}/g, ' ')
+  if (link) out = out.split('#link').join(link)
+  return out
 }
 
 export type PreviaDisparo = {
@@ -253,7 +259,7 @@ export async function previaDisparo(filtro: FiltroDisparo, mensagem: string): Pr
   return {
     total: leads.length,
     amostra: leads.slice(0, 8).map((l) => ({ nome: l.nome, cidade: l.cidade, uf: l.uf })),
-    exemplo: leads[0] ? aplicarTemplate(mensagem, leads[0].nome) : null,
+    exemplo: leads[0] ? aplicarTemplate(mensagem, leads[0].nome, visualizadorPedidoUrl(leads[0].id)) : null,
     cap: DISPARO_MAX_POR_RODADA,
   }
 }
@@ -267,7 +273,7 @@ export async function executarDisparo(filtro: FiltroDisparo, mensagem: string): 
   let enviados = 0
   let erros = 0
   for (const l of alvo) {
-    const msg = aplicarTemplate(mensagem, l.nome)
+    const msg = aplicarTemplate(mensagem, l.nome, visualizadorPedidoUrl(l.id))
     let ok = false
     try {
       ok = await enviarMensagem(l.telefone!, msg)

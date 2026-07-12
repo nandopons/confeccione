@@ -101,6 +101,12 @@ POST /api/whatsapp/webhook      app/lib/whatsapp-cloud.ts
 - Envio programático (notificações do sistema): importar de
   `app/lib/whatsapp-cloud.ts` (`enviarTexto`, `enviarTemplate`) — mesma infra
   do inbox. Migração do Z-API pode ser gradual, função a função.
+- **Retomada de pedido (marketing)**: template `retomar_pedido_v3` com botão
+  de URL dinâmica `visualizador/{{1}}` — cada cliente cai direto no PRÓPRIO
+  pedido. Criação one-shot: `POST /api/admin/whatsapp/criar-templates-retomada`
+  (logado como admin). Envio: pelo inbox (o backend injeta o pedido do contato
+  automaticamente) ou via `enviarTemplateRetomadaPedido()` (nutrição do painel
+  de marketing e botão Lembrete usam essa função).
 
 ## Fase 3 (futuro, não implementado)
 - Gravação de áudio pelo microfone no composer (MediaRecorder)
