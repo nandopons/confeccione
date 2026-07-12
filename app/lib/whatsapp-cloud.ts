@@ -223,6 +223,21 @@ export async function enviarTemplateRetomadaPedido(
   ])
 }
 
+// ─────────────────────────────────────────────────────────────
+// Código de acesso (login OTP) — template AUTHENTICATION `codigo_acesso`
+// com botão "copiar código". Corpo é padrão da Meta; enviamos o código no
+// body e no botão (exigência do formato de autenticação).
+// ─────────────────────────────────────────────────────────────
+
+export const TEMPLATE_CODIGO_ACESSO = 'codigo_acesso'
+
+export async function enviarCodigoAcesso(telefone: string, codigo: string): Promise<EnvioResultado> {
+  return await enviarTemplate(normalizarWaId(telefone), TEMPLATE_CODIGO_ACESSO, 'pt_BR', [
+    { type: 'body', parameters: [{ type: 'text', text: codigo }] },
+    { type: 'button', sub_type: 'url', index: 0, parameters: [{ type: 'text', text: codigo }] },
+  ])
+}
+
 /** Marca mensagem recebida como lida (✓✓ azul pro cliente). Fire-safe. */
 export async function marcarComoLida(wamid: string): Promise<boolean> {
   const { token, phoneId } = credenciais()

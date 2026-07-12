@@ -54,6 +54,28 @@ export default function PedidoSteps() {
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [showExtras, setShowExtras] = useState(false);
+  const [contaExistente, setContaExistente] = useState(false);
+  const [emailChecado, setEmailChecado] = useState("");
+
+  // Detecta conta/pedidos anteriores quando o e-mail fica válido — sugere o
+  // painel em vez de refazer o pedido (evita duplicados de quem acha que
+  // "não computou"). Failure-soft: erro na checagem não muda nada.
+  async function checarContaExistente() {
+    const v = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) || v === emailChecado) return;
+    setEmailChecado(v);
+    try {
+      const r = await fetch("/api/pedido/assistente/verificar-contato", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: v }),
+      });
+      const j = await r.json().catch(() => null);
+      setContaExistente(Boolean(j?.existe));
+    } catch {
+      setContaExistente(false);
+    }
+  }
 
   useEffect(() => {
     if (tipo && nichosExtras.some((n) => n.id === tipo)) setShowExtras(true);
@@ -276,9 +298,24 @@ export default function PedidoSteps() {
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-1 block">E-mail</label>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com" className={inputCls} />
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onBlur={checarContaExistente} placeholder="seu@email.com" className={inputCls} />
               </div>
             </div>
+            {contaExistente && (
+              <div className="bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-3 mb-4 text-sm">
+                <p className="text-gray-800 font-medium mb-1">Você já tem pedidos na Confeccione 👋</p>
+                <p className="text-gray-600 text-[13px] mb-2">
+                  Encontramos esse e-mail por aqui. Acesse sua conta pra acompanhar os pedidos anteriores e fazer novos — você recebe o código de acesso por WhatsApp e e-mail.
+                </p>
+                <a
+                  href={`/cliente/login?email=${encodeURIComponent(email.trim())}`}
+                  className="inline-block bg-[#1D9E75] text-white text-[13px] font-medium rounded-lg px-3 py-1.5 hover:bg-[#178761]"
+                >
+                  Acessar minha conta
+                </a>
+                <span className="text-[12px] text-gray-500 ml-2">ou continue o pedido normalmente abaixo</span>
+              </div>
+            )}
             <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm">
               <p className="text-xs text-gray-500 font-medium mb-3">Resumo do pedido</p>
               <div className="space-y-2">

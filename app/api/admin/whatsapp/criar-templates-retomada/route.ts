@@ -4,6 +4,9 @@
 // One-shot: rode uma vez; a Meta coloca em análise. Reexecutar é seguro
 // (nome duplicado é rejeitado pela Meta, sem duplicar).
 //
+// Templates criados: pedido_recebido_v2 (confirmação com botão pro painel),
+// codigo_acesso (OTP de login) e retomar_pedido_v3 (marketing de retomada).
+//
 // v3: botão "Continuar meu pedido" com URL DINÂMICA — na hora do envio o
 // inbox injeta o id do pedido do contato e cada cliente cai direto no
 // PRÓPRIO pedido (visualizador/{{1}}), não mais na home. O corpo segue
@@ -26,6 +29,49 @@ const EXEMPLO_VISUALIZADOR =
   'https://www.confeccione.com.br/visualizador/a1591a0f-007e-4e0d-a299-582138cc9bad'
 
 const TEMPLATES = [
+  // Confirmação de pedido (utility) — botão dinâmico pro painel do cliente
+  // com o e-mail pré-preenchido (login?email={{1}}).
+  {
+    name: 'pedido_recebido_v2',
+    language: 'pt_BR',
+    category: 'UTILITY',
+    components: [
+      {
+        type: 'BODY',
+        text:
+          'Oi, {{1}}! Recebemos seu pedido nº {{2}} aqui na Confeccione. ✅ Nossa equipe já está buscando o fornecedor ideal pra sua produção. Acompanhe o andamento e fale com a gente pelo seu painel — é só tocar no botão abaixo.',
+        example: { body_text: [['Ana', '20260700110']] },
+      },
+      { type: 'FOOTER', text: 'Confeccione · confeccione.com.br' },
+      {
+        type: 'BUTTONS',
+        buttons: [
+          {
+            type: 'URL',
+            text: 'Acompanhar meu pedido',
+            url: 'https://www.confeccione.com.br/cliente/login?email={{1}}',
+            example: ['https://www.confeccione.com.br/cliente/login?email=ana%40email.com'],
+          },
+          { type: 'QUICK_REPLY', text: 'Falar com atendente' },
+        ],
+      },
+    ],
+  },
+  // Código de acesso (authentication) — formato fixo da Meta com botão
+  // "copiar código". Corpo/rodapé são gerados pela Meta.
+  {
+    name: 'codigo_acesso',
+    language: 'pt_BR',
+    category: 'AUTHENTICATION',
+    components: [
+      { type: 'BODY', add_security_recommendation: true },
+      { type: 'FOOTER', code_expiration_minutes: 10 },
+      {
+        type: 'BUTTONS',
+        buttons: [{ type: 'OTP', otp_type: 'COPY_CODE', text: 'Copiar código' }],
+      },
+    ],
+  },
   {
     name: 'retomar_pedido_v3',
     language: 'pt_BR',

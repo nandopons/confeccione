@@ -76,25 +76,40 @@ async function garantirConversa(waId: string, nome: string | null): Promise<stri
 }
 
 /**
- * Confirmação de pedido recebido via template oficial `pedido_recebido`.
+ * Confirmação de pedido recebido via template oficial `pedido_recebido_v2`:
+ * corpo com nome + nº do pedido e botão "Acompanhar meu pedido" que abre o
+ * painel do cliente com o e-mail pré-preenchido (login?email={{1}}).
  * @returns true se a Meta aceitou o envio (senão o caller pode usar fallback).
  */
 export async function notificarPedidoRecebido(params: {
   telefone: string
   nome: string
   protocolo: string
+  /** E-mail do cliente — pré-preenche o login do painel no botão. */
+  email?: string | null
 }): Promise<boolean> {
   try {
     const waId = normalizarWaId(params.telefone)
     if (waId.replace(/\D/g, '').length < 10) return false
 
-    const resultado = await enviarTemplate(waId, 'pedido_recebido', 'pt_BR', [
+    // Sufixo do botão: e-mail urlencoded + UTMs (a Meta cola após login?email=).
+    const sufixoBotao =
+      encodeURIComponent(params.email ?? '') +
+      '&utm_source=whatsapp&utm_medium=template&utm_campaign=pedido_recebido'
+
+    const resultado = await enviarTemplate(waId, 'pedido_recebido_v2', 'pt_BR', [
       {
         type: 'body',
         parameters: [
           { type: 'text', text: params.nome },
           { type: 'text', text: params.protocolo },
         ],
+      },
+      {
+        type: 'button',
+        sub_type: 'url',
+        index: 0,
+        parameters: [{ type: 'text', text: sufixoBotao }],
       },
     ])
     if (!resultado.ok) {
@@ -109,8 +124,8 @@ export async function notificarPedidoRecebido(params: {
         const agora = new Date().toISOString()
         const corpo =
           `Oi, ${params.nome}! Recebemos seu pedido nº ${params.protocolo} aqui na Confeccione. ✅\n\n` +
-          `Nossa equipe já está buscando o fornecedor ideal pra sua produção — assim que tiver novidade, você recebe o aviso por aqui.\n\n` +
-          `Qualquer dúvida, é só responder esta mensagem.\n▸ Falar com atendente`
+          `Nossa equipe já está buscando o fornecedor ideal pra sua produção. Acompanhe o andamento e fale com a gente pelo seu painel.\n\n` +
+          `▸ Acompanhar meu pedido → https://www.confeccione.com.br/cliente/login\n▸ Falar com atendente`
         await supabaseAdmin.from('wa_mensagens').insert({
           conversa_id: conversaId,
           wamid: resultado.wamid,
@@ -118,7 +133,7 @@ export async function notificarPedidoRecebido(params: {
           tipo: 'template',
           corpo,
           status: 'enviando',
-          template_nome: 'pedido_recebido',
+          template_nome: 'pedido_recebido_v2',
           criado_em: agora,
         })
         await supabaseAdmin

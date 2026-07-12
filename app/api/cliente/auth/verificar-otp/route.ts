@@ -1,10 +1,11 @@
 // app/api/cliente/auth/verificar-otp/route.ts
 // ============================================================================
 // POST /api/cliente/auth/verificar-otp
-// Body: { email: string, codigo: string }
+// Body: { email?: string; telefone?: string; codigo: string } — mesmo
+// identificador usado no solicitar-otp.
 //
 // Fluxo:
-//   1. Busca conta por email → 400 se não existir (não criar aqui)
+//   1. Busca conta por email OU telefone → 400 se não existir (não criar aqui)
 //   2. Verifica bloqueio → 429
 //   3. Valida OTP → 400 com motivo
 //   4. Backfill lazy: vincula pedidos com mesmo email à conta
@@ -20,6 +21,7 @@ import { supabaseAdmin } from '@/app/lib/supabase-server'
 import {
   COOKIE_CLIENTE,
   SESSAO_DURACAO_DIAS,
+  buscarContaPorWhatsApp,
   criarSessao,
   estaBloqueado,
   tempoBloqueioRestante,
@@ -29,7 +31,7 @@ import {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export async function POST(req: Request) {
-  let body: { email?: string; codigo?: string; client?: string }
+  let body: { email?: string; telefone?: string; codigo?: string; client?: string }
   try {
     body = await req.json()
   } catch {
@@ -37,21 +39,31 @@ export async function POST(req: Request) {
   }
 
   const email = (body.email ?? '').trim().toLowerCase()
+  const telefone = (body.telefone ?? '').trim()
   const codigo = (body.codigo ?? '').trim()
 
-  if (!EMAIL_REGEX.test(email)) {
+  if (!email && !telefone) {
+    return NextResponse.json({ erro: 'informe e-mail ou WhatsApp' }, { status: 400 })
+  }
+  if (email && !EMAIL_REGEX.test(email)) {
     return NextResponse.json({ erro: 'email inválido' }, { status: 400 })
   }
   if (!/^\d{6}$/.test(codigo)) {
     return NextResponse.json({ erro: 'código inválido' }, { status: 400 })
   }
 
-  // 1. Busca conta
-  const { data: conta } = await supabaseAdmin
-    .from('contas_clientes')
-    .select('id, email, whatsapp, nome')
-    .eq('email', email)
-    .maybeSingle()
+  // 1. Busca conta — mesmo identificador do solicitar-otp
+  let conta: { id: string; email: string; whatsapp: string | null; nome: string | null } | null = null
+  if (email) {
+    const { data } = await supabaseAdmin
+      .from('contas_clientes')
+      .select('id, email, whatsapp, nome')
+      .eq('email', email)
+      .maybeSingle()
+    conta = data
+  } else {
+    conta = await buscarContaPorWhatsApp(telefone)
+  }
 
   if (!conta) {
     return NextResponse.json(
@@ -88,14 +100,22 @@ export async function POST(req: Request) {
     )
   }
 
-  // 4. Backfill lazy: vincula pedidos com mesmo email à conta
+  // 4. Backfill lazy: vincula pedidos (legado + assistente) com o e-mail da
+  // conta — assim os pedidos feitos sem login aparecem no painel.
   // best-effort, não bloqueia login se falhar
   try {
-    await supabaseAdmin
-      .from('pedidos')
-      .update({ conta_id: conta.id })
-      .ilike('email', email)
-      .is('conta_id', null)
+    await Promise.all([
+      supabaseAdmin
+        .from('pedidos')
+        .update({ conta_id: conta.id })
+        .ilike('email', conta.email)
+        .is('conta_id', null),
+      supabaseAdmin
+        .from('pedidos_assistente')
+        .update({ conta_id: conta.id })
+        .ilike('email', conta.email)
+        .is('conta_id', null),
+    ])
   } catch (err) {
     console.error('[cliente/verificar-otp] backfill falhou:', err)
   }
