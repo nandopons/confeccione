@@ -5,7 +5,7 @@ import SiteHeader from "@/app/components/SiteHeader";
 import SiteFooter from "@/app/components/SiteFooter";
 import PortoDigitalBadge from "@/app/components/PortoDigitalBadge";
 import PedidoSteps from "@/app/components/PedidoSteps";
-import { linkWhatsAppSuporte } from "@/app/lib/contatos";
+import { linkWhatsAppSuporte, WHATSAPP_SUPORTE_FORMATADO } from "@/app/lib/contatos";
 
 export default function Home() {
   return (
@@ -109,7 +109,7 @@ export default function Home() {
             </div>
             <div>
               <p className="text-sm text-gray-900 font-medium">Precisa de ajuda?</p>
-              <p className="text-xs text-gray-400 leading-relaxed">Nosso time atende pelo WhatsApp{" "}<a href={linkWhatsAppSuporte("Olá! Estou com uma dúvida no pedido")} target="_blank" rel="noopener noreferrer" className="font-medium text-[#0F6E56] hover:underline">(81) 99578-2077</a>. Chame a qualquer momento que a gente te guia pelo processo.</p>
+              <p className="text-xs text-gray-400 leading-relaxed">Nosso time atende pelo WhatsApp{" "}<a href={linkWhatsAppSuporte("Olá! Estou com uma dúvida no pedido")} target="_blank" rel="noopener noreferrer" className="font-medium text-[#0F6E56] hover:underline">{WHATSAPP_SUPORTE_FORMATADO}</a>. Chame a qualquer momento que a gente te guia pelo processo.</p>
             </div>
           </div>
         </div>
