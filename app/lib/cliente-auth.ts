@@ -91,6 +91,29 @@ export async function garanteContaPorEmail(email: string): Promise<ContaCliente>
   return nova as ContaCliente
 }
 
+/**
+ * Busca conta pelo WhatsApp (últimos 8 dígitos + validação de sufixo).
+ * NÃO cria conta — telefone sozinho não tem e-mail pra abrir cadastro.
+ */
+export async function buscarContaPorWhatsApp(telefone: string): Promise<ContaCliente | null> {
+  const dig = telefone.replace(/\D/g, '')
+  const last8 = dig.slice(-8)
+  if (last8.length < 8) return null
+
+  const { data } = await supabaseAdmin
+    .from('contas_clientes')
+    .select('*')
+    .ilike('whatsapp', `%${last8}`)
+    .limit(3)
+
+  const bate = (tel: string | null) => {
+    if (!tel) return false
+    const d = tel.replace(/\D/g, '')
+    return d.endsWith(last8) || dig.endsWith(d.slice(-8))
+  }
+  return ((data ?? []) as ContaCliente[]).find((c) => bate(c.whatsapp)) ?? null
+}
+
 // ============================================================================
 // SESSÃO
 // ============================================================================

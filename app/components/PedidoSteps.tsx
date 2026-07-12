@@ -48,12 +48,37 @@ export default function PedidoSteps() {
   const [complemento, setComplemento] = useState("");
   const [cepInfo, setCepInfo] = useState<string | null>(null);
   const [buscandoCep, setBuscandoCep] = useState(false);
+  // true só quando uma busca REAL terminou sem achar — evita o falso
+  // "não achamos" que aparecia ao digitar o 8º dígito antes do blur.
+  const [cepFalhou, setCepFalhou] = useState(false);
   const [nome, setNome] = useState("");
   const [tel, setTel] = useState("");
   const [email, setEmail] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [showExtras, setShowExtras] = useState(false);
+  const [contaExistente, setContaExistente] = useState(false);
+  const [emailChecado, setEmailChecado] = useState("");
+
+  // Detecta conta/pedidos anteriores quando o e-mail fica válido — sugere o
+  // painel em vez de refazer o pedido (evita duplicados de quem acha que
+  // "não computou"). Failure-soft: erro na checagem não muda nada.
+  async function checarContaExistente() {
+    const v = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) || v === emailChecado) return;
+    setEmailChecado(v);
+    try {
+      const r = await fetch("/api/pedido/assistente/verificar-contato", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: v }),
+      });
+      const j = await r.json().catch(() => null);
+      setContaExistente(Boolean(j?.existe));
+    } catch {
+      setContaExistente(false);
+    }
+  }
 
   useEffect(() => {
     if (tipo && nichosExtras.some((n) => n.id === tipo)) setShowExtras(true);
@@ -77,16 +102,20 @@ export default function PedidoSteps() {
     setStep(2);
   }
 
-  async function buscarCep() {
-    const d = cep.replace(/\D/g, "");
-    if (d.length !== 8) { setCepInfo(null); return; }
+  async function buscarCep(valor?: string) {
+    const d = (valor ?? cep).replace(/\D/g, "");
+    if (d.length !== 8) { setCepInfo(null); setCepFalhou(false); return; }
     setBuscandoCep(true);
+    setCepFalhou(false);
     try {
       const r = await fetch(`https://viacep.com.br/ws/${d}/json/`).then((x) => x.json()).catch(() => null);
       if (r && !r.erro && (r.localidade || r.logradouro)) {
         setCepInfo([r.logradouro, r.bairro, [r.localidade, r.uf].filter(Boolean).join("/")].filter(Boolean).join(", "));
         if (r.uf && !estado) setEstado(r.uf);
-      } else { setCepInfo(null); }
+      } else {
+        setCepInfo(null);
+        setCepFalhou(true);
+      }
     } finally { setBuscandoCep(false); }
   }
 
@@ -240,7 +269,7 @@ export default function PedidoSteps() {
             <div className="mb-6">
               <label className="text-sm font-medium text-gray-700 mb-1 block">Endereço de entrega <span className="text-gray-300">(pro cálculo do frete)</span></label>
               <div className="flex items-start gap-2">
-                <input value={cepFmt(cep)} onChange={(e) => { setCep(e.target.value.replace(/\D/g, "").slice(0, 8)); setCepInfo(null); }} onBlur={() => void buscarCep()} inputMode="numeric" placeholder="CEP" className={inputCls + " w-40"} />
+                <input value={cepFmt(cep)} onChange={(e) => { const d = e.target.value.replace(/\D/g, "").slice(0, 8); setCep(d); setCepInfo(null); setCepFalhou(false); if (d.length === 8) void buscarCep(d); }} onBlur={() => { if (!cepInfo && !buscandoCep) void buscarCep(); }} inputMode="numeric" placeholder="CEP" className={inputCls + " w-40"} />
                 <button type="button" onClick={() => void buscarCep()} disabled={buscandoCep || cep.replace(/\D/g, "").length !== 8} className="shrink-0 border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 text-sm px-3 py-2 rounded-xl whitespace-nowrap">{buscandoCep ? "buscando…" : "buscar CEP"}</button>
               </div>
               {!buscandoCep && cepInfo && (
@@ -249,7 +278,7 @@ export default function PedidoSteps() {
                   <p className="text-xs text-gray-700">{cepInfo}</p>
                 </div>
               )}
-              {!buscandoCep && !cepInfo && cep.replace(/\D/g, "").length === 8 && (
+              {!buscandoCep && cepFalhou && cep.replace(/\D/g, "").length === 8 && (
                 <p className="text-[11px] text-amber-600 mt-1">Não achamos esse CEP — confira os números.</p>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
@@ -276,9 +305,24 @@ export default function PedidoSteps() {
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-1 block">E-mail</label>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com" className={inputCls} />
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onBlur={checarContaExistente} placeholder="seu@email.com" className={inputCls} />
               </div>
             </div>
+            {contaExistente && (
+              <div className="bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-xl p-3 mb-4 text-sm">
+                <p className="text-gray-800 font-medium mb-1">Você já tem pedidos na Confeccione 👋</p>
+                <p className="text-gray-600 text-[13px] mb-2">
+                  Encontramos esse e-mail por aqui. Acesse sua conta pra acompanhar os pedidos anteriores e fazer novos — você recebe o código de acesso por WhatsApp e e-mail.
+                </p>
+                <a
+                  href={`/cliente/login?email=${encodeURIComponent(email.trim())}`}
+                  className="inline-block bg-[#1D9E75] text-white text-[13px] font-medium rounded-lg px-3 py-1.5 hover:bg-[#178761]"
+                >
+                  Acessar minha conta
+                </a>
+                <span className="text-[12px] text-gray-500 ml-2">ou continue o pedido normalmente abaixo</span>
+              </div>
+            )}
             <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm">
               <p className="text-xs text-gray-500 font-medium mb-3">Resumo do pedido</p>
               <div className="space-y-2">

@@ -101,6 +101,19 @@ POST /api/whatsapp/webhook      app/lib/whatsapp-cloud.ts
 - Envio programático (notificações do sistema): importar de
   `app/lib/whatsapp-cloud.ts` (`enviarTexto`, `enviarTemplate`) — mesma infra
   do inbox. Migração do Z-API pode ser gradual, função a função.
+- **Confirmação de pedido**: template `pedido_recebido_v2` (utility) sai na
+  hora que o pedido é salvo (`/api/pedido/assistente/criar` e fluxo legado),
+  com nº do pedido e botão "Acompanhar meu pedido" → painel do cliente com
+  e-mail pré-preenchido.
+- **Código de acesso (login)**: template `codigo_acesso` (authentication) com
+  botão copiar código — `/api/cliente/auth/solicitar-otp` envia por e-mail +
+  WhatsApp oficial; login aceita e-mail ou WhatsApp.
+- **Retomada de pedido (marketing)**: template `retomar_pedido_v3` com botão
+  de URL dinâmica `visualizador/{{1}}` — cada cliente cai direto no PRÓPRIO
+  pedido. Criação one-shot: `POST /api/admin/whatsapp/criar-templates-retomada`
+  (logado como admin). Envio: pelo inbox (o backend injeta o pedido do contato
+  automaticamente) ou via `enviarTemplateRetomadaPedido()` (nutrição do painel
+  de marketing e botão Lembrete usam essa função).
 
 ## Fase 3 (futuro, não implementado)
 - Gravação de áudio pelo microfone no composer (MediaRecorder)

@@ -5,7 +5,8 @@ import { supabaseAdmin } from './supabase-server'
 import { enviarMensagem } from './zapi'
 import { SITE_URL } from './url'
 import { emailFeedbackMockup } from './email'
-import { mensagemReativacao, registrarContato } from './marketing-contatos'
+import { registrarContato } from './marketing-contatos'
+import { corpoRetomadaPedido, enviarTemplateRetomadaPedido } from './whatsapp-cloud'
 
 type LinhaJson = {
   modelo?: string | null; cor?: string | null; material?: string | null
@@ -152,15 +153,21 @@ export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<
   let whats = false
   let email = false
 
-  // Lembrete = mensagem SIMPLES de reativação, sem link (o link vai manualmente
-  // depois que o cliente responder). Feedback continua com link.
+  // Lembrete = template OFICIAL de retomada (Meta, retomar_pedido_v3): botão
+  // "Continuar meu pedido" leva cada cliente direto ao PRÓPRIO pedido no
+  // visualizador. Feedback segue texto livre com link.
   const msg =
     acao === 'lembrete'
-      ? mensagemReativacao(p.nome)
+      ? corpoRetomadaPedido(p.nome, id)
       : `Oi${p.nome ? ' ' + p.nome.split(' ')[0] : ''}! 👀 O mockup ficou como você queria? Dá uma olhada e, se precisar mudar algo (posição da arte, tamanho, cor…), use o botão "Ajustar detalhe" na peça que a gente atualiza na hora:\n${link}`
 
   if (p.telefone) {
-    try { whats = await enviarMensagem(p.telefone, msg) } catch { whats = false }
+    try {
+      whats =
+        acao === 'lembrete'
+          ? (await enviarTemplateRetomadaPedido(p.telefone, p.nome, id)).ok
+          : await enviarMensagem(p.telefone, msg)
+    } catch { whats = false }
     if (whats) {
       try { await registrarContato(id, { tipo: acao, origem: 'manual', mensagem: msg }) } catch { /* histórico não bloqueia */ }
     }

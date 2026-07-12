@@ -47,7 +47,15 @@ type Mensagem = {
   criado_em: string
 }
 
-type Template = { name: string; language: string; category: string; bodyPreview: string }
+type Template = {
+  name: string
+  language: string
+  category: string
+  bodyPreview: string
+  bodyVars: number
+  /** Botão com URL dinâmica (visualizador/{{1}}) — o envio injeta o pedido do contato. */
+  urlDinamica: { index: number; base: string } | null
+}
 
 type PedidoResumo = {
   id: string
@@ -953,6 +961,9 @@ export function WhatsAppInbox({
                   <div className="flex items-center gap-2">
                     <span className="text-[13.5px] font-medium">{t.name}</span>
                     <span className="text-[10px] uppercase tracking-wide text-neutral-400">{t.language} · {t.category}</span>
+                    {t.urlDinamica && (
+                      <span className="text-[10px] rounded-full bg-[#E1F5EE] text-[#0F6E56] px-2 py-0.5 whitespace-nowrap">→ pedido do cliente</span>
+                    )}
                   </div>
                   {t.bodyPreview && <p className="text-[12px] text-neutral-500 line-clamp-2 mt-0.5">{t.bodyPreview}</p>}
                 </button>

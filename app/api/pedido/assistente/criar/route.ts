@@ -12,7 +12,9 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getContaAtual } from '@/app/lib/cliente-auth'
+import { primeiroNome } from '@/app/lib/nome'
 import { normalizarWhatsApp } from '@/app/lib/phone'
+import { notificarPedidoRecebido } from '@/app/lib/whatsapp-notify'
 
 export const runtime = 'nodejs'
 
@@ -133,7 +135,7 @@ export async function POST(req: Request) {
       origem: 'home_chat',
       conta_id: contaId,
     })
-    .select('id')
+    .select('id, codigo')
     .single()
 
   if (error || !data) {
@@ -141,5 +143,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error?.message ?? 'Erro ao salvar o pedido.' }, { status: 500 })
   }
 
-  return NextResponse.json({ ok: true, id: data.id, protocolo: data.id })
+  // Confirmação imediata no WhatsApp OFICIAL (template pedido_recebido_v2):
+  // nº do pedido + botão "Acompanhar meu pedido" → painel do cliente.
+  // Failure-soft (não bloqueia o pedido) e SEMPRE await antes do return
+  // (regra serverless). Evita o cliente reenviar achando que não computou.
+  const telefoneNorm = contato.telefone ? normalizarWhatsApp(contato.telefone) : null
+  if (telefoneNorm) {
+    try {
+      await notificarPedidoRecebido({
+        telefone: telefoneNorm,
+        nome: primeiroNome(contato.nome),
+        protocolo: String(data.codigo ?? data.id),
+        email: contato.email,
+      })
+    } catch (err) {
+      console.error('[pedido/assistente/criar] confirmação whatsapp falhou:', err)
+    }
+  }
+
+  return NextResponse.json({ ok: true, id: data.id, protocolo: String(data.codigo ?? data.id), codigo: data.codigo ?? null })
 }

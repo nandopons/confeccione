@@ -1,6 +1,7 @@
 // app/cliente/login/LoginForm.tsx
 // ============================================================================
-// Form de login OTP de 2 etapas (email → código).
+// Form de login OTP de 2 etapas (e-mail OU WhatsApp → código).
+// O código chega por e-mail + WhatsApp oficial (template codigo_acesso).
 // ============================================================================
 
 'use client'
@@ -8,6 +9,12 @@
 import { useState } from 'react'
 
 type Etapa = 'email' | 'codigo'
+
+/** Identificador digitado → payload da API ({ email } ou { telefone }). */
+function payloadIdentificador(v: string): { email?: string; telefone?: string } {
+  const valor = v.trim()
+  return valor.includes('@') ? { email: valor } : { telefone: valor }
+}
 
 export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
   const [etapa, setEtapa] = useState<Etapa>('email')
@@ -26,7 +33,7 @@ export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ email }),
+        body: JSON.stringify(payloadIdentificador(email)),
       })
       const j = await r.json()
       if (!r.ok) {
@@ -52,7 +59,7 @@ export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ email, codigo }),
+        body: JSON.stringify({ ...payloadIdentificador(email), codigo }),
       })
       const j = await r.json()
       if (!r.ok) {
@@ -99,7 +106,7 @@ export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
             {canalTxt}.
           </p>
           <p className="text-xs text-gray-600 mt-1">
-            Confira sua caixa de entrada (e a pasta de spam, por garantia).
+            Confira o WhatsApp e a caixa de entrada do e-mail (e a pasta de spam, por garantia).
           </p>
         </div>
 
@@ -142,7 +149,7 @@ export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
           onClick={voltarParaEmail}
           className="text-sm text-gray-600 underline self-center"
         >
-          Reenviar código ou usar outro e-mail
+          Reenviar código ou usar outro e-mail/WhatsApp
         </button>
       </form>
     )
@@ -152,14 +159,14 @@ export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
     <form onSubmit={handleSolicitar} className="flex flex-col gap-4">
       <label className="block">
         <span className="text-sm font-medium text-gray-700 block mb-1">
-          E-mail
+          E-mail ou WhatsApp
         </span>
         <input
-          type="email"
+          type="text"
           autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="seu@email.com"
+          placeholder="seu@email.com ou (81) 99999-9999"
           required
           className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-900 placeholder:text-gray-400 placeholder:font-normal"
         />

@@ -139,6 +139,7 @@ export async function POST(req: Request) {
       telefone: normalizarWhatsApp(whatsapp),
       nome: primeiroNome(nome),
       protocolo: protocoloCurto,
+      email: email ?? null,
     })
 
     if (!enviadoOficial) {
