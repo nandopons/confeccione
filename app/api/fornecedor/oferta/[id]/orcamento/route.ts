@@ -9,9 +9,31 @@ import { salvarOrcamentoFornecedor } from '@/app/lib/pedido-assistente-oferta'
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
+const FreteMeSchema = z.object({
+  servicoId: z.number().int().positive(),
+  servico: z.string().min(1).max(80),
+  transportadora: z.string().min(1).max(80),
+  precoCentavos: z.number().int().positive(),
+  prazoDias: z.number().int().min(0).max(120),
+  volumes: z
+    .array(
+      z.object({
+        altura: z.number().positive(),
+        largura: z.number().positive(),
+        comprimento: z.number().positive(),
+        peso: z.number().positive(),
+      })
+    )
+    .min(1)
+    .max(20),
+  cepOrigem: z.string().regex(/^\d{8}$/),
+  cepDestino: z.string().regex(/^\d{8}$/),
+})
+
 const BodySchema = z.object({
   unitCentavos: z.array(z.number().int().positive()).min(1).max(50),
   freteCentavos: z.number().int().min(0),
+  freteMe: FreteMeSchema.nullable().optional(),
 })
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -25,7 +47,7 @@ export async function POST(req: Request, ctx: Ctx) {
   const p = BodySchema.safeParse(bruto)
   if (!p.success) return NextResponse.json({ erro: 'Dados inválidos' }, { status: 400 })
 
-  const r = await salvarOrcamentoFornecedor(id, p.data.unitCentavos, p.data.freteCentavos)
+  const r = await salvarOrcamentoFornecedor(id, p.data.unitCentavos, p.data.freteCentavos, p.data.freteMe ?? null)
   if (!r.ok) return NextResponse.json({ erro: r.erro ?? 'Falha ao salvar' }, { status: 409 })
 
   return NextResponse.json({

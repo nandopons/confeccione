@@ -6,7 +6,8 @@
 // o cliente é avisado por e-mail e WhatsApp pra aprovar e pagar.
 
 import { useMemo, useState } from 'react'
-import type { OrcamentoFornecedorDados } from '@/app/lib/pedido-assistente-oferta'
+import type { FreteMeEscolhido, OrcamentoFornecedorDados } from '@/app/lib/pedido-assistente-oferta'
+import CalculadoraFreteME from './CalculadoraFreteME'
 import PortfolioUploader from './PortfolioUploader'
 
 const TAXA = 0.03
@@ -32,6 +33,8 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
     dados.itens.map((it) => paraTexto(it.unitLiquidoAtualCentavos ?? it.unitLiquidoSugeridoCentavos))
   )
   const [frete, setFrete] = useState<string>(paraTexto(dados.freteLiquidoAtualCentavos))
+  const [freteMe, setFreteMe] = useState<FreteMeEscolhido | null>(null)
+  const [calculadoraAberta, setCalculadoraAberta] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [feito, setFeito] = useState<{ valorCliente: number; repasse: number } | null>(null)
   const [erro, setErro] = useState<string | null>(null)
@@ -64,6 +67,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
         body: JSON.stringify({
           unitCentavos: dados.itens.map((_, i) => paraCentavos(unit[i] ?? '')),
           freteCentavos: paraCentavos(frete || '0'),
+          freteMe,
         }),
       })
       const j = await r.json()
@@ -146,16 +150,37 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
                 Frete — quanto você quer receber pelo envio (R$)
                 <input
                   value={frete}
-                  onChange={(e) => setFrete(e.target.value)}
+                  onChange={(e) => { setFrete(e.target.value); setFreteMe(null) }}
                   inputMode="decimal"
                   placeholder="0,00"
                   className="block mt-1 w-32 border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 focus:outline-none focus:border-emerald-600"
                 />
               </label>
-              <p className="text-[11px] text-gray-400 mt-1">Deixe 0,00 se o frete já está embutido nos produtos.</p>
+              <button
+                type="button"
+                onClick={() => setCalculadoraAberta(true)}
+                className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-medium text-[#0F6E56] border border-[#1D9E75]/40 rounded-lg px-3 py-1.5 hover:bg-[#E1F5EE]"
+              >
+                📦 Calcular com Melhor Envio
+              </button>
+              {freteMe ? (
+                <p className="text-[11px] text-emerald-700 mt-1.5">
+                  ✓ {freteMe.transportadora} · {freteMe.servico} — até {freteMe.prazoDias} dias úteis. A etiqueta vai custar isso na sua conta Melhor Envio.
+                </p>
+              ) : (
+                <p className="text-[11px] text-gray-400 mt-1">Deixe 0,00 se o frete já está embutido nos produtos.</p>
+              )}
             </div>
 
             <PortfolioUploader ofertaId={dados.ofertaId} inicial={dados.portfolio} />
+
+            <CalculadoraFreteME
+              ofertaId={dados.ofertaId}
+              seguroCentavos={calc.produtos}
+              aberto={calculadoraAberta}
+              onFechar={() => setCalculadoraAberta(false)}
+              onEscolher={(f) => { setFreteMe(f); setFrete(paraTexto(f.precoCentavos)) }}
+            />
 
             <div className="rounded-xl border-2 border-emerald-600/30 bg-emerald-50/50 px-4 py-3.5">
               <div className="flex justify-between text-sm text-gray-700"><span>Você recebe (produtos + frete)</span><strong>{brl(calc.liquido)}</strong></div>
