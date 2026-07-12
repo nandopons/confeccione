@@ -871,10 +871,22 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
   }
 }
 
+export type FreteMeEscolhido = {
+  servicoId: number
+  servico: string
+  transportadora: string
+  precoCentavos: number
+  prazoDias: number
+  volumes: Array<{ altura: number; largura: number; comprimento: number; peso: number }>
+  cepOrigem: string
+  cepDestino: string
+}
+
 export async function salvarOrcamentoFornecedor(
   ofertaId: string,
   unitLiquidoCentavos: number[],
-  freteLiquidoCentavos: number
+  freteLiquidoCentavos: number,
+  freteMe?: FreteMeEscolhido | null
 ): Promise<{ ok: boolean; erro?: string; valorClienteCentavos?: number; repasseCentavos?: number }> {
   const { data: oferta } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
@@ -931,6 +943,9 @@ export async function salvarOrcamentoFornecedor(
       valor_centavos: valorCliente,
       frete_centavos: freteCliente,
       repasse_centavos: totalLiquido,
+      // Serviço do Melhor Envio escolhido na cotação (null = frete manual).
+      // A fase 2 (compra da etiqueta) parte exatamente desses dados.
+      frete_me: freteMe ? { ...freteMe, cotado_em: agora } : null,
       orcamento_status: 'definido',
       orcamento_definido_em: agora,
       atualizado_em: agora,
