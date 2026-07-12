@@ -147,7 +147,7 @@ export default function PedidoSteps() {
     }
   }
 
-  const inputCls = "w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]";
+  const inputCls = "w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75] focus:ring-2 focus:ring-[#1D9E75]/20";
 
   return (
     <div>
@@ -168,28 +168,28 @@ export default function PedidoSteps() {
         {step === 0 && (
           <>
             <p className="text-gray-900 font-medium mb-1">O que você precisa produzir?</p>
-            <p className="text-gray-400 text-sm mb-5">Escolha o tipo de pedido mais próximo da sua necessidade.</p>
+            <p className="text-gray-500 text-sm mb-5">Escolha o tipo de pedido mais próximo da sua necessidade.</p>
             <div className="overflow-hidden mb-0">
               <div className={`flex transition-transform duration-300 ease-out ${showExtras ? "-translate-x-full" : "translate-x-0"}`}>
                 <div className="flex-shrink-0 w-full">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                     {nichosPrincipais.map((n) => (
-                      <button key={n.id} onClick={() => setTipo(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 hover:border-[#1D9E75]"}`}>
+                      <button key={n.id} onClick={() => setTipo(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-300 hover:border-[#1D9E75]"}`}>
                         <span className="text-2xl shrink-0 sm:mb-2">{n.icon}</span>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-gray-900 leading-tight">{n.title}</div>
-                          <div className="text-xs text-gray-400 mt-0.5 leading-snug">{n.sub}</div>
+                          <div className="text-xs text-gray-500 mt-0.5 leading-snug">{n.sub}</div>
                         </div>
                       </button>
                     ))}
-                    <button type="button" onClick={() => setShowExtras(true)} className="text-left border-2 border-gray-200 hover:border-[#1D9E75] rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all">
+                    <button type="button" onClick={() => setShowExtras(true)} className="text-left border-2 border-gray-300 hover:border-[#1D9E75] rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all">
                       <span className="text-2xl shrink-0 sm:mb-2">➕</span>
                       <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
                         <div>
                           <div className="text-sm font-medium text-gray-900 leading-tight">Outros</div>
-                          <div className="text-xs text-gray-400 mt-0.5 leading-snug">Mais categorias</div>
+                          <div className="text-xs text-gray-500 mt-0.5 leading-snug">Mais categorias</div>
                         </div>
-                        <span className="text-gray-400 text-lg shrink-0">›</span>
+                        <span className="text-gray-500 text-lg shrink-0">›</span>
                       </div>
                     </button>
                   </div>
@@ -198,11 +198,11 @@ export default function PedidoSteps() {
                   <button type="button" onClick={() => setShowExtras(false)} className="text-xs text-gray-500 hover:text-gray-800 mb-3 inline-flex items-center gap-1">← Voltar</button>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                     {nichosExtras.map((n) => (
-                      <button key={n.id} onClick={() => setTipo(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 hover:border-[#1D9E75]"}`}>
+                      <button key={n.id} onClick={() => setTipo(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-300 hover:border-[#1D9E75]"}`}>
                         <span className="text-2xl shrink-0 sm:mb-2">{n.icon}</span>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-gray-900 leading-tight">{n.title}</div>
-                          <div className="text-xs text-gray-400 mt-0.5 leading-snug">{n.sub}</div>
+                          <div className="text-xs text-gray-500 mt-0.5 leading-snug">{n.sub}</div>
                         </div>
                       </button>
                     ))}
@@ -216,32 +216,32 @@ export default function PedidoSteps() {
         {step === 1 && (
           <>
             <p className="text-gray-900 font-medium mb-1">Detalhes do pedido</p>
-            <p className="text-gray-400 text-sm mb-5">Quanto você precisa produzir, o prazo e os detalhes.</p>
+            <p className="text-gray-500 text-sm mb-5">Quanto você precisa produzir, o prazo e os detalhes.</p>
             <div className="mb-5">
-              <label className="text-xs text-gray-400 mb-2 block">Quantidade de peças</label>
+              <label className="text-sm font-medium text-gray-700 mb-2 block">Quantidade de peças</label>
               <div className="flex items-center gap-3">
                 <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-9 h-9 border border-gray-400 text-gray-700 rounded-lg text-lg flex items-center justify-center hover:bg-gray-100">−</button>
-                <input type="number" min={1} step={1} value={qty} onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="w-16 h-9 border border-gray-200 rounded-lg text-center text-sm font-medium text-gray-900 focus:outline-none focus:border-[#1D9E75]" />
+                <input type="number" min={1} step={1} value={qty} onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="w-16 h-9 border border-gray-300 rounded-lg text-center text-sm font-medium text-gray-900 focus:outline-none focus:border-[#1D9E75]" />
                 <button onClick={() => setQty(qty + 1)} className="w-9 h-9 border border-gray-400 text-gray-700 rounded-lg text-lg flex items-center justify-center hover:bg-gray-100">+</button>
-                <span className="text-sm text-gray-400">peças</span>
+                <span className="text-sm text-gray-500">peças</span>
               </div>
             </div>
             <div className="mb-4">
-              <label className="text-xs text-gray-400 mb-1 block">Prazo desejado</label>
+              <label className="text-sm font-medium text-gray-700 mb-1 block">Prazo desejado</label>
               <SelectModal
                 label="Prazo desejado"
                 placeholder="Selecione..."
                 value={prazo}
                 onChange={setPrazo}
-                triggerClassName="w-full border border-gray-200 rounded-xl px-3 py-2 bg-white text-sm"
+                triggerClassName="w-full border border-gray-300 rounded-xl px-3 py-2 bg-white text-sm"
                 options={Object.entries(prazos).map(([value, label]) => ({ value, label }))}
               />
             </div>
             <div className="mb-6">
-              <label className="text-xs text-gray-400 mb-1 block">Endereço de entrega <span className="text-gray-300">(pro cálculo do frete)</span></label>
+              <label className="text-sm font-medium text-gray-700 mb-1 block">Endereço de entrega <span className="text-gray-300">(pro cálculo do frete)</span></label>
               <div className="flex items-start gap-2">
                 <input value={cepFmt(cep)} onChange={(e) => { setCep(e.target.value.replace(/\D/g, "").slice(0, 8)); setCepInfo(null); }} onBlur={() => void buscarCep()} inputMode="numeric" placeholder="CEP" className={inputCls + " w-40"} />
-                <button type="button" onClick={() => void buscarCep()} disabled={buscandoCep || cep.replace(/\D/g, "").length !== 8} className="shrink-0 border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50 text-sm px-3 py-2 rounded-xl whitespace-nowrap">{buscandoCep ? "buscando…" : "buscar CEP"}</button>
+                <button type="button" onClick={() => void buscarCep()} disabled={buscandoCep || cep.replace(/\D/g, "").length !== 8} className="shrink-0 border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 text-sm px-3 py-2 rounded-xl whitespace-nowrap">{buscandoCep ? "buscando…" : "buscar CEP"}</button>
               </div>
               {!buscandoCep && cepInfo && (
                 <div className="mt-2 flex items-start gap-2 rounded-xl bg-[#E1F5EE]/60 border border-[#1D9E75]/20 px-3 py-2">
@@ -256,7 +256,7 @@ export default function PedidoSteps() {
                 <input value={numero} onChange={(e) => setNumero(e.target.value.slice(0, 20))} placeholder="Número" className={inputCls} />
                 <input value={complemento} onChange={(e) => setComplemento(e.target.value.slice(0, 80))} placeholder="Complemento (opcional)" className={inputCls} />
               </div>
-              <p className="text-[11px] text-gray-400 mt-2">Não precisa escolher o estado — pegamos pelo CEP. Os detalhes de cada modelo (cor, estampa…) você ajusta na próxima página.</p>
+              <p className="text-[11px] text-gray-500 mt-2">Não precisa escolher o estado — pegamos pelo CEP. Os detalhes de cada modelo (cor, estampa…) você ajusta na próxima página.</p>
             </div>
           </>
         )}
@@ -264,23 +264,23 @@ export default function PedidoSteps() {
         {step === 2 && (
           <>
             <p className="text-gray-900 font-medium mb-1">Contato</p>
-            <p className="text-gray-400 text-sm mb-5">Vamos montar seus mockups e o orçamento — você acompanha tudo no visualizador.</p>
+            <p className="text-gray-500 text-sm mb-5">Vamos montar seus mockups e o orçamento — você acompanha tudo no visualizador.</p>
             <div className="mb-4">
-              <label className="text-xs text-gray-400 mb-1 block">Nome completo</label>
+              <label className="text-sm font-medium text-gray-700 mb-1 block">Nome completo</label>
               <input type="text" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome" className={inputCls} />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">WhatsApp</label>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">WhatsApp</label>
                 <input type="tel" value={tel} onChange={(e) => setTel(e.target.value)} placeholder="(00) 00000-0000" className={inputCls} />
               </div>
               <div>
-                <label className="text-xs text-gray-400 mb-1 block">E-mail</label>
+                <label className="text-sm font-medium text-gray-700 mb-1 block">E-mail</label>
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="seu@email.com" className={inputCls} />
               </div>
             </div>
             <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm">
-              <p className="text-xs text-gray-400 font-medium mb-3">Resumo do pedido</p>
+              <p className="text-xs text-gray-500 font-medium mb-3">Resumo do pedido</p>
               <div className="space-y-2">
                 <div className="flex justify-between text-gray-600"><span>Categoria</span><span>{nichosTodos.find((n) => n.id === tipo)?.title}</span></div>
                 <div className="flex justify-between text-gray-600"><span>Quantidade</span><span>{qty} peças</span></div>
@@ -300,7 +300,7 @@ export default function PedidoSteps() {
           {erro && <div className="mb-2 text-red-600 text-sm text-right">{erro}</div>}
           <div className="flex justify-between items-center">
             {step > 0 ? (
-              <button onClick={() => setStep(step - 1)} className="border border-gray-200 text-gray-400 px-5 py-3 rounded-xl text-sm hover:bg-gray-50 whitespace-nowrap">← Voltar</button>
+              <button onClick={() => setStep(step - 1)} className="border border-gray-300 text-gray-600 px-5 py-3 rounded-xl text-sm hover:bg-gray-50 whitespace-nowrap">← Voltar</button>
             ) : <span />}
             {step === 0 && (
               <button onClick={avancarParaDetalhes} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium hover:opacity-85 whitespace-nowrap">Continuar →</button>
@@ -309,7 +309,7 @@ export default function PedidoSteps() {
               <button onClick={() => void avancarParaContatos()} className="bg-[#111] text-white px-6 py-3 rounded-xl text-sm font-medium hover:opacity-85 whitespace-nowrap">Continuar →</button>
             )}
             {step === 2 && (
-              <button onClick={() => void enviarPedido()} disabled={enviando} className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white px-6 py-3 rounded-xl text-sm font-medium transition-colors whitespace-nowrap">
+              <button onClick={() => void enviarPedido()} disabled={enviando} className="bg-[#1D9E75] enabled:hover:bg-[#0F6E56] disabled:bg-gray-200 disabled:text-gray-500 disabled:cursor-not-allowed text-white px-6 py-3 rounded-xl text-sm font-medium transition-colors whitespace-nowrap">
                 {enviando ? "Gerando…" : "Continuar →"}
               </button>
             )}
