@@ -24,7 +24,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { mapearStatusAsaas, type AsaasPaymentStatus } from '@/app/lib/asaas-payments'
 import { PLANOS_CONFIG, creditarLoteAvulso, type Plano } from '@/app/lib/planos'
-import { enviarMensagem } from '@/app/lib/zapi'
+import { avisoOficial } from '@/app/lib/whatsapp-notify'
 import { revelarContatosPedidoPago } from '@/app/lib/pedido-assistente-oferta'
 
 const supabase = createClient(
@@ -299,10 +299,13 @@ async function aplicarEfeitoPagamento(params: {
 
     // Notifica fornecedor
     try {
-      await enviarMensagem(
-        fornecedor.whatsapp,
-        `🎉 Pagamento confirmado, ${fornecedor.nome}!\n\nVocê acabou de adicionar *${quantidade} pedidos extras* à sua conta. Eles ficam disponíveis até serem usados.\n\nVou começar a te ofertar pedidos compatíveis novamente!`
-      )
+      await avisoOficial({
+        telefone: fornecedor.whatsapp,
+        nome: fornecedor.nome ?? null,
+        texto: `🎉 Pagamento confirmado, ${fornecedor.nome}!\n\nVocê acabou de adicionar *${quantidade} pedidos extras* à sua conta. Eles ficam disponíveis até serem usados.\n\nVou começar a te ofertar pedidos compatíveis novamente!`,
+        resumo: `Pagamento confirmado — ${quantidade} pedidos extras adicionados`,
+        caminhoBotao: 'fornecedor/painel',
+      })
     } catch (err) {
       console.error('[asaas-webhook] notificação pacote falhou:', err)
     }
@@ -336,10 +339,13 @@ async function aplicarEfeitoPagamento(params: {
 
     // Notifica fornecedor
     try {
-      await enviarMensagem(
-        fornecedor.whatsapp,
-        `🎉 Pagamento confirmado, ${fornecedor.nome}!\n\nSeu plano foi atualizado para *${config.nome}* — agora você recebe até *${config.leads_inclusos} pedidos por mês*.\n\nA cobrança é mensal e renova automaticamente. Você pode cancelar a qualquer momento pelo painel.`
-      )
+      await avisoOficial({
+        telefone: fornecedor.whatsapp,
+        nome: fornecedor.nome ?? null,
+        texto: `🎉 Pagamento confirmado, ${fornecedor.nome}!\n\nSeu plano foi atualizado para *${config.nome}* — agora você recebe até *${config.leads_inclusos} pedidos por mês*.\n\nA cobrança é mensal e renova automaticamente. Você pode cancelar a qualquer momento pelo painel.`,
+        resumo: `Plano ${config.nome} ativado — até ${config.leads_inclusos} pedidos/mês`,
+        caminhoBotao: 'fornecedor/painel',
+      })
     } catch (err) {
       console.error('[asaas-webhook] notificação assinatura falhou:', err)
     }

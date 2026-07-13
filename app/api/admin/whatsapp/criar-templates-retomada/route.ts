@@ -30,6 +30,34 @@ const EXEMPLO_VISUALIZADOR =
   'https://www.confeccione.com.br/visualizador/a1591a0f-007e-4e0d-a299-582138cc9bad'
 
 const TEMPLATES = [
+  // Atualização genérica de pedido (utility) — fallback oficial pra QUALQUER
+  // aviso transacional fora da janela de 24h. O sufixo do botão é o caminho
+  // completo no site (visualizador/…, fornecedor/oferta/…, fornecedor/painel).
+  {
+    name: 'pedido_atualizacao',
+    language: 'pt_BR',
+    category: 'UTILITY',
+    components: [
+      {
+        type: 'BODY',
+        text:
+          'Oi, {{1}}! Atualização do seu pedido na Confeccione: {{2}}. Toque no botão pra ver os detalhes e continuar por lá.',
+        example: { body_text: [['Ana', 'Pagamento confirmado — produção liberada']] },
+      },
+      { type: 'FOOTER', text: 'Confeccione · confeccione.com.br' },
+      {
+        type: 'BUTTONS',
+        buttons: [
+          {
+            type: 'URL',
+            text: 'Ver detalhes',
+            url: 'https://www.confeccione.com.br/{{1}}',
+            example: ['https://www.confeccione.com.br/visualizador/a1591a0f-007e-4e0d-a299-582138cc9bad'],
+          },
+        ],
+      },
+    ],
+  },
   // Oferta de pedido ao FORNECEDOR (utility) — botão dinâmico pra página da
   // oferta (fornecedor/oferta/{{1}}). Sem contato do cliente (contrato de
   // privacidade: contato só após o aceite).

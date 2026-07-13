@@ -8,7 +8,7 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { registrarAudit } from '@/app/lib/audit'
-import { enviarMensagem } from '@/app/lib/zapi'
+import { avisoOficial } from '@/app/lib/whatsapp-notify'
 import { emailBoasVindasFornecedor } from '@/app/lib/email'
 import { matchingRetroativo } from '@/app/lib/orfaos'
 
@@ -55,10 +55,13 @@ export async function POST(
   // Avisa o fornecedor e dispara matching de pedidos órfãos compatíveis.
   if (forn.whatsapp) {
     try {
-      await enviarMensagem(
-        forn.whatsapp,
-        `Boa notícia, ${forn.nome}! 🎉\n\nSeu cadastro no *Confeccione* foi *aprovado* pela nossa equipe.\n\n🎁 *Bônus de boas-vindas:* 90 dias do plano *Pro* — até 30 pedidos por mês nesse período.\n\nA partir de agora você passa a receber pedidos de clientes que combinam com a sua produção. Quando um pedido chegar, é só responder se quer atender. 🚀`,
-      )
+      await avisoOficial({
+        telefone: forn.whatsapp,
+        nome: forn.nome ?? null,
+        texto: `Boa notícia, ${forn.nome}! 🎉\n\nSeu cadastro no *Confeccione* foi *aprovado* pela nossa equipe.\n\n🎁 *Bônus de boas-vindas:* 90 dias do plano *Pro* — até 30 pedidos por mês nesse período.\n\nA partir de agora você passa a receber pedidos de clientes que combinam com a sua produção. Quando um pedido chegar, é só responder se quer atender. 🚀`,
+        resumo: 'Cadastro aprovado! Bônus: 90 dias do plano Pro',
+        caminhoBotao: 'fornecedor/entrar',
+      })
     } catch (err) {
       console.error('[aprovar] whatsapp falhou:', err)
     }
