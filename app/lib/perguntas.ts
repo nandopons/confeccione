@@ -10,7 +10,7 @@
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
-import { enviarMensagem } from './zapi'
+import { avisoOficial } from './whatsapp-notify'
 import { SITE_URL } from './url'
 import { emailNovaPergunta } from './email'
 
@@ -110,7 +110,13 @@ export async function criarPerguntaFornecedor(
           `"${v.valor}"\n\n` +
           `Responda por aqui (sem precisar trocar contato):\n${link}`
         try {
-          await enviarMensagem(pedido.telefone, msg)
+          await avisoOficial({
+            telefone: pedido.telefone,
+            nome: pedido.nome ?? null,
+            texto: msg,
+            resumo: 'O fornecedor fez uma pergunta sobre o seu pedido — responda pela plataforma',
+            caminhoBotao: `visualizador/${oferta.pedido_id}`,
+          })
         } catch (e) {
           console.error('[perguntas] WhatsApp ao cliente falhou', oferta.pedido_id, e)
         }

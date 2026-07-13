@@ -25,7 +25,7 @@ import { pedidoTemListaAbertaIncompleta } from '@/app/lib/listas-externas'
 
 import { supabaseAdmin } from './supabase-server'
 import { enviarMensagem } from './zapi'
-import { notificarOfertaFornecedor } from './whatsapp-notify'
+import { avisoOficial, notificarOfertaFornecedor } from './whatsapp-notify'
 import { SITE_URL, ofertaFornecedorUrl } from './url'
 import { emailOfertaPedidoAssistente, emailFornecedorDefinido } from './email'
 import { enviarEmailOrcamentoFinal } from './email-pedido'
@@ -423,7 +423,13 @@ async function notificarAceiteEContatos(ofertaId: string, pedidoId: string, forn
         (pago
           ? `\n✅ Este pedido já está pago — pode iniciar a produção assim que combinar os detalhes.`
           : `\n💰 Depois de alinhar, *defina o orçamento final* (produtos + frete) aqui — é assim que o cliente paga com segurança pela Confeccione:\n${linkOrcamento}\n\n⚠️ Reforce com o cliente: o orçamento e o pagamento precisam ser feitos pela plataforma. Combinar e cobrar por fora tira o suporte e a garantia de pagamento da Confeccione (e é contra os termos de uso).`)
-      await enviarMensagem(forn.whatsapp, msg)
+      await avisoOficial({
+        telefone: forn.whatsapp,
+        nome: forn.nome ?? null,
+        texto: msg,
+        resumo: 'Pedido assumido! Veja o contato do cliente e os próximos passos',
+        caminhoBotao: `fornecedor/oferta/${ofertaId}`,
+      })
     }
 
     // → para o CLIENTE: contato do fornecedor + aviso de segurança (WhatsApp).
@@ -437,7 +443,13 @@ async function notificarAceiteEContatos(ofertaId: string, pedidoId: string, forn
         (pago
           ? `✅ Seu pagamento já está confirmado e garantido pela Confeccione até você aprovar o recebimento.`
           : `⚠️ *Importante:* peça pro fornecedor lançar o orçamento e finalize o pagamento aqui pela Confeccione — não fora da plataforma. Assim a gente dá suporte ao seu pedido do início ao fim e garante seu dinheiro até você confirmar que recebeu tudo certinho.`)
-      await enviarMensagem(pedido.telefone, msg)
+      await avisoOficial({
+        telefone: pedido.telefone,
+        nome: pedido.nome ?? null,
+        texto: msg,
+        resumo: `Fornecedor definido: ${forn.nome ?? 'confecção parceira'}`,
+        caminhoBotao: `visualizador/${pedidoId}`,
+      })
     }
     if (pedido.email && forn) {
       try {
@@ -483,7 +495,13 @@ export async function revelarContatosPedidoPago(pedidoId: string): Promise<void>
     // → para o FORNECEDOR: libera produção (contato já tinha sido enviado no aceite).
     if (forn?.whatsapp) {
       const msg = `✅ *Pagamento confirmado!*\n\nO cliente pagou — *pode iniciar a produção*. Qualquer coisa, o contato do cliente já está com você desde que assumiu o pedido.`
-      await enviarMensagem(forn.whatsapp, msg)
+      await avisoOficial({
+        telefone: forn.whatsapp,
+        nome: forn.nome ?? null,
+        texto: msg,
+        resumo: 'Pagamento confirmado — pode iniciar a produção',
+        caminhoBotao: oferta?.id ? `fornecedor/oferta/${oferta.id}` : 'fornecedor/painel',
+      })
     }
 
     // → para o CLIENTE: confirma pagamento (contato do fornecedor já tinha ido no aceite).
@@ -491,7 +509,13 @@ export async function revelarContatosPedidoPago(pedidoId: string): Promise<void>
       const msg =
         `✅ *Pagamento confirmado!*\n\n` +
         `*${forn.nome ?? 'A confecção'}* já pode iniciar a produção do seu pedido. O pagamento fica garantido pela Confeccione até você confirmar o recebimento. 💚`
-      await enviarMensagem(pedido.telefone, msg)
+      await avisoOficial({
+        telefone: pedido.telefone,
+        nome: pedido.nome ?? null,
+        texto: msg,
+        resumo: 'Pagamento confirmado — produção liberada',
+        caminhoBotao: `visualizador/${pedidoId}`,
+      })
     }
   } catch (e) {
     console.error('[oferta] confirmação de pagamento falhou', pedidoId, e)
@@ -1020,7 +1044,13 @@ export async function salvarOrcamentoFornecedor(
         `💰 Total: *${brl(valorCliente)}*` +
         (freteCliente > 0 ? ` (produtos ${brl(valorCliente - freteCliente)} + frete ${brl(freteCliente)})` : ' (frete incluso)') +
         `\n\nVeja os detalhes e finalize o pagamento (PIX ou cartão):\n${SITE_URL}/visualizador/${pedido.id}`
-      await enviarMensagem(pedido.telefone, msg)
+      await avisoOficial({
+        telefone: pedido.telefone,
+        nome: pedido.nome ?? null,
+        texto: msg,
+        resumo: `Seu orçamento saiu: ${brl(valorCliente)} — veja e pague com segurança`,
+        caminhoBotao: `visualizador/${pedido.id}`,
+      })
     } catch (e) {
       console.error('[orcamento-fornecedor] WhatsApp ao cliente falhou', e)
     }

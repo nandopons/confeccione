@@ -11,7 +11,7 @@
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
-import { enviarTemplate, normalizarWaId } from './whatsapp-cloud'
+import { enviarTemplate, enviarTexto, normalizarWaId } from './whatsapp-cloud'
 
 async function vincularContato(waId: string): Promise<{ clienteId: string | null; fornecedorId: string | null }> {
   const last8 = waId.slice(-8)
@@ -224,6 +224,87 @@ export async function notificarOfertaFornecedor(params: {
     return true
   } catch (err) {
     console.error('[wa-notify] oferta exception', { err })
+    return false
+  }
+}
+
+
+/**
+ * Aviso transacional pelo número OFICIAL com fallback de template:
+ * 1) tenta TEXTO LIVRE (grátis — funciona se a janela de 24h estiver aberta);
+ * 2) fora da janela, envia o template `pedido_atualizacao` (utility) com o
+ *    resumo curto e botão pro caminho informado (site/{{1}}).
+ * Substitui o Z-API nos avisos de aceite, pagamento, orçamento, perguntas etc.
+ * Failure-soft. Registra a saída no inbox.
+ */
+export async function avisoOficial(params: {
+  telefone: string
+  nome: string | null
+  /** Mensagem completa (rica) — usada quando a janela de 24h está aberta. */
+  texto: string
+  /** Resumo curto pro fallback de template (sem quebras de linha). */
+  resumo: string
+  /** Caminho no site pro botão do template, ex.: `visualizador/<id>`. */
+  caminhoBotao: string
+}): Promise<boolean> {
+  try {
+    const waId = normalizarWaId(params.telefone)
+    if (waId.replace(/\D/g, '').length < 10) return false
+
+    const primeiro = (params.nome ?? '').trim().split(/\s+/)[0] || 'cliente'
+    let corpoRegistrado = params.texto
+    let templateUsado: string | null = null
+
+    let resultado = await enviarTexto(waId, params.texto)
+    if (!resultado.ok) {
+      // Fora da janela de 24h → template utility genérico com botão.
+      const resumo = params.resumo.replace(/\s*\n+\s*/g, ' · ').replace(/\s{2,}/g, ' ').trim().slice(0, 300)
+      resultado = await enviarTemplate(waId, 'pedido_atualizacao', 'pt_BR', [
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: primeiro },
+            { type: 'text', text: resumo },
+          ],
+        },
+        { type: 'button', sub_type: 'url', index: 0, parameters: [{ type: 'text', text: params.caminhoBotao }] },
+      ])
+      corpoRegistrado =
+        `Oi, ${primeiro}! Atualização do seu pedido na Confeccione: ${resumo}. Toque no botão pra ver os detalhes e continuar por lá.\n` +
+        `▸ Ver detalhes → https://www.confeccione.com.br/${params.caminhoBotao}`
+      templateUsado = 'pedido_atualizacao'
+    }
+    if (!resultado.ok) {
+      console.error('[wa-notify] avisoOficial falhou', { erro: resultado.erro })
+      return false
+    }
+
+    try {
+      const conversaId = await garantirConversa(waId, params.nome)
+      if (conversaId) {
+        const agora = new Date().toISOString()
+        await supabaseAdmin.from('wa_mensagens').insert({
+          conversa_id: conversaId,
+          wamid: resultado.wamid,
+          direcao: 'saida',
+          tipo: templateUsado ? 'template' : 'text',
+          corpo: corpoRegistrado,
+          status: 'enviando',
+          template_nome: templateUsado,
+          criado_em: agora,
+        })
+        await supabaseAdmin
+          .from('wa_conversas')
+          .update({ preview: `Você: ${corpoRegistrado.slice(0, 110)}`, ultima_mensagem_em: agora })
+          .eq('id', conversaId)
+      }
+    } catch (err) {
+      console.error('[wa-notify] registro inbox aviso falhou', { err })
+    }
+
+    return true
+  } catch (err) {
+    console.error('[wa-notify] avisoOficial exception', { err })
     return false
   }
 }
