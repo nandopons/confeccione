@@ -25,6 +25,7 @@ import { pedidoTemListaAbertaIncompleta } from '@/app/lib/listas-externas'
 
 import { supabaseAdmin } from './supabase-server'
 import { enviarMensagem } from './zapi'
+import { notificarOfertaFornecedor } from './whatsapp-notify'
 import { SITE_URL, ofertaFornecedorUrl } from './url'
 import { emailOfertaPedidoAssistente, emailFornecedorDefinido } from './email'
 import { enviarEmailOrcamentoFinal } from './email-pedido'
@@ -346,7 +347,22 @@ export async function ofertarPedido(
           ? `Valor total do pedido: *${repasseTexto}* (pagamento garantido pela Confeccione, liberado após a entrega em conformidade)\n\n`
           : `Repasse: *${repasseTexto}* — ao assumir, VOCÊ define o orçamento final (produtos + frete) e o cliente recebe pra aprovar. Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.\n\n`) +
         `👉 Veja os mockups e detalhes e assuma o pedido aqui:\n${link}`
-      const enviado = await enviarMensagem(forn.whatsapp, mensagem)
+      // Preferência: template OFICIAL (Meta) com botão pra oferta — o Z-API
+      // (assinatura expirada) fica como fallback caso volte a existir.
+      const condicoes = [
+        pedido.prazo_dias ? `prazo ${pedido.prazo_dias} dias` : null,
+        pago ? `pedido JÁ PAGO · valor ${repasseTexto}` : `repasse ${repasseTexto} (você define o orçamento final)`,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+      const enviadoOficial = await notificarOfertaFornecedor({
+        telefone: forn.whatsapp,
+        nome: forn.nome ?? null,
+        resumo: `${texto} · ${totalPecas} peças`,
+        condicoes,
+        ofertaId,
+      })
+      const enviado = enviadoOficial || (await enviarMensagem(forn.whatsapp, mensagem))
       if (enviado) notificadas++
     }
 
