@@ -151,3 +151,79 @@ export async function notificarPedidoRecebido(params: {
     return false
   }
 }
+
+
+/**
+ * Oferta de pedido ao FORNECEDOR via template oficial `oferta_pedido`
+ * (utility, botão direto pra página da oferta). Substitui o texto livre do
+ * Z-API (assinatura expirada em 07/2026). resumo/condicoes viram linha única
+ * (parâmetros da Meta não aceitam quebra de linha). Failure-soft.
+ */
+export async function notificarOfertaFornecedor(params: {
+  telefone: string
+  nome: string | null
+  /** ex.: "50x camiseta preta · 50 peças" */
+  resumo: string
+  /** ex.: "prazo 21 dias · repasse R$ 2.500,00" */
+  condicoes: string
+  ofertaId: string
+}): Promise<boolean> {
+  try {
+    const waId = normalizarWaId(params.telefone)
+    if (waId.replace(/\D/g, '').length < 10) return false
+
+    const primeiro = (params.nome ?? '').trim().split(/\s+/)[0] || 'parceiro(a)'
+    const limpa = (s: string) => s.replace(/\s*\n+\s*/g, ' · ').replace(/\s{2,}/g, ' ').trim().slice(0, 300)
+    const resumo = limpa(params.resumo)
+    const condicoes = limpa(params.condicoes)
+
+    const resultado = await enviarTemplate(waId, 'oferta_pedido', 'pt_BR', [
+      {
+        type: 'body',
+        parameters: [
+          { type: 'text', text: primeiro },
+          { type: 'text', text: resumo },
+          { type: 'text', text: condicoes },
+        ],
+      },
+      { type: 'button', sub_type: 'url', index: 0, parameters: [{ type: 'text', text: params.ofertaId }] },
+    ])
+    if (!resultado.ok) {
+      console.error('[wa-notify] oferta_pedido falhou', { erro: resultado.erro })
+      return false
+    }
+
+    // Histórico no inbox (failure-soft; envio já aconteceu).
+    try {
+      const conversaId = await garantirConversa(waId, params.nome)
+      if (conversaId) {
+        const agora = new Date().toISOString()
+        const corpo =
+          `Oi, ${primeiro}! 🧵 Tem pedido disponível pra você na Confeccione: ${resumo} — ${condicoes}. ` +
+          `Toque no botão pra ver os mockups e assumir (é por ordem de chegada). Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.\n` +
+          `▸ Ver e assumir pedido → https://www.confeccione.com.br/fornecedor/oferta/${params.ofertaId}`
+        await supabaseAdmin.from('wa_mensagens').insert({
+          conversa_id: conversaId,
+          wamid: resultado.wamid,
+          direcao: 'saida',
+          tipo: 'template',
+          corpo,
+          status: 'enviando',
+          template_nome: 'oferta_pedido',
+          criado_em: agora,
+        })
+        await supabaseAdmin
+          .from('wa_conversas')
+          .update({ preview: 'Você: Oferta de pedido enviada 🧵', ultima_mensagem_em: agora })
+          .eq('id', conversaId)
+      }
+    } catch (err) {
+      console.error('[wa-notify] registro inbox oferta falhou', { err })
+    }
+
+    return true
+  } catch (err) {
+    console.error('[wa-notify] oferta exception', { err })
+    return false
+  }
+}

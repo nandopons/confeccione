@@ -4,8 +4,9 @@
 // One-shot: rode uma vez; a Meta coloca em análise. Reexecutar é seguro
 // (nome duplicado é rejeitado pela Meta, sem duplicar).
 //
-// Templates criados: pedido_recebido_v2 (confirmação com botão pro painel),
-// codigo_acesso (OTP de login) e retomar_pedido_v3 (marketing de retomada).
+// Templates criados: oferta_pedido (oferta ao fornecedor com botão), 
+// pedido_recebido_v2 (confirmação com botão pro painel), codigo_acesso
+// (OTP de login) e retomar_pedido_v3 (marketing de retomada).
 //
 // v3: botão "Continuar meu pedido" com URL DINÂMICA — na hora do envio o
 // inbox injeta o id do pedido do contato e cada cliente cai direto no
@@ -29,6 +30,34 @@ const EXEMPLO_VISUALIZADOR =
   'https://www.confeccione.com.br/visualizador/a1591a0f-007e-4e0d-a299-582138cc9bad'
 
 const TEMPLATES = [
+  // Oferta de pedido ao FORNECEDOR (utility) — botão dinâmico pra página da
+  // oferta (fornecedor/oferta/{{1}}). Sem contato do cliente (contrato de
+  // privacidade: contato só após o aceite).
+  {
+    name: 'oferta_pedido',
+    language: 'pt_BR',
+    category: 'UTILITY',
+    components: [
+      {
+        type: 'BODY',
+        text:
+          'Oi, {{1}}! 🧵 Tem pedido disponível pra você na Confeccione: {{2}} — {{3}}. Toque no botão pra ver os mockups e assumir (é por ordem de chegada). Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.',
+        example: { body_text: [['Ana', '50x camiseta preta · 50 peças', 'prazo 21 dias · repasse R$ 2.500,00']] },
+      },
+      { type: 'FOOTER', text: 'Confeccione · confeccione.com.br' },
+      {
+        type: 'BUTTONS',
+        buttons: [
+          {
+            type: 'URL',
+            text: 'Ver e assumir pedido',
+            url: 'https://www.confeccione.com.br/fornecedor/oferta/{{1}}',
+            example: ['https://www.confeccione.com.br/fornecedor/oferta/12a6aef5-5042-4927-9a68-2276777563d1'],
+          },
+        ],
+      },
+    ],
+  },
   // Confirmação de pedido (utility) — botão dinâmico pro painel do cliente
   // com o e-mail pré-preenchido (login?email={{1}}).
   {
