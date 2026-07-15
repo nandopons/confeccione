@@ -1235,7 +1235,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         </div>
       ) : confirmadoEm ? (
         <div className="mt-6 bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-2xl p-5">
-          <p className="text-sm font-semibold text-[#0F6E56]">🔎 Pedido confirmado — buscando o fornecedor ideal</p>
+          <p className="text-sm font-semibold text-[#0F6E56]">🔎 Pedido enviado — buscando o fornecedor ideal</p>
           <p className="text-xs text-[#0F6E56]/80 mt-1.5 leading-relaxed">
             Nosso time está selecionando o melhor fornecedor pras suas peças. Assim que alguém assumir, você recebe o contato pra alinhar os detalhes — e o <strong>orçamento final</strong> (produtos + frete) chega por <strong>e-mail e WhatsApp</strong>, e só paga se aprovar. Enquanto isso, pode continuar ajustando as artes por aqui.
           </p>
@@ -1245,12 +1245,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         <div className="mt-6 bg-white border border-gray-200 rounded-2xl shadow-sm p-5">
           <p className="text-sm font-semibold text-gray-900">Tudo certo com os produtos?</p>
           <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-            Confirme o pedido e a gente encontra o <strong>fornecedor ideal</strong> pra produzir suas peças. Você recebe o orçamento final por e-mail e WhatsApp — <strong>sem compromisso até aprovar</strong>.
+            A gente encontra o <strong>fornecedor ideal</strong> pra produzir suas peças. Você recebe o orçamento final por e-mail e WhatsApp — <strong>sem compromisso até aprovar</strong>.
           </p>
           <button type="button" disabled={!podeConfirmar || confirmandoPedido}
             onClick={() => void confirmarPedido()}
             className="mt-4 w-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 disabled:cursor-not-allowed text-white text-base font-semibold px-6 py-3.5 rounded-xl transition-colors shadow-sm">
-            {confirmandoPedido ? "Confirmando…" : "Confirmar pedido →"}
+            {confirmandoPedido ? "Buscando…" : "Buscar fornecedor →"}
           </button>
           {confirmErro && confirmStep === "idle" && <p className="text-xs text-red-600 mt-2">{confirmErro}</p>}
           <p className="text-[11px] text-gray-400 text-center mt-2">Sem pagamento agora — o valor só aparece no orçamento final.</p>
@@ -1376,8 +1376,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             {orcamentoDefinido
               ? <>Orçamento final disponível acima — clique em <strong className="text-gray-600">Pagar agora</strong> pra fechar o pedido.</>
               : confirmadoEm
-                ? <>Pedido confirmado — assim que o fornecedor definir o orçamento, o pagamento libera por aqui.</>
-                : <>Revise os produtos acima e clique em <strong className="text-gray-600">Confirmar pedido</strong> — a gente encontra o fornecedor ideal.</>}
+                ? <>Pedido enviado — assim que o fornecedor definir o orçamento, o pagamento libera por aqui.</>
+                : <>Revise os produtos acima e clique em <strong className="text-gray-600">Buscar fornecedor</strong> — a gente encontra o fornecedor ideal.</>}
           </p>
         )}
       </div>
