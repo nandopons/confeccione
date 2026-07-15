@@ -154,10 +154,14 @@ export async function notificarPedidoRecebido(params: {
 
 
 /**
- * Oferta de pedido ao FORNECEDOR via template oficial `oferta_pedido`
- * (utility, botão direto pra página da oferta). Substitui o texto livre do
- * Z-API (assinatura expirada em 07/2026). resumo/condicoes viram linha única
- * (parâmetros da Meta não aceitam quebra de linha). Failure-soft.
+ * Oferta de pedido ao FORNECEDOR via template oficial `oferta_pedido_v2`
+ * (utility de verdade, botão direto pra página da oferta). A v1 foi
+ * recategorizada pela Meta como MARKETING e passou a ser suprimida pra
+ * números em experimento/limite da Meta ("part of an experiment" / "healthy
+ * ecosystem engagement") — caso real: Dom Santo, 15/07/2026. Substitui o
+ * texto livre do Z-API (assinatura expirada em 07/2026). resumo/condicoes
+ * viram linha única (parâmetros da Meta não aceitam quebra de linha).
+ * Failure-soft.
  */
 export async function notificarOfertaFornecedor(params: {
   telefone: string
@@ -177,7 +181,7 @@ export async function notificarOfertaFornecedor(params: {
     const resumo = limpa(params.resumo)
     const condicoes = limpa(params.condicoes)
 
-    const resultado = await enviarTemplate(waId, 'oferta_pedido', 'pt_BR', [
+    const resultado = await enviarTemplate(waId, 'oferta_pedido_v2', 'pt_BR', [
       {
         type: 'body',
         parameters: [
@@ -199,9 +203,9 @@ export async function notificarOfertaFornecedor(params: {
       if (conversaId) {
         const agora = new Date().toISOString()
         const corpo =
-          `Oi, ${primeiro}! 🧵 Tem pedido disponível pra você na Confeccione: ${resumo} — ${condicoes}. ` +
-          `Toque no botão pra ver os mockups e assumir (é por ordem de chegada). Pagamento garantido pela Confeccione, liberado após a entrega em conformidade.\n` +
-          `▸ Ver e assumir pedido → https://www.confeccione.com.br/fornecedor/oferta/${params.ofertaId}`
+          `Oi, ${primeiro}! Há um pedido aguardando sua resposta no seu cadastro de fornecedor da Confeccione: ${resumo} — ${condicoes}. ` +
+          `Acesse pra ver os detalhes e aceitar ou recusar o atendimento.\n` +
+          `▸ Responder ao pedido → https://www.confeccione.com.br/fornecedor/oferta/${params.ofertaId}`
         await supabaseAdmin.from('wa_mensagens').insert({
           conversa_id: conversaId,
           wamid: resultado.wamid,
@@ -209,7 +213,7 @@ export async function notificarOfertaFornecedor(params: {
           tipo: 'template',
           corpo,
           status: 'enviando',
-          template_nome: 'oferta_pedido',
+          template_nome: 'oferta_pedido_v2',
           criado_em: agora,
         })
         await supabaseAdmin
