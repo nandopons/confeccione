@@ -86,6 +86,40 @@ const TEMPLATES = [
       },
     ],
   },
+  // Oferta ao FORNECEDOR v2 — a v1 (oferta_pedido) foi recategorizada pela
+  // Meta como MARKETING, e mensagem de marketing é suprimida pra números em
+  // experimento/limite da Meta ("User's number is part of an experiment" /
+  // "healthy ecosystem engagement") — caso real: Dom Santo, 15/07/2026, 5
+  // ofertas seguradas. Copy seca e vinculada ao cadastro do fornecedor, sem
+  // tom promocional, e com allow_category_change: false — se a Meta discordar
+  // de UTILITY ela REJEITA (a gente itera o texto) em vez de virar marketing
+  // em silêncio.
+  {
+    name: 'oferta_pedido_v2',
+    language: 'pt_BR',
+    category: 'UTILITY',
+    allow_category_change: false,
+    components: [
+      {
+        type: 'BODY',
+        text:
+          'Oi, {{1}}! Há um pedido aguardando sua resposta no seu cadastro de fornecedor da Confeccione: {{2}} — {{3}}. Acesse pra ver os detalhes e aceitar ou recusar o atendimento.',
+        example: { body_text: [['Ana', '50x camiseta preta · 50 peças', 'prazo 21 dias · repasse R$ 2.500,00']] },
+      },
+      { type: 'FOOTER', text: 'Confeccione · confeccione.com.br' },
+      {
+        type: 'BUTTONS',
+        buttons: [
+          {
+            type: 'URL',
+            text: 'Responder ao pedido',
+            url: 'https://www.confeccione.com.br/fornecedor/oferta/{{1}}',
+            example: ['https://www.confeccione.com.br/fornecedor/oferta/12a6aef5-5042-4927-9a68-2276777563d1'],
+          },
+        ],
+      },
+    ],
+  },
   // Confirmação de pedido (utility) — botão dinâmico pro painel do cliente
   // com o e-mail pré-preenchido (login?email={{1}}).
   {
