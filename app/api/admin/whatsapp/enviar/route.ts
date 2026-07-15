@@ -260,11 +260,19 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         )
       }
+      // O sufixo depende de onde o {{1}} está na URL do template:
+      // - .../visualizador/{{1}} (retomar_pedido_v3 etc.) → só o id do pedido;
+      // - .../{{1}} na raiz do site (pedido_atualizacao) → caminho completo
+      //   "visualizador/<id>", senão o botão cai em confeccione.com.br/<id> (404).
+      const naRaiz = !/\/visualizador\/\{\{\s*1\s*\}\}/.test(def.urlDinamica.base)
+      const sufixo = naRaiz
+        ? `visualizador/${sufixoVisualizadorPedido(pedidoId)}`
+        : sufixoVisualizadorPedido(pedidoId)
       components.push({
         type: 'button',
         sub_type: 'url',
         index: def.urlDinamica.index,
-        parameters: [{ type: 'text', text: sufixoVisualizadorPedido(pedidoId) }],
+        parameters: [{ type: 'text', text: sufixo }],
       })
     }
 
