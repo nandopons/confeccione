@@ -11,7 +11,7 @@
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
-import { enviarTemplate, enviarTexto, normalizarWaId } from './whatsapp-cloud'
+import { enviarTemplate, enviarTexto, normalizarWaId, type EnvioResultado } from './whatsapp-cloud'
 
 async function vincularContato(waId: string): Promise<{ clienteId: string | null; fornecedorId: string | null }> {
   const last8 = waId.slice(-8)
@@ -230,10 +230,41 @@ export async function notificarOfertaFornecedor(params: {
 
 
 /**
+ * Janela de atendimento de 24h aberta? Só consideramos aberta se o contato
+ * mandou mensagem (direcao = entrada) nas últimas 24h — é o espelho local da
+ * regra da Meta. Na dúvida (contato/conversa inexistentes, erro de consulta),
+ * retorna false: template sempre entrega; texto livre fora da janela nunca.
+ */
+async function janela24hAberta(waId: string): Promise<boolean> {
+  try {
+    const { data: contato } = await supabaseAdmin.from('wa_contatos').select('id').eq('wa_id', waId).maybeSingle()
+    if (!contato?.id) return false
+    const { data: conversa } = await supabaseAdmin.from('wa_conversas').select('id').eq('contato_id', contato.id).maybeSingle()
+    if (!conversa?.id) return false
+    const desde = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+    const { count } = await supabaseAdmin
+      .from('wa_mensagens')
+      .select('id', { count: 'exact', head: true })
+      .eq('conversa_id', conversa.id)
+      .eq('direcao', 'entrada')
+      .gte('criado_em', desde)
+    return (count ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
+/**
  * Aviso transacional pelo número OFICIAL com fallback de template:
- * 1) tenta TEXTO LIVRE (grátis — funciona se a janela de 24h estiver aberta);
- * 2) fora da janela, envia o template `pedido_atualizacao` (utility) com o
- *    resumo curto e botão pro caminho informado (site/{{1}}).
+ * 1) TEXTO LIVRE (grátis) — só quando a janela de 24h está comprovadamente
+ *    aberta (pré-check no banco). Fora da janela a Meta ACEITA o envio na
+ *    hora (devolve wamid) e derruba DEPOIS via webhook com o erro 131047
+ *    "Re-engagement message" — o erro síncrono nunca vem, então confiar nele
+ *    deixava o aviso morrer sem fallback (caso real: orçamento da Samantha,
+ *    15/07/2026).
+ * 2) Janela fechada (ou texto livre recusado na hora): template
+ *    `pedido_atualizacao` (utility) com o resumo curto e botão pro caminho
+ *    informado (site/{{1}}).
  * Substitui o Z-API nos avisos de aceite, pagamento, orçamento, perguntas etc.
  * Failure-soft. Registra a saída no inbox.
  */
@@ -255,9 +286,12 @@ export async function avisoOficial(params: {
     let corpoRegistrado = params.texto
     let templateUsado: string | null = null
 
-    let resultado = await enviarTexto(waId, params.texto)
+    let resultado: EnvioResultado = { ok: false, erro: 'Janela de 24h fechada (pré-check) — indo direto pro template' }
+    if (await janela24hAberta(waId)) {
+      resultado = await enviarTexto(waId, params.texto)
+    }
     if (!resultado.ok) {
-      // Fora da janela de 24h → template utility genérico com botão.
+      // Fora da janela de 24h (ou texto livre recusado) → template utility genérico com botão.
       const resumo = params.resumo.replace(/\s*\n+\s*/g, ' · ').replace(/\s{2,}/g, ' ').trim().slice(0, 300)
       resultado = await enviarTemplate(waId, 'pedido_atualizacao', 'pt_BR', [
         {
