@@ -248,7 +248,7 @@ export async function ofertarPedido(
 ): Promise<{ ok: boolean; criadas: number; notificadas: number; erro?: string }> {
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, pagamento_status, confirmado_em, valor_centavos, linhas, cep, imagens, mockups, prazo_dias')
+    .select('id, pagamento_status, confirmado_em, valor_centavos, linhas, cep, imagens, mockups, prazo_dias, uf, categoria')
     .eq('id', pedidoId)
     .maybeSingle<{
       id: string
@@ -260,6 +260,8 @@ export async function ofertarPedido(
       imagens: unknown[] | null
       mockups: MapaMockups | null
       prazo_dias: number | null
+      uf: string | null
+      categoria: string | null
     }>()
 
   if (!pedido) return { ok: false, criadas: 0, notificadas: 0, erro: 'Pedido não encontrado' }
@@ -281,6 +283,15 @@ export async function ofertarPedido(
   const repasseTexto = pago ? brl(repasse) : repasse != null ? `~${brl(repasse)} (estimado)` : 'a definir por você'
 
   const { totalPecas, texto } = resumirLinhas(linhas)
+  // Resumo CURTO pro WhatsApp do fornecedor (o detalhe item-a-item ele vê no
+  // link "Responder ao pedido"): total de peças · categoria/estilo · estado.
+  const resumoCurto = [
+    `${totalPecas} ${totalPecas === 1 ? 'peça' : 'peças'}`,
+    pedido.categoria?.trim() || null,
+    pedido.uf?.trim() || null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
   const emailLinhas = resumirLinhasEmail(linhas)
   const numImagens = coletarVisuaisPedido(pedido.mockups, pedido.imagens).length
 
@@ -358,7 +369,7 @@ export async function ofertarPedido(
       const enviadoOficial = await notificarOfertaFornecedor({
         telefone: forn.whatsapp,
         nome: forn.nome ?? null,
-        resumo: `${texto} · ${totalPecas} peças`,
+        resumo: resumoCurto,
         condicoes,
         ofertaId,
       })
