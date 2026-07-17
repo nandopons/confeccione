@@ -12,6 +12,8 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { enviarEmailPedidoRecebido } from '@/app/lib/email-pedido'
+import { notificarPedidoRecebido } from '@/app/lib/whatsapp-notify'
+import { primeiroNome } from '@/app/lib/nome'
 
 export const runtime = 'nodejs'
 
@@ -56,9 +58,9 @@ export async function POST(req: Request, ctx: Ctx) {
 
   const { data: pedido, error: errPedido } = await supabase
     .from('pedidos_assistente')
-    .select('id, nome, email, confirmado_em, pagamento_status')
+    .select('id, nome, email, telefone, codigo, confirmado_em, pagamento_status')
     .eq('id', id)
-    .maybeSingle<{ id: string; nome: string | null; email: string | null; confirmado_em: string | null; pagamento_status: string | null }>()
+    .maybeSingle<{ id: string; nome: string | null; email: string | null; telefone: string | null; codigo: string | null; confirmado_em: string | null; pagamento_status: string | null }>()
   if (errPedido || !pedido) return NextResponse.json({ erro: 'Pedido não encontrado.' }, { status: 404 })
 
   // valida tamanho das imagens
@@ -99,6 +101,23 @@ export async function POST(req: Request, ctx: Ctx) {
       emailEnviado = true
     } catch (err) {
       console.error('[confirmar] email falhou:', err)
+    }
+  }
+
+  // WhatsApp "pedido recebido" — só na PRIMEIRA confirmação, ou seja, quando o
+  // cliente clica em "Buscar fornecedor". Antes saía na criação do pedido;
+  // movido pra cá pra só avisar quando ele realmente pede pra buscar fornecedor.
+  // Failure-soft (não bloqueia a confirmação) e sempre await (regra serverless).
+  if (primeiraVez && pedido.telefone) {
+    try {
+      await notificarPedidoRecebido({
+        telefone: pedido.telefone,
+        nome: primeiroNome(pedido.nome),
+        protocolo: String(pedido.codigo ?? pedido.id),
+        email: pedido.email,
+      })
+    } catch (err) {
+      console.error('[confirmar] confirmação whatsapp falhou:', err)
     }
   }
 
