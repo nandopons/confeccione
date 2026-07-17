@@ -12,9 +12,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getContaAtual } from '@/app/lib/cliente-auth'
-import { primeiroNome } from '@/app/lib/nome'
 import { normalizarWhatsApp } from '@/app/lib/phone'
-import { notificarPedidoRecebido } from '@/app/lib/whatsapp-notify'
 
 export const runtime = 'nodejs'
 
@@ -143,23 +141,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error?.message ?? 'Erro ao salvar o pedido.' }, { status: 500 })
   }
 
-  // Confirmação imediata no WhatsApp OFICIAL (template pedido_recebido_v2):
-  // nº do pedido + botão "Acompanhar meu pedido" → painel do cliente.
-  // Failure-soft (não bloqueia o pedido) e SEMPRE await antes do return
-  // (regra serverless). Evita o cliente reenviar achando que não computou.
-  const telefoneNorm = contato.telefone ? normalizarWhatsApp(contato.telefone) : null
-  if (telefoneNorm) {
-    try {
-      await notificarPedidoRecebido({
-        telefone: telefoneNorm,
-        nome: primeiroNome(contato.nome),
-        protocolo: String(data.codigo ?? data.id),
-        email: contato.email,
-      })
-    } catch (err) {
-      console.error('[pedido/assistente/criar] confirmação whatsapp falhou:', err)
-    }
-  }
-
+  // Esta etapa só PERSISTE o pedido (status 'completo'). A confirmação por
+  // WhatsApp ao cliente NÃO sai daqui — passou pra rota /confirmar, disparada
+  // só quando o cliente clica em "Buscar fornecedor" (decisão do Fernando,
+  // jul/2026: não avisar antes de ele realmente pedir pra buscar fornecedor).
   return NextResponse.json({ ok: true, id: data.id, protocolo: String(data.codigo ?? data.id), codigo: data.codigo ?? null })
 }
