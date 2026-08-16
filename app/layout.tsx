@@ -24,6 +24,17 @@ const manrope = Manrope({
 export const metadata: Metadata = {
   title: "Confeccione | Encontre fornecedores de confecção",
   description: "Encontre confecções para fabricar suas peças. Orçamento rápido pelo WhatsApp.",
+  metadataBase: new URL("https://confeccione.com.br"),
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    siteName: "Confeccione",
+    locale: "pt_BR",
+    url: "/",
+    title: "Confeccione | Encontre fornecedores de confecção",
+    description:
+      "Encontre confecções para fabricar suas peças. Orçamento rápido pelo WhatsApp.",
+  },
   verification: {
     other: {
       "p:domain_verify": "d43c634ff3dd0e303a70944d1854ebf3",
@@ -38,10 +49,41 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="pt-BR"
       className={`${geistSans.variable} ${geistMono.variable} ${manrope.variable} h-full antialiased`}
     >
       <head>
+        {/* Dados estruturados da empresa - 16/08/2026.
+            Ate esta data o site so tinha JSON-LD nos artigos do blog. A home, o
+            /sobre e o resto nao diziam a nenhuma maquina o que a Confeccione e.
+            Isso vale tanto para o Google quanto para ChatGPT, Perplexity e
+            Gemini, que leem estes dados para decidir se citam a marca.
+
+            Se o telefone de atendimento mudar, muda aqui tambem. */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "Organization",
+              name: "Confeccione",
+              url: "https://confeccione.com.br",
+              logo: "https://confeccione.com.br/icon.svg",
+              description:
+                "Plataforma brasileira que conecta marcas, lojistas e criadores a confecções e costureiras para fabricação de roupas sob demanda.",
+              areaServed: { "@type": "Country", name: "Brasil" },
+              knowsLanguage: "pt-BR",
+              contactPoint: [
+                {
+                  "@type": "ContactPoint",
+                  contactType: "customer support",
+                  telephone: "+55-81-99593-2695",
+                  availableLanguage: ["Portuguese"],
+                },
+              ],
+            }),
+          }}
+        />
         <Script id="gtm-script" strategy="afterInteractive">
           {`(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','GTM-T59XPSZ');`}
         </Script>
