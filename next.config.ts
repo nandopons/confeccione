@@ -18,9 +18,7 @@ import type { NextConfig } from "next";
  * O QUE **NAO** ENTRA AQUI
  * ---------------------------------------------------------------------------
  * /saiba-mais/*  ->  e o blog DESTE app (app/saiba-mais). Redirecionar esse
- * prefixo derrubaria 5 paginas vivas e indexadas do sistema. Os artigos da
- * loja que um dia moraram em /saiba-mais/<slug> hoje sao atendidos pelo blog
- * do sistema com conteudo equivalente - ninguem cai em 404.
+ * prefixo derrubaria 5 paginas vivas e indexadas do sistema.
  *
  * Tambem ficam de fora, porque sao rotas do app:
  *   /  /admin  /alinhar  /api  /artes  /cliente  /fornecedor  /inscricao
@@ -54,15 +52,30 @@ const PAGINAS_DA_LOJA = [
   "infantil",
   "design",
   "modelista",
-  // artigos do blog da loja, na raiz
+];
+
+// Prefixos com subcaminho: /produtos/camiseta-x/, /masculino/algo/ etc.
+const PREFIXOS_DA_LOJA = ["produtos", "masculino", "feminino"];
+
+/* ---------------------------------------------------------------------------
+ * ARTIGOS: FICAM NO SISTEMA
+ * ---------------------------------------------------------------------------
+ * 16/08/2026. Decisao do Fernando: o blog continua sendo o do sistema, em
+ * /saiba-mais/<slug> (content/blog, markdown). A loja tem copias dos mesmos
+ * quatro artigos, e ate agora estas quatro URLs de raiz apontavam para la -
+ * o que mandava a autoridade dos links antigos para a copia, e nao para o
+ * original.
+ *
+ * Agora a raiz aponta para o blog deste app. O destino e relativo de
+ * proposito: o visitante nao troca de dominio no meio do caminho.
+ * ---------------------------------------------------------------------------
+ */
+const ARTIGOS_DO_BLOG = [
   "como-criar-uma-marca-de-roupas",
   "por-que-gola-da-camisa-esgarca",
   "silk-dtf-dtg-tecnicas-estampa",
   "tingimento-sob-demanda-marcas-iniciantes",
 ];
-
-// Prefixos com subcaminho: /produtos/camiseta-x/, /masculino/algo/ etc.
-const PREFIXOS_DA_LOJA = ["produtos", "masculino", "feminino"];
 
 function redirecionamentosDaLoja() {
   if (process.env.LOJA_MIGRADA !== "1") return [];
@@ -83,6 +96,12 @@ function redirecionamentosDaLoja() {
       destination: `${LOJA}/${p}`,
       permanent: true,
     })),
+    // artigos: continuam neste dominio, no blog do sistema
+    ...ARTIGOS_DO_BLOG.map((slug) => ({
+      source: `/${slug}`,
+      destination: `/saiba-mais/${slug}`,
+      permanent: true,
+    })),
     // sitemap do blog da loja
     {
       source: "/sitemap_blog.xml",
@@ -97,12 +116,45 @@ function redirecionamentosDaLoja() {
  * porque o redirect vem antes.
  */
 
+/* ===========================================================================
+ * DOMINIOS DA VERCEL FORA DO INDICE
+ * ---------------------------------------------------------------------------
+ * 16/08/2026. confeccione.vercel.app respondia 200 com o site inteiro e sem
+ * nenhum sinal de noindex - ou seja, o Google podia indexar uma copia
+ * completa do site num dominio que nao e o nosso. O mesmo vale para as URLs
+ * de preview de cada deploy.
+ *
+ * O X-Robots-Tag resolve no cabecalho, sem tocar em nenhuma pagina. O regex
+ * pega qualquer subdominio .vercel.app; o dominio proprio nao casa e continua
+ * indexavel normalmente.
+ * ---------------------------------------------------------------------------
+ */
+function cabecalhosDeIndexacao() {
+  return [
+    {
+      source: "/:path*",
+      has: [
+        {
+          type: "host" as const,
+          value: "(?<vercelsub>.*)\\.vercel\\.app",
+        },
+      ],
+      headers: [
+        { key: "X-Robots-Tag", value: "noindex, nofollow" },
+      ],
+    },
+  ];
+}
+
 const nextConfig: NextConfig = {
   images: {
     qualities: [75, 85],
   },
   async redirects() {
     return redirecionamentosDaLoja();
+  },
+  async headers() {
+    return cabecalhosDeIndexacao();
   },
 };
 
