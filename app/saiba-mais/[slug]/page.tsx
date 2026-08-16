@@ -6,7 +6,7 @@ import { ptBR } from "date-fns/locale";
 import SiteHeader from "@/app/components/SiteHeader";
 import { getAllSlugs, getPostBySlug } from "@/app/lib/blog";
 
-const SITE_URL = "https://www.confeccione.com.br";
+const SITE_URL = "https://confeccione.com.br";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
