@@ -28,8 +28,8 @@ const PAGINAS: Array<{
   changeFrequency: MetadataRoute.Sitemap[number]["changeFrequency"];
 }> = [
   { caminho: "/", priority: 1.0, changeFrequency: "weekly" },
-  { caminhn: "/saiba-mais", priority: 0.8, changeFrequency: "weekly" },
-  { caminhn: "/sobre", priority: 0.6, changeFrequency: "yearly" },
+  { caminho: "/saiba-mais", priority: 0.8, changeFrequency: "weekly" },
+  { caminho: "/sobre", priority: 0.6, changeFrequency: "yearly" },
   { caminho: "/fornecedor/cadastro", priority: 0.7, changeFrequency: "monthly" },
   { caminho: "/porto-digital", priority: 0.3, changeFrequency: "yearly" },
   { caminho: "/privacidade", priority: 0.2, changeFrequency: "yearly" },
