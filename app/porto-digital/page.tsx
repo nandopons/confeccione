@@ -4,6 +4,9 @@ import SiteFooter from "@/app/components/SiteFooter";
 import PortoDigitalBadge from "@/app/components/PortoDigitalBadge";
 
 export const metadata: Metadata = {
+  // Ver comentario em app/sobre/page.tsx: sem canonical proprio, herda o "/"
+  // do layout raiz e sai do indice.
+  alternates: { canonical: "/porto-digital" },
   title: "Confeccione é empresa embarcada no Porto Digital",
   description:
     "A Confeccione integra o ecossistema do Porto Digital, distrito de inovação tecnológica de Recife/PE.",
