@@ -6,6 +6,9 @@ export const metadata: Metadata = {
   title: "Política de Privacidade | Confeccione",
   description:
     "Como a Confeccione coleta, usa e protege os seus dados pessoais, em conformidade com a LGPD.",
+  // Ver comentario em app/sobre/page.tsx: sem canonical proprio, herda o "/"
+  // do layout raiz e sai do indice.
+  alternates: { canonical: "/privacidade" },
 };
 
 export default function PrivacidadePage() {
