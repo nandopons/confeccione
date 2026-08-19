@@ -5,6 +5,10 @@ import SiteFooter from "@/app/components/SiteFooter";
 import PortoDigitalBadge from "@/app/components/PortoDigitalBadge";
 
 export const metadata: Metadata = {
+  // Sem esta linha o canonical "/" do layout raiz e herdado, e esta pagina
+  // declara a home como sua versao canonica. O Google obedece e tira /sobre do
+  // indice - foi o que aconteceu ate 19/08/2026.
+  alternates: { canonical: "/sobre" },
   title: "Sobre a Confeccione",
   description:
     "Marketplace brasileiro de confecção. Empresa embarcada no Porto Digital. CNPJ 49.307.439/0001-50.",
