@@ -87,10 +87,14 @@ export default function RootLayout({
         <Script id="gtm-script" strategy="afterInteractive">
           {`(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','GTM-T59XPSZ');`}
         </Script>
-        {/* Microsoft Clarity — gravação de sessões + heatmaps. ID público (visível no HTML); pode ser sobrescrito por NEXT_PUBLIC_CLARITY_ID na Vercel. */}
-        <Script id="clarity-script" strategy="afterInteractive">
-          {`(function(){try{var p=new URLSearchParams(location.search);if(p.get('clarity')==='off'){localStorage.setItem('clarity_off','1');}if(p.get('clarity')==='on'){localStorage.removeItem('clarity_off');}if(localStorage.getItem('clarity_off')==='1'){return;}}catch(e){}(function(c,l,a,r,i,t,y){c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);})(window,document,"clarity","script","${process.env.NEXT_PUBLIC_CLARITY_ID || 'x9qlu1huv8'}");})();`}
-        </Script>
+        {/* Microsoft Clarity REMOVIDO daqui em 19/08/2026.
+            Estava duplicado: este bloco carregava clarity.ms/tag/ e a tag
+            "Microsoft Clarity - Official" dentro do GTM-T59XPSZ carregava o
+            mesmo ID de novo. Medido ao vivo na home: 2 carregamentos de
+            clarity.ms/tag/ e 5 requisicoes a dominios do Clarity na mesma pagina.
+            Ficou o do GTM, que a integracao oficial instalou e gerencia.
+            O opt-out ?clarity=off se perde - para excluir as proprias sessoes,
+            use Clarity > Settings > Bloqueio de IP. */}
       </head>
       <body className="min-h-full flex flex-col">
         <noscript>
