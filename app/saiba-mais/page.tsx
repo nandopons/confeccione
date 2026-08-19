@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   description:
     "Artigos sobre confecção sob demanda, criação de marcas, tecidos e processos de fabricação.",
   alternates: {
-    canonical: "https://www.confeccione.com.br/saiba-mais",
+    canonical: "/saiba-mais",
   },
   openGraph: {
     type: "website",
@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     title: "Saiba mais | Confeccione",
     description:
       "Artigos sobre confecção sob demanda, criação de marcas, tecidos e processos de fabricação.",
-    url: "https://www.confeccione.com.br/saiba-mais",
+    url: "/saiba-mais",
     locale: "pt_BR",
   },
 };
