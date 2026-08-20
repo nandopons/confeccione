@@ -16,6 +16,8 @@ import { useEffect, useRef, useState, type ReactElement } from "react";
 import Link from "next/link";
 import ListaColeta from "./ListaColeta";
 import ProdutoChat, { type LinhaProduto } from "./ProdutoChat";
+import { linkWhatsApp } from "@/app/lib/phone";
+import { msgClienteParaFornecedor } from "@/app/lib/mensagens-whatsapp";
 
 export type Tamanho = { tamanho: string; qtd: number | null };
 export type Estampa = { posicao: string; tamanho: string };
@@ -1217,8 +1219,23 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             <strong className="text-gray-900">{pedido.fornecedor_nome}</strong> vai atender seu pedido. Já pode combinar cores, prazos e detalhes direto por lá.
           </p>
           {pedido.fornecedor_whatsapp && (
+            /* linkWhatsApp() em vez do template inline: a montagem manual
+               ("55" + tira nao-digito + tira 55 do inicio) quebra em numero
+               salvo como "081..." — vira 5581... certo por acaso, mas 55 na
+               frente de um numero que ja tinha DDI some com o DDD. O helper
+               ja normaliza pra E.164 e e o mesmo usado no resto do app.
+               A mensagem vai pronta: o fornecedor pode ter varios pedidos
+               abertos e nao adivinha quem esta chamando. */
             <a
-              href={`https://wa.me/55${pedido.fornecedor_whatsapp.replace(/\D/g, "").replace(/^55/, "")}`}
+              href={linkWhatsApp(
+                pedido.fornecedor_whatsapp,
+                msgClienteParaFornecedor({
+                  clienteNome: pedido.nome,
+                  fornecedorNome: pedido.fornecedor_nome ?? null,
+                  totalPecas,
+                  pedidoId: pedido.id,
+                }),
+              )}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-3 inline-flex items-center gap-2 bg-[#25D366] hover:brightness-95 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-all"
