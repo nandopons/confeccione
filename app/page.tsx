@@ -19,6 +19,14 @@ export default function Home() {
             alt="Camiseta estampada em destaque numa arara de camisetas — confecção e estamparia"
             fill
             preload
+            /* fetchPriority e prop propria no Next 16 - `preload` e `priority`
+               NAO a definem (get-img-props.js apenas repassa o valor). Sem ela,
+               o <link rel="preload"> saia sem prioridade e a imagem da LCP
+               disputava banda com o CSS e o JS: o PageSpeed de 19/08 reprovou
+               "A propriedade fetchpriority=high precisa ser aplicada a
+               solicitacao de pre-carregamento da imagem" e o atraso no
+               carregamento do recurso subiu para 430 ms. */
+            fetchPriority="high"
             quality={85}
             sizes="100vw"
             className="object-contain object-center md:object-right"
