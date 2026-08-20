@@ -13,6 +13,7 @@ import { tipoLabel, prazoLabel } from '@/app/lib/ofertas-labels'
 import { corStatus, labelStatus } from '@/app/lib/cliente-status'
 import { formatarWhatsappBR } from '@/app/lib/format'
 import { linkWhatsApp } from '@/app/lib/phone'
+import { msgClienteParaFornecedor } from '@/app/lib/mensagens-whatsapp'
 import SolicitarOutroFornecedorButton from './SolicitarOutroFornecedorButton'
 import CompartilharArtesButton from './CompartilharArtesButton'
 
@@ -212,7 +213,17 @@ export default async function PedidoDetalhePage({
             📱 {formatarWhatsappBR(pedido.fornecedor_aceito.whatsapp)}
           </div>
           <a
-            href={linkWhatsApp(pedido.fornecedor_aceito.whatsapp)}
+            href={linkWhatsApp(
+              pedido.fornecedor_aceito.whatsapp,
+              // Mensagem pronta: o fornecedor atende varios pedidos e nao
+              // adivinha quem esta chamando numa conversa em branco.
+              msgClienteParaFornecedor({
+                clienteNome: conta.nome ?? null,
+                fornecedorNome: pedido.fornecedor_aceito.nome,
+                totalPecas: pedido.quantidade,
+                pedidoId: pedido.id,
+              }),
+            )}
             target="_blank"
             rel="noopener noreferrer"
             className="mt-3 inline-block px-5 py-2.5 rounded-md bg-[#1D9E75] text-white text-sm font-medium hover:bg-[#178761]"
