@@ -7,12 +7,28 @@
 export function normalizarWhatsApp(input: string): string {
   let digits = input.replace(/\D/g, '')
 
+  if (!digits) return ''
+
   // Remove '0' inicial de discagem nacional (ex: 081...)
   if (digits.startsWith('0')) {
     digits = digits.slice(1)
   }
 
-  // Adiciona DDI 55 se ainda não estiver presente
+  // Um número brasileiro escrito localmente tem 10 dígitos (fixo: DDD + 8) ou
+  // 11 (celular: DDD + 9 + 8). Nesse tamanho ele NUNCA carrega DDI, então
+  // prefixa sempre — sem perguntar como começa.
+  //
+  // Por que a pergunta era errada: o teste anterior era só
+  // `if (!digits.startsWith('55'))`, e isso quebra o **DDD 55** (Santa Maria e
+  // região, no RS), que colide com o código do país. Um celular de lá escrito
+  // como "55999667936" (11 dígitos) era lido como "já tem DDI" e voltava com
+  // 11 dígitos — número inválido, wa.me não abre e a Z-API não entrega.
+  // Encontrado em 20/08/2026 num cliente real de pedidos_assistente.
+  if (digits.length <= 11) {
+    return '55' + digits
+  }
+
+  // Daqui pra cima (12+) só falta o DDI quando ele realmente não está lá.
   if (!digits.startsWith('55')) {
     digits = '55' + digits
   }
@@ -67,11 +83,20 @@ export function validarWhatsApp(input: string): boolean {
 
 /**
  * Gera link wa.me com texto opcional pré-preenchido.
- * O número é normalizado pra formato E.164 BR sem '+' (proteção pra entradas legadas
- * que possam estar sem DDI). WhatsApp renderiza o link como clicável nas mensagens.
+ * WhatsApp renderiza o link como clicável nas mensagens.
+ *
+ * Usa `variantesWhatsApp(...)[0]`, e não `normalizarWhatsApp` direto, porque a
+ * primeira variante é sempre a **canônica de 13 dígitos**: quando o número
+ * chega com 12 (DDD + 8 dígitos, celular cadastrado antes de o nono dígito
+ * virar obrigatório no Brasil), ela completa o 9. O wa.me não resolve a forma
+ * curta — abre "número inválido" — e havia 4 desses em pedidos_assistente em
+ * 20/08/2026, todos em pedidos já aceitos.
+ *
+ * Fixo continua intacto: em `variantesWhatsApp` o 9 só entra quando o primeiro
+ * dígito do assinante é 6–9, faixa de celular.
  */
 export function linkWhatsApp(numero: string, mensagem?: string): string {
-  const n = normalizarWhatsApp(numero)
+  const n = variantesWhatsApp(numero)[0]
   const base = `https://wa.me/${n}`
   return mensagem ? `${base}?text=${encodeURIComponent(mensagem)}` : base
 }
