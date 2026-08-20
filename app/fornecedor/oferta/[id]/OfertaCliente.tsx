@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { linkWhatsApp } from '@/app/lib/phone'
+import { msgFornecedorParaCliente } from '@/app/lib/mensagens-whatsapp'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 type Estampa = { posicao?: string | null; tamanho?: string | null }
@@ -279,10 +281,35 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
               <div className="mt-4 rounded-xl bg-gray-50 border border-gray-200 px-4 py-3">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Contato do cliente</p>
                 <p className="text-sm text-gray-900 font-medium">{oferta.contatoCliente.nome ?? 'Cliente Confeccione'}</p>
-                {oferta.contatoCliente.telefone && <p className="text-sm text-gray-700">📱 {oferta.contatoCliente.telefone}</p>}
                 {oferta.contatoCliente.email && <p className="text-sm text-gray-700 break-all">✉️ {oferta.contatoCliente.email}</p>}
                 {(oferta.contatoCliente.cidade || oferta.contatoCliente.uf) && (
                   <p className="text-sm text-gray-700">📍 {[oferta.contatoCliente.cidade, oferta.contatoCliente.uf].filter(Boolean).join('/')}</p>
+                )}
+                {/* Atalho pra conversa. Antes o telefone era só texto: o
+                    fornecedor tinha que selecionar, copiar e colar no WhatsApp
+                    — no celular isso é atrito suficiente pra adiar o contato.
+                    A mensagem já vai pronta porque o cliente não sabe quem
+                    está mandando "oi". */}
+                {oferta.contatoCliente.telefone && (
+                  <a
+                    href={linkWhatsApp(
+                      oferta.contatoCliente.telefone,
+                      msgFornecedorParaCliente({
+                        clienteNome: oferta.contatoCliente.nome,
+                        fornecedorNome: oferta.fornecedorNome,
+                        totalPecas: oferta.totalPecas,
+                        pedidoId: oferta.pedidoId,
+                      }),
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#25D366] px-4 py-3 text-sm font-semibold text-white hover:brightness-95"
+                  >
+                    💬 Falar com o cliente no WhatsApp
+                  </a>
+                )}
+                {oferta.contatoCliente.telefone && (
+                  <p className="mt-1.5 text-center text-xs text-gray-500">{oferta.contatoCliente.telefone}</p>
                 )}
                 {!oferta.pago && (
                   <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-3 leading-snug">
