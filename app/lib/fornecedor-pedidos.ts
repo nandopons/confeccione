@@ -31,6 +31,10 @@ export type OfertaFornecedor = {
   orcamentoStatus: string | null
   prazoDias: number | null
   clienteNome: string | null
+  // So vem preenchido em oferta ACEITA — mesma regra de
+  // carregarOfertaParaFornecedor(). Antes do aceite o contato do cliente nao
+  // sai desta funcao, nem para a tela do painel.
+  clienteTelefone: string | null
   estado: EstadoOferta
 }
 
@@ -47,6 +51,7 @@ type Row = {
     pagamento_status: string | null
     orcamento_status: string | null
     nome: string | null
+    telefone: string | null
     prazo_dias: number | null
   } | null
 }
@@ -83,6 +88,7 @@ function mapRow(o: Row): OfertaFornecedor {
     orcamentoStatus,
     prazoDias: ped?.prazo_dias ?? null,
     clienteNome: ped?.nome ?? null,
+    clienteTelefone: o.status === 'aceita' ? (ped?.telefone ?? null) : null,
     estado: derivarEstado(orcamentoStatus, pagamentoStatus, o.repasse_status),
   }
 }
@@ -90,7 +96,7 @@ function mapRow(o: Row): OfertaFornecedor {
 async function buscar(fornecedorId: string, status: StatusOferta[]): Promise<OfertaFornecedor[]> {
   const { data } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
-    .select('id, pedido_id, status, repasse_status, valor_repasse_centavos, criado_em, pedidos_assistente(linhas, imagens, pagamento_status, orcamento_status, nome, prazo_dias)')
+    .select('id, pedido_id, status, repasse_status, valor_repasse_centavos, criado_em, pedidos_assistente(linhas, imagens, pagamento_status, orcamento_status, nome, telefone, prazo_dias)')
     .eq('fornecedor_id', fornecedorId)
     .in('status', status)
     .order('criado_em', { ascending: false })
