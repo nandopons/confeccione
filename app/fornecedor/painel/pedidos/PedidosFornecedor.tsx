@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
+import { linkWhatsApp } from '@/app/lib/phone'
+import { msgFornecedorParaCliente } from '@/app/lib/mensagens-whatsapp'
 
 type Estado = 'orcar' | 'aguardando_cliente' | 'producao' | 'concluido'
 
@@ -19,6 +21,7 @@ type Oferta = {
   orcamentoStatus: string | null
   prazoDias: number | null
   clienteNome: string | null
+  clienteTelefone: string | null   // so vem em oferta aceita
   estado: Estado
 }
 
@@ -107,7 +110,15 @@ function ValorLabel({ o }: { o: Oferta }) {
   )
 }
 
-export default function PedidosFornecedor({ pendentes, aceitos }: { pendentes: Oferta[]; aceitos: Oferta[] }) {
+export default function PedidosFornecedor({
+  pendentes,
+  aceitos,
+  fornecedorNome,
+}: {
+  pendentes: Oferta[]
+  aceitos: Oferta[]
+  fornecedorNome?: string | null
+}) {
   const [tab, setTab] = useState<TabId>('pendentes')
   const [lista, setLista] = useState({ pendentes, aceitos })
   const [agindo, setAgindo] = useState<string | null>(null)
@@ -203,7 +214,7 @@ export default function PedidosFornecedor({ pendentes, aceitos }: { pendentes: O
           tab === 'pendentes' ? (
             <CardPendente key={o.ofertaId} o={o} agindo={agindo === o.ofertaId} onResponder={responder} />
           ) : (
-            <CardAceito key={o.ofertaId} o={o} />
+            <CardAceito key={o.ofertaId} o={o} fornecedorNome={fornecedorNome ?? null} />
           ),
         )}
       </div>
@@ -264,7 +275,7 @@ function CardPendente({
   )
 }
 
-function CardAceito({ o }: { o: Oferta }) {
+function CardAceito({ o, fornecedorNome }: { o: Oferta; fornecedorNome: string | null }) {
   const cfg = ESTADO_CFG[o.estado]
   const destaque = o.estado === 'producao'
   return (
@@ -303,6 +314,28 @@ function CardAceito({ o }: { o: Oferta }) {
       <div className="mt-3">
         <ValorLabel o={o} />
       </div>
+
+      {/* Atalho de conversa. Este painel nao mostrava telefone nenhum: pra
+          falar com o cliente o fornecedor tinha que voltar no e-mail ou no
+          link da oferta. Aqui o contato fica onde ele ja esta trabalhando. */}
+      {o.clienteTelefone && (
+        <a
+          href={linkWhatsApp(
+            o.clienteTelefone,
+            msgFornecedorParaCliente({
+              clienteNome: o.clienteNome,
+              fornecedorNome,
+              totalPecas: o.totalPecas,
+              pedidoId: o.pedidoId,
+            }),
+          )}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-3 flex items-center justify-center gap-2 rounded-lg bg-[#25D366] px-4 py-2.5 text-sm font-semibold text-white hover:brightness-95"
+        >
+          💬 Falar com {o.clienteNome ? o.clienteNome.split(' ')[0] : 'o cliente'} no WhatsApp
+        </a>
+      )}
 
       {/* Ações contextuais */}
       <div className="mt-4 flex flex-wrap gap-2">
