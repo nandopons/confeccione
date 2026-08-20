@@ -9,9 +9,25 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
+// preload: false desde 20/08/2026.
+// O Geist Mono era pre-carregado em TODA pagina - inclusive na home, onde
+// `font-mono` nao aparece em lugar nenhum (nem em page.tsx, SiteHeader,
+// SiteFooter ou PedidoSteps). Ele so e usado em tres campos de codigo OTP:
+// /cliente/login, /fornecedor/entrar e /admin/captacao.
+//
+// Custava caro no lugar errado: 23.108 bytes com `as="font" crossorigin`, que
+// o navegador trata com prioridade MAXIMA, e o <link> saia ANTES do preload da
+// imagem da LCP no <head>. Em 4G lento isso e banda tomada exatamente na
+// janela que decide o LCP - o atraso de carregamento do recurso estava em
+// 450 ms no PageSpeed de 19/08 23:09.
+//
+// Com preload: false a variavel CSS continua funcionando; a fonte passa a ser
+// buscada so quando alguma pagina de fato usa `font-mono`. O custo e um FOUT
+// breve nesses tres campos, que ficam atras de login e nao sao elemento de LCP.
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+  preload: false,
 });
 
 const manrope = Manrope({
