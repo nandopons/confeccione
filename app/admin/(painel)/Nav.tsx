@@ -115,6 +115,13 @@ const SECOES: Secao[] = [
     titulo: 'Operação',
     itens: [
       {
+        href: '/admin/producao',
+        label: 'Produção',
+        icone: (
+          <Ico d="M3 21V9l5 3V9l5 3V9l5 3v9H3M7 21v-4h4v4" />
+        ),
+      },
+      {
         href: '/admin/fornecedores',
         label: 'Fornecedores',
         icone: (
