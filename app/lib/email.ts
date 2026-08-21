@@ -715,6 +715,50 @@ export async function emailLembretePedido(params: { email: string; nome: string 
   await enviarEmail({ to: params.email, subject, html, text })
 }
 
+// ─── Andamento da producao (sistema -> cliente) ──────────────────────────
+// Disparado quando o card do pedido muda de etapa no quadro de producao.
+// O texto de cada etapa mora em producao-avisos.ts — aqui so a moldura.
+//
+// `link` aponta pro visualizador do pedido (fluxo do marketplace) ou fica
+// vazio no orcamento avulso, que nao tem pagina propria pro cliente.
+export async function emailProducaoAtualizada(params: {
+  email: string
+  nome: string | null
+  titulo: string
+  corpo: string
+  referencia: string
+  link?: string | null
+}): Promise<void> {
+  const nome = escapeHtml((params.nome || '').trim().split(/\s+/)[0] || 'tudo bem?')
+  const titulo = escapeHtml(params.titulo)
+  const corpo = escapeHtml(params.corpo)
+  const ref = escapeHtml(params.referencia)
+  const subject = `${params.titulo} · ${params.referencia}`
+
+  const botao = params.link
+    ? `<div style="text-align:center;margin:24px 0;">
+         <a href="${params.link}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;padding:14px 28px;border-radius:10px;font-weight:bold;">Ver meu pedido</a>
+       </div>`
+    : ''
+
+  const html = layout(
+    `
+    <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#111827;">${titulo}</h1>
+    <p style="margin:0 0 6px;color:#888;font-size:13px;">Pedido ${ref}</p>
+    <p style="margin:0 0 16px;color:#555;line-height:1.5;">Oi, ${nome}! ${corpo}</p>
+    ${botao}
+    <p style="margin:8px 0 0;color:#888;font-size:13px;">Qualquer duvida, e so responder este e-mail ou chamar no WhatsApp (81) 99593-2695.</p>
+    `,
+    params.corpo.slice(0, 120)
+  )
+  const text =
+    `Oi, ${params.nome || ''}\n\n${params.titulo}\nPedido ${params.referencia}\n\n${params.corpo}\n` +
+    (params.link ? `\nVer seu pedido: ${params.link}\n` : '') +
+    `\nDuvidas? WhatsApp (81) 99593-2695.\nConfeccione`
+
+  await enviarEmail({ to: params.email, subject, html, text })
+}
+
 // ─── Pedir feedback do mockup/arte (admin -> cliente) ────────────────────
 export async function emailFeedbackMockup(params: { email: string; nome: string | null; link: string }): Promise<void> {
   const nome = escapeHtml(params.nome || 'tudo bem?')

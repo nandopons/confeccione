@@ -24,6 +24,9 @@
 import { supabaseAdmin } from './supabase-server'
 import { resumirLinhas, type LinhaPedido } from './pedido-assistente-oferta'
 import { ehEtapa, type Etapa } from './producao-etapas'
+import { AVISOS } from './producao-avisos'
+import { emailProducaoAtualizada } from './email'
+import { avisoOficial } from './whatsapp-notify'
 
 // As etapas moram em producao-etapas.ts, sem import de servidor, porque o
 // componente cliente do painel do fornecedor precisa da lista — e importar
@@ -69,6 +72,8 @@ function dias(desde: string): number {
   const ms = Date.now() - new Date(desde).getTime()
   return Math.max(0, Math.floor(ms / 86_400_000))
 }
+
+const SITE = 'https://www.confeccione.com.br'
 
 function refCurta(uuid: string): string {
   return uuid.replace(/-/g, '').slice(0, 8).toUpperCase()
@@ -281,6 +286,112 @@ export async function carregarQuadro(fornecedorId?: string): Promise<CardProduca
   return [...doPedido, ...doOrcamento]
 }
 
+// ---------------------------------------------------------------------------
+// Aviso ao cliente quando o pedido muda de etapa
+//
+// TRES TRAVAS, TODAS DE PROPOSITO:
+//
+// 1. So avisa a PRIMEIRA vez que o pedido chega numa etapa. Producao volta —
+//    peca sai da costura e retorna pra estamparia porque a estampa falhou — e
+//    o cliente nao pode receber "sua estampa esta sendo aplicada" tres vezes.
+//    A checagem e no historico: se ja existe evento com aquele para_etapa,
+//    cala a boca.
+//
+// 2. NAO avisa na entrada automatica no quadro. `garantirCards` cria o card
+//    quando o pagamento e confirmado, e isso vale pra pedidos que ja estavam
+//    pagos antes desta funcionalidade existir — avisar dali dispararia uma
+//    leva de e-mails sobre pedidos velhos.
+//
+// 3. WhatsApp so em 'pronto'. E-mail em toda etapa foi decisao do Fernando
+//    (21/08/2026); WhatsApp em toda etapa seria interromper a pessoa oito
+//    vezes por uma camiseta.
+//
+// Failure-soft inteiro: aviso que falha nao pode impedir o card de andar.
+// ---------------------------------------------------------------------------
+async function avisarCliente(params: {
+  pedidoId: string | null
+  orcamentoId: string | null
+  etapa: Etapa
+}): Promise<void> {
+  try {
+    const aviso = AVISOS[params.etapa]
+    if (!aviso) return
+
+    let email: string | null = null
+    let telefone: string | null = null
+    let nome: string | null = null
+    let referencia = ''
+    let link: string | null = null
+
+    if (params.pedidoId) {
+      const { data } = await supabaseAdmin
+        .from('pedidos_assistente')
+        .select('nome, email, telefone')
+        .eq('id', params.pedidoId)
+        .maybeSingle<{ nome: string | null; email: string | null; telefone: string | null }>()
+      if (!data) return
+      nome = data.nome
+      email = data.email
+      telefone = data.telefone
+      referencia = refCurta(params.pedidoId)
+      link = `${SITE}/visualizador/${params.pedidoId}`
+    } else if (params.orcamentoId) {
+      const { data } = await supabaseAdmin
+        .from('orcamentos')
+        .select('cliente_nome, cliente_email, numero')
+        .eq('id', params.orcamentoId)
+        .maybeSingle<{ cliente_nome: string | null; cliente_email: string | null; numero: string }>()
+      if (!data) return
+      nome = data.cliente_nome
+      email = data.cliente_email
+      // A tabela `orcamentos` nao guarda telefone — so nome, documento e email.
+      // Entao orcamento avulso avisa por e-mail e nao por WhatsApp. Se quiser
+      // WhatsApp aqui, precisa de uma coluna de telefone no formulario.
+      telefone = null
+      referencia = data.numero
+      link = null
+    } else {
+      return
+    }
+
+    if (email) {
+      await emailProducaoAtualizada({
+        email,
+        nome,
+        titulo: aviso.titulo,
+        corpo: aviso.corpo,
+        referencia,
+        link,
+      })
+    }
+
+    if (aviso.whatsapp && telefone && params.pedidoId) {
+      await avisoOficial({
+        telefone,
+        nome,
+        texto: `${aviso.titulo}\n\n${aviso.corpo}\n\nPedido ${referencia}`,
+        resumo: aviso.resumo,
+        caminhoBotao: `visualizador/${params.pedidoId}`,
+      })
+    }
+  } catch (e) {
+    console.error('[producao] aviso ao cliente falhou', e)
+  }
+}
+
+/** Ja avisamos esta etapa antes? Historico e a fonte da verdade. */
+async function jaPassouPor(
+  pedidoId: string | null,
+  orcamentoId: string | null,
+  etapa: Etapa,
+): Promise<boolean> {
+  const q = supabaseAdmin.from('producao_eventos').select('id').eq('para_etapa', etapa).limit(1)
+  const { data } = pedidoId
+    ? await q.eq('pedido_id', pedidoId)
+    : await q.eq('orcamento_id', orcamentoId!)
+  return (data ?? []).length > 0
+}
+
 export type ResultadoMover = { ok: true; etapa: Etapa } | { ok: false; erro: string }
 
 /**
@@ -339,6 +450,10 @@ export async function moverEtapa(params: {
   // Evento só quando a etapa muda. Editar a observação não é movimento —
   // gravar isso encheria a linha do tempo de ruído.
   if (mudou) {
+    // Consulta ANTES de inserir o evento novo: depois do insert a resposta
+    // seria sempre "sim, ja passou".
+    const repetida = await jaPassouPor(card.pedido_id, card.orcamento_id, params.etapa)
+
     await supabaseAdmin.from('producao_eventos').insert({
       pedido_id: card.pedido_id,
       orcamento_id: card.orcamento_id,
@@ -349,6 +464,14 @@ export async function moverEtapa(params: {
       autor_nome: params.autorNome ?? null,
       observacao: params.observacao ?? null,
     })
+
+    if (!repetida) {
+      await avisarCliente({
+        pedidoId: card.pedido_id,
+        orcamentoId: card.orcamento_id,
+        etapa: params.etapa,
+      })
+    }
   }
 
   return { ok: true, etapa: params.etapa }
