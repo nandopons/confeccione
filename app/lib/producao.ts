@@ -2,20 +2,23 @@
 // ============================================================================
 // CRM de produção — o pedaço que faltava entre "cliente pagou" e "finalizado".
 //
-// O QUE ESTE ARQUIVO É
-// A fonte da verdade das etapas de fábrica e das três operações que o quadro
-// precisa: montar o quadro, mover um card e ler a linha do tempo de um pedido.
-// Admin e painel do fornecedor consomem daqui — não duplicam regra.
+// DUAS ORIGENS DE CARD
+//   'assistente' -> pedidos_assistente (marketplace: cliente pediu, fornecedor
+//                   aceitou e orçou, cliente pagou pelo Asaas)
+//   'orcamento'  -> orcamentos (orçamento avulso feito por você no admin, com
+//                   cobrança Asaas gerada na hora)
+// Os dois viram produção. Não fabrico um pedidos_assistente falso a partir do
+// orçamento avulso porque isso poluiria funil, métricas e painel do fornecedor
+// com pedidos que nunca passaram por oferta.
 //
-// QUEM PRODUZ
-// O fornecedor parceiro, não a Confeccione. Então este quadro é instrumento de
-// ACOMPANHAMENTO: o admin vê tudo e move qualquer card; o fornecedor move só
-// os pedidos dele. Cada movimento grava quem foi.
+// SÓ ENTRA O QUE FOI PAGO
+// Antes do pagamento o pedido ainda é comercial. O próprio sistema diz ao
+// fornecedor para não começar antes de pagar — um card de algo que não pode
+// ser produzido só polui o quadro.
 //
-// SÓ PEDIDO PAGO ENTRA
-// Antes do pagamento o pedido ainda é comercial (orçamento, aceite, cobrança) —
-// e o próprio sistema diz ao fornecedor para não começar antes de pagar. Um
-// card de algo que não pode ser produzido só polui o quadro.
+// QUEM MOVE
+// Admin move tudo. Fornecedor move só os pedidos que ele assumiu (origem
+// 'assistente'); orçamento avulso não tem fornecedor, é seu.
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
@@ -25,24 +28,27 @@ import { ehEtapa, type Etapa } from './producao-etapas'
 // As etapas moram em producao-etapas.ts, sem import de servidor, porque o
 // componente cliente do painel do fornecedor precisa da lista — e importar
 // deste arquivo arrastaria o supabaseAdmin (service role) pro bundle.
-// Reexporta pra quem já lê daqui não precisar saber da divisão.
 export { ETAPAS, ehEtapa, tituloEtapa, type Etapa } from './producao-etapas'
 
+export type OrigemCard = 'assistente' | 'orcamento'
+
 export type CardProducao = {
-  pedidoId: string
+  cardId: string
+  origem: OrigemCard
+  pedidoId: string | null
+  orcamentoId: string | null
   etapa: Etapa
   entrouEtapaEm: string
   observacao: string | null
-  // Do pedido
+  // Identificação
+  referencia: string        // ORC-2026-0007 ou os 8 primeiros do uuid
   clienteNome: string | null
   totalPecas: number
   resumo: string
   valorCentavos: number | null
   repasseCentavos: number | null
-  prazoDias: number | null
-  pagoEm: string | null
   criadoEm: string
-  // Do fornecedor que assumiu
+  // Só em origem 'assistente'
   fornecedorId: string | null
   fornecedorNome: string | null
   // Derivado
@@ -59,139 +65,223 @@ export type EventoProducao = {
   criadoEm: string
 }
 
-type LinhaPedidoRow = {
-  id: string
-  nome: string | null
-  linhas: LinhaPedido[] | null
-  valor_centavos: number | null
-  repasse_centavos: number | null
-  prazo_dias: number | null
-  criado_em: string
-  atualizado_em: string | null
-  pagamento_status: string | null
-  finalizado_em: string | null
-}
-
 function dias(desde: string): number {
   const ms = Date.now() - new Date(desde).getTime()
   return Math.max(0, Math.floor(ms / 86_400_000))
 }
 
+function refCurta(uuid: string): string {
+  return uuid.replace(/-/g, '').slice(0, 8).toUpperCase()
+}
+
+type LinhaProducao = {
+  id: string
+  pedido_id: string | null
+  orcamento_id: string | null
+  etapa: Etapa
+  entrou_etapa_em: string
+  observacao: string | null
+}
+
 /**
- * Monta o quadro inteiro.
+ * Garante a linha de produção das origens passadas e devolve todas.
  *
- * Cria a linha de produção sob demanda: qualquer pedido pago e não finalizado
- * que ainda não tenha card entra em `planejamento`, com um evento de autor
- * 'sistema'. Isso é o que faz os pedidos que JÁ estavam pagos antes desta
- * funcionalidade existir aparecerem sem migração de dados.
- *
- * `fornecedorId` restringe ao que aquele fornecedor assumiu — é assim que o
- * painel dele reusa esta mesma função sem ver pedido de terceiro.
+ * Criação sob demanda em vez de gatilho no pagamento: é o que faz os pedidos
+ * que JÁ estavam pagos antes desta funcionalidade existir aparecerem sem
+ * migração de dados, e cobre também qualquer pagamento que o webhook tenha
+ * perdido e a reconciliação tenha resgatado depois.
  */
-export async function carregarQuadro(fornecedorId?: string): Promise<CardProducao[]> {
-  const { data: pedidosData } = await supabaseAdmin
-    .from('pedidos_assistente')
-    .select('id, nome, linhas, valor_centavos, repasse_centavos, prazo_dias, criado_em, atualizado_em, pagamento_status, finalizado_em')
-    .eq('pagamento_status', 'pago')
-    .is('finalizado_em', null)
-    .order('criado_em', { ascending: true })
+async function garantirCards(
+  pedidoIds: string[],
+  orcamentoIds: string[],
+): Promise<Map<string, LinhaProducao>> {
+  const mapa = new Map<string, LinhaProducao>()
+  if (!pedidoIds.length && !orcamentoIds.length) return mapa
 
-  const pedidos = (pedidosData ?? []) as unknown as LinhaPedidoRow[]
-  if (!pedidos.length) return []
-
-  const ids = pedidos.map((p) => p.id)
-
-  // Fornecedor que assumiu cada pedido
-  const { data: ofertasData } = await supabaseAdmin
-    .from('ofertas_pedido_assistente')
-    .select('pedido_id, fornecedor_id, leads_fornecedores(nome)')
-    .in('pedido_id', ids)
-    .eq('status', 'aceita')
-
-  const porPedidoFornecedor = new Map<string, { id: string; nome: string | null }>()
-  for (const o of (ofertasData ?? []) as unknown as {
-    pedido_id: string
-    fornecedor_id: string
-    leads_fornecedores: { nome: string | null } | null
-  }[]) {
-    porPedidoFornecedor.set(o.pedido_id, {
-      id: o.fornecedor_id,
-      nome: o.leads_fornecedores?.nome ?? null,
-    })
+  const consultas: Promise<{ data: unknown }>[] = []
+  if (pedidoIds.length) {
+    consultas.push(
+      supabaseAdmin
+        .from('producao_pedido')
+        .select('id, pedido_id, orcamento_id, etapa, entrou_etapa_em, observacao')
+        .in('pedido_id', pedidoIds) as unknown as Promise<{ data: unknown }>,
+    )
+  }
+  if (orcamentoIds.length) {
+    consultas.push(
+      supabaseAdmin
+        .from('producao_pedido')
+        .select('id, pedido_id, orcamento_id, etapa, entrou_etapa_em, observacao')
+        .in('orcamento_id', orcamentoIds) as unknown as Promise<{ data: unknown }>,
+    )
   }
 
-  // Filtro do painel do fornecedor: só o que é dele.
-  const visiveis = fornecedorId
-    ? pedidos.filter((p) => porPedidoFornecedor.get(p.id)?.id === fornecedorId)
-    : pedidos
-  if (!visiveis.length) return []
-
-  const idsVisiveis = visiveis.map((p) => p.id)
-
-  const { data: prodData } = await supabaseAdmin
-    .from('producao_pedido')
-    .select('pedido_id, etapa, entrou_etapa_em, observacao')
-    .in('pedido_id', idsVisiveis)
-
-  const producao = new Map<string, { etapa: Etapa; entrou_etapa_em: string; observacao: string | null }>()
-  for (const r of (prodData ?? []) as unknown as {
-    pedido_id: string
-    etapa: Etapa
-    entrou_etapa_em: string
-    observacao: string | null
-  }[]) {
-    producao.set(r.pedido_id, r)
+  for (const r of await Promise.all(consultas)) {
+    for (const linha of (r.data ?? []) as LinhaProducao[]) {
+      mapa.set(linha.pedido_id ?? linha.orcamento_id!, linha)
+    }
   }
 
-  // Backfill: pedido pago sem card ainda.
-  const faltando = idsVisiveis.filter((id) => !producao.has(id))
+  const faltando = [
+    ...pedidoIds.filter((id) => !mapa.has(id)).map((id) => ({ pedido_id: id, orcamento_id: null })),
+    ...orcamentoIds.filter((id) => !mapa.has(id)).map((id) => ({ pedido_id: null, orcamento_id: id })),
+  ]
+
   if (faltando.length) {
     const agora = new Date().toISOString()
-    await supabaseAdmin.from('producao_pedido').insert(
-      faltando.map((pedido_id) => ({ pedido_id, etapa: 'planejamento', entrou_etapa_em: agora })),
-    )
+    const { data: criados } = await supabaseAdmin
+      .from('producao_pedido')
+      .insert(faltando.map((f) => ({ ...f, etapa: 'planejamento', entrou_etapa_em: agora })))
+      .select('id, pedido_id, orcamento_id, etapa, entrou_etapa_em, observacao')
+
     await supabaseAdmin.from('producao_eventos').insert(
-      faltando.map((pedido_id) => ({
-        pedido_id,
+      faltando.map((f) => ({
+        ...f,
         de_etapa: null,
         para_etapa: 'planejamento',
         autor: 'sistema',
         observacao: 'Pagamento confirmado — entrou na fila de produção',
       })),
     )
-    for (const id of faltando) {
-      producao.set(id, { etapa: 'planejamento', entrou_etapa_em: agora, observacao: null })
+
+    for (const linha of ((criados ?? []) as unknown as LinhaProducao[])) {
+      mapa.set(linha.pedido_id ?? linha.orcamento_id!, linha)
     }
   }
 
-  return visiveis.map((p) => {
-    const prod = producao.get(p.id)!
-    const linhas = Array.isArray(p.linhas) ? p.linhas : []
-    const { totalPecas, texto } = resumirLinhas(linhas)
+  return mapa
+}
+
+/**
+ * Monta o quadro.
+ *
+ * `fornecedorId` restringe ao que aquele fornecedor assumiu — e, nesse caso,
+ * orçamento avulso não entra: não tem fornecedor, é trabalho seu.
+ */
+export async function carregarQuadro(fornecedorId?: string): Promise<CardProducao[]> {
+  type PedidoRow = {
+    id: string
+    nome: string | null
+    linhas: LinhaPedido[] | null
+    valor_centavos: number | null
+    repasse_centavos: number | null
+    criado_em: string
+  }
+  type OrcamentoRow = {
+    id: string
+    numero: string
+    cliente_nome: string | null
+    itens: { descricao?: string; quantidade?: number }[] | null
+    total_centavos: number | null
+    criado_em: string
+  }
+
+  const [pedidosRes, orcamentosRes] = await Promise.all([
+    supabaseAdmin
+      .from('pedidos_assistente')
+      .select('id, nome, linhas, valor_centavos, repasse_centavos, criado_em')
+      .eq('pagamento_status', 'pago')
+      .is('finalizado_em', null)
+      .order('criado_em', { ascending: true }),
+    // Orçamento avulso não tem "finalizado" — sai do quadro quando você o
+    // arrasta pra Pronto e, daí em diante, ele simplesmente fica lá.
+    fornecedorId
+      ? Promise.resolve({ data: [] })
+      : supabaseAdmin
+          .from('orcamentos')
+          .select('id, numero, cliente_nome, itens, total_centavos, criado_em')
+          .eq('pagamento_status', 'pago')
+          .order('criado_em', { ascending: true }),
+  ])
+
+  const pedidos = ((pedidosRes.data ?? []) as unknown as PedidoRow[])
+  const orcamentos = ((orcamentosRes.data ?? []) as unknown as OrcamentoRow[])
+
+  // Fornecedor que assumiu cada pedido
+  const porPedidoFornecedor = new Map<string, { id: string; nome: string | null }>()
+  if (pedidos.length) {
+    const { data: ofertas } = await supabaseAdmin
+      .from('ofertas_pedido_assistente')
+      .select('pedido_id, fornecedor_id, leads_fornecedores(nome)')
+      .in('pedido_id', pedidos.map((p) => p.id))
+      .eq('status', 'aceita')
+
+    for (const o of (ofertas ?? []) as unknown as {
+      pedido_id: string
+      fornecedor_id: string
+      leads_fornecedores: { nome: string | null } | null
+    }[]) {
+      porPedidoFornecedor.set(o.pedido_id, { id: o.fornecedor_id, nome: o.leads_fornecedores?.nome ?? null })
+    }
+  }
+
+  const pedidosVisiveis = fornecedorId
+    ? pedidos.filter((p) => porPedidoFornecedor.get(p.id)?.id === fornecedorId)
+    : pedidos
+
+  const cards = await garantirCards(
+    pedidosVisiveis.map((p) => p.id),
+    orcamentos.map((o) => o.id),
+  )
+
+  const doPedido: CardProducao[] = pedidosVisiveis.map((p) => {
+    const c = cards.get(p.id)!
+    const { totalPecas, texto } = resumirLinhas(Array.isArray(p.linhas) ? p.linhas : [])
     const forn = porPedidoFornecedor.get(p.id) ?? null
     return {
+      cardId: c.id,
+      origem: 'assistente' as const,
       pedidoId: p.id,
-      etapa: prod.etapa,
-      entrouEtapaEm: prod.entrou_etapa_em,
-      observacao: prod.observacao,
+      orcamentoId: null,
+      etapa: c.etapa,
+      entrouEtapaEm: c.entrou_etapa_em,
+      observacao: c.observacao,
+      referencia: refCurta(p.id),
       clienteNome: p.nome,
       totalPecas,
       resumo: texto,
       valorCentavos: p.valor_centavos,
       repasseCentavos: p.repasse_centavos,
-      prazoDias: p.prazo_dias ?? null,
-      pagoEm: p.atualizado_em ?? null,
       criadoEm: p.criado_em,
       fornecedorId: forn?.id ?? null,
       fornecedorNome: forn?.nome ?? null,
-      diasNaEtapa: dias(prod.entrou_etapa_em),
+      diasNaEtapa: dias(c.entrou_etapa_em),
     }
   })
+
+  const doOrcamento: CardProducao[] = orcamentos.map((o) => {
+    const c = cards.get(o.id)!
+    const itens = Array.isArray(o.itens) ? o.itens : []
+    const totalPecas = itens.reduce((s, i) => s + (Number(i?.quantidade) || 0), 0)
+    const resumo = itens.length
+      ? itens.map((i) => `${Number(i?.quantidade) || 0}× ${i?.descricao ?? 'item'}`).join('\n')
+      : 'Sem itens detalhados'
+    return {
+      cardId: c.id,
+      origem: 'orcamento' as const,
+      pedidoId: null,
+      orcamentoId: o.id,
+      etapa: c.etapa,
+      entrouEtapaEm: c.entrou_etapa_em,
+      observacao: c.observacao,
+      referencia: o.numero,
+      clienteNome: o.cliente_nome,
+      totalPecas,
+      resumo,
+      valorCentavos: o.total_centavos,
+      // Orçamento avulso é seu: não há repasse a terceiro.
+      repasseCentavos: null,
+      criadoEm: o.criado_em,
+      fornecedorId: null,
+      fornecedorNome: null,
+      diasNaEtapa: dias(c.entrou_etapa_em),
+    }
+  })
+
+  return [...doPedido, ...doOrcamento]
 }
 
-export type ResultadoMover =
-  | { ok: true; etapa: Etapa }
-  | { ok: false; erro: string }
+export type ResultadoMover = { ok: true; etapa: Etapa } | { ok: false; erro: string }
 
 /**
  * Move um card de etapa e registra o evento.
@@ -204,69 +294,55 @@ export type ResultadoMover =
  * observação não pode zerar o contador de "parado há N dias".
  */
 export async function moverEtapa(params: {
-  pedidoId: string
+  cardId: string
   etapa: Etapa
   autor: 'admin' | 'fornecedor'
   autorId?: string | null
   autorNome?: string | null
   observacao?: string | null
-  // Quando presente, exige que o pedido seja deste fornecedor.
+  // Quando presente, exige que o card seja de um pedido deste fornecedor.
   exigirFornecedorId?: string
 }): Promise<ResultadoMover> {
   if (!ehEtapa(params.etapa)) return { ok: false, erro: 'Etapa desconhecida' }
 
-  const { data: pedido } = await supabaseAdmin
-    .from('pedidos_assistente')
-    .select('id, pagamento_status, finalizado_em')
-    .eq('id', params.pedidoId)
-    .maybeSingle()
+  const { data: card } = await supabaseAdmin
+    .from('producao_pedido')
+    .select('id, pedido_id, orcamento_id, etapa')
+    .eq('id', params.cardId)
+    .maybeSingle<{ id: string; pedido_id: string | null; orcamento_id: string | null; etapa: Etapa }>()
 
-  if (!pedido) return { ok: false, erro: 'Pedido não encontrado' }
-  if (pedido.pagamento_status !== 'pago') {
-    return { ok: false, erro: 'Pedido ainda não foi pago' }
-  }
+  if (!card) return { ok: false, erro: 'Card não encontrado' }
 
   if (params.exigirFornecedorId) {
+    // Fornecedor não mexe em orçamento avulso — aquilo não passou por oferta.
+    if (!card.pedido_id) return { ok: false, erro: 'Este pedido não é seu' }
     const { data: oferta } = await supabaseAdmin
       .from('ofertas_pedido_assistente')
       .select('id')
-      .eq('pedido_id', params.pedidoId)
+      .eq('pedido_id', card.pedido_id)
       .eq('fornecedor_id', params.exigirFornecedorId)
       .eq('status', 'aceita')
       .maybeSingle()
     if (!oferta) return { ok: false, erro: 'Este pedido não é seu' }
   }
 
-  const { data: atual } = await supabaseAdmin
-    .from('producao_pedido')
-    .select('etapa')
-    .eq('pedido_id', params.pedidoId)
-    .maybeSingle()
-
-  const de = (atual?.etapa as Etapa | undefined) ?? null
-  const mudou = de !== params.etapa
+  const mudou = card.etapa !== params.etapa
   const agora = new Date().toISOString()
 
-  const patch: Record<string, unknown> = {
-    pedido_id: params.pedidoId,
-    etapa: params.etapa,
-    atualizado_em: agora,
-  }
+  const patch: Record<string, unknown> = { etapa: params.etapa, atualizado_em: agora }
   if (mudou) patch.entrou_etapa_em = agora
   if (params.observacao !== undefined) patch.observacao = params.observacao || null
 
-  const { error } = await supabaseAdmin
-    .from('producao_pedido')
-    .upsert(patch, { onConflict: 'pedido_id' })
-
+  const { error } = await supabaseAdmin.from('producao_pedido').update(patch).eq('id', card.id)
   if (error) return { ok: false, erro: 'Não foi possível salvar' }
 
   // Evento só quando a etapa muda. Editar a observação não é movimento —
   // gravar isso encheria a linha do tempo de ruído.
   if (mudou) {
     await supabaseAdmin.from('producao_eventos').insert({
-      pedido_id: params.pedidoId,
-      de_etapa: de,
+      pedido_id: card.pedido_id,
+      orcamento_id: card.orcamento_id,
+      de_etapa: card.etapa,
       para_etapa: params.etapa,
       autor: params.autor,
       autor_id: params.autorId ?? null,
@@ -278,13 +354,24 @@ export async function moverEtapa(params: {
   return { ok: true, etapa: params.etapa }
 }
 
-/** Linha do tempo de um pedido, do mais recente para o mais antigo. */
-export async function timelineProducao(pedidoId: string): Promise<EventoProducao[]> {
-  const { data } = await supabaseAdmin
+/** Linha do tempo de um card, do mais recente para o mais antigo. */
+export async function timelineProducao(cardId: string): Promise<EventoProducao[]> {
+  const { data: card } = await supabaseAdmin
+    .from('producao_pedido')
+    .select('pedido_id, orcamento_id')
+    .eq('id', cardId)
+    .maybeSingle<{ pedido_id: string | null; orcamento_id: string | null }>()
+
+  if (!card) return []
+
+  const consulta = supabaseAdmin
     .from('producao_eventos')
     .select('id, de_etapa, para_etapa, autor, autor_nome, observacao, criado_em')
-    .eq('pedido_id', pedidoId)
     .order('criado_em', { ascending: false })
+
+  const { data } = card.pedido_id
+    ? await consulta.eq('pedido_id', card.pedido_id)
+    : await consulta.eq('orcamento_id', card.orcamento_id!)
 
   return ((data ?? []) as unknown as {
     id: string
@@ -303,4 +390,13 @@ export async function timelineProducao(pedidoId: string): Promise<EventoProducao
     observacao: e.observacao,
     criadoEm: e.criado_em,
   }))
+}
+
+/**
+ * Card do fornecedor a partir do pedido — o painel dele não conhece cardId.
+ * Cria a linha se ainda não existir, pelo mesmo caminho do quadro.
+ */
+export async function cardIdDoPedido(pedidoId: string): Promise<string | null> {
+  const cards = await garantirCards([pedidoId], [])
+  return cards.get(pedidoId)?.id ?? null
 }
