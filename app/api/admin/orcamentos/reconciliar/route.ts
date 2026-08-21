@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { buscarCobranca, mapearStatusAsaas } from '@/app/lib/asaas-payments'
+import { marcarParcelaPagaPorAsaas } from '@/app/lib/orcamento-parcelas'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -42,11 +43,13 @@ export async function GET(req: NextRequest) {
   }
   const somenteConferir = req.nextUrl.searchParams.get('somenteConferir') === '1'
 
+  // Varre PARCELAS, nao orcamentos: no 50/50 cada uma tem cobranca propria e
+  // pode ter sido paga sem que a outra tenha.
   const { data: pendentes, error } = await supabaseAdmin
-    .from('orcamentos')
-    .select('id, numero, cliente_nome, total_centavos, pagamento_status, asaas_payment_id')
+    .from('orcamento_cobrancas')
+    .select('id, parcela, rotulo, valor_centavos, asaas_payment_id, orcamentos(numero, cliente_nome)')
     .not('asaas_payment_id', 'is', null)
-    .or('pagamento_status.is.null,pagamento_status.neq.pago')
+    .eq('status', 'gerada')
     .order('criado_em', { ascending: true })
     .limit(100)
 
@@ -56,22 +59,26 @@ export async function GET(req: NextRequest) {
   let marcados = 0
   let somaPagaCentavos = 0
 
-  for (const o of pendentes ?? []) {
+  for (const o of (pendentes ?? []) as unknown as {
+    id: string
+    parcela: number
+    rotulo: string
+    valor_centavos: number
+    asaas_payment_id: string
+    orcamentos: { numero: string; cliente_nome: string | null } | null
+  }[]) {
     const base = {
-      numero: o.numero as string,
-      cliente: (o.cliente_nome as string | null) ?? null,
-      totalCentavos: (o.total_centavos as number | null) ?? null,
+      numero: `${o.orcamentos?.numero ?? '—'}${o.rotulo === 'integral' ? '' : ` · ${o.rotulo}`}`,
+      cliente: o.orcamentos?.cliente_nome ?? null,
+      totalCentavos: o.valor_centavos,
     }
     try {
-      const cobranca = await buscarCobranca(o.asaas_payment_id as string)
+      const cobranca = await buscarCobranca(o.asaas_payment_id)
       const interno = mapearStatusAsaas(cobranca.status)
 
       if (interno === 'pago') {
         if (!somenteConferir) {
-          await supabaseAdmin
-            .from('orcamentos')
-            .update({ pagamento_status: 'pago', pago_em: new Date().toISOString() })
-            .eq('id', o.id)
+          await marcarParcelaPagaPorAsaas(o.asaas_payment_id)
         }
         marcados++
         somaPagaCentavos += base.totalCentavos ?? 0
