@@ -11,11 +11,15 @@
 //
 // Dinheiro: inputs em R$ (texto pt-BR), convertidos pra CENTAVOS antes do
 // POST — o server recalcula subtotal/total e é a fonte da verdade.
+//
+// 21/08/2026 — duas abas. "Novo" é este form; "Histórico" é a tela do que já
+// foi emitido, com as parcelas e a cobrança do vencido.
 // ============================================================================
 
 import { useMemo, useState } from 'react'
 import dynamic from 'next/dynamic'
 import type { OrcamentoPDFDados } from '@/app/components/pdf/OrcamentoPDF'
+import HistoricoOrcamentos from './HistoricoOrcamentos'
 
 const BaixarPDF = dynamic(() => import('./BaixarOrcamentoPDF'), {
   ssr: false,
@@ -71,7 +75,15 @@ const inputCls =
   'w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75] bg-white'
 const labelCls = 'block text-xs font-medium text-gray-500 mb-1'
 
+type Modalidade = 'integral' | 'sinal_50'
+
 export default function OrcamentosAdmin() {
+  const [aba, setAba] = useState<'novo' | 'historico'>('novo')
+  const [modalidade, setModalidade] = useState<Modalidade>('integral')
+  // Desconto PIX vira escolha por orçamento (21/08/2026). Marcado por padrão
+  // no integral porque é o que você vinha fazendo desde julho — mas agora dá
+  // pra desmarcar quando a margem não comporta.
+  const [descontoPix, setDescontoPix] = useState(true)
   const [clienteNome, setClienteNome] = useState('')
   const [clienteDocumento, setClienteDocumento] = useState('')
   const [clienteEmail, setClienteEmail] = useState('')
@@ -206,6 +218,10 @@ export default function OrcamentosAdmin() {
           data_orcamento: dataOrcamento || undefined,
           validade: validade || undefined,
           gerar_cobranca: gerarCobranca,
+          modalidade,
+          // No 50/50 o server zera o desconto de qualquer jeito; mando o
+          // estado real pra não existir duas versões da mesma regra.
+          desconto_pix: modalidade === 'integral' && descontoPix,
         }),
       })
       const corpo = await resposta.json().catch(() => null)
@@ -227,6 +243,8 @@ export default function OrcamentosAdmin() {
     setErro(null)
     setCobrancaAviso(null)
     setGerarCobranca(true)
+    setModalidade('integral')
+    setDescontoPix(true)
     setClienteNome('')
     setClienteDocumento('')
     setClienteEmail('')
@@ -245,7 +263,8 @@ export default function OrcamentosAdmin() {
   }
 
   // ---- tela de sucesso ----------------------------------------------------
-  if (gerado) {
+  function telaSucesso() {
+    if (!gerado) return null
     return (
       <div className="bg-white border border-gray-200 rounded-2xl p-6 text-center">
         <div className="text-sm text-gray-500">Orçamento gerado</div>
@@ -296,13 +315,8 @@ export default function OrcamentosAdmin() {
   }
 
   // ---- form ---------------------------------------------------------------
-  return (
-    <div>
-      <h1 className="text-xl font-semibold text-gray-900">Orçamentos</h1>
-      <p className="text-sm text-gray-500 mt-1 mb-6">
-        Gere um orçamento avulso em PDF com a identidade da Confeccione.
-      </p>
-
+  function telaForm() {
+    return (
       <div className="bg-white border border-gray-200 rounded-2xl p-5 space-y-5">
         {/* Cliente */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -533,20 +547,87 @@ export default function OrcamentosAdmin() {
         </div>
 
         {/* Cobrança Asaas */}
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={gerarCobranca}
-            onChange={(e) => setGerarCobranca(e.target.checked)}
-            className="mt-0.5 accent-[#1D9E75]"
-          />
-          <span className="text-sm text-gray-700">
-            Gerar cobrança PIX no Asaas (QR + página de cópia no PDF)
-            <span className="block text-xs text-gray-400">
-              Exige nome e CPF/CNPJ do cliente. PIX até o vencimento tem 3% de desconto.
+        <div className="border-t border-gray-100 pt-4 space-y-3">
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={gerarCobranca}
+              onChange={(e) => setGerarCobranca(e.target.checked)}
+              className="mt-0.5 accent-[#1D9E75]"
+            />
+            <span className="text-sm text-gray-700">
+              Gerar cobrança PIX no Asaas (QR + página de cópia no PDF)
+              <span className="block text-xs text-gray-400">
+                Exige nome e CPF/CNPJ do cliente.
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+
+          {gerarCobranca ? (
+            <div className="pl-6 space-y-3">
+              {/* Modalidade */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {(
+                  [
+                    {
+                      id: 'integral' as Modalidade,
+                      titulo: 'Pagamento integral',
+                      ajuda: 'Uma cobrança só, do total.',
+                      valor: calculo.total,
+                    },
+                    {
+                      id: 'sinal_50' as Modalidade,
+                      titulo: 'Sinal de 50% + final',
+                      ajuda: 'Cobra a metade agora. A final você libera depois, com o sinal pago.',
+                      valor: Math.ceil(calculo.total / 2),
+                    },
+                  ] as const
+                ).map((op) => (
+                  <button
+                    key={op.id}
+                    type="button"
+                    onClick={() => setModalidade(op.id)}
+                    className={`text-left rounded-xl border px-3 py-2.5 transition-colors ${
+                      modalidade === op.id
+                        ? 'border-[#1D9E75] bg-[#1D9E75]/5'
+                        : 'border-gray-200 hover:border-gray-300 bg-white'
+                    }`}
+                  >
+                    <div className="text-sm font-medium text-gray-800">{op.titulo}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{op.ajuda}</div>
+                    <div className="text-xs text-gray-600 mt-1">
+                      Cobra agora <strong>{brl(op.valor)}</strong>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {/* Desconto PIX — só existe no integral */}
+              {modalidade === 'integral' ? (
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={descontoPix}
+                    onChange={(e) => setDescontoPix(e.target.checked)}
+                    className="mt-0.5 accent-[#1D9E75]"
+                  />
+                  <span className="text-sm text-gray-700">
+                    Dar 3% de desconto no PIX até o vencimento
+                    <span className="block text-xs text-gray-400">
+                      Cliente paga {brl(Math.round(calculo.total * 0.97))} em vez de{' '}
+                      {brl(calculo.total)}.
+                    </span>
+                  </span>
+                </label>
+              ) : (
+                <div className="text-xs text-gray-400 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2">
+                  No 50/50 não tem desconto: sinal e parcela final saem cheios. O desconto é o
+                  prêmio de quem paga tudo de uma vez.
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
 
         {/* Totais + ação */}
         <div className="border-t border-gray-100 pt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -572,6 +653,39 @@ export default function OrcamentosAdmin() {
           </div>
         )}
       </div>
+    )
+  }
+
+  return (
+    <div>
+      <h1 className="text-xl font-semibold text-gray-900">Orçamentos</h1>
+      <p className="text-sm text-gray-500 mt-1 mb-4">
+        Emita um orçamento avulso em PDF, cobre pelo PIX e acompanhe o que já foi emitido.
+      </p>
+
+      <div className="flex items-center gap-1 mb-5 border-b border-gray-200">
+        {(
+          [
+            { id: 'novo' as const, texto: 'Novo orçamento' },
+            { id: 'historico' as const, texto: 'Histórico e cobranças' },
+          ]
+        ).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setAba(t.id)}
+            className={`text-sm px-3 py-2 -mb-px border-b-2 transition-colors ${
+              aba === t.id
+                ? 'border-[#1D9E75] text-gray-900 font-medium'
+                : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            {t.texto}
+          </button>
+        ))}
+      </div>
+
+      {aba === 'historico' ? <HistoricoOrcamentos /> : gerado ? telaSucesso() : telaForm()}
     </div>
   )
 }
