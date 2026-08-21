@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getFornecedorAtual } from '@/app/lib/auth-server'
-import { moverEtapa, ehEtapa } from '@/app/lib/producao'
+import { moverEtapa, ehEtapa, cardIdDoPedido } from '@/app/lib/producao'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -33,8 +33,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ erro: 'Dados inválidos' }, { status: 400 })
   }
 
+  // O painel do fornecedor conhece o pedido, nao o card. Resolve aqui (e cria
+  // a linha de producao se ainda nao existir).
+  const cardId = await cardIdDoPedido(corpo.data.pedidoId)
+  if (!cardId) return NextResponse.json({ erro: 'Pedido nao encontrado' }, { status: 404 })
+
   const r = await moverEtapa({
-    pedidoId: corpo.data.pedidoId,
+    cardId,
     etapa: corpo.data.etapa,
     autor: 'fornecedor',
     autorId: fornecedor.id,
