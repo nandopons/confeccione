@@ -1,0 +1,31 @@
+# Quebra de linha — o repositório manda, não a máquina.
+#
+# POR QUE ISTO EXISTE
+# O clone em C:\Users\pc\dev\confeccione mostrava 25 arquivos modificados com
+# 8.970 inserções e 8.969 remoções: cada linha de cada arquivo "mudou". Não
+# havia mudança nenhuma — era CRLF (Windows) contra LF do repositório. Um diff
+# assim é pior que inútil: esconde a alteração de verdade no meio de milhares
+# de linhas falsas, e faz qualquer commit virar uma reescrita do projeto.
+#
+# `text=auto eol=lf` resolve na raiz: git normaliza pra LF ao gravar e entrega
+# LF no checkout, em qualquer sistema operacional. Node, Next.js, VS Code e o
+# terminal do Windows leem LF sem reclamar — o CRLF só existia por hábito de
+# editor antigo.
+
+* text=auto eol=lf
+
+# Binário não é texto: nenhuma conversão, nunca. Sem estas linhas, uma imagem
+# que por acaso pareça texto pro git sai corrompida do checkout.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.ico  binary
+*.webp binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.pdf   binary
+
+# SVG é texto (XML) de propósito — dá diff legível e merge possível.
+*.svg text eol=lf
