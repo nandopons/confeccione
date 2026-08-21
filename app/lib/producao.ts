@@ -54,6 +54,9 @@ export type CardProducao = {
   // Só em origem 'assistente'
   fornecedorId: string | null
   fornecedorNome: string | null
+  // Arquivamento
+  arquivadoEm: string | null
+  arquivadoMotivo: string | null
   // Derivado
   diasNaEtapa: number
 }
@@ -86,7 +89,12 @@ type LinhaProducao = {
   etapa: Etapa
   entrou_etapa_em: string
   observacao: string | null
+  arquivado_em: string | null
+  arquivado_motivo: string | null
 }
+
+const COLUNAS_CARD =
+  'id, pedido_id, orcamento_id, etapa, entrou_etapa_em, observacao, arquivado_em, arquivado_motivo'
 
 /**
  * Garante a linha de produção das origens passadas e devolve todas.
@@ -95,6 +103,9 @@ type LinhaProducao = {
  * que JÁ estavam pagos antes desta funcionalidade existir aparecerem sem
  * migração de dados, e cobre também qualquer pagamento que o webhook tenha
  * perdido e a reconciliação tenha resgatado depois.
+ *
+ * Devolve TAMBÉM os arquivados, de propósito: é a linha arquivada que faz o
+ * `faltando` abaixo não recriar o card. Quem filtra é `carregarQuadro`.
  */
 async function garantirCards(
   pedidoIds: string[],
@@ -108,7 +119,7 @@ async function garantirCards(
     consultas.push(
       supabaseAdmin
         .from('producao_pedido')
-        .select('id, pedido_id, orcamento_id, etapa, entrou_etapa_em, observacao')
+        .select(COLUNAS_CARD)
         .in('pedido_id', pedidoIds) as unknown as Promise<{ data: unknown }>,
     )
   }
@@ -116,7 +127,7 @@ async function garantirCards(
     consultas.push(
       supabaseAdmin
         .from('producao_pedido')
-        .select('id, pedido_id, orcamento_id, etapa, entrou_etapa_em, observacao')
+        .select(COLUNAS_CARD)
         .in('orcamento_id', orcamentoIds) as unknown as Promise<{ data: unknown }>,
     )
   }
@@ -137,7 +148,7 @@ async function garantirCards(
     const { data: criados } = await supabaseAdmin
       .from('producao_pedido')
       .insert(faltando.map((f) => ({ ...f, etapa: 'planejamento', entrou_etapa_em: agora })))
-      .select('id, pedido_id, orcamento_id, etapa, entrou_etapa_em, observacao')
+      .select(COLUNAS_CARD)
 
     await supabaseAdmin.from('producao_eventos').insert(
       faltando.map((f) => ({
@@ -162,8 +173,15 @@ async function garantirCards(
  *
  * `fornecedorId` restringe ao que aquele fornecedor assumiu — e, nesse caso,
  * orçamento avulso não entra: não tem fornecedor, é trabalho seu.
+ *
+ * `verArquivados` inverte o filtro e devolve SÓ os arquivados — é a lista da
+ * gaveta, pra você conferir o que tirou e desarquivar se errou. Fornecedor
+ * nunca vê arquivado: card fora do quadro não é trabalho dele.
  */
-export async function carregarQuadro(fornecedorId?: string): Promise<CardProducao[]> {
+export async function carregarQuadro(
+  fornecedorId?: string,
+  verArquivados = false,
+): Promise<CardProducao[]> {
   type PedidoRow = {
     id: string
     nome: string | null
@@ -229,7 +247,12 @@ export async function carregarQuadro(fornecedorId?: string): Promise<CardProduca
     orcamentos.map((o) => o.id),
   )
 
-  const doPedido: CardProducao[] = pedidosVisiveis.map((p) => {
+  // Fornecedor nunca enxerga a gaveta — card arquivado saiu do quadro, e pra
+  // ele isso é simplesmente trabalho que não existe mais.
+  const querArquivado = verArquivados && !fornecedorId
+  const naGaveta = (id: string) => Boolean(cards.get(id)?.arquivado_em) === querArquivado
+
+  const doPedido: CardProducao[] = pedidosVisiveis.filter((p) => naGaveta(p.id)).map((p) => {
     const c = cards.get(p.id)!
     const { totalPecas, texto } = resumirLinhas(Array.isArray(p.linhas) ? p.linhas : [])
     const forn = porPedidoFornecedor.get(p.id) ?? null
@@ -250,11 +273,13 @@ export async function carregarQuadro(fornecedorId?: string): Promise<CardProduca
       criadoEm: p.criado_em,
       fornecedorId: forn?.id ?? null,
       fornecedorNome: forn?.nome ?? null,
+      arquivadoEm: c.arquivado_em,
+      arquivadoMotivo: c.arquivado_motivo,
       diasNaEtapa: dias(c.entrou_etapa_em),
     }
   })
 
-  const doOrcamento: CardProducao[] = orcamentos.map((o) => {
+  const doOrcamento: CardProducao[] = orcamentos.filter((o) => naGaveta(o.id)).map((o) => {
     const c = cards.get(o.id)!
     const itens = Array.isArray(o.itens) ? o.itens : []
     const totalPecas = itens.reduce((s, i) => s + (Number(i?.quantidade) || 0), 0)
@@ -279,6 +304,8 @@ export async function carregarQuadro(fornecedorId?: string): Promise<CardProduca
       criadoEm: o.criado_em,
       fornecedorId: null,
       fornecedorNome: null,
+      arquivadoEm: c.arquivado_em,
+      arquivadoMotivo: c.arquivado_motivo,
       diasNaEtapa: dias(c.entrou_etapa_em),
     }
   })
@@ -418,11 +445,24 @@ export async function moverEtapa(params: {
 
   const { data: card } = await supabaseAdmin
     .from('producao_pedido')
-    .select('id, pedido_id, orcamento_id, etapa')
+    .select('id, pedido_id, orcamento_id, etapa, arquivado_em')
     .eq('id', params.cardId)
-    .maybeSingle<{ id: string; pedido_id: string | null; orcamento_id: string | null; etapa: Etapa }>()
+    .maybeSingle<{
+      id: string
+      pedido_id: string | null
+      orcamento_id: string | null
+      etapa: Etapa
+      arquivado_em: string | null
+    }>()
 
   if (!card) return { ok: false, erro: 'Card não encontrado' }
+
+  // Card arquivado não anda. Sem esta trava, uma aba velha aberta no quadro
+  // (ou o painel do fornecedor) moveria um card que você tirou fora — e o
+  // movimento dispararia aviso ao cliente de um pedido encerrado.
+  if (card.arquivado_em) {
+    return { ok: false, erro: 'Card arquivado — desarquive antes de mover' }
+  }
 
   if (params.exigirFornecedorId) {
     // Fornecedor não mexe em orçamento avulso — aquilo não passou por oferta.
@@ -475,6 +515,52 @@ export async function moverEtapa(params: {
   }
 
   return { ok: true, etapa: params.etapa }
+}
+
+/**
+ * Tira o card do quadro sem fazê-lo percorrer as oito etapas — ou o traz de
+ * volta (`arquivar: false`).
+ *
+ * POR QUE ARQUIVAR E NÃO APAGAR
+ * Apagar a linha não resolveria nada: `garantirCards` recria o card de qualquer
+ * pedido pago que não tenha linha, então o card voltaria na próxima carga do
+ * quadro. A linha arquivada é justamente a lápide que impede isso. De quebra,
+ * o histórico em `producao_eventos` continua de pé — o pedido existiu, foi
+ * produzido, e daqui a seis meses alguém vai querer saber quando.
+ *
+ * NÃO DISPARA AVISO AO CLIENTE, nem grava evento de etapa: arquivar não é
+ * movimento de fábrica. Mandar "seu pedido está pronto" pra alguém que recebeu
+ * em junho seria pior do que o quadro sujo.
+ */
+export async function arquivarCard(params: {
+  cardId: string
+  arquivar: boolean
+  motivo?: string | null
+}): Promise<ResultadoMover> {
+  const { data: card } = await supabaseAdmin
+    .from('producao_pedido')
+    .select('id, etapa')
+    .eq('id', params.cardId)
+    .maybeSingle<{ id: string; etapa: Etapa }>()
+
+  if (!card) return { ok: false, erro: 'Card não encontrado' }
+
+  const agora = new Date().toISOString()
+  const { error } = await supabaseAdmin
+    .from('producao_pedido')
+    .update({
+      arquivado_em: params.arquivar ? agora : null,
+      arquivado_motivo: params.arquivar ? (params.motivo?.trim() || null) : null,
+      atualizado_em: agora,
+      // Desarquivar zera o contador: o card volta "de hoje", senão reapareceria
+      // já vermelho de 90 dias e roubaria a atenção de quem está atrasado
+      // de verdade.
+      ...(params.arquivar ? {} : { entrou_etapa_em: agora }),
+    })
+    .eq('id', card.id)
+
+  if (error) return { ok: false, erro: 'Não foi possível salvar' }
+  return { ok: true, etapa: card.etapa }
 }
 
 /** Linha do tempo de um card, do mais recente para o mais antigo. */
