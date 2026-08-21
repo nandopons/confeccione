@@ -26,6 +26,7 @@ import { mapearStatusAsaas, type AsaasPaymentStatus } from '@/app/lib/asaas-paym
 import { PLANOS_CONFIG, creditarLoteAvulso, type Plano } from '@/app/lib/planos'
 import { avisoOficial } from '@/app/lib/whatsapp-notify'
 import { revelarContatosPedidoPago } from '@/app/lib/pedido-assistente-oferta'
+import { marcarParcelaPagaPorAsaas } from '@/app/lib/orcamento-parcelas'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -373,17 +374,10 @@ async function marcarOrcamentoAvulsoPago(
   payment: NonNullable<AsaasWebhookPayload['payment']>
 ): Promise<void> {
   try {
-    const { data: antes } = await supabase
-      .from('orcamentos')
-      .select('id, pagamento_status')
-      .eq('asaas_payment_id', payment.id)
-      .maybeSingle<{ id: string; pagamento_status: string | null }>()
-    if (!antes || antes.pagamento_status === 'pago') return
-
-    await supabase
-      .from('orcamentos')
-      .update({ pagamento_status: 'pago', pago_em: new Date().toISOString() })
-      .eq('id', antes.id)
+    // Desde 21/08/2026 as cobrancas de orcamento vivem em orcamento_cobrancas
+    // (o 50/50 tem duas). A funcao marca a PARCELA e recalcula o
+    // pagamento_status do orcamento — que e o que libera a producao.
+    await marcarParcelaPagaPorAsaas(payment.id)
   } catch (err) {
     console.error('[asaas-webhook] marcar orcamento avulso pago falhou:', err)
   }
