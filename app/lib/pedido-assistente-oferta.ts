@@ -26,7 +26,8 @@ import { pedidoTemListaAbertaIncompleta } from '@/app/lib/listas-externas'
 import { supabaseAdmin } from './supabase-server'
 import { registrarVersaoOrcamento } from './orcamento-versoes'
 import { enviarMensagem } from './zapi'
-import { avisoOficial, notificarOfertaFornecedor } from './whatsapp-notify'
+import { avisoOficial, notificarOfertaFornecedor, enviarResumoPdfPedido } from './whatsapp-notify'
+import { refPedido } from './mensagens-whatsapp'
 import { SITE_URL, ofertaFornecedorUrl } from './url'
 import { emailOfertaPedidoAssistente, emailFornecedorDefinido } from './email'
 import { enviarEmailOrcamentoFinal } from './email-pedido'
@@ -420,6 +421,10 @@ async function notificarAceiteEContatos(ofertaId: string, pedidoId: string, forn
 
     const pago = pedido.pagamento_status === 'pago'
     const linkOrcamento = `${SITE_URL}/fornecedor/oferta/${ofertaId}/orcamento`
+    // O PDF sai como DOCUMENTO logo abaixo (enviarResumoPdfPedido), mas isso
+    // só funciona com a janela de 24h aberta. O link no texto é a garantia de
+    // entrega no caso fechado — e não custa nada quando o arquivo chega.
+    const linkResumo = `${SITE_URL}/api/pedido/assistente/${pedidoId}/resumo-pdf`
     const local = [pedido.cidade, pedido.uf].filter(Boolean).join('/')
     const destino = [local, pedido.cep ? `CEP ${pedido.cep}` : ''].filter(Boolean).join(' — ')
 
@@ -432,6 +437,7 @@ async function notificarAceiteEContatos(ofertaId: string, pedidoId: string, forn
         (pedido.telefone ? `📱 ${telBR(pedido.telefone)}\n` : '') +
         (pedido.email ? `✉️ ${pedido.email}\n` : '') +
         (destino ? `📍 ${destino}\n` : '') +
+        `\n📄 Ficha técnica do pedido (modelos, grade, artes):\n${linkResumo}\n` +
         (pago
           ? `\n✅ Este pedido já está pago — pode iniciar a produção assim que combinar os detalhes.`
           : `\n💰 Depois de alinhar, *defina o orçamento final* (produtos + frete) aqui — é assim que o cliente paga com segurança pela Confeccione:\n${linkOrcamento}\n\n⚠️ Reforce com o cliente: o orçamento e o pagamento precisam ser feitos pela plataforma. Combinar e cobrar por fora tira o suporte e a garantia de pagamento da Confeccione (e é contra os termos de uso).`)
@@ -451,7 +457,8 @@ async function notificarAceiteEContatos(ofertaId: string, pedidoId: string, forn
         `Quem vai atender seu pedido:\n` +
         `🏭 ${forn.nome ?? 'Confecção parceira'}\n` +
         (forn.whatsapp ? `📱 ${telBR(forn.whatsapp)}\n` : '') +
-        `\nVocê já pode combinar os detalhes (cores, prazos, dúvidas) direto com a confecção.\n\n` +
+        `\nVocê já pode combinar os detalhes (cores, prazos, dúvidas) direto com a confecção.\n` +
+        `\n📄 Resumo do seu pedido em PDF:\n${linkResumo}\n\n` +
         (pago
           ? `✅ Seu pagamento já está confirmado e garantido pela Confeccione até você aprovar o recebimento.`
           : `⚠️ *Importante:* peça pro fornecedor lançar o orçamento e finalize o pagamento aqui pela Confeccione — não fora da plataforma. Assim a gente dá suporte ao seu pedido do início ao fim e garante seu dinheiro até você confirmar que recebeu tudo certinho.`)
@@ -463,6 +470,29 @@ async function notificarAceiteEContatos(ofertaId: string, pedidoId: string, forn
         caminhoBotao: `visualizador/${pedidoId}`,
       })
     }
+    // → o ARQUIVO em si, pros dois lados. Depois dos textos de propósito: o
+    // documento chega como continuação de uma mensagem que explica o que é,
+    // e não como um PDF solto caindo do nada.
+    await enviarResumoPdfPedido({
+      pedidoId,
+      destinos: [
+        ...(forn?.whatsapp
+          ? [{
+              telefone: forn.whatsapp,
+              nome: forn.nome ?? null,
+              legenda: `Ficha técnica do pedido ${refPedido(pedidoId)} — modelos, grade de tamanhos, artes e endereço de entrega.`,
+            }]
+          : []),
+        ...(pedido.telefone
+          ? [{
+              telefone: pedido.telefone,
+              nome: pedido.nome ?? null,
+              legenda: `Resumo do seu pedido ${refPedido(pedidoId)}. Confira a grade e as artes — se algo estiver diferente, ajuste no site antes da produção começar.`,
+            }]
+          : []),
+      ],
+    })
+
     if (pedido.email && forn) {
       try {
         await emailFornecedorDefinido({

@@ -11,7 +11,15 @@
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
-import { enviarTemplate, enviarTexto, normalizarWaId, type EnvioResultado } from './whatsapp-cloud'
+import {
+  enviarTemplate,
+  enviarTexto,
+  enviarMidiaPorId,
+  uploadMidia,
+  normalizarWaId,
+  type EnvioResultado,
+} from './whatsapp-cloud'
+import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
 
 async function vincularContato(waId: string): Promise<{ clienteId: string | null; fornecedorId: string | null }> {
   const last8 = waId.slice(-8)
@@ -255,6 +263,124 @@ async function janela24hAberta(waId: string): Promise<boolean> {
     return (count ?? 0) > 0
   } catch {
     return false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Resumo do pedido em PDF, como DOCUMENTO no WhatsApp
+//
+// POR QUE ISTO NÃO É UM LINK NO BOTÃO wa.me
+// O atalho de WhatsApp que o fornecedor clica é um `wa.me/...?text=`, e esse
+// link só carrega TEXTO — não existe parâmetro de anexo. Arquivo de verdade só
+// sai pelo número oficial, pela Cloud API. É o que esta função faz.
+//
+// A JANELA DE 24h MANDA
+// Mídia livre só é aceita quando o contato falou com a gente nas últimas 24h.
+// Fora disso a Meta recusa, e não existe fallback: template com cabeçalho de
+// documento precisaria de aprovação própria. Por isso a função devolve `false`
+// em vez de fingir sucesso — quem chama já mandou o link do PDF no texto do
+// aviso, e é esse link que garante a entrega no caso fechado.
+//
+// GERA UMA VEZ, ENVIA PRA VÁRIOS
+// O PDF do pedido é o mesmo pro fornecedor e pro cliente. Gerar e subir duas
+// vezes seria pagar dobrado por um arquivo idêntico — o media id da Meta é
+// reutilizável entre destinatários do mesmo número.
+// ---------------------------------------------------------------------------
+type DestinoResumo = { telefone: string; nome: string | null; legenda: string }
+
+export async function enviarResumoPdfPedido(params: {
+  pedidoId: string
+  destinos: DestinoResumo[]
+}): Promise<{ enviados: number; total: number }> {
+  const total = params.destinos.length
+  if (!total) return { enviados: 0, total: 0 }
+
+  try {
+    // Só vale gerar o PDF se ALGUÉM puder receber — a geração lê imagens e
+    // monta o documento inteiro, é a parte cara.
+    const abertos: { waId: string; destino: DestinoResumo }[] = []
+    for (const destino of params.destinos) {
+      const waId = normalizarWaId(destino.telefone)
+      if (waId.replace(/\D/g, '').length < 10) continue
+      if (await janela24hAberta(waId)) abertos.push({ waId, destino })
+    }
+    if (!abertos.length) return { enviados: 0, total }
+
+    const { data } = await supabaseAdmin
+      .from('pedidos_assistente')
+      .select('id, codigo, nome, linhas, prazo_dias, cep, numero, complemento, logradouro, bairro, cidade, uf, mockups, imagens')
+      .eq('id', params.pedidoId)
+      .maybeSingle<Record<string, unknown>>()
+    if (!data) return { enviados: 0, total }
+
+    const pedido: ResumoPedido = {
+      id: String(data.id),
+      nome: (data.nome as string | null) ?? null,
+      linhas: Array.isArray(data.linhas) ? (data.linhas as ResumoPedido['linhas']) : [],
+      prazoDias: (data.prazo_dias as number | null) ?? null,
+      cep: (data.cep as string | null) ?? null,
+      numero: (data.numero as string | null) ?? null,
+      complemento: (data.complemento as string | null) ?? null,
+      logradouro: (data.logradouro as string | null) ?? null,
+      bairro: (data.bairro as string | null) ?? null,
+      cidade: (data.cidade as string | null) ?? null,
+      uf: (data.uf as string | null) ?? null,
+      codigo: (data.codigo as string | null) ?? null,
+      mockups: (data.mockups as ResumoPedido['mockups']) ?? null,
+      imagens: Array.isArray(data.imagens) ? (data.imagens as string[]) : null,
+    }
+
+    const bytes = await gerarResumoPedidoPdf(pedido)
+    // `bytes.buffer` pode ser maior que o conteúdo (Uint8Array é uma janela
+    // sobre o buffer). O slice recorta exatamente o PDF.
+    const arquivo = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+    const nomeArquivo = `confeccione-pedido-${pedido.id.slice(0, 8)}.pdf`
+
+    const up = await uploadMidia(arquivo, 'application/pdf', nomeArquivo)
+    if (!up.ok) {
+      console.error('[wa-notify] upload do resumo em PDF falhou', { erro: up.erro })
+      return { enviados: 0, total }
+    }
+
+    let enviados = 0
+    for (const { waId, destino } of abertos) {
+      const r = await enviarMidiaPorId(waId, 'document', up.mediaId, {
+        caption: destino.legenda.slice(0, 1024),
+        filename: nomeArquivo,
+      })
+      if (!r.ok) {
+        console.error('[wa-notify] envio do resumo em PDF falhou', { erro: r.erro })
+        continue
+      }
+      enviados++
+      try {
+        const conversaId = await garantirConversa(waId, destino.nome)
+        if (conversaId) {
+          const agora = new Date().toISOString()
+          await supabaseAdmin.from('wa_mensagens').insert({
+            conversa_id: conversaId,
+            wamid: r.wamid,
+            direcao: 'saida',
+            tipo: 'document',
+            corpo: destino.legenda,
+            midia_mime: 'application/pdf',
+            midia_nome: nomeArquivo,
+            status: 'enviando',
+            criado_em: agora,
+          })
+          await supabaseAdmin
+            .from('wa_conversas')
+            .update({ preview: `Você: 📄 ${nomeArquivo}`, ultima_mensagem_em: agora })
+            .eq('id', conversaId)
+        }
+      } catch (err) {
+        console.error('[wa-notify] registro inbox do PDF falhou', { err })
+      }
+    }
+    return { enviados, total }
+  } catch (err) {
+    console.error('[wa-notify] enviarResumoPdfPedido exception', { err })
+    return { enviados: 0, total }
   }
 }
 
