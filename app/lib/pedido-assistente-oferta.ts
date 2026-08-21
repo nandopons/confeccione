@@ -24,6 +24,7 @@ import { pedidoTemListaAbertaIncompleta } from '@/app/lib/listas-externas'
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
+import { registrarVersaoOrcamento } from './orcamento-versoes'
 import { enviarMensagem } from './zapi'
 import { avisoOficial, notificarOfertaFornecedor } from './whatsapp-notify'
 import { SITE_URL, ofertaFornecedorUrl } from './url'
@@ -1008,6 +1009,20 @@ export async function salvarOrcamentoFornecedor(
     .from('ofertas_pedido_assistente')
     .update({ valor_repasse_centavos: totalLiquido })
     .eq('id', ofertaId)
+
+  // Rastro do orcamento. Fica DEPOIS do UPDATE do pedido de proposito: o que
+  // vale e o valor gravado no pedido; isto e auditoria e nunca pode derrubar
+  // o salvamento (a funcao engole o proprio erro).
+  await registrarVersaoOrcamento({
+    pedidoId: pedido.id,
+    valorCentavos: valorCliente,
+    freteCentavos: freteCliente,
+    repasseCentavos: totalLiquido,
+    linhas: linhasNovas,
+    freteMe: freteMe ? { ...freteMe, cotado_em: agora } : null,
+    autor: 'fornecedor',
+    autorNome: oferta.leads_fornecedores?.nome ?? null,
+  })
 
   // cobrança já gerada (não paga) com valor antigo → atualiza no ASAAS
   if (pedido.asaas_payment_id && pedido.valor_centavos !== valorCliente) {

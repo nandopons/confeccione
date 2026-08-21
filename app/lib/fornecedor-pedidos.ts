@@ -35,6 +35,9 @@ export type OfertaFornecedor = {
   // carregarOfertaParaFornecedor(). Antes do aceite o contato do cliente nao
   // sai desta funcao, nem para a tela do painel.
   clienteTelefone: string | null
+  // Etapa de fabrica (app/lib/producao.ts). null quando o pedido ainda nao
+  // esta pago — antes disso nao ha producao pra acompanhar.
+  etapaProducao: string | null
   estado: EstadoOferta
 }
 
@@ -89,6 +92,7 @@ function mapRow(o: Row): OfertaFornecedor {
     prazoDias: ped?.prazo_dias ?? null,
     clienteNome: ped?.nome ?? null,
     clienteTelefone: o.status === 'aceita' ? (ped?.telefone ?? null) : null,
+    etapaProducao: null, // preenchido em buscar(), que consulta producao_pedido
     estado: derivarEstado(orcamentoStatus, pagamentoStatus, o.repasse_status),
   }
 }
@@ -100,7 +104,30 @@ async function buscar(fornecedorId: string, status: StatusOferta[]): Promise<Ofe
     .eq('fornecedor_id', fornecedorId)
     .in('status', status)
     .order('criado_em', { ascending: false })
-  return ((data ?? []) as unknown as Row[]).map(mapRow)
+
+  const ofertas = ((data ?? []) as unknown as Row[]).map(mapRow)
+
+  // Etapa de producao dos pedidos ja pagos. Consulta separada de proposito: a
+  // linha em producao_pedido e criada sob demanda (pelo quadro do admin ou
+  // pelo primeiro movimento), entao um pedido pago pode ainda nao ter linha —
+  // nesse caso o painel mostra 'planejamento', que e onde ele entraria.
+  const pagos = ofertas.filter((o) => o.pagamentoStatus === 'pago').map((o) => o.pedidoId)
+  if (pagos.length) {
+    const { data: prod } = await supabaseAdmin
+      .from('producao_pedido')
+      .select('pedido_id, etapa')
+      .in('pedido_id', pagos)
+    const porPedido = new Map(
+      ((prod ?? []) as unknown as { pedido_id: string; etapa: string }[]).map((r) => [r.pedido_id, r.etapa]),
+    )
+    for (const o of ofertas) {
+      if (o.pagamentoStatus === 'pago') {
+        o.etapaProducao = porPedido.get(o.pedidoId) ?? 'planejamento'
+      }
+    }
+  }
+
+  return ofertas
 }
 
 export async function pedidosPendentesFornecedor(fornecedorId: string) {
