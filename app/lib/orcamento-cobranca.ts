@@ -64,6 +64,15 @@ export async function criarCobrancaOrcamento(input: {
   valorCentavos: number
   /** YYYY-MM-DD; default: hoje + 7 dias */
   vencimento?: string | null
+  /**
+   * Desconto ate o vencimento, em %. Default 3 (comportamento historico).
+   * Passe 0 nas parcelas do 50/50: o desconto e o premio de quem paga tudo de
+   * uma vez, entao sinal e parcela final saem cheios. Decisao do Fernando,
+   * 21/08/2026.
+   */
+  descontoPercentual?: number
+  /** Vai pro fim da descricao no Asaas, ex.: "sinal 50%". */
+  sufixoDescricao?: string | null
 }): Promise<CobrancaOrcamento> {
   const customerId = await criarOuObterCustomer(input.nome, input.cpfCnpj, input.email ?? null)
 
@@ -74,6 +83,8 @@ export async function criarCobrancaOrcamento(input: {
     vencimento = d.toISOString().slice(0, 10)
   }
 
+  const desconto = input.descontoPercentual ?? DESCONTO_PIX_PERCENTUAL
+
   const payment = await asaasFetch<{ id: string; invoiceUrl: string }>('/payments', {
     method: 'POST',
     body: {
@@ -81,14 +92,20 @@ export async function criarCobrancaOrcamento(input: {
       billingType: 'PIX', // PIX puro — sem cartão; o desconto abaixo só existe no PIX
       value: centavosParaReais(input.valorCentavos),
       dueDate: vencimento,
-      description: `Confeccione - Orçamento ${input.numero}`,
+      description: `Confeccione - Orçamento ${input.numero}${input.sufixoDescricao ? ` (${input.sufixoDescricao})` : ''}`,
       externalReference: input.orcamentoId,
-      // 3% de desconto pra pagamento até o vencimento.
-      discount: {
-        value: DESCONTO_PIX_PERCENTUAL,
-        type: 'PERCENTAGE',
-        dueDateLimitDays: 0,
-      },
+      // Desconto até o vencimento. `descontoPercentual: 0` significa SEM
+      // desconto — e aí o objeto nem vai, porque o Asaas trata desconto de
+      // valor zero como desconto existente e mostra "0% off" na fatura.
+      ...(desconto > 0
+        ? {
+            discount: {
+              value: desconto,
+              type: 'PERCENTAGE',
+              dueDateLimitDays: 0,
+            },
+          }
+        : {}),
     },
   })
 
