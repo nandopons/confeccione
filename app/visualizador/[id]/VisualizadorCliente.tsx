@@ -1213,7 +1213,16 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
               </div>
             </>
           ) : (
-            <p className="text-sm text-[#0F6E56] font-medium mt-3">Pagamento confirmado ✅ — pedido em produção.</p>
+            <>
+              <p className="text-sm text-[#0F6E56] font-medium mt-3">Pagamento confirmado ✅ — pedido em produção.</p>
+              {/* A trilha mora AQUI, e nao no galho do "Fornecedor definido":
+                  pedido pago tem orcamentoDefinido = true, entao a cadeia de
+                  ternarios acima nunca chega no outro galho. Ficou no lugar
+                  errado no primeiro deploy e nao aparecia pra ninguem. */}
+              {pedido.producao_etapa && (
+                <TrilhaProducao etapa={pedido.producao_etapa} desde={pedido.producao_desde ?? null} />
+              )}
+            </>
           )}
         </div>
       ) : confirmadoEm && pedido.fornecedor_nome ? (
@@ -1253,7 +1262,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             </p>
           </div>
           {confirmadoMsg && <p className="text-[11px] text-[#0F6E56] bg-[#E1F5EE] rounded-lg px-3 py-2 mt-3">Resumo enviado pro seu e-mail. ✉️</p>}
-          {pedido.producao_etapa && <TrilhaProducao etapa={pedido.producao_etapa} desde={pedido.producao_desde ?? null} />}
         </div>
       ) : confirmadoEm ? (
         <div className="mt-6 bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-2xl p-5">
