@@ -79,6 +79,21 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     fornecedorPortfolio = Array.isArray(oferta?.portfolio_midias) ? oferta!.portfolio_midias : []
   }
 
+  // Etapa de fabrica, quando o pedido ja esta em producao. Sem join: se nao ha
+  // linha em producao_pedido, e porque o pedido ainda nao foi pago — e ai nao
+  // existe producao pra mostrar.
+  let producaoEtapa: string | null = null
+  let producaoDesde: string | null = null
+  if (pedido) {
+    const { data: prod } = await supabase
+      .from('producao_pedido')
+      .select('etapa, entrou_etapa_em')
+      .eq('pedido_id', pedido.id)
+      .maybeSingle<{ etapa: string; entrou_etapa_em: string }>()
+    producaoEtapa = prod?.etapa ?? null
+    producaoDesde = prod?.entrou_etapa_em ?? null
+  }
+
   return (
     <main className="min-h-screen bg-[#F7F8F9] font-sans flex flex-col">
       <SiteHeader />
@@ -93,7 +108,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           </Link>
         </div>
       ) : (
-        <VisualizadorCliente pedido={{ ...(pedido as PedidoVis), fornecedor_nome: fornecedorNome, fornecedor_whatsapp: fornecedorWhatsapp, oferta_id: ofertaId, fornecedor_portfolio: fornecedorPortfolio as PedidoVis['fornecedor_portfolio'] }} />
+        <VisualizadorCliente pedido={{ ...(pedido as PedidoVis), fornecedor_nome: fornecedorNome, fornecedor_whatsapp: fornecedorWhatsapp, oferta_id: ofertaId, fornecedor_portfolio: fornecedorPortfolio as PedidoVis['fornecedor_portfolio'], producao_etapa: producaoEtapa, producao_desde: producaoDesde }} />
       )}
       <SiteFooter />
     </main>

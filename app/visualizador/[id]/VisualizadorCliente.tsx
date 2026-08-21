@@ -18,6 +18,8 @@ import ListaColeta from "./ListaColeta";
 import ProdutoChat, { type LinhaProduto } from "./ProdutoChat";
 import { linkWhatsApp } from "@/app/lib/phone";
 import { msgClienteParaFornecedor } from "@/app/lib/mensagens-whatsapp";
+import { ETAPAS } from "@/app/lib/producao-etapas";
+import { AVISOS } from "@/app/lib/producao-avisos";
 
 export type Tamanho = { tamanho: string; qtd: number | null };
 export type Estampa = { posicao: string; tamanho: string };
@@ -74,6 +76,8 @@ export type PedidoVis = {
   codigo?: string | null;
   oferta_id?: string | null;
   fornecedor_portfolio?: PortfolioMidiaVis[];
+  producao_etapa?: string | null;
+  producao_desde?: string | null;
 };
 
 type PortfolioMidiaVis = { path: string; mime: string | null; tipo: 'imagem' | 'video'; nome: string };
@@ -1249,6 +1253,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             </p>
           </div>
           {confirmadoMsg && <p className="text-[11px] text-[#0F6E56] bg-[#E1F5EE] rounded-lg px-3 py-2 mt-3">Resumo enviado pro seu e-mail. ✉️</p>}
+          {pedido.producao_etapa && <TrilhaProducao etapa={pedido.producao_etapa} desde={pedido.producao_desde ?? null} />}
         </div>
       ) : confirmadoEm ? (
         <div className="mt-6 bg-[#E1F5EE] border border-[#1D9E75]/30 rounded-2xl p-5">
@@ -1653,6 +1658,44 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
 }
 
 const inputCls = "w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75]";
+
+
+/**
+ * Trilha da producao pro cliente.
+ *
+ * Mostra as 8 etapas com a atual destacada e o texto escrito PRA ELE
+ * (producao-avisos.ts), nao o jargao de fabrica das colunas do admin. Quem
+ * esta esperando uma camiseta nao sabe o que e "enfesto".
+ */
+function TrilhaProducao({ etapa, desde }: { etapa: string; desde: string | null }) {
+  const idx = ETAPAS.findIndex((e) => e.id === etapa);
+  const aviso = (AVISOS as Record<string, { titulo: string; corpo: string }>)[etapa];
+  if (idx < 0 || !aviso) return null;
+
+  const dias = desde ? Math.max(0, Math.floor((Date.now() - new Date(desde).getTime()) / 86400000)) : null;
+
+  return (
+    <div className="mt-4 border-t border-gray-200 pt-4">
+      <p className="text-sm font-semibold text-gray-900">{aviso.titulo}</p>
+      <p className="text-xs text-gray-600 mt-1 leading-relaxed">{aviso.corpo}</p>
+
+      <div className="mt-3 flex items-center gap-1" aria-label={`Etapa ${idx + 1} de ${ETAPAS.length}`}>
+        {ETAPAS.map((e, i) => (
+          <div
+            key={e.id}
+            title={e.titulo}
+            className="h-1.5 flex-1 rounded-full"
+            style={{ backgroundColor: i <= idx ? "#1D9E75" : "#E5E7EB" }}
+          />
+        ))}
+      </div>
+      <p className="text-[11px] text-gray-500 mt-1.5">
+        Etapa {idx + 1} de {ETAPAS.length}
+        {dias !== null && dias > 0 ? ` · há ${dias} ${dias === 1 ? "dia" : "dias"}` : ""}
+      </p>
+    </div>
+  );
+}
 
 function Campo({ label, children }: { label: string; children: React.ReactNode }) {
   return (
