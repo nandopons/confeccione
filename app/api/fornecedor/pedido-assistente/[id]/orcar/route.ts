@@ -1,6 +1,7 @@
 import { getFornecedorId, unauthorized, supabaseAdmin } from '@/lib/mobileAuth';
 import { precoClienteDeLiquido } from '@/app/lib/pedido-assistente-oferta';
 import { atualizarValorCobrancaPix } from '@/app/lib/pedido-pagamento';
+import { registrarVersaoOrcamento } from '@/app/lib/orcamento-versoes';
 
 // POST /api/fornecedor/pedido-assistente/[id]/orcar
 // Fornecedor (que aceitou) envia/atualiza o orçamento do pedido RICO.
@@ -132,6 +133,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     .from('ofertas_pedido_assistente')
     .update({ valor_repasse_centavos: totalLiquido, observacao })
     .eq('id', oferta.id);
+
+  // Mesmo rastro do caminho web (app/lib/pedido-assistente-oferta.ts). Sem
+  // isto, orcamento enviado pelo app nao apareceria no historico do admin.
+  await registrarVersaoOrcamento({
+    pedidoId: id,
+    valorCentavos: valorCliente,
+    freteCentavos: freteCliente,
+    repasseCentavos: totalLiquido,
+    linhas: linhasNovas,
+    orcamentoItens: orcamentoItens,
+    autor: 'fornecedor',
+    autorId: fornecedorId,
+  });
 
   // Cobrança já gerada (não paga) com valor antigo → atualiza no ASAAS.
   if (pedido.asaas_payment_id && pedido.valor_centavos !== valorCliente) {
