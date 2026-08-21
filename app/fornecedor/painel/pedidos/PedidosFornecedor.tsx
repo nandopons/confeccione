@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { linkWhatsApp } from '@/app/lib/phone'
 import { msgFornecedorParaCliente } from '@/app/lib/mensagens-whatsapp'
+import { ETAPAS } from '@/app/lib/producao-etapas'
 
 type Estado = 'orcar' | 'aguardando_cliente' | 'producao' | 'concluido'
 
@@ -22,6 +23,7 @@ type Oferta = {
   prazoDias: number | null
   clienteNome: string | null
   clienteTelefone: string | null   // so vem em oferta aceita
+  etapaProducao: string | null     // so vem em pedido pago
   estado: Estado
 }
 
@@ -275,6 +277,67 @@ function CardPendente({
   )
 }
 
+/**
+ * Seletor de etapa de fabrica.
+ *
+ * So aparece depois do pagamento — antes disso o proprio sistema pede pro
+ * fornecedor NAO comecar, entao oferecer "Corte" ali seria contradicao.
+ *
+ * Sem drag-and-drop aqui de proposito: o fornecedor mexe nisso do celular, no
+ * meio do galpao. Um <select> resolve em dois toques; arrastar, nao.
+ */
+function EtapaProducao({ o }: { o: Oferta }) {
+  const [etapa, setEtapa] = useState(o.etapaProducao ?? 'planejamento')
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+
+  async function mudar(nova: string) {
+    const anterior = etapa
+    setEtapa(nova)
+    setSalvando(true)
+    setErro(null)
+    try {
+      const r = await fetch('/api/fornecedor/producao/mover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pedidoId: o.pedidoId, etapa: nova }),
+      })
+      if (!r.ok) {
+        const d = await r.json().catch(() => null)
+        throw new Error(d?.erro || 'Nao foi possivel salvar')
+      }
+    } catch (e) {
+      setEtapa(anterior)
+      setErro(e instanceof Error ? e.message : 'Nao foi possivel salvar')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-gray-200 px-3 py-2.5">
+      <label className="block text-xs font-medium text-gray-600 mb-1.5">
+        Etapa da producao {salvando && <span className="text-gray-400">· salvando…</span>}
+      </label>
+      <select
+        value={etapa}
+        onChange={(e) => void mudar(e.target.value)}
+        className="w-full text-sm border border-gray-300 rounded-lg px-2.5 py-2 bg-white"
+      >
+        {ETAPAS.map((et) => (
+          <option key={et.id} value={et.id}>
+            {et.titulo}
+          </option>
+        ))}
+      </select>
+      <p className="text-[11px] text-gray-500 mt-1.5 leading-snug">
+        A Confeccione acompanha por aqui — voce nao precisa avisar por WhatsApp a cada passo.
+      </p>
+      {erro && <p className="text-[11px] text-red-700 mt-1">{erro}</p>}
+    </div>
+  )
+}
+
 function CardAceito({ o, fornecedorNome }: { o: Oferta; fornecedorNome: string | null }) {
   const cfg = ESTADO_CFG[o.estado]
   const destaque = o.estado === 'producao'
@@ -314,6 +377,9 @@ function CardAceito({ o, fornecedorNome }: { o: Oferta; fornecedorNome: string |
       <div className="mt-3">
         <ValorLabel o={o} />
       </div>
+
+      {/* Etapa de fabrica — so faz sentido depois de pago. */}
+      {o.etapaProducao && <EtapaProducao o={o} />}
 
       {/* Atalho de conversa. Este painel nao mostrava telefone nenhum: pra
           falar com o cliente o fornecedor tinha que voltar no e-mail ou no
