@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { criarCobrancaOrcamento } from '@/app/lib/orcamento-cobranca'
+import { metades } from '@/app/lib/orcamento-parcelas'
 import { apenasDigitos } from '@/app/lib/cpf-cnpj'
 import { buscarEnderecoCep } from '@/app/lib/cep'
 
@@ -99,7 +100,8 @@ export async function GET(req: NextRequest) {
     .select(
       'id, numero, cliente_nome, cliente_documento, total_centavos, frete_centavos, ' +
         'data_orcamento, validade, status, pagamento_status, pago_em, ' +
-        'asaas_payment_id, asaas_invoice_url, cobranca_vencimento, criado_em'
+        'asaas_payment_id, asaas_invoice_url, cobranca_vencimento, modalidade, ' +
+        'desconto_pix_percentual, criado_em'
     )
     .order('criado_em', { ascending: false })
     .limit(200)
@@ -195,6 +197,17 @@ export async function POST(req: NextRequest) {
 
   // ---- cobrança ASAAS (opcional) ----------------------------------------
   const gerar_cobranca = body.gerar_cobranca === true
+
+  // Modalidade e desconto (21/08/2026).
+  //  integral -> uma cobranca do total, com desconto se voce marcar
+  //  sinal_50 -> so a PRIMEIRA metade agora; a final voce libera depois, pela
+  //              tela de orcamentos, quando a producao justificar
+  // O desconto e o premio de quem paga tudo de uma vez, entao no 50/50 ele
+  // nao existe — nem no sinal, nem na final.
+  const modalidade = body.modalidade === 'sinal_50' ? 'sinal_50' : 'integral'
+  const desconto_pix_percentual =
+    modalidade === 'sinal_50' ? 0 : body.desconto_pix === true ? 3 : 0
+
   if (gerar_cobranca) {
     if (!cliente_nome) {
       return NextResponse.json(
@@ -234,6 +247,8 @@ export async function POST(req: NextRequest) {
       subtotal_centavos,
       total_centavos,
       observacoes,
+      modalidade,
+      desconto_pix_percentual,
       ...(data_orcamento ? { data_orcamento } : {}),
       validade: validade && typeof validade === 'string' && validade !== '' ? validade : null,
     })
@@ -250,15 +265,39 @@ export async function POST(req: NextRequest) {
   let cobranca_erro: string | null = null
   if (gerar_cobranca) {
     try {
+      // No 50/50 a cobranca de agora vale METADE. A outra metade nasce depois,
+      // por gerarParcelaFinal(), e so com o sinal ja pago.
+      const valorAgora =
+        modalidade === 'sinal_50' ? metades(total_centavos).sinal : total_centavos
+
       const cobranca = await criarCobrancaOrcamento({
         orcamentoId: data.id,
         numero: data.numero,
         nome: cliente_nome as string,
         cpfCnpj: cliente_documento as string,
         email: cliente_email,
-        valorCentavos: total_centavos,
+        valorCentavos: valorAgora,
         vencimento: typeof validade === 'string' && validade ? validade : null,
+        descontoPercentual: desconto_pix_percentual,
+        sufixoDescricao: modalidade === 'sinal_50' ? 'sinal 50%' : null,
       })
+
+      // A parcela e a fonte da verdade; as colunas do orcamento seguem como
+      // espelho da primeira, porque o PDF e o e-mail leem de la.
+      await supabaseAdmin.from('orcamento_cobrancas').insert({
+        orcamento_id: data.id,
+        parcela: 1,
+        rotulo: modalidade === 'sinal_50' ? 'sinal' : 'integral',
+        valor_centavos: valorAgora,
+        desconto_percentual: desconto_pix_percentual,
+        vencimento: cobranca.vencimento,
+        asaas_payment_id: cobranca.paymentId,
+        asaas_invoice_url: cobranca.invoiceUrl,
+        pix_copia_cola: cobranca.copiaCola,
+        pix_qr_imagem: cobranca.qrImagem,
+        status: 'gerada',
+      })
+
       const { data: atualizado, error: updErr } = await supabaseAdmin
         .from('orcamentos')
         .update({
@@ -268,6 +307,7 @@ export async function POST(req: NextRequest) {
           pix_copia_cola: cobranca.copiaCola,
           pix_qr_imagem: cobranca.qrImagem,
           cobranca_vencimento: cobranca.vencimento,
+          pagamento_status: 'gerado',
         })
         .eq('id', data.id)
         .select()
