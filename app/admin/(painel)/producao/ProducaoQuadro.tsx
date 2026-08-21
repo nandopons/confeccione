@@ -21,7 +21,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 type Etapa = { id: string; titulo: string; ajuda: string }
 
 type Card = {
-  pedidoId: string
+  cardId: string
+  origem: 'assistente' | 'orcamento'
+  pedidoId: string | null
+  orcamentoId: string | null
+  referencia: string
   etapa: string
   entrouEtapaEm: string
   observacao: string | null
@@ -30,7 +34,6 @@ type Card = {
   resumo: string
   valorCentavos: number | null
   repasseCentavos: number | null
-  prazoDias: number | null
   fornecedorId: string | null
   fornecedorNome: string | null
   diasNaEtapa: number
@@ -75,10 +78,6 @@ function dataHora(iso: string) {
   }
 }
 
-function ref(pedidoId: string) {
-  return pedidoId.replace(/-/g, '').slice(0, 8).toUpperCase()
-}
-
 /**
  * Cor do "parado há N dias". Não é enfeite: um card que ficou duas semanas na
  * mesma etapa é o sinal mais útil do quadro inteiro.
@@ -119,14 +118,14 @@ export default function ProducaoQuadro() {
   }, [carregar])
 
   const mover = useCallback(
-    async (pedidoId: string, etapa: string) => {
+    async (cardId: string, etapa: string) => {
       const anterior = cards
-      setCards((cs) => cs.map((c) => (c.pedidoId === pedidoId ? { ...c, etapa, diasNaEtapa: 0 } : c)))
+      setCards((cs) => cs.map((c) => (c.cardId === cardId ? { ...c, etapa, diasNaEtapa: 0 } : c)))
       try {
         const r = await fetch('/api/admin/producao', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pedidoId, etapa }),
+          body: JSON.stringify({ cardId, etapa }),
         })
         if (!r.ok) {
           const d = await r.json().catch(() => null)
@@ -227,14 +226,20 @@ export default function ProducaoQuadro() {
                 <div className="flex flex-col gap-2">
                   {lista.map((c) => (
                     <article
-                      key={c.pedidoId}
+                      key={c.cardId}
                       draggable
-                      onDragStart={() => setArrastando(c.pedidoId)}
+                      onDragStart={() => setArrastando(c.cardId)}
                       onDragEnd={() => setArrastando(null)}
                       className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm cursor-grab active:cursor-grabbing"
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <span className="text-[11px] font-mono text-gray-400">{ref(c.pedidoId)}</span>
+                        <span
+                          className="text-[11px] font-mono truncate"
+                          style={{ color: c.origem === 'orcamento' ? VERDE_ESCURO : '#9ca3af' }}
+                          title={c.origem === 'orcamento' ? 'Orcamento avulso do admin' : 'Pedido do marketplace'}
+                        >
+                          {c.referencia}
+                        </span>
                         <span className={'text-[11px] px-1.5 py-0.5 rounded-full ' + corParado(c.diasNaEtapa)}>
                           {c.diasNaEtapa === 0 ? 'hoje' : `${c.diasNaEtapa}d`}
                         </span>
@@ -244,9 +249,11 @@ export default function ProducaoQuadro() {
                         {c.totalPecas} peças
                       </p>
                       <p className="text-xs text-gray-600 truncate">{c.clienteNome ?? 'Cliente'}</p>
-                      {c.fornecedorNome && (
+                      {c.fornecedorNome ? (
                         <p className="text-[11px] text-gray-500 truncate mt-0.5">🏭 {c.fornecedorNome}</p>
-                      )}
+                      ) : c.origem === 'orcamento' ? (
+                        <p className="text-[11px] text-gray-500 truncate mt-0.5">📄 Orçamento avulso</p>
+                      ) : null}
                       <p className="text-[11px] mt-1" style={{ color: VERDE_ESCURO }}>
                         {brl(c.valorCentavos)}
                       </p>
@@ -260,8 +267,8 @@ export default function ProducaoQuadro() {
                       {/* Caminho de toque e de teclado — DnD nativo não cobre celular. */}
                       <select
                         value={c.etapa}
-                        onChange={(ev) => void mover(c.pedidoId, ev.target.value)}
-                        aria-label={`Etapa do pedido ${ref(c.pedidoId)}`}
+                        onChange={(ev) => void mover(c.cardId, ev.target.value)}
+                        aria-label={`Etapa do pedido ${c.referencia}`}
                         className="mt-2 w-full text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white"
                       >
                         {etapas.map((op) => (
@@ -325,8 +332,13 @@ function PainelDetalhe({
     let vivo = true
     void (async () => {
       const [a, b] = await Promise.all([
-        fetch(`/api/admin/producao?pedido=${card.pedidoId}`, { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
-        fetch(`/api/admin/pedidos-assistente/orcamento?pedido=${card.pedidoId}`, { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
+        fetch(`/api/admin/producao?card=${card.cardId}`, { cache: 'no-store' }).then((r) => r.json()).catch(() => null),
+        // Versoes de orcamento so existem no fluxo do marketplace. Orcamento
+        // avulso e escrito de uma vez, no admin — nao ha ida e volta com
+        // fornecedor pra versionar.
+        card.pedidoId
+          ? fetch(`/api/admin/pedidos-assistente/orcamento?pedido=${card.pedidoId}`, { cache: 'no-store' }).then((r) => r.json()).catch(() => null)
+          : Promise.resolve(null),
       ])
       if (!vivo) return
       setEventos(a?.eventos ?? [])
@@ -336,7 +348,7 @@ function PainelDetalhe({
     return () => {
       vivo = false
     }
-  }, [card.pedidoId])
+  }, [card.cardId, card.pedidoId])
 
   async function salvarObservacao() {
     setSalvando(true)
@@ -345,7 +357,7 @@ function PainelDetalhe({
       const r = await fetch('/api/admin/producao', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pedidoId: card.pedidoId, etapa: card.etapa, observacao: obs }),
+        body: JSON.stringify({ cardId: card.cardId, etapa: card.etapa, observacao: obs }),
       })
       if (!r.ok) {
         const d = await r.json().catch(() => null)
@@ -370,7 +382,10 @@ function PainelDetalhe({
       >
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <p className="text-[11px] font-mono text-gray-400">{ref(card.pedidoId)}</p>
+            <p className="text-[11px] font-mono text-gray-400">
+              {card.referencia}
+              {card.origem === 'orcamento' ? ' · orçamento avulso' : ''}
+            </p>
             <h2 className="text-lg font-semibold text-gray-900">
               {card.totalPecas} peças · {card.clienteNome ?? 'Cliente'}
             </h2>
@@ -417,7 +432,8 @@ function PainelDetalhe({
             Orçamento
           </h3>
           <p className="text-sm text-gray-900">
-            Cliente pagou {brl(card.valorCentavos)} · fornecedor recebe {brl(card.repasseCentavos)}
+            Cliente pagou {brl(card.valorCentavos)}
+            {card.origem === 'assistente' ? ` · fornecedor recebe ${brl(card.repasseCentavos)}` : ''}
           </p>
           {pago && (
             <p className="text-[11px] text-gray-500 mt-1 leading-snug">
@@ -426,7 +442,12 @@ function PainelDetalhe({
             </p>
           )}
 
-          {versoes.length === 0 ? (
+          {card.origem === 'orcamento' ? (
+            <p className="text-xs text-gray-500 mt-3 leading-snug">
+              Orçamento avulso — feito por você de uma vez no admin, sem ida e volta com fornecedor,
+              então não há versões a comparar.
+            </p>
+          ) : versoes.length === 0 ? (
             <p className="text-xs text-gray-500 mt-3 leading-snug">
               Sem versões registradas. O histórico começou em 20/08/2026 — orçamentos enviados antes disso
               foram sobrescritos e não dá para recuperar.
