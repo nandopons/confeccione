@@ -14,6 +14,14 @@
 // ATUALIZAÇÃO OTIMISTA
 // O card pula de coluna na hora e volta sozinho se o servidor recusar. Arrastar
 // e esperar meio segundo pra ver se andou destrói a sensação de quadro.
+//
+// ARQUIVAR
+// Card sai do quadro sem percorrer as oito etapas — o caso dos pedidos que já
+// estavam pagos e entregues antes do CRM existir e entraram todos em
+// "Planejamento". Arquivar NÃO apaga: a linha continua no banco (é ela que
+// impede o card de ser recriado na próxima carga) e a gaveta devolve qualquer
+// um com um clique. Por isso o botão não pede confirmação em modal — o desfazer
+// está a dois cliques de distância.
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -36,6 +44,8 @@ type Card = {
   repasseCentavos: number | null
   fornecedorId: string | null
   fornecedorNome: string | null
+  arquivadoEm: string | null
+  arquivadoMotivo: string | null
   diasNaEtapa: number
 }
 
@@ -96,6 +106,10 @@ export default function ProducaoQuadro() {
   const [arrastando, setArrastando] = useState<string | null>(null)
   const [sobre, setSobre] = useState<string | null>(null)
   const [aberto, setAberto] = useState<Card | null>(null)
+  const [gaveta, setGaveta] = useState(false)
+  const [arquivados, setArquivados] = useState<Card[] | null>(null)
+  // Card em que você clicou "Arquivar" e que agora mostra o motivo + confirmar.
+  const [confirmando, setConfirmando] = useState<string | null>(null)
 
   const carregar = useCallback(async () => {
     setCarregando(true)
@@ -139,6 +153,68 @@ export default function ProducaoQuadro() {
     [cards],
   )
 
+  const carregarGaveta = useCallback(async () => {
+    try {
+      const r = await fetch('/api/admin/producao?arquivados=1', { cache: 'no-store' })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d?.erro || 'Falha ao carregar')
+      setArquivados(d.cards ?? [])
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Falha ao carregar os arquivados')
+    }
+  }, [])
+
+  /**
+   * Some o card do quadro na hora e devolve se o servidor recusar — mesmo
+   * contrato do mover. A gaveta é invalidada porque ficou desatualizada.
+   */
+  const arquivar = useCallback(
+    async (cardId: string, motivo: string) => {
+      const anterior = cards
+      setCards((cs) => cs.filter((c) => c.cardId !== cardId))
+      setConfirmando(null)
+      try {
+        const r = await fetch('/api/admin/producao', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ acao: 'arquivar', cardId, motivo: motivo.trim() || null }),
+        })
+        if (!r.ok) {
+          const d = await r.json().catch(() => null)
+          throw new Error(d?.erro || 'Não foi possível arquivar')
+        }
+        setArquivados(null)
+      } catch (e) {
+        setCards(anterior)
+        setErro(e instanceof Error ? e.message : 'Não foi possível arquivar')
+      }
+    },
+    [cards],
+  )
+
+  const restaurar = useCallback(
+    async (cardId: string) => {
+      const anterior = arquivados
+      setArquivados((as) => (as ?? []).filter((c) => c.cardId !== cardId))
+      try {
+        const r = await fetch('/api/admin/producao', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ acao: 'restaurar', cardId }),
+        })
+        if (!r.ok) {
+          const d = await r.json().catch(() => null)
+          throw new Error(d?.erro || 'Não foi possível desarquivar')
+        }
+        await carregar()
+      } catch (e) {
+        setArquivados(anterior)
+        setErro(e instanceof Error ? e.message : 'Não foi possível desarquivar')
+      }
+    },
+    [arquivados, carregar],
+  )
+
   const porEtapa = useMemo(() => {
     const m = new Map<string, Card[]>()
     for (const e of etapas) m.set(e.id, [])
@@ -165,13 +241,33 @@ export default function ProducaoQuadro() {
           <strong className="text-gray-900">{totalPecasAbertas}</strong> peças ·{' '}
           {brl(cards.reduce((s, c) => s + (c.valorCentavos ?? 0), 0))} em jogo
         </div>
-        <button
-          onClick={() => void carregar()}
-          className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50"
-        >
-          Atualizar
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const abrindo = !gaveta
+              setGaveta(abrindo)
+              if (abrindo && arquivados === null) void carregarGaveta()
+            }}
+            className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50"
+          >
+            {gaveta ? 'Voltar ao quadro' : 'Arquivados'}
+          </button>
+          <button
+            onClick={() => void (gaveta ? carregarGaveta() : carregar())}
+            className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50"
+          >
+            Atualizar
+          </button>
+        </div>
       </div>
+
+      {gaveta && (
+        <Gaveta
+          cards={arquivados}
+          onRestaurar={(id) => void restaurar(id)}
+          onVoltar={() => setGaveta(false)}
+        />
+      )}
 
       {erro && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800">
@@ -179,7 +275,7 @@ export default function ProducaoQuadro() {
         </div>
       )}
 
-      {!cards.length && (
+      {!gaveta && !cards.length && (
         <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center">
           <p className="text-sm text-gray-600">
             Nenhum pedido em produção. Os cards entram sozinhos quando o pagamento é confirmado no Asaas.
@@ -189,7 +285,7 @@ export default function ProducaoQuadro() {
 
       {/* Rolagem horizontal: 8 colunas não cabem em tela nenhuma sem espremer
           o card a ponto de não dar pra ler o que é o pedido. */}
-      <div className="overflow-x-auto pb-4">
+      <div className="overflow-x-auto pb-4" hidden={gaveta}>
         <div className="flex gap-3 min-w-max">
           {etapas.map((e) => {
             const lista = porEtapa.get(e.id) ?? []
@@ -278,12 +374,28 @@ export default function ProducaoQuadro() {
                         ))}
                       </select>
 
-                      <button
-                        onClick={() => setAberto(c)}
-                        className="mt-1.5 w-full text-xs text-gray-600 hover:text-gray-900 underline underline-offset-2"
-                      >
-                        Detalhes e histórico
-                      </button>
+                      <div className="mt-1.5 flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => setAberto(c)}
+                          className="text-xs text-gray-600 hover:text-gray-900 underline underline-offset-2"
+                        >
+                          Detalhes
+                        </button>
+                        <button
+                          onClick={() => setConfirmando(c.cardId)}
+                          className="text-xs text-gray-400 hover:text-red-700"
+                          title="Tirar do quadro sem arrastar até Pronto"
+                        >
+                          Arquivar
+                        </button>
+                      </div>
+
+                      {confirmando === c.cardId && (
+                        <ConfirmarArquivo
+                          onCancelar={() => setConfirmando(null)}
+                          onConfirmar={(motivo) => void arquivar(c.cardId, motivo)}
+                        />
+                      )}
                     </article>
                   ))}
                 </div>
@@ -301,6 +413,118 @@ export default function ProducaoQuadro() {
           onMudou={() => void carregar()}
         />
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Confirmação de arquivamento, dentro do próprio card.
+//
+// Não é window.confirm nem modal: o card já está na sua frente, e um modal por
+// cima de uma limpeza de dez cards seria dez modais. O motivo é opcional de
+// propósito — se arquivar custar um texto obrigatório, o quadro nunca é limpo.
+// ---------------------------------------------------------------------------
+function ConfirmarArquivo({
+  onConfirmar,
+  onCancelar,
+}: {
+  onConfirmar: (motivo: string) => void
+  onCancelar: () => void
+}) {
+  const [motivo, setMotivo] = useState('')
+  return (
+    <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2">
+      <p className="text-[11px] text-red-900 leading-snug">
+        Tirar do quadro? Não apaga nada — fica em <strong>Arquivados</strong>, e volta com um clique.
+      </p>
+      <input
+        value={motivo}
+        onChange={(e) => setMotivo(e.target.value)}
+        maxLength={280}
+        placeholder="Motivo (opcional)"
+        autoFocus
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onConfirmar(motivo)
+          if (e.key === 'Escape') onCancelar()
+        }}
+        className="mt-1.5 w-full text-xs border border-red-200 rounded-md px-2 py-1 bg-white"
+      />
+      <div className="mt-1.5 flex gap-1.5">
+        <button
+          onClick={() => onConfirmar(motivo)}
+          className="flex-1 text-xs px-2 py-1 rounded-md bg-red-600 text-white hover:bg-red-700"
+        >
+          Arquivar
+        </button>
+        <button
+          onClick={onCancelar}
+          className="flex-1 text-xs px-2 py-1 rounded-md border border-gray-300 bg-white hover:bg-gray-50"
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// A gaveta — lista simples do que saiu do quadro, com desarquivar.
+//
+// Lista e não kanban: aqui ninguém quer arrastar nada, só conferir o que tirou
+// e consertar se tirou errado.
+// ---------------------------------------------------------------------------
+function Gaveta({
+  cards,
+  onRestaurar,
+  onVoltar,
+}: {
+  cards: Card[] | null
+  onRestaurar: (cardId: string) => void
+  onVoltar: () => void
+}) {
+  if (cards === null) return <p className="text-sm text-gray-500">Carregando os arquivados…</p>
+
+  if (!cards.length) {
+    return (
+      <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center">
+        <p className="text-sm text-gray-600">Nada arquivado.</p>
+        <button onClick={onVoltar} className="mt-3 text-sm underline underline-offset-2 text-gray-600">
+          Voltar ao quadro
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-gray-200 bg-gray-50">
+        <p className="text-sm text-gray-700">
+          <strong>{cards.length}</strong> {cards.length === 1 ? 'card arquivado' : 'cards arquivados'} —
+          fora do quadro, mas nada foi apagado.
+        </p>
+      </div>
+      <ul className="divide-y divide-gray-100">
+        {cards.map((c) => (
+          <li key={c.cardId} className="flex flex-wrap items-center gap-3 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-mono text-gray-400">{c.referencia}</p>
+              <p className="text-sm text-gray-900">
+                {c.totalPecas} peças · {c.clienteNome ?? 'Cliente'} · {brl(c.valorCentavos)}
+              </p>
+              <p className="text-xs text-gray-500">
+                Arquivado {c.arquivadoEm ? dataHora(c.arquivadoEm) : ''}
+                {c.arquivadoMotivo ? ` — ${c.arquivadoMotivo}` : ''}
+              </p>
+            </div>
+            <button
+              onClick={() => onRestaurar(c.cardId)}
+              className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 shrink-0"
+            >
+              Devolver ao quadro
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
