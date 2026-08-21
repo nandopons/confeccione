@@ -80,6 +80,34 @@ function validarItem(item: ItemEntrada, indice: number): ItemValido | string {
   }
 }
 
+// ---------------------------------------------------------------------------
+// GET — lista os orcamentos avulsos ja emitidos.
+//
+// A tela /admin/orcamentos so criava; nao havia como ver o que voce ja tinha
+// emitido. Isto e o historico pedido em 20/08/2026.
+//
+// Nao devolve pix_copia_cola nem pix_qr_imagem: sao campos grandes (o QR e um
+// PNG em base64) e a listagem nao precisa deles.
+// ---------------------------------------------------------------------------
+export async function GET(req: NextRequest) {
+  if (!ehTokenAdminValido(req.cookies.get(COOKIE_ADMIN)?.value)) {
+    return NextResponse.json({ erro: 'Nao autenticado' }, { status: 401 })
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('orcamentos')
+    .select(
+      'id, numero, cliente_nome, cliente_documento, total_centavos, frete_centavos, ' +
+        'data_orcamento, validade, status, pagamento_status, pago_em, ' +
+        'asaas_payment_id, asaas_invoice_url, cobranca_vencimento, criado_em'
+    )
+    .order('criado_em', { ascending: false })
+    .limit(200)
+
+  if (error) return NextResponse.json({ erro: error.message }, { status: 500 })
+  return NextResponse.json({ orcamentos: data ?? [] })
+}
+
 export async function POST(req: NextRequest) {
   if (!ehTokenAdminValido(req.cookies.get(COOKIE_ADMIN)?.value)) {
     return NextResponse.json({ erro: 'Não autorizado' }, { status: 401 })
