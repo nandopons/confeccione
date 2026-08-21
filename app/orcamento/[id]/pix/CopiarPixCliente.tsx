@@ -9,9 +9,6 @@
 
 import { useState } from 'react'
 
-/** Espelha DESCONTO_PIX_PERCENTUAL de orcamento-cobranca.ts (módulo server). */
-const DESCONTO_PERCENTUAL = 3
-
 function brl(centavos: number): string {
   return (centavos / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
@@ -21,10 +18,23 @@ function dataBR(iso: string): string {
   return `${dia}/${mes}/${ano}`
 }
 
+const TITULO: Record<'integral' | 'sinal' | 'final', string> = {
+  integral: 'Pagamento do orçamento',
+  sinal: 'Sinal de 50% do orçamento',
+  final: 'Parcela final do orçamento',
+}
+
 type Props = {
   numero: string
   clienteNome: string | null
+  /** Valor DESTA parcela, não do orçamento inteiro. */
   totalCentavos: number
+  /** 0 no sinal e na final — desconto é prêmio de quem paga tudo de uma vez. */
+  descontoPercentual: number
+  rotulo: 'integral' | 'sinal' | 'final'
+  pago: boolean
+  /** Quanto ainda fica pra outra parcela. 0 no integral. */
+  restanteCentavos: number
   copiaCola: string
   qrImagem: string | null
   vencimento: string | null
@@ -35,6 +45,10 @@ export default function CopiarPixCliente({
   numero,
   clienteNome,
   totalCentavos,
+  descontoPercentual,
+  rotulo,
+  pago,
+  restanteCentavos,
   copiaCola,
   qrImagem,
   vencimento,
@@ -42,7 +56,10 @@ export default function CopiarPixCliente({
 }: Props) {
   const [copiado, setCopiado] = useState(false)
 
-  const valorPix = Math.round(totalCentavos * (1 - DESCONTO_PERCENTUAL / 100))
+  const temDesconto = descontoPercentual > 0
+  const valorPix = temDesconto
+    ? Math.round(totalCentavos * (1 - descontoPercentual / 100))
+    : totalCentavos
 
   async function copiar() {
     let ok = false
@@ -75,20 +92,39 @@ export default function CopiarPixCliente({
       <div className="w-full max-w-md bg-white border border-gray-200 rounded-2xl p-6 text-center">
         <div className="text-xs tracking-widest font-medium text-gray-900">CONFECCIONE</div>
         <h1 className="text-lg font-semibold text-gray-900 mt-3">
-          Pagamento do orçamento {numero}
+          {TITULO[rotulo]} {numero}
         </h1>
         {clienteNome ? <p className="text-sm text-gray-500 mt-1">{clienteNome}</p> : null}
+
+        {pago ? (
+          <div className="mt-4 text-sm text-[#0F6E56] bg-[#1D9E75]/10 border border-[#1D9E75]/20 rounded-xl px-3 py-2">
+            Esta parcela já está paga ✅ — não precisa pagar de novo.
+          </div>
+        ) : null}
 
         <div className="mt-4">
           <div className="text-3xl font-semibold text-[#1D9E75]">{brl(valorPix)}</div>
           <div className="text-xs text-gray-500 mt-1">
-            no PIX ({DESCONTO_PERCENTUAL}% de desconto
-            {vencimento ? ` até ${dataBR(vencimento)}` : ''}) · valor original{' '}
-            {brl(totalCentavos)}
+            {temDesconto ? (
+              <>
+                no PIX ({descontoPercentual}% de desconto
+                {vencimento ? ` até ${dataBR(vencimento)}` : ''}) · valor original{' '}
+                {brl(totalCentavos)}
+              </>
+            ) : (
+              <>no PIX{vencimento ? ` · vence em ${dataBR(vencimento)}` : ''}</>
+            )}
           </div>
+          {restanteCentavos > 0 ? (
+            <div className="text-xs text-gray-400 mt-1">
+              {rotulo === 'sinal'
+                ? `Os outros ${brl(restanteCentavos)} são cobrados na parcela final.`
+                : `O sinal de ${brl(restanteCentavos)} já foi pago.`}
+            </div>
+          ) : null}
         </div>
 
-        {qrImagem ? (
+        {qrImagem && !pago ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={`data:image/png;base64,${qrImagem}`}
