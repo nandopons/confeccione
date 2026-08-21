@@ -28,16 +28,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 })
   }
 
-  const pedido = req.nextUrl.searchParams.get('pedido')
-  if (pedido) {
-    return NextResponse.json({ eventos: await timelineProducao(pedido) })
+  const card = req.nextUrl.searchParams.get('card')
+  if (card) {
+    return NextResponse.json({ eventos: await timelineProducao(card) })
   }
 
   return NextResponse.json({ etapas: ETAPAS, cards: await carregarQuadro() })
 }
 
 const CorpoMover = z.object({
-  pedidoId: z.string().uuid(),
+  cardId: z.string().uuid(),
   etapa: z.string().refine(ehEtapa, 'Etapa desconhecida'),
   observacao: z.string().max(280).nullish(),
 })
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   }
 
   const r = await moverEtapa({
-    pedidoId: corpo.data.pedidoId,
+    cardId: corpo.data.cardId,
     etapa: corpo.data.etapa,
     autor: 'admin',
     autorNome: 'Admin',
