@@ -115,6 +115,7 @@ export async function POST(req: Request) {
     ) {
       if (event === 'PAYMENT_CONFIRMED' || event === 'PAYMENT_RECEIVED') {
         await marcarPedidoAssistentePago(payment)
+        await marcarOrcamentoAvulsoPago(payment)
       }
       await atualizarStatusEAplicarEfeito(event, payment)
     } else if (event.startsWith('SUBSCRIPTION_')) {
@@ -357,6 +358,37 @@ async function aplicarEfeitoPagamento(params: {
 
 // ============================================================
 // Handler extra: marca o PEDIDO de cliente (pedidos_assistente) como pago.
+// ============================================================
+// Orcamento avulso do admin (/admin/orcamentos) pago.
+//
+// O gerador de orcamento avulso cria cobranca no Asaas desde 02/07/2026, mas
+// ate 21/08/2026 este webhook so procurava o asaas_payment_id em
+// pedidos_assistente — entao o pagamento de um orcamento seu simplesmente
+// nunca chegava ao sistema. Eram 17 cobrancas nessa situacao.
+//
+// Marcar como pago e o que faz o card aparecer no quadro de producao: o quadro
+// le `orcamentos` com pagamento_status = 'pago' e cria a linha sob demanda.
+// ============================================================
+async function marcarOrcamentoAvulsoPago(
+  payment: NonNullable<AsaasWebhookPayload['payment']>
+): Promise<void> {
+  try {
+    const { data: antes } = await supabase
+      .from('orcamentos')
+      .select('id, pagamento_status')
+      .eq('asaas_payment_id', payment.id)
+      .maybeSingle<{ id: string; pagamento_status: string | null }>()
+    if (!antes || antes.pagamento_status === 'pago') return
+
+    await supabase
+      .from('orcamentos')
+      .update({ pagamento_status: 'pago', pago_em: new Date().toISOString() })
+      .eq('id', antes.id)
+  } catch (err) {
+    console.error('[asaas-webhook] marcar orcamento avulso pago falhou:', err)
+  }
+}
+
 // O PIX do pedido tem externalReference = id do pedido e asaas_payment_id no
 // nosso registro. Independente do fluxo de billing do fornecedor.
 // ============================================================
