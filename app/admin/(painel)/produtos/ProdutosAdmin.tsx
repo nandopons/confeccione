@@ -30,6 +30,8 @@ type Maquina = {
   capacidadeHorasDia: number
 }
 
+type TipoOperacao = 'por_peca' | 'por_lote'
+
 type Operacao = {
   id: string
   ordem: number
@@ -37,6 +39,8 @@ type Operacao = {
   maquinaId: string | null
   maquinaNome: string | null
   tempoSegundos: number | null
+  tipo: TipoOperacao
+  rendePecas: number | null
   observacao: string | null
 }
 
@@ -59,9 +63,27 @@ type Produto = {
   ativo: boolean
   operacoes: Operacao[]
   componentes: Componente[]
-  tempoTotalSegundos: number | null
+  tempoPorPecaSegundos: number | null
+  temOperacaoPorLote: boolean
   operacoesSemTempo: number
   prontoParaCalculo: boolean
+}
+
+/**
+ * Quanto esta operação custa para `qtd` peças.
+ *
+ * Espelha `custoOperacaoSegundos` do servidor — a conta roda aqui só para o
+ * simulador responder na hora, sem ida ao banco. A verdade continua no
+ * servidor; se as duas divergirem, é a de lá que vale.
+ */
+function custoOperacao(
+  o: { tempoSegundos: number | null; tipo: TipoOperacao; rendePecas: number | null },
+  qtd: number,
+): number {
+  if (o.tempoSegundos == null || qtd <= 0) return 0
+  if (o.tipo === 'por_peca') return o.tempoSegundos * qtd
+  if (!o.rendePecas) return o.tempoSegundos
+  return o.tempoSegundos * Math.ceil(qtd / o.rendePecas)
 }
 
 const VERDE = '#1D9E75'
@@ -533,7 +555,8 @@ function CardProduto({
               className="text-[11px] px-2 py-1 rounded-full"
               style={{ backgroundColor: '#E1F5EE', color: VERDE_ESCURO }}
             >
-              {tempoLegivel(produto.tempoTotalSegundos)} por peça
+              {tempoLegivel(produto.tempoPorPecaSegundos)} por peça
+              {produto.temOperacaoPorLote ? ' + lote' : ''}
             </span>
           ) : (
             <span className="text-[11px] px-2 py-1 rounded-full bg-amber-100 text-amber-800">
@@ -564,6 +587,8 @@ type LinhaOp = {
   descricao: string
   maquinaId: string | null
   tempo: string
+  tipo: TipoOperacao
+  rende: string
   observacao: string
 }
 
@@ -583,11 +608,17 @@ function EditorRoteiro({
       descricao: o.descricao,
       maquinaId: o.maquinaId,
       tempo: o.tempoSegundos == null ? '' : String(o.tempoSegundos),
+      tipo: o.tipo,
+      rende: o.rendePecas == null ? '' : String(o.rendePecas),
       observacao: o.observacao ?? '',
     })),
   )
   const [salvando, setSalvando] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
+  // Lote de referência do simulador. 50 é só um ponto de partida legível —
+  // o número real vem do pedido, e a graça é justamente mexer aqui e ver o
+  // custo por peça mudar quando existe operação por lote.
+  const [lote, setLote] = useState('50')
 
   const mudar = (i: number, campo: keyof LinhaOp, valor: string | null) =>
     setLinhas((ls) => ls.map((l, j) => (j === i ? { ...l, [campo]: valor } : l)))
@@ -603,8 +634,33 @@ function EditorRoteiro({
       return copia
     })
 
-  const totalConhecido = linhas.reduce((s, l) => s + (parseInt(l.tempo, 10) || 0), 0)
   const semTempo = linhas.filter((l) => l.descricao.trim() && !parseInt(l.tempo, 10)).length
+  const qtdLote = parseInt(lote, 10) || 0
+
+  const { custoLote, porMaquina } = useMemo(() => {
+    const porMaq = new Map<string, number>()
+    let total = 0
+    for (const l of linhas) {
+      const seg = custoOperacao(
+        {
+          tempoSegundos: parseInt(l.tempo, 10) || null,
+          tipo: l.tipo,
+          rendePecas: parseInt(l.rende, 10) || null,
+        },
+        qtdLote,
+      )
+      if (!seg) continue
+      total += seg
+      const nome = maquinas.find((m) => m.id === l.maquinaId)?.nome ?? 'Sem máquina'
+      porMaq.set(nome, (porMaq.get(nome) ?? 0) + seg)
+    }
+    return {
+      custoLote: total,
+      porMaquina: [...porMaq.entries()]
+        .map(([nome, segundos]) => ({ nome, segundos }))
+        .sort((a, b) => b.segundos - a.segundos),
+    }
+  }, [linhas, qtdLote, maquinas])
 
   return (
     <div>
@@ -620,6 +676,7 @@ function EditorRoteiro({
               <th className="pb-1">Operação</th>
               <th className="pb-1 w-40">Máquina</th>
               <th className="pb-1 w-28">Tempo (seg)</th>
+              <th className="pb-1 w-44">Como conta</th>
               <th className="pb-1">Observação</th>
               <th className="pb-1 w-20" />
             </tr>
@@ -658,6 +715,32 @@ function EditorRoteiro({
                     className="w-full text-sm border rounded-lg px-2 py-1.5 text-gray-900"
                     style={{ borderColor: l.tempo ? '#d1d5db' : '#fcd34d' }}
                   />
+                </td>
+                <td className="py-1 pr-2">
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={l.tipo}
+                      onChange={(e) => mudar(i, 'tipo', e.target.value)}
+                      className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 bg-white text-gray-900"
+                      aria-label="Como o tempo conta"
+                    >
+                      <option value="por_peca">por peça</option>
+                      <option value="por_lote">por lote</option>
+                    </select>
+                    {l.tipo === 'por_lote' && (
+                      <>
+                        <span className="text-[11px] text-gray-500 whitespace-nowrap">rende</span>
+                        <input
+                          value={l.rende}
+                          onChange={(e) => mudar(i, 'rende', e.target.value.replace(/\D/g, ''))}
+                          inputMode="numeric"
+                          placeholder="∞"
+                          title="Quantas peças esse tempo rende. Vazio = uma vez por lote, qualquer tamanho."
+                          className="w-14 text-sm border border-gray-300 rounded-lg px-2 py-1.5 text-gray-900"
+                        />
+                      </>
+                    )}
+                  </div>
                 </td>
                 <td className="py-1 pr-2">
                   <input
@@ -700,7 +783,10 @@ function EditorRoteiro({
       <div className="flex flex-wrap items-center gap-2 mt-3">
         <button
           onClick={() =>
-            setLinhas((ls) => [...ls, { descricao: '', maquinaId: null, tempo: '', observacao: '' }])
+            setLinhas((ls) => [
+              ...ls,
+              { descricao: '', maquinaId: null, tempo: '', tipo: 'por_peca' as TipoOperacao, rende: '', observacao: '' },
+            ])
           }
           className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 hover:text-gray-900"
         >
@@ -718,6 +804,8 @@ function EditorRoteiro({
                   descricao: l.descricao,
                   maquinaId: l.maquinaId,
                   tempoSegundos: parseInt(l.tempo, 10) || null,
+                  tipo: l.tipo,
+                  rendePecas: l.tipo === 'por_lote' ? parseInt(l.rende, 10) || null : null,
                   observacao: l.observacao || null,
                 })),
               })
@@ -734,12 +822,40 @@ function EditorRoteiro({
         >
           {salvando ? 'Salvando…' : 'Salvar roteiro'}
         </button>
-        <span className="text-xs text-gray-500">
-          {semTempo > 0
-            ? `${tempoLegivel(totalConhecido)} nas operações já medidas · faltam ${semTempo}`
-            : `${tempoLegivel(totalConhecido)} por peça`}
-        </span>
         {aviso && <span className="text-xs text-gray-600">{aviso}</span>}
+      </div>
+
+      {/* Simulador — é ele que mostra por que média fracionada não serve:
+          mude o lote e veja o custo por peça andar. */}
+      <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-700">
+          <span>Um lote de</span>
+          <input
+            value={lote}
+            onChange={(e) => setLote(e.target.value.replace(/\D/g, ''))}
+            inputMode="numeric"
+            className="w-20 text-sm border border-gray-300 rounded-lg px-2 py-1 text-gray-900 bg-white"
+          />
+          <span>peças custa</span>
+          <strong className="text-gray-900">{tempoLegivel(custoLote)}</strong>
+          <span>
+            — {tempoLegivel(qtdLote > 0 ? Math.round(custoLote / qtdLote) : null)} por peça
+          </span>
+          {semTempo > 0 && (
+            <span className="text-amber-800">
+              (parcial — faltam {semTempo} {semTempo === 1 ? 'tempo' : 'tempos'})
+            </span>
+          )}
+        </div>
+        {porMaquina.length > 0 && (
+          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-gray-600">
+            {porMaquina.map((m) => (
+              <span key={m.nome}>
+                {m.nome}: <strong className="text-gray-900">{tempoLegivel(m.segundos)}</strong>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
