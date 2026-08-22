@@ -13,12 +13,21 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* NÃO existe modo escuro aqui — e não é esquecimento.
+ *
+ * O bloco @media (prefers-color-scheme: dark) que veio do create-next-app
+ * trocava --foreground para #ededed. O projeto inteiro é claro: 61 arquivos
+ * fixam bg-white e NÃO existe uma única variante `dark:` no código. Resultado:
+ * pra quem usa o navegador no modo escuro, todo texto que não declarava cor
+ * própria virava quase branco sobre fundo branco — invisível.
+ *
+ * Foi assim que o cadastro de produtos apareceu "apagado" (22/08/2026). Medido
+ * no Chrome do Fernando: body color = rgb(237,237,237) sobre bg-white. Isso
+ * não afetava só o admin: valia pro site público, pro visualizador do cliente
+ * e pro painel do fornecedor, em qualquer visitante com o sistema no escuro.
+ *
+ * Voltar a ter modo escuro exige repintar as 61 telas, não reabrir estas
+ * quatro linhas. */
 
 html {
   scroll-behavior: smooth;
