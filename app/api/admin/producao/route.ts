@@ -25,7 +25,15 @@ import {
   ETAPAS,
   ehEtapa,
 } from '@/app/lib/producao'
-import { listarItensCard, salvarItensCard, cargaDoCard, listarProdutos } from '@/app/lib/pcp'
+import {
+  listarItensCard,
+  salvarItensCard,
+  cargaDoCard,
+  listarProdutos,
+  listarServicos,
+  listarServicosCard,
+  salvarServicosCard,
+} from '@/app/lib/pcp'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -43,12 +51,14 @@ export async function GET(req: NextRequest) {
   // produtos pro seletor. Numa resposta só — a tela abre os três juntos.
   const carga = req.nextUrl.searchParams.get('carga')
   if (carga) {
-    const [itens, resumo, produtos] = await Promise.all([
+    const [itens, resumo, produtos, servicos, servicosCard] = await Promise.all([
       listarItensCard(carga),
       cargaDoCard(carga),
       listarProdutos(),
+      listarServicos(),
+      listarServicosCard(carga),
     ])
-    return NextResponse.json({ itens, carga: resumo, produtos })
+    return NextResponse.json({ itens, carga: resumo, produtos, servicos, servicosCard })
   }
 
   const card = req.nextUrl.searchParams.get('card')
@@ -89,6 +99,17 @@ const Corpo = z.union([
         }),
       )
       .max(200),
+    servicos: z
+      .array(
+        z.object({
+          servicoId: z.string().uuid(),
+          horas: z.number().min(0).max(9999),
+          precoCentavos: z.number().int().min(0).max(100_000_000).nullish(),
+          descricao: z.string().max(280).nullish(),
+        }),
+      )
+      .max(50)
+      .optional(),
   }),
   z.object({
     acao: z.literal('mover').optional(),
@@ -121,11 +142,28 @@ export async function POST(req: NextRequest) {
       })),
     )
     if (!r.ok) return NextResponse.json({ erro: r.erro }, { status: 409 })
+
+    // Serviços vão na MESMA ação: itens e serviços são editados juntos na tela,
+    // e salvar um sem o outro deixaria a carga metade nova, metade velha.
+    if (d.servicos) {
+      const rs = await salvarServicosCard(
+        d.cardId,
+        d.servicos.map((sv) => ({
+          servicoId: sv.servicoId,
+          horas: sv.horas,
+          precoCentavos: sv.precoCentavos ?? null,
+          descricao: sv.descricao ?? null,
+        })),
+      )
+      if (!rs.ok) return NextResponse.json({ erro: rs.erro }, { status: 409 })
+    }
+
     // Devolve a carga recalculada: gravar item sem ver o efeito na máquina
     // seria digitar no escuro.
     return NextResponse.json({
       ok: true,
       itens: await listarItensCard(d.cardId),
+      servicosCard: await listarServicosCard(d.cardId),
       carga: await cargaDoCard(d.cardId),
     })
   }
