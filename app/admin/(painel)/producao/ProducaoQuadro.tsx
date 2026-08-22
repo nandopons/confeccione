@@ -81,10 +81,30 @@ type CargaMaquina = {
   diasDeMaquina: number | null
 }
 
+type ServicoCatalogo = {
+  id: string
+  nome: string
+  recursoNome: string | null
+  horasPadrao: number | null
+  precoCentavos: number | null
+}
+
+type ServicoDoCard = {
+  id: string
+  servicoId: string
+  servicoNome: string
+  recursoNome: string | null
+  horas: number
+  precoCentavos: number | null
+  descricao: string | null
+}
+
 type Carga = {
   totalPecas: number
   totalSegundos: number
   setupSegundos: number
+  servicosSegundos: number
+  servicosCentavos: number
   porMaquina: CargaMaquina[]
   produtosIncompletos: string[]
   cores: string[]
@@ -584,11 +604,14 @@ function Gaveta({
 // setups na overloque, e isso aparece separado do tempo de produção.
 // ---------------------------------------------------------------------------
 type LinhaItem = { produtoId: string; cor: string; tamanho: string; quantidade: string }
+type LinhaServico = { servicoId: string; horas: string; preco: string; descricao: string }
 
 function SecaoPcp({ cardId }: { cardId: string }) {
   const [produtos, setProdutos] = useState<ProdutoPcp[]>([])
+  const [catalogo, setCatalogo] = useState<ServicoCatalogo[]>([])
   const [carga, setCarga] = useState<Carga | null>(null)
   const [linhas, setLinhas] = useState<LinhaItem[]>([])
+  const [servicos, setServicos] = useState<LinhaServico[]>([])
   const [carregando, setCarregando] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
@@ -601,7 +624,16 @@ function SecaoPcp({ cardId }: { cardId: string }) {
         const d = await r.json()
         if (!vivo || !r.ok) return
         setProdutos(d.produtos ?? [])
+        setCatalogo(d.servicos ?? [])
         setCarga(d.carga ?? null)
+        setServicos(
+          (d.servicosCard ?? []).map((sv: ServicoDoCard) => ({
+            servicoId: sv.servicoId,
+            horas: String(sv.horas),
+            preco: sv.precoCentavos == null ? '' : String(sv.precoCentavos / 100),
+            descricao: sv.descricao ?? '',
+          })),
+        )
         setLinhas(
           (d.itens ?? []).map((i: ItemPcp) => ({
             produtoId: i.produtoId,
@@ -640,6 +672,18 @@ function SecaoPcp({ cardId }: { cardId: string }) {
               tamanho: l.tamanho.trim().toUpperCase(),
               quantidade: parseInt(l.quantidade, 10),
             })),
+          servicos: servicos
+            .filter((sv) => sv.servicoId && (parseFloat(sv.horas.replace(',', '.')) || 0) > 0)
+            .map((sv) => {
+              const p = parseFloat(sv.preco.replace(',', '.'))
+              return {
+                servicoId: sv.servicoId,
+                horas: parseFloat(sv.horas.replace(',', '.')),
+                // Vazio = absorvido; zero diria "de graça" no orçamento.
+                precoCentavos: Number.isFinite(p) ? Math.round(p * 100) : null,
+                descricao: sv.descricao || null,
+              }
+            }),
         }),
       })
       const d = await r.json().catch(() => null)
@@ -760,6 +804,115 @@ function SecaoPcp({ cardId }: { cardId: string }) {
         </>
       )}
 
+      {catalogo.length > 0 && (
+        <div className="mt-4">
+          <h4 className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
+            Serviços deste pedido
+          </h4>
+          <p className="text-[11px] text-gray-500 leading-snug mb-2">
+            Design, modelagem, ajuste de grade. Ficam aqui e não no produto porque variam de pedido
+            pra pedido — nem todo pedido do mesmo modelo precisa de modelagem nova.
+          </p>
+
+          <div className="flex flex-col gap-2">
+            {servicos.map((sv, i) => {
+              const doCatalogo = catalogo.find((c) => c.id === sv.servicoId)
+              return (
+                <div key={i} className="flex flex-wrap items-end gap-1.5">
+                  <label className="text-[11px] text-gray-500 grow min-w-[140px]">
+                    Serviço
+                    <select
+                      value={sv.servicoId}
+                      onChange={(e) => {
+                        const escolhido = catalogo.find((c) => c.id === e.target.value)
+                        // Puxa horas e preço padrão SÓ quando os campos estão
+                        // vazios: sobrescrever o que você já ajustou seria
+                        // apagar decisão sua.
+                        setServicos((ls) =>
+                          ls.map((l, j) =>
+                            j === i
+                              ? {
+                                  ...l,
+                                  servicoId: e.target.value,
+                                  horas:
+                                    l.horas ||
+                                    (escolhido?.horasPadrao == null ? '' : String(escolhido.horasPadrao)),
+                                  preco:
+                                    l.preco ||
+                                    (escolhido?.precoCentavos == null
+                                      ? ''
+                                      : String(escolhido.precoCentavos / 100)),
+                                }
+                              : l,
+                          ),
+                        )
+                      }}
+                      className="mt-0.5 w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5 bg-white text-gray-900"
+                    >
+                      <option value="">— escolha —</option>
+                      {catalogo.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nome}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-[11px] text-gray-500">
+                    Horas
+                    <input
+                      value={sv.horas}
+                      onChange={(e) =>
+                        setServicos((ls) =>
+                          ls.map((l, j) => (j === i ? { ...l, horas: e.target.value } : l)),
+                        )
+                      }
+                      inputMode="decimal"
+                      className="mt-0.5 w-16 text-sm border border-gray-300 rounded-lg px-2 py-1.5 text-gray-900"
+                    />
+                  </label>
+                  <label className="text-[11px] text-gray-500">
+                    Preço R$
+                    <input
+                      value={sv.preco}
+                      onChange={(e) =>
+                        setServicos((ls) =>
+                          ls.map((l, j) => (j === i ? { ...l, preco: e.target.value } : l)),
+                        )
+                      }
+                      inputMode="decimal"
+                      placeholder="—"
+                      title="Vazio = absorvido, não vai pro orçamento"
+                      className="mt-0.5 w-20 text-sm border border-gray-300 rounded-lg px-2 py-1.5 text-gray-900"
+                    />
+                  </label>
+                  <button
+                    onClick={() => setServicos((ls) => ls.filter((_, j) => j !== i))}
+                    className="text-xs text-gray-400 hover:text-red-700 pb-2"
+                    aria-label="Remover serviço"
+                  >
+                    ×
+                  </button>
+                  {doCatalogo?.recursoNome && (
+                    <span className="text-[11px] text-gray-400 pb-2 w-full">
+                      ocupa {doCatalogo.recursoNome}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <button
+            onClick={() =>
+              setServicos((ls) => [...ls, { servicoId: '', horas: '', preco: '', descricao: '' }])
+            }
+            className="mt-2 text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50"
+          >
+            + Serviço
+          </button>
+        </div>
+      )}
+
       {carga && carga.porMaquina.length > 0 && (
         <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
           <p className="text-sm text-gray-900">
@@ -773,6 +926,12 @@ function SecaoPcp({ cardId }: { cardId: string }) {
               </span>
             )}
           </p>
+          {(carga.servicosSegundos > 0 || carga.servicosCentavos > 0) && (
+            <p className="text-xs text-gray-600 mt-0.5">
+              Serviços: {horas(carga.servicosSegundos)}
+              {carga.servicosCentavos > 0 && <> · {brl(carga.servicosCentavos)} a cobrar</>}
+            </p>
+          )}
 
           <table className="w-full text-xs mt-2">
             <thead className="text-left text-gray-400">
