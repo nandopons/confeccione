@@ -32,9 +32,13 @@ export type Maquina = {
   observacao: string | null
   ordem: number
   ativo: boolean
-  /** quantidade × horasDia — o teto diário deste tipo de máquina. */
+  /** 'maquina' = equipamento; 'posto' = trabalho humano (design, modelagem). */
+  tipo: TipoRecurso
+  /** quantidade × horasDia — o teto diário deste recurso. */
   capacidadeHorasDia: number
 }
+
+export type TipoRecurso = 'maquina' | 'posto'
 
 export type TipoOperacao = 'por_peca' | 'por_lote'
 
@@ -155,6 +159,7 @@ type LinhaMaquina = {
   observacao: string | null
   ordem: number
   ativo: boolean
+  tipo: TipoRecurso
 }
 
 /** Postgres devolve numeric como string — Number() aqui, uma vez, e não espalhado. */
@@ -176,12 +181,13 @@ function mapearMaquina(l: LinhaMaquina): Maquina {
     observacao: l.observacao,
     ordem: l.ordem,
     ativo: l.ativo,
+    tipo: l.tipo ?? 'maquina',
     capacidadeHorasDia: quantidade * horasDia,
   }
 }
 
 const COLUNAS_MAQUINA =
-  'id, codigo, nome, quantidade, horas_dia, setup_troca_min, observacao, ordem, ativo'
+  'id, codigo, nome, quantidade, horas_dia, setup_troca_min, observacao, ordem, ativo, tipo'
 
 export async function listarMaquinas(incluirInativas = false): Promise<Maquina[]> {
   let q = supabaseAdmin.from('pcp_maquinas').select(COLUNAS_MAQUINA).order('ordem').order('nome')
@@ -208,6 +214,7 @@ export async function salvarMaquina(params: {
   observacao?: string | null
   ordem?: number
   ativo?: boolean
+  tipo?: TipoRecurso
 }): Promise<ResultadoPcp> {
   const codigo = params.codigo
     .normalize('NFD')
@@ -227,6 +234,7 @@ export async function salvarMaquina(params: {
     observacao: params.observacao?.trim() || null,
     ordem: params.ordem ?? 0,
     ativo: params.ativo ?? true,
+    tipo: params.tipo ?? 'maquina',
     atualizado_em: new Date().toISOString(),
   }
 
@@ -663,6 +671,10 @@ export type CargaCard = {
   totalPecas: number
   totalSegundos: number
   setupSegundos: number
+  /** Horas de design, modelagem etc. já incluídas em `porMaquina`. */
+  servicosSegundos: number
+  /** O que os serviços deste card somam de cobrança ao cliente. */
+  servicosCentavos: number
   porMaquina: CargaMaquina[]
   /** Produtos citados no card que ainda têm operação sem tempo. */
   produtosIncompletos: string[]
@@ -690,10 +702,11 @@ export type CargaCard = {
  * número menor que a realidade, e ninguém notaria.
  */
 export async function cargaDoCard(cardId: string): Promise<CargaCard> {
-  const [itens, produtos, maquinas] = await Promise.all([
+  const [itens, produtos, maquinas, servicos] = await Promise.all([
     listarItensCard(cardId),
     listarProdutos(true),
     listarMaquinas(true),
+    listarServicosCard(cardId),
   ])
 
   const porId = new Map(produtos.map((p) => [p.id, p]))
@@ -746,6 +759,28 @@ export async function cargaDoCard(cardId: string): Promise<CargaCard> {
     }
   }
 
+  // Serviços entram como produção no posto que os executa. Serviço sem recurso
+  // é terceirizado: conta como prazo e custo, mas não ocupa capacidade nossa —
+  // por isso fica fora de `porMaquina`, e não numa linha "sem máquina" que
+  // apareceria disputando gargalo com a costura.
+  let servicosSegundos = 0
+  let servicosCentavos = 0
+  for (const sv of servicos) {
+    const seg = Math.round(sv.horas * 3600)
+    servicosSegundos += seg
+    servicosCentavos += sv.precoCentavos ?? 0
+    if (!sv.recursoId) continue
+    const atual = producaoPorMaquina.get(sv.recursoId)
+    if (atual) atual.segundos += seg
+    else {
+      producaoPorMaquina.set(sv.recursoId, {
+        maquinaId: sv.recursoId,
+        nome: sv.recursoNome ?? 'Posto',
+        segundos: seg,
+      })
+    }
+  }
+
   const porMaquina: CargaMaquina[] = [...producaoPorMaquina.values()].map((m) => {
     const maquina = m.maquinaId ? maquinaPorId.get(m.maquinaId) : null
     const setup = m.maquinaId
@@ -773,8 +808,189 @@ export async function cargaDoCard(cardId: string): Promise<CargaCard> {
     totalPecas,
     totalSegundos: porMaquina.reduce((s, m) => s + m.totalSegundos, 0),
     setupSegundos: setupTotal,
+    servicosSegundos,
+    servicosCentavos,
     porMaquina,
     produtosIncompletos: [...incompletos],
     cores: [...new Set(itens.map((i) => i.cor))],
   }
+}
+
+// ---------------------------------------------------------------------------
+// SERVIÇOS — design, modelagem, ajuste de grade
+//
+// POR QUE NÃO SÃO OPERAÇÃO DO PRODUTO
+// Decisão do Fernando (22/08/2026): modelagem "varia por pedido — só às vezes".
+// Se morasse no roteiro do produto, seria cobrada em todo pedido daquele
+// modelo, inclusive nos que reaproveitam a modelagem antiga. Por isso o
+// serviço é pendurado no CARD.
+//
+// POR QUE O POSTO É UM "RECURSO" E NÃO UMA TABELA NOVA
+// Ele também respondeu que design e modelagem "são horas minhas/da equipe" —
+// disputam tempo e podem virar gargalo. A conta é idêntica à da máquina
+// (quantidade × horas/dia), então reaproveito `pcp_maquinas` com `tipo`. Duas
+// tabelas para o mesmo conceito divergiriam na primeira mudança de regra.
+// ---------------------------------------------------------------------------
+
+export type Servico = {
+  id: string
+  codigo: string
+  nome: string
+  recursoId: string | null
+  recursoNome: string | null
+  horasPadrao: number | null
+  precoCentavos: number | null
+  descricao: string | null
+  ativo: boolean
+}
+
+export async function listarServicos(incluirInativos = false): Promise<Servico[]> {
+  let q = supabaseAdmin
+    .from('pcp_servicos')
+    .select('id, codigo, nome, recurso_id, horas_padrao, preco_centavos, descricao, ativo, pcp_maquinas(nome)')
+    .order('nome')
+  if (!incluirInativos) q = q.eq('ativo', true)
+
+  const { data } = await q
+  return ((data ?? []) as unknown as {
+    id: string
+    codigo: string
+    nome: string
+    recurso_id: string | null
+    horas_padrao: string | number | null
+    preco_centavos: number | null
+    descricao: string | null
+    ativo: boolean
+    pcp_maquinas: { nome: string } | null
+  }[]).map((l) => ({
+    id: l.id,
+    codigo: l.codigo,
+    nome: l.nome,
+    recursoId: l.recurso_id,
+    recursoNome: l.pcp_maquinas?.nome ?? null,
+    horasPadrao: l.horas_padrao == null ? null : num(l.horas_padrao),
+    precoCentavos: l.preco_centavos,
+    descricao: l.descricao,
+    ativo: l.ativo,
+  }))
+}
+
+export async function salvarServico(params: {
+  id?: string | null
+  codigo: string
+  nome: string
+  recursoId: string | null
+  horasPadrao: number | null
+  precoCentavos: number | null
+  descricao?: string | null
+  ativo?: boolean
+}): Promise<ResultadoPcp> {
+  const codigo = params.codigo
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  if (!codigo) return { ok: false, erro: 'Código inválido' }
+  if (!params.nome.trim()) return { ok: false, erro: 'Informe o nome do serviço' }
+
+  const linha = {
+    codigo,
+    nome: params.nome.trim(),
+    recurso_id: params.recursoId || null,
+    horas_padrao: params.horasPadrao && params.horasPadrao > 0 ? params.horasPadrao : null,
+    preco_centavos:
+      params.precoCentavos != null && params.precoCentavos >= 0 ? Math.round(params.precoCentavos) : null,
+    descricao: params.descricao?.trim() || null,
+    ativo: params.ativo ?? true,
+    atualizado_em: new Date().toISOString(),
+  }
+
+  if (params.id) {
+    const { error } = await supabaseAdmin.from('pcp_servicos').update(linha).eq('id', params.id)
+    if (error) return { ok: false, erro: error.message }
+    return { ok: true, id: params.id }
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('pcp_servicos')
+    .insert(linha)
+    .select('id')
+    .maybeSingle<{ id: string }>()
+  if (error) return { ok: false, erro: error.message }
+  return { ok: true, id: data?.id }
+}
+
+export type ServicoDoCard = {
+  id: string
+  servicoId: string
+  servicoNome: string
+  recursoId: string | null
+  recursoNome: string | null
+  horas: number
+  precoCentavos: number | null
+  descricao: string | null
+}
+
+export async function listarServicosCard(cardId: string): Promise<ServicoDoCard[]> {
+  const { data } = await supabaseAdmin
+    .from('pcp_producao_servicos')
+    .select('id, servico_id, horas, preco_centavos, descricao, pcp_servicos(nome, recurso_id, pcp_maquinas(nome))')
+    .eq('card_id', cardId)
+    .order('criado_em')
+
+  return ((data ?? []) as unknown as {
+    id: string
+    servico_id: string
+    horas: string | number
+    preco_centavos: number | null
+    descricao: string | null
+    pcp_servicos: { nome: string; recurso_id: string | null; pcp_maquinas: { nome: string } | null } | null
+  }[]).map((l) => ({
+    id: l.id,
+    servicoId: l.servico_id,
+    servicoNome: l.pcp_servicos?.nome ?? '—',
+    recursoId: l.pcp_servicos?.recurso_id ?? null,
+    recursoNome: l.pcp_servicos?.pcp_maquinas?.nome ?? null,
+    horas: num(l.horas),
+    precoCentavos: l.preco_centavos,
+    descricao: l.descricao,
+  }))
+}
+
+/** Grava a lista inteira de serviços do card — mesma estratégia dos itens. */
+export async function salvarServicosCard(
+  cardId: string,
+  servicos: {
+    servicoId: string
+    horas: number
+    precoCentavos?: number | null
+    descricao?: string | null
+  }[],
+): Promise<ResultadoPcp> {
+  // Serviço sem horas não é serviço: seria uma linha que ocupa a tela e não
+  // entra em conta nenhuma. Some no salvamento em vez de virar zero silencioso.
+  const limpos = servicos.filter((s) => s.servicoId && s.horas > 0)
+
+  const { error: delErr } = await supabaseAdmin
+    .from('pcp_producao_servicos')
+    .delete()
+    .eq('card_id', cardId)
+  if (delErr) return { ok: false, erro: delErr.message }
+
+  if (limpos.length) {
+    const { error } = await supabaseAdmin.from('pcp_producao_servicos').insert(
+      limpos.map((s) => ({
+        card_id: cardId,
+        servico_id: s.servicoId,
+        horas: s.horas,
+        preco_centavos:
+          s.precoCentavos != null && s.precoCentavos >= 0 ? Math.round(s.precoCentavos) : null,
+        descricao: s.descricao?.trim() || null,
+      })),
+    )
+    if (error) return { ok: false, erro: error.message }
+  }
+
+  return { ok: true, id: cardId }
 }
