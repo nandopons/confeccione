@@ -22,6 +22,8 @@ import {
   salvarProduto,
   salvarRoteiro,
   salvarComponentes,
+  listarServicos,
+  salvarServico,
 } from '@/app/lib/pcp'
 
 export const runtime = 'nodejs'
@@ -34,11 +36,13 @@ function naoAutenticado(req: NextRequest): boolean {
 export async function GET(req: NextRequest) {
   if (naoAutenticado(req)) return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 })
 
-  const [maquinas, produtos] = await Promise.all([
-    listarMaquinas(req.nextUrl.searchParams.get('inativos') === '1'),
-    listarProdutos(req.nextUrl.searchParams.get('inativos') === '1'),
+  const inativos = req.nextUrl.searchParams.get('inativos') === '1'
+  const [maquinas, produtos, servicos] = await Promise.all([
+    listarMaquinas(inativos),
+    listarProdutos(inativos),
+    listarServicos(inativos),
   ])
-  return NextResponse.json({ maquinas, produtos })
+  return NextResponse.json({ maquinas, produtos, servicos })
 }
 
 const Corpo = z.discriminatedUnion('acao', [
@@ -52,6 +56,18 @@ const Corpo = z.discriminatedUnion('acao', [
     setupTrocaMin: z.number().min(0).max(999),
     observacao: z.string().max(280).nullish(),
     ordem: z.number().int().min(0).max(999).optional(),
+    ativo: z.boolean().optional(),
+    tipo: z.enum(['maquina', 'posto']).optional(),
+  }),
+  z.object({
+    acao: z.literal('salvar_servico'),
+    id: z.string().uuid().nullish(),
+    codigo: z.string().trim().min(1).max(60),
+    nome: z.string().trim().min(1).max(120),
+    recursoId: z.string().uuid().nullable(),
+    horasPadrao: z.number().min(0).max(999).nullable(),
+    precoCentavos: z.number().int().min(0).max(100_000_000).nullable(),
+    descricao: z.string().max(280).nullish(),
     ativo: z.boolean().optional(),
   }),
   z.object({ acao: z.literal('desativar_maquina'), id: z.string().uuid() }),
@@ -123,6 +139,19 @@ export async function POST(req: NextRequest) {
         observacao: d.observacao ?? null,
         ordem: d.ordem,
         ativo: d.ativo,
+        tipo: d.tipo,
+      })
+      break
+    case 'salvar_servico':
+      r = await salvarServico({
+        id: d.id ?? null,
+        codigo: d.codigo,
+        nome: d.nome,
+        recursoId: d.recursoId,
+        horasPadrao: d.horasPadrao,
+        precoCentavos: d.precoCentavos,
+        descricao: d.descricao ?? null,
+        ativo: d.ativo,
       })
       break
     case 'desativar_maquina':
@@ -170,6 +199,10 @@ export async function POST(req: NextRequest) {
 
   // Devolve o cadastro recarregado: toda ação aqui mexe em relações que a tela
   // mostra junto (mudar uma máquina muda o nome dela em N operações).
-  const [maquinas, produtos] = await Promise.all([listarMaquinas(), listarProdutos()])
-  return NextResponse.json({ ok: true, maquinas, produtos })
+  const [maquinas, produtos, servicos] = await Promise.all([
+    listarMaquinas(),
+    listarProdutos(),
+    listarServicos(),
+  ])
+  return NextResponse.json({ ok: true, maquinas, produtos, servicos })
 }
