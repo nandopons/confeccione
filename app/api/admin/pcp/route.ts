@@ -73,6 +73,8 @@ const Corpo = z.discriminatedUnion('acao', [
           maquinaId: z.string().uuid().nullable(),
           // 0 e null significam "ainda não cronometrado" — nunca "instantâneo".
           tempoSegundos: z.number().int().min(0).max(86_400).nullable(),
+          tipo: z.enum(['por_peca', 'por_lote']).optional(),
+          rendePecas: z.number().int().min(1).max(100_000).nullish(),
           observacao: z.string().max(280).nullish(),
         }),
       )
@@ -142,6 +144,8 @@ export async function POST(req: NextRequest) {
           descricao: o.descricao,
           maquinaId: o.maquinaId,
           tempoSegundos: o.tempoSegundos && o.tempoSegundos > 0 ? o.tempoSegundos : null,
+          tipo: o.tipo ?? 'por_peca',
+          rendePecas: o.rendePecas ?? null,
           observacao: o.observacao ?? null,
         })),
       )
