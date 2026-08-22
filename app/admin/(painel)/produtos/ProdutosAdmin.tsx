@@ -17,6 +17,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
+type TipoRecurso = 'maquina' | 'posto'
+
+type Servico = {
+  id: string
+  codigo: string
+  nome: string
+  recursoId: string | null
+  recursoNome: string | null
+  horasPadrao: number | null
+  precoCentavos: number | null
+  descricao: string | null
+  ativo: boolean
+}
+
 type Maquina = {
   id: string
   codigo: string
@@ -27,6 +41,7 @@ type Maquina = {
   observacao: string | null
   ordem: number
   ativo: boolean
+  tipo: TipoRecurso
   capacidadeHorasDia: number
 }
 
@@ -104,8 +119,9 @@ function nInput(v: string): number | null {
 }
 
 export default function ProdutosAdmin() {
-  const [aba, setAba] = useState<'produtos' | 'maquinas'>('produtos')
+  const [aba, setAba] = useState<'produtos' | 'maquinas' | 'servicos'>('produtos')
   const [maquinas, setMaquinas] = useState<Maquina[]>([])
+  const [servicos, setServicos] = useState<Servico[]>([])
   const [produtos, setProdutos] = useState<Produto[]>([])
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
@@ -118,6 +134,7 @@ export default function ProdutosAdmin() {
       if (!r.ok) throw new Error(d?.erro || 'Falha ao carregar')
       setMaquinas(d.maquinas ?? [])
       setProdutos(d.produtos ?? [])
+      setServicos(d.servicos ?? [])
       setErro(null)
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Falha ao carregar')
@@ -140,6 +157,7 @@ export default function ProdutosAdmin() {
     if (!r.ok) throw new Error(d?.erro || 'Não foi possível salvar')
     if (d?.maquinas) setMaquinas(d.maquinas)
     if (d?.produtos) setProdutos(d.produtos)
+    if (d?.servicos) setServicos(d.servicos)
   }, [])
 
   if (carregando && !produtos.length && !maquinas.length) {
@@ -155,7 +173,7 @@ export default function ProdutosAdmin() {
       </p>
 
       <div className="flex gap-1 mt-5 border-b border-gray-200">
-        {(['produtos', 'maquinas'] as const).map((a) => (
+        {(['produtos', 'maquinas', 'servicos'] as const).map((a) => (
           <button
             key={a}
             onClick={() => setAba(a)}
@@ -166,7 +184,7 @@ export default function ProdutosAdmin() {
                 : { borderColor: 'transparent', color: '#6b7280' }
             }
           >
-            {a === 'produtos' ? 'Produtos' : 'Máquinas'}
+            {a === 'produtos' ? 'Produtos' : a === 'maquinas' ? 'Máquinas e postos' : 'Serviços'}
           </button>
         ))}
       </div>
@@ -178,7 +196,9 @@ export default function ProdutosAdmin() {
       )}
 
       <div className="mt-5">
-        {aba === 'maquinas' ? (
+        {aba === 'servicos' ? (
+          <AbaServicos servicos={servicos} maquinas={maquinas} onEnviar={enviar} onErro={setErro} />
+        ) : aba === 'maquinas' ? (
           <AbaMaquinas maquinas={maquinas} onEnviar={enviar} onErro={setErro} />
         ) : (
           <AbaProdutos produtos={produtos} maquinas={maquinas} onEnviar={enviar} onErro={setErro} />
@@ -265,6 +285,11 @@ function AbaMaquinas({
                 <tr key={m.id}>
                   <td className="px-4 py-2.5">
                     <span className="text-gray-900">{m.nome}</span>
+                    {m.tipo === 'posto' && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 ml-1.5">
+                        posto
+                      </span>
+                    )}
                     <span className="text-[11px] font-mono text-gray-400 ml-2">{m.codigo}</span>
                     {m.observacao && (
                       <p className="text-xs text-gray-500 mt-0.5">{m.observacao}</p>
@@ -276,7 +301,9 @@ function AbaMaquinas({
                     {m.capacidadeHorasDia}h/dia
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
-                    {m.setupTrocaMin > 0 ? (
+                    {m.tipo === 'posto' ? (
+                      <span className="text-gray-400">—</span>
+                    ) : m.setupTrocaMin > 0 ? (
                       `${m.setupTrocaMin} min`
                     ) : (
                       <span className="text-amber-700">a medir</span>
@@ -323,6 +350,7 @@ function FormMaquina({
   const [quantidade, setQuantidade] = useState(String(maquina?.quantidade ?? 1))
   const [horasDia, setHorasDia] = useState(String(maquina?.horasDia ?? 8))
   const [setup, setSetup] = useState(String(maquina?.setupTrocaMin ?? 0))
+  const [tipo, setTipo] = useState<TipoRecurso>(maquina?.tipo ?? 'maquina')
   const [obs, setObs] = useState(maquina?.observacao ?? '')
   const [salvando, setSalvando] = useState(false)
 
@@ -372,14 +400,28 @@ function FormMaquina({
           />
         </label>
         <label className="text-xs text-gray-600">
-          Troca de linha (minutos)
-          <input
-            value={setup}
-            onChange={(e) => setSetup(e.target.value)}
-            inputMode="decimal"
-            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-900"
-          />
+          O que é
+          <select
+            value={tipo}
+            onChange={(e) => setTipo(e.target.value as TipoRecurso)}
+            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-900"
+          >
+            <option value="maquina">Máquina</option>
+            <option value="posto">Posto de trabalho (design, modelagem)</option>
+          </select>
         </label>
+        {/* Posto não troca linha de cor — o campo só confundiria. */}
+        {tipo === 'maquina' && (
+          <label className="text-xs text-gray-600">
+            Troca de linha (minutos)
+            <input
+              value={setup}
+              onChange={(e) => setSetup(e.target.value)}
+              inputMode="decimal"
+              className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-900"
+            />
+          </label>
+        )}
         <label className="text-xs text-gray-600">
           Observação
           <input
@@ -400,7 +442,8 @@ function FormMaquina({
               codigo: codigo || nome,
               quantidade: Math.max(0, Math.round(nInput(quantidade) ?? 0)),
               horasDia: nInput(horasDia) ?? 0,
-              setupTrocaMin: nInput(setup) ?? 0,
+              setupTrocaMin: tipo === 'posto' ? 0 : nInput(setup) ?? 0,
+              tipo,
               observacao: obs || null,
             })
             setSalvando(false)
@@ -413,6 +456,252 @@ function FormMaquina({
         <button
           onClick={onCancelar}
           className="text-sm px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 hover:text-gray-900"
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Serviços — design, modelagem, ajuste de grade
+//
+// POR QUE NÃO SÃO OPERAÇÃO DO PRODUTO
+// Modelagem varia por pedido (decisão do Fernando, 22/08/2026): alguns pedidos
+// exigem modelo novo, outros reaproveitam. No roteiro do produto ela seria
+// cobrada sempre. Aqui é só o CATÁLOGO — tempo e preço padrão; o uso real você
+// pendura no card, em Produção, e pode ajustar os dois.
+// ---------------------------------------------------------------------------
+function AbaServicos({
+  servicos,
+  maquinas,
+  onEnviar,
+  onErro,
+}: {
+  servicos: Servico[]
+  maquinas: Maquina[]
+  onEnviar: Enviar
+  onErro: (e: string | null) => void
+}) {
+  const [editando, setEditando] = useState<Servico | null>(null)
+  const [novo, setNovo] = useState(false)
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <p className="text-sm text-gray-600 max-w-2xl">
+          Trabalho que não é operação de peça. Cada serviço aponta pro posto que o executa — é assim
+          que ele disputa hora e pode virar gargalo junto com a costura.
+        </p>
+        <button
+          onClick={() => {
+            setNovo(true)
+            setEditando(null)
+          }}
+          className="text-sm px-4 py-2 rounded-lg text-white shrink-0"
+          style={{ backgroundColor: VERDE }}
+        >
+          Novo serviço
+        </button>
+      </div>
+
+      {(novo || editando) && (
+        <FormServico
+          servico={editando}
+          maquinas={maquinas}
+          onCancelar={() => {
+            setNovo(false)
+            setEditando(null)
+          }}
+          onSalvar={async (dados) => {
+            try {
+              await onEnviar({ acao: 'salvar_servico', ...dados })
+              setNovo(false)
+              setEditando(null)
+              onErro(null)
+            } catch (e) {
+              onErro(e instanceof Error ? e.message : 'Não foi possível salvar')
+            }
+          }}
+        />
+      )}
+
+      <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden mt-3">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+              <tr>
+                <th className="px-4 py-2.5 font-semibold">Serviço</th>
+                <th className="px-4 py-2.5 font-semibold">Executado em</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Horas padrão</th>
+                <th className="px-4 py-2.5 font-semibold text-right">Preço padrão</th>
+                <th className="px-4 py-2.5" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {servicos.map((sv) => (
+                <tr key={sv.id}>
+                  <td className="px-4 py-2.5">
+                    <span className="text-gray-900">{sv.nome}</span>
+                    {sv.descricao && <p className="text-xs text-gray-500 mt-0.5">{sv.descricao}</p>}
+                  </td>
+                  <td className="px-4 py-2.5 text-gray-700">
+                    {sv.recursoNome ?? (
+                      <span className="text-gray-500">terceirizado — não ocupa capacidade</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">
+                    {sv.horasPadrao == null ? (
+                      <span className="text-amber-700">a definir</span>
+                    ) : (
+                      `${sv.horasPadrao}h`
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">
+                    {sv.precoCentavos == null ? '—' : brlPcp(sv.precoCentavos)}
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <button
+                      onClick={() => {
+                        setEditando(sv)
+                        setNovo(false)
+                      }}
+                      className="text-xs text-gray-600 hover:text-gray-900 underline underline-offset-2"
+                    >
+                      Editar
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p className="text-xs text-gray-500 mt-3 leading-relaxed max-w-3xl">
+        <strong>Horas e preço aqui são padrão</strong> — sugestão para não redigitar. No card você
+        ajusta os dois: uma modelagem difícil leva o dobro, e mudar o catálogo depois não reescreve o
+        que já foi planejado e cobrado.
+      </p>
+    </div>
+  )
+}
+
+function brlPcp(centavos: number): string {
+  return (centavos / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+
+function FormServico({
+  servico,
+  maquinas,
+  onSalvar,
+  onCancelar,
+}: {
+  servico: Servico | null
+  maquinas: Maquina[]
+  onSalvar: (dados: Record<string, unknown>) => Promise<void>
+  onCancelar: () => void
+}) {
+  const [nome, setNome] = useState(servico?.nome ?? '')
+  const [codigo, setCodigo] = useState(servico?.codigo ?? '')
+  const [recursoId, setRecursoId] = useState(servico?.recursoId ?? '')
+  const [horas, setHoras] = useState(servico?.horasPadrao == null ? '' : String(servico.horasPadrao))
+  const [preco, setPreco] = useState(
+    servico?.precoCentavos == null ? '' : String(servico.precoCentavos / 100),
+  )
+  const [descricao, setDescricao] = useState(servico?.descricao ?? '')
+  const [salvando, setSalvando] = useState(false)
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4">
+      <h3 className="text-sm font-semibold text-gray-900 mb-3">
+        {servico ? `Editar ${servico.nome}` : 'Novo serviço'}
+      </h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <label className="text-xs text-gray-600">
+          Nome
+          <input
+            value={nome}
+            onChange={(e) => {
+              setNome(e.target.value)
+              if (!servico && !codigo) setCodigo(e.target.value)
+            }}
+            placeholder="Modelagem nova"
+            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-900"
+          />
+        </label>
+        <label className="text-xs text-gray-600">
+          Executado em
+          <select
+            value={recursoId}
+            onChange={(e) => setRecursoId(e.target.value)}
+            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white text-gray-900"
+          >
+            <option value="">Terceirizado — não ocupa capacidade</option>
+            {maquinas.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.nome}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-gray-600">
+          Horas padrão
+          <input
+            value={horas}
+            onChange={(e) => setHoras(e.target.value)}
+            inputMode="decimal"
+            placeholder="4"
+            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-900"
+          />
+        </label>
+        <label className="text-xs text-gray-600">
+          Preço padrão (R$)
+          <input
+            value={preco}
+            onChange={(e) => setPreco(e.target.value)}
+            inputMode="decimal"
+            placeholder="250"
+            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-900"
+          />
+        </label>
+        <label className="text-xs text-gray-600 sm:col-span-2">
+          Descrição
+          <input
+            value={descricao}
+            onChange={(e) => setDescricao(e.target.value)}
+            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-900"
+          />
+        </label>
+      </div>
+      <div className="flex gap-2 mt-3">
+        <button
+          disabled={salvando}
+          onClick={async () => {
+            setSalvando(true)
+            const p = nInput(preco)
+            await onSalvar({
+              id: servico?.id ?? null,
+              nome,
+              codigo: codigo || nome,
+              recursoId: recursoId || null,
+              horasPadrao: nInput(horas),
+              // Preço vazio não é zero: zero diria "de graça", vazio diz
+              // "ainda não decidi".
+              precoCentavos: p == null ? null : Math.round(p * 100),
+              descricao: descricao || null,
+            })
+            setSalvando(false)
+          }}
+          className="text-sm px-4 py-2 rounded-lg text-white disabled:opacity-50"
+          style={{ backgroundColor: VERDE }}
+        >
+          {salvando ? 'Salvando…' : 'Salvar'}
+        </button>
+        <button
+          onClick={onCancelar}
+          className="text-sm px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50"
         >
           Cancelar
         </button>
