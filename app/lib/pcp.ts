@@ -36,6 +36,8 @@ export type Maquina = {
   capacidadeHorasDia: number
 }
 
+export type TipoOperacao = 'por_peca' | 'por_lote'
+
 export type Operacao = {
   id: string
   ordem: number
@@ -43,6 +45,10 @@ export type Operacao = {
   maquinaId: string | null
   maquinaNome: string | null
   tempoSegundos: number | null
+  /** por_peca = tempo por peça; por_lote = o tempo cobre um lote inteiro. */
+  tipo: TipoOperacao
+  /** Só no por_lote: quantas peças aquele tempo rende. Null = uma vez por lote. */
+  rendePecas: number | null
   observacao: string | null
 }
 
@@ -65,12 +71,75 @@ export type Produto = {
   ativo: boolean
   operacoes: Operacao[]
   componentes: Componente[]
-  /** Soma dos tempos. Null se QUALQUER operação ainda não foi cronometrada. */
-  tempoTotalSegundos: number | null
+  /**
+   * Soma só das operações POR PEÇA. Null se alguma delas ainda não tem tempo.
+   * Não é o custo da peça: as operações por lote entram diluídas, e o quanto
+   * elas pesam depende do tamanho do lote — por isso `custoDoLote`.
+   */
+  tempoPorPecaSegundos: number | null
+  /** Existe operação por lote? Se sim, "tempo por peça" sozinho engana. */
+  temOperacaoPorLote: boolean
   /** Quantas operações ainda faltam cronometrar. */
   operacoesSemTempo: number
   /** Só com tempo em todas as operações este produto pode virar capacidade. */
   prontoParaCalculo: boolean
+}
+
+/**
+ * Quanto tempo esta operação custa para produzir `quantidade` peças.
+ *
+ * POR QUE NÃO MÉDIA FRACIONADA
+ * Diluir "30 min que rendem 50 peças" em 36 s/peça só acerta o total quando o
+ * lote tem exatamente 50. Num lote de 10 você gasta os 30 minutos do mesmo
+ * jeito (a mesa é montada uma vez, não um quinto de vez); num lote de 120 são
+ * três cortes, 90 minutos. E a média apaga o DEGRAU — gargalo é ocupação numa
+ * janela de tempo, e 30 minutos contínuos travando a máquina é um fato de
+ * planejamento que 36 segundos por peça escondem.
+ */
+export function custoOperacaoSegundos(op: Operacao, quantidade: number): number {
+  if (op.tempoSegundos == null || quantidade <= 0) return 0
+  if (op.tipo === 'por_peca') return op.tempoSegundos * quantidade
+  // por_lote sem rendimento = uma vez só, independente do tamanho do lote
+  // (montar enfesto, regular máquina).
+  if (!op.rendePecas) return op.tempoSegundos
+  return op.tempoSegundos * Math.ceil(quantidade / op.rendePecas)
+}
+
+export type CustoLote = {
+  quantidade: number
+  totalSegundos: number
+  /** O que o lote custa dividido por peça — número derivado, nunca cadastrado. */
+  porPecaSegundos: number
+  porMaquina: { maquinaId: string | null; maquinaNome: string; segundos: number }[]
+}
+
+/** Custo de um lote inteiro, com a quebra por máquina (a base do gargalo). */
+export function custoDoLote(produto: Produto, quantidade: number): CustoLote {
+  const porMaquina = new Map<string, { maquinaId: string | null; maquinaNome: string; segundos: number }>()
+  let total = 0
+
+  for (const op of produto.operacoes) {
+    const seg = custoOperacaoSegundos(op, quantidade)
+    if (!seg) continue
+    total += seg
+    const chave = op.maquinaId ?? 'sem_maquina'
+    const atual = porMaquina.get(chave)
+    if (atual) atual.segundos += seg
+    else {
+      porMaquina.set(chave, {
+        maquinaId: op.maquinaId,
+        maquinaNome: op.maquinaNome ?? 'Sem máquina',
+        segundos: seg,
+      })
+    }
+  }
+
+  return {
+    quantidade,
+    totalSegundos: total,
+    porPecaSegundos: quantidade > 0 ? total / quantidade : 0,
+    porMaquina: [...porMaquina.values()].sort((a, b) => b.segundos - a.segundos),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +270,8 @@ type LinhaOperacao = {
   descricao: string
   maquina_id: string | null
   tempo_segundos: number | null
+  tipo: TipoOperacao
+  rende_pecas: number | null
   observacao: string | null
 }
 
@@ -226,7 +297,7 @@ export async function listarProdutos(incluirInativos = false): Promise<Produto[]
     listarMaquinas(true),
     supabaseAdmin
       .from('pcp_operacoes')
-      .select('id, produto_id, ordem, descricao, maquina_id, tempo_segundos, observacao')
+      .select('id, produto_id, ordem, descricao, maquina_id, tempo_segundos, tipo, rende_pecas, observacao')
       .in('produto_id', ids)
       .order('ordem'),
     supabaseAdmin
@@ -280,6 +351,8 @@ export async function listarProdutos(incluirInativos = false): Promise<Produto[]
       maquinaId: o.maquina_id,
       maquinaNome: o.maquina_id ? nomeMaquina.get(o.maquina_id) ?? null : null,
       tempoSegundos: o.tempo_segundos,
+      tipo: o.tipo ?? 'por_peca',
+      rendePecas: o.rende_pecas,
       observacao: o.observacao,
     })
     opsPorProduto.set(o.produto_id, arr)
@@ -302,6 +375,8 @@ export async function listarProdutos(incluirInativos = false): Promise<Produto[]
   return lista.map((p) => {
     const operacoes = opsPorProduto.get(p.id) ?? []
     const semTempo = operacoes.filter((o) => o.tempoSegundos == null).length
+    const porPeca = operacoes.filter((o) => o.tipo === 'por_peca')
+    const porPecaIncompleto = porPeca.some((o) => o.tempoSegundos == null)
     return {
       id: p.id,
       codigo: p.codigo,
@@ -310,12 +385,12 @@ export async function listarProdutos(incluirInativos = false): Promise<Produto[]
       ativo: p.ativo,
       operacoes,
       componentes: compsPorProduto.get(p.id) ?? [],
-      // Total só existe quando TODAS têm tempo. Somar as conhecidas e ignorar
-      // as vazias daria um número menor que a realidade, e ninguém notaria.
-      tempoTotalSegundos:
-        operacoes.length && semTempo === 0
-          ? operacoes.reduce((s, o) => s + (o.tempoSegundos ?? 0), 0)
-          : null,
+      // Só existe quando todas as por-peça têm tempo. Somar as conhecidas e
+      // ignorar as vazias daria um número menor que a realidade, sem aviso.
+      tempoPorPecaSegundos: porPeca.length && !porPecaIncompleto
+        ? porPeca.reduce((s, o) => s + (o.tempoSegundos ?? 0), 0)
+        : null,
+      temOperacaoPorLote: operacoes.some((o) => o.tipo === 'por_lote'),
       operacoesSemTempo: semTempo,
       prontoParaCalculo: operacoes.length > 0 && semTempo === 0,
     }
@@ -376,6 +451,8 @@ export async function salvarRoteiro(
     descricao: string
     maquinaId: string | null
     tempoSegundos: number | null
+    tipo?: TipoOperacao
+    rendePecas?: number | null
     observacao?: string | null
   }[],
 ): Promise<ResultadoPcp> {
@@ -400,6 +477,13 @@ export async function salvarRoteiro(
         descricao: o.descricao,
         maquina_id: o.maquinaId || null,
         tempo_segundos: o.tempoSegundos && o.tempoSegundos > 0 ? Math.round(o.tempoSegundos) : null,
+        tipo: o.tipo ?? 'por_peca',
+        // Rendimento só sobrevive no por_lote — o CHECK do banco recusa o resto,
+        // e mandar mesmo assim quebraria o salvamento inteiro por uma linha.
+        rende_pecas:
+          o.tipo === 'por_lote' && o.rendePecas && o.rendePecas > 0
+            ? Math.round(o.rendePecas)
+            : null,
         observacao: o.observacao?.trim() || null,
       })),
     )
