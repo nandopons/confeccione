@@ -5,6 +5,7 @@
 //   GET                  -> quadro inteiro (todos os pedidos pagos e abertos)
 //   GET ?card=<uuid>     -> linha do tempo daquele card
 //   GET ?arquivados=1    -> a gaveta: só os cards arquivados
+//   GET ?carga=<uuid>    -> o que o card é (itens do PCP) e quanto custa por máquina
 //   POST                 -> move um card de etapa
 //   POST { acao: 'arquivar' | 'restaurar' } -> tira do quadro / traz de volta
 //
@@ -24,6 +25,7 @@ import {
   ETAPAS,
   ehEtapa,
 } from '@/app/lib/producao'
+import { listarItensCard, salvarItensCard, cargaDoCard, listarProdutos } from '@/app/lib/pcp'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -35,6 +37,18 @@ function naoAutenticado(req: NextRequest): boolean {
 export async function GET(req: NextRequest) {
   if (naoAutenticado(req)) {
     return NextResponse.json({ erro: 'Não autenticado' }, { status: 401 })
+  }
+
+  // O PCP do card: o que ele é, quanto custa por máquina, e o catálogo de
+  // produtos pro seletor. Numa resposta só — a tela abre os três juntos.
+  const carga = req.nextUrl.searchParams.get('carga')
+  if (carga) {
+    const [itens, resumo, produtos] = await Promise.all([
+      listarItensCard(carga),
+      cargaDoCard(carga),
+      listarProdutos(),
+    ])
+    return NextResponse.json({ itens, carga: resumo, produtos })
   }
 
   const card = req.nextUrl.searchParams.get('card')
@@ -62,6 +76,21 @@ const Corpo = z.union([
     cardId: z.string().uuid(),
   }),
   z.object({
+    acao: z.literal('salvar_itens_pcp'),
+    cardId: z.string().uuid(),
+    itens: z
+      .array(
+        z.object({
+          produtoId: z.string().uuid(),
+          cor: z.string().trim().max(60),
+          tamanho: z.string().trim().max(12),
+          quantidade: z.number().int().min(1).max(100_000),
+          observacao: z.string().max(280).nullish(),
+        }),
+      )
+      .max(200),
+  }),
+  z.object({
     acao: z.literal('mover').optional(),
     cardId: z.string().uuid(),
     etapa: z.string().refine(ehEtapa, 'Etapa desconhecida'),
@@ -79,6 +108,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ erro: 'Dados inválidos' }, { status: 400 })
   }
   const d = corpo.data
+
+  if (d.acao === 'salvar_itens_pcp') {
+    const r = await salvarItensCard(
+      d.cardId,
+      d.itens.map((i) => ({
+        produtoId: i.produtoId,
+        cor: i.cor,
+        tamanho: i.tamanho,
+        quantidade: i.quantidade,
+        observacao: i.observacao ?? null,
+      })),
+    )
+    if (!r.ok) return NextResponse.json({ erro: r.erro }, { status: 409 })
+    // Devolve a carga recalculada: gravar item sem ver o efeito na máquina
+    // seria digitar no escuro.
+    return NextResponse.json({
+      ok: true,
+      itens: await listarItensCard(d.cardId),
+      carga: await cargaDoCard(d.cardId),
+    })
+  }
 
   if (d.acao === 'arquivar' || d.acao === 'restaurar') {
     const r = await arquivarCard({
