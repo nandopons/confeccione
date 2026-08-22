@@ -545,3 +545,236 @@ export async function salvarComponentes(
 
   return { ok: true, id: produtoId }
 }
+
+// ---------------------------------------------------------------------------
+// O ELO: card do quadro de produção → produto, cor e grade
+//
+// Sem isto o roteiro não vale nada operacionalmente: "10 camisas" em texto
+// livre não diz ao sistema que são camisas básicas na grade M/G em preto, e
+// portanto não vira hora de overloque.
+// ---------------------------------------------------------------------------
+
+export type ItemProducao = {
+  id: string
+  produtoId: string
+  produtoNome: string
+  cor: string
+  tamanho: string
+  quantidade: number
+  observacao: string | null
+}
+
+export async function listarItensCard(cardId: string): Promise<ItemProducao[]> {
+  const { data } = await supabaseAdmin
+    .from('pcp_producao_itens')
+    .select('id, produto_id, cor, tamanho, quantidade, observacao, pcp_produtos(nome)')
+    .eq('card_id', cardId)
+    .order('cor')
+    .order('tamanho')
+
+  return ((data ?? []) as unknown as {
+    id: string
+    produto_id: string
+    cor: string
+    tamanho: string
+    quantidade: number
+    observacao: string | null
+    pcp_produtos: { nome: string } | null
+  }[]).map((l) => ({
+    id: l.id,
+    produtoId: l.produto_id,
+    produtoNome: l.pcp_produtos?.nome ?? '—',
+    cor: l.cor,
+    tamanho: l.tamanho,
+    quantidade: l.quantidade,
+    observacao: l.observacao,
+  }))
+}
+
+/** Grava a lista inteira do card — mesma estratégia do roteiro e da ficha. */
+export async function salvarItensCard(
+  cardId: string,
+  itens: {
+    produtoId: string
+    cor: string
+    tamanho: string
+    quantidade: number
+    observacao?: string | null
+  }[],
+): Promise<ResultadoPcp> {
+  const limpos = itens
+    .map((i) => ({
+      ...i,
+      cor: (i.cor || '').trim() || 'Único',
+      tamanho: (i.tamanho || '').trim().toUpperCase(),
+    }))
+    .filter((i) => i.produtoId && i.tamanho && i.quantidade > 0)
+
+  // A unique (card, produto, cor, tamanho) protege o banco, mas um duplicado
+  // vindo da tela derrubaria o insert inteiro. Somar é o que a pessoa quis
+  // dizer ao digitar "M 5" duas vezes.
+  const somados = new Map<string, (typeof limpos)[number]>()
+  for (const i of limpos) {
+    const chave = `${i.produtoId}|${i.cor}|${i.tamanho}`
+    const atual = somados.get(chave)
+    if (atual) atual.quantidade += i.quantidade
+    else somados.set(chave, { ...i })
+  }
+
+  const { error: delErr } = await supabaseAdmin
+    .from('pcp_producao_itens')
+    .delete()
+    .eq('card_id', cardId)
+  if (delErr) return { ok: false, erro: delErr.message }
+
+  if (somados.size) {
+    const { error } = await supabaseAdmin.from('pcp_producao_itens').insert(
+      [...somados.values()].map((i) => ({
+        card_id: cardId,
+        produto_id: i.produtoId,
+        cor: i.cor,
+        tamanho: i.tamanho,
+        quantidade: Math.round(i.quantidade),
+        observacao: i.observacao?.trim() || null,
+      })),
+    )
+    if (error) return { ok: false, erro: error.message }
+  }
+
+  return { ok: true, id: cardId }
+}
+
+export type CargaMaquina = {
+  maquinaId: string | null
+  maquinaNome: string
+  /** Tempo das operações em si. */
+  producaoSegundos: number
+  /** Tempo perdido trocando linha de cor nesta máquina. */
+  setupSegundos: number
+  totalSegundos: number
+  /** null quando a operação não tem máquina (corte manual, conferência). */
+  capacidadeHorasDia: number | null
+  /** Quantos dias de máquina esta carga ocupa. Null sem capacidade cadastrada. */
+  diasDeMaquina: number | null
+}
+
+export type CargaCard = {
+  cardId: string
+  totalPecas: number
+  totalSegundos: number
+  setupSegundos: number
+  porMaquina: CargaMaquina[]
+  /** Produtos citados no card que ainda têm operação sem tempo. */
+  produtosIncompletos: string[]
+  /** Cores distintas — é o que multiplica o setup. */
+  cores: string[]
+}
+
+/**
+ * Quanto trabalho este card é, por máquina.
+ *
+ * AGRUPA POR (PRODUTO, COR), NÃO POR CARD INTEIRO
+ * Operação por lote — cortar viés, montar enfesto — é feita por layout, e o
+ * layout é de um produto numa cor. Somar as peças de cores diferentes antes de
+ * aplicar o teto do rendimento faria o sistema achar que um corte só atende
+ * preto e branco juntos, o que não acontece na mesa.
+ *
+ * O SETUP É POR MÁQUINA × COR
+ * Cada máquina paga uma troca de linha por cor que passa por ela. Duas cores no
+ * mesmo card = dois setups na overloque. É exatamente o custo que some quando
+ * alguém dilui tudo em "tempo médio por peça".
+ *
+ * PRODUTO INCOMPLETO NÃO ENTRA
+ * Se falta cronometrar qualquer operação do produto, ele fica de fora da conta
+ * e o nome dele volta em `produtosIncompletos`. Somar o que se conhece daria um
+ * número menor que a realidade, e ninguém notaria.
+ */
+export async function cargaDoCard(cardId: string): Promise<CargaCard> {
+  const [itens, produtos, maquinas] = await Promise.all([
+    listarItensCard(cardId),
+    listarProdutos(true),
+    listarMaquinas(true),
+  ])
+
+  const porId = new Map(produtos.map((p) => [p.id, p]))
+  const maquinaPorId = new Map(maquinas.map((m) => [m.id, m]))
+
+  const grupos = new Map<string, { produtoId: string; cor: string; quantidade: number }>()
+  let totalPecas = 0
+  for (const i of itens) {
+    totalPecas += i.quantidade
+    const chave = `${i.produtoId}|${i.cor}`
+    const atual = grupos.get(chave)
+    if (atual) atual.quantidade += i.quantidade
+    else grupos.set(chave, { produtoId: i.produtoId, cor: i.cor, quantidade: i.quantidade })
+  }
+
+  const producaoPorMaquina = new Map<string, { maquinaId: string | null; nome: string; segundos: number }>()
+  // Chave "maquinaId|cor" — o setup é pago uma vez por combinação.
+  const setupsCobrados = new Set<string>()
+  const incompletos = new Set<string>()
+  let setupTotal = 0
+
+  for (const g of grupos.values()) {
+    const produto = porId.get(g.produtoId)
+    if (!produto) continue
+    if (!produto.prontoParaCalculo) {
+      incompletos.add(produto.nome)
+      continue
+    }
+
+    const custo = custoDoLote(produto, g.quantidade)
+    for (const linha of custo.porMaquina) {
+      const chave = linha.maquinaId ?? 'sem_maquina'
+      const atual = producaoPorMaquina.get(chave)
+      if (atual) atual.segundos += linha.segundos
+      else {
+        producaoPorMaquina.set(chave, {
+          maquinaId: linha.maquinaId,
+          nome: linha.maquinaNome,
+          segundos: linha.segundos,
+        })
+      }
+
+      if (linha.maquinaId) {
+        const chaveSetup = `${linha.maquinaId}|${g.cor}`
+        if (!setupsCobrados.has(chaveSetup)) {
+          setupsCobrados.add(chaveSetup)
+          setupTotal += (maquinaPorId.get(linha.maquinaId)?.setupTrocaMin ?? 0) * 60
+        }
+      }
+    }
+  }
+
+  const porMaquina: CargaMaquina[] = [...producaoPorMaquina.values()].map((m) => {
+    const maquina = m.maquinaId ? maquinaPorId.get(m.maquinaId) : null
+    const setup = m.maquinaId
+      ? [...setupsCobrados].filter((c) => c.startsWith(`${m.maquinaId}|`)).length *
+        (maquina?.setupTrocaMin ?? 0) * 60
+      : 0
+    const total = m.segundos + setup
+    const capacidade = maquina?.capacidadeHorasDia ?? null
+    return {
+      maquinaId: m.maquinaId,
+      maquinaNome: m.nome,
+      producaoSegundos: m.segundos,
+      setupSegundos: setup,
+      totalSegundos: total,
+      capacidadeHorasDia: capacidade,
+      diasDeMaquina: capacidade && capacidade > 0 ? total / 3600 / capacidade : null,
+    }
+  })
+
+  // Máquina mais carregada primeiro: o gargalo é a primeira linha da lista.
+  porMaquina.sort((a, b) => (b.diasDeMaquina ?? 0) - (a.diasDeMaquina ?? 0) || b.totalSegundos - a.totalSegundos)
+
+  return {
+    cardId,
+    totalPecas,
+    totalSegundos: porMaquina.reduce((s, m) => s + m.totalSegundos, 0),
+    setupSegundos: setupTotal,
+    porMaquina,
+    produtosIncompletos: [...incompletos],
+    cores: [...new Set(itens.map((i) => i.cor))],
+  }
+}
