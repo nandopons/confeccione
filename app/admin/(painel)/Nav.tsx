@@ -122,6 +122,14 @@ const SECOES: Secao[] = [
         ),
       },
       {
+        // Ficha técnica do PCP: roteiro de operações e parque de máquinas.
+        // Fica em Operação, colado em Produção, porque é o cadastro que faz o
+        // quadro de produção virar horas de máquina.
+        href: '/admin/produtos',
+        label: 'Produtos',
+        icone: <Ico d="M3 7l9-4 9 4v10l-9 4-9-4V7z" extra={<path d="M3 7l9 4 9-4M12 11v10" />} />,
+      },
+      {
         href: '/admin/fornecedores',
         label: 'Fornecedores',
         icone: (
