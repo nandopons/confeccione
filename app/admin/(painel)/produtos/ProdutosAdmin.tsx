@@ -319,7 +319,7 @@ function FormMaquina({
               if (!maquina && !codigo) setCodigo(e.target.value)
             }}
             placeholder="Overloque"
-            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-900"
           />
         </label>
         <label className="text-xs text-gray-600">
@@ -328,7 +328,7 @@ function FormMaquina({
             value={codigo}
             onChange={(e) => setCodigo(e.target.value)}
             placeholder="overloque"
-            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-mono"
+            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 font-mono text-gray-900"
           />
         </label>
         <label className="text-xs text-gray-600">
@@ -337,7 +337,7 @@ function FormMaquina({
             value={quantidade}
             onChange={(e) => setQuantidade(e.target.value)}
             inputMode="numeric"
-            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-900"
           />
         </label>
         <label className="text-xs text-gray-600">
@@ -346,7 +346,7 @@ function FormMaquina({
             value={horasDia}
             onChange={(e) => setHorasDia(e.target.value)}
             inputMode="decimal"
-            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-900"
           />
         </label>
         <label className="text-xs text-gray-600">
@@ -355,7 +355,7 @@ function FormMaquina({
             value={setup}
             onChange={(e) => setSetup(e.target.value)}
             inputMode="decimal"
-            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-900"
           />
         </label>
         <label className="text-xs text-gray-600">
@@ -363,7 +363,7 @@ function FormMaquina({
           <input
             value={obs}
             onChange={(e) => setObs(e.target.value)}
-            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+            className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-900"
           />
         </label>
       </div>
@@ -390,7 +390,7 @@ function FormMaquina({
         </button>
         <button
           onClick={onCancelar}
-          className="text-sm px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50"
+          className="text-sm px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 hover:text-gray-900"
         >
           Cancelar
         </button>
@@ -453,7 +453,7 @@ function AbaProdutos({
               onChange={(e) => setNomeNovo(e.target.value)}
               placeholder="Camisa gola polo"
               autoFocus
-              className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2"
+              className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-900"
             />
           </label>
           <div className="flex gap-2 mt-3">
@@ -475,7 +475,7 @@ function AbaProdutos({
             </button>
             <button
               onClick={() => setNovo(false)}
-              className="text-sm px-4 py-2 rounded-lg border border-gray-300 hover:bg-gray-50"
+              className="text-sm px-4 py-2 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 hover:text-gray-900"
             >
               Cancelar
             </button>
@@ -632,14 +632,14 @@ function EditorRoteiro({
                   <input
                     value={l.descricao}
                     onChange={(e) => mudar(i, 'descricao', e.target.value)}
-                    className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
+                    className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5 text-gray-900"
                   />
                 </td>
                 <td className="py-1 pr-2">
                   <select
                     value={l.maquinaId ?? ''}
                     onChange={(e) => mudar(i, 'maquinaId', e.target.value || null)}
-                    className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5 bg-white"
+                    className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5 bg-white text-gray-900"
                   >
                     <option value="">— sem máquina —</option>
                     {maquinas.map((m) => (
@@ -655,7 +655,7 @@ function EditorRoteiro({
                     onChange={(e) => mudar(i, 'tempo', e.target.value.replace(/\D/g, ''))}
                     inputMode="numeric"
                     placeholder="a medir"
-                    className="w-full text-sm border rounded-lg px-2 py-1.5"
+                    className="w-full text-sm border rounded-lg px-2 py-1.5 text-gray-900"
                     style={{ borderColor: l.tempo ? '#d1d5db' : '#fcd34d' }}
                   />
                 </td>
@@ -663,7 +663,7 @@ function EditorRoteiro({
                   <input
                     value={l.observacao}
                     onChange={(e) => mudar(i, 'observacao', e.target.value)}
-                    className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
+                    className="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5 text-gray-900"
                   />
                 </td>
                 <td className="py-1 text-right whitespace-nowrap">
@@ -702,7 +702,7 @@ function EditorRoteiro({
           onClick={() =>
             setLinhas((ls) => [...ls, { descricao: '', maquinaId: null, tempo: '', observacao: '' }])
           }
-          className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50"
+          className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 hover:text-gray-900"
         >
           + Operação
         </button>
@@ -808,7 +808,7 @@ function EditorComponentes({
                   value={c.nome}
                   onChange={(e) => mudarComp(i, 'nome', e.target.value)}
                   placeholder="Ribana da gola"
-                  className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
+                  className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5 text-gray-900"
                 />
               </label>
               <label className="text-xs text-gray-600">
@@ -818,7 +818,7 @@ function EditorComponentes({
                   onChange={(e) => mudarComp(i, 'largura', e.target.value)}
                   inputMode="decimal"
                   placeholder="5,3"
-                  className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
+                  className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5 text-gray-900"
                 />
               </label>
               <label className="text-xs text-gray-600">
@@ -826,7 +826,7 @@ function EditorComponentes({
                 <input
                   value={c.observacao}
                   onChange={(e) => mudarComp(i, 'observacao', e.target.value)}
-                  className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"
+                  className="mt-1 w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5 text-gray-900"
                 />
               </label>
             </div>
@@ -839,7 +839,7 @@ function EditorComponentes({
                     <input
                       value={m.tamanho}
                       onChange={(e) => mudarMedida(i, k, 'tamanho', e.target.value.toUpperCase())}
-                      className="mt-0.5 w-14 text-sm border border-gray-300 rounded-lg px-2 py-1 text-center"
+                      className="mt-0.5 w-14 text-sm border border-gray-300 rounded-lg px-2 py-1 text-center text-gray-900"
                     />
                   </label>
                   <label className="text-[11px] text-gray-500">
@@ -848,7 +848,7 @@ function EditorComponentes({
                       value={m.comprimento}
                       onChange={(e) => mudarMedida(i, k, 'comprimento', e.target.value)}
                       inputMode="decimal"
-                      className="mt-0.5 w-20 text-sm border border-gray-300 rounded-lg px-2 py-1"
+                      className="mt-0.5 w-20 text-sm border border-gray-300 rounded-lg px-2 py-1 text-gray-900"
                     />
                   </label>
                   <button
@@ -876,7 +876,7 @@ function EditorComponentes({
                     ),
                   )
                 }
-                className="text-xs px-2 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50"
+                className="text-xs px-2 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 hover:text-gray-900"
               >
                 + Tamanho
               </button>
@@ -896,7 +896,7 @@ function EditorComponentes({
           onClick={() =>
             setComps((cs) => [...cs, { nome: '', largura: '', observacao: '', medidas: [] }])
           }
-          className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50"
+          className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 font-medium hover:bg-gray-50 hover:text-gray-900"
         >
           + Componente
         </button>
