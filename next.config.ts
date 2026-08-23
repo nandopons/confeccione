@@ -77,6 +77,34 @@ const ARTIGOS_DO_BLOG = [
   "tingimento-sob-demanda-marcas-iniciantes",
 ];
 
+/* ---------------------------------------------------------------------------
+ * /blog — o 404 que o Search Console reclamou (23/08/2026)
+ * ---------------------------------------------------------------------------
+ * A corrente que existia, e que nos mesmos alimentavamos:
+ *
+ *   loja.confeccione.com.br/sitemap_blog.xml
+ *     lista https://www.confeccione.com.br/blog/
+ *       -> 308 confeccione.com.br/blog/
+ *         -> 308 /blog
+ *           -> 404
+ *
+ * E o /sitemap_blog.xml DESTE dominio redireciona para aquele sitemap. Ou
+ * seja: eramos nos mandando o Google ate a porta fechada. Era o unico
+ * "Nao encontrado (404)" do relatorio de indexacao.
+ *
+ * O blog vive em /saiba-mais desde 16/08/2026. /blog nunca foi rota deste
+ * app — era da loja, quando ela morava neste dominio. Mandar para a listagem
+ * e o destino honesto: nao ha um artigo especifico a preservar nesse caminho.
+ *
+ * FICA FORA de `redirecionamentosDaLoja` de proposito: nao depende de
+ * LOJA_MIGRADA. Se aquele interruptor for desligado um dia, /blog voltaria a
+ * ser 404 — e o 404 e justamente o problema.
+ * ------------------------------------------------------------------------- */
+const REDIRECTS_BLOG = [
+  { source: "/blog", destination: "/saiba-mais", permanent: true },
+  { source: "/blog/:path*", destination: "/saiba-mais", permanent: true },
+];
+
 function redirecionamentosDaLoja() {
   if (process.env.LOJA_MIGRADA !== "1") return [];
 
@@ -151,7 +179,7 @@ const nextConfig: NextConfig = {
     qualities: [75, 85],
   },
   async redirects() {
-    return redirecionamentosDaLoja();
+    return [...REDIRECTS_BLOG, ...redirecionamentosDaLoja()];
   },
   async headers() {
     return cabecalhosDeIndexacao();
