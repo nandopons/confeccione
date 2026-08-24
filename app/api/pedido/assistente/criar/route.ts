@@ -76,13 +76,24 @@ export async function POST(req: Request) {
 
   const { linhas, contato } = parsed.data
 
-  // Validação mínima: pelo menos 1 linha com modelo + cor + total, e contato básico.
-  // A home cria um produto-rascunho (modelo definido depois no visualizador):
-  // basta ter identidade (modelo OU cor) + quantidade (total OU tamanhos).
-  const linhasValidas = linhas.filter((l) => (l.modelo || l.cor) && (l.total || (l.tamanhos?.length ?? 0) > 0))
+  // Validação mínima: pelo menos 1 linha com identidade (modelo OU cor), e
+  // contato básico.
+  //
+  // A QUANTIDADE DEIXOU DE SER OBRIGATÓRIA AQUI — 24/08/2026.
+  // O filtro também exigia `total` ou `tamanhos`. Isso valia enquanto a home
+  // perguntava a quantidade no passo 2; desde que esse campo saiu do formulário,
+  // a linha chega com `total: null` e a exigência derrubaria TODO pedido vindo da
+  // home, com um 400 genérico na cara do cliente.
+  //
+  // Quem preenche a quantidade agora é o chat de alinhamento (/alinhar/{id}),
+  // que já pergunta modelo, cor, quantidade e divisão por tamanho — e que trata
+  // `total` nulo como "ainda não perguntamos", não como zero.
+  //
+  // O que continua barrado é a linha vazia: sem modelo e sem cor não há pedido.
+  const linhasValidas = linhas.filter((l) => l.modelo || l.cor)
   if (linhasValidas.length === 0) {
     return NextResponse.json(
-      { error: 'Inclua pelo menos um produto com modelo, cor e quantidade.' },
+      { error: 'Inclua pelo menos um produto.' },
       { status: 400 }
     )
   }
