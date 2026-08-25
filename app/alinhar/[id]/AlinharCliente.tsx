@@ -454,10 +454,24 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
           {erro && <p className="text-xs text-red-600">{erro}</p>}
           <div ref={fimRef} />
         </div>
-        {/* gatilho mobile do resumo — slim bar logo acima do input */}
+        {/* Porta de entrada do resumo — e, desde que exista produto no pedido,
+            a AÇÃO PRINCIPAL da tela. Enquanto o pedido está vazio ela é discreta
+            (fundo claro), pra não gritar "conclua" antes de ter o que concluir;
+            com produto vira botão cheio e chama pra conferir e concluir. */}
         <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => { inputRef.current?.blur(); setAlturaTeclado(null); setSheetAberto(true); }}
-          className={(embutido ? "" : "lg:hidden ") + "mx-3 mt-3 shrink-0 flex items-center justify-center gap-1.5 rounded-full bg-[#E1F5EE] text-[#0F6E56] text-sm font-medium px-4 py-2.5 shadow-sm hover:shadow active:scale-[0.99] transition"}>
-          📋 Resumo do pedido{qtdProdutos > 0 ? ` · ${qtdProdutos} ${qtdProdutos === 1 ? "produto" : "produtos"}` : ""}
+          className={
+            (embutido ? "" : "lg:hidden ") +
+            // whitespace-nowrap: em 360px sobram ~208px de texto dentro da
+            // pílula. Rótulo comprido virava duas linhas e a barra ficava um
+            // bloco desproporcional em cima do input — por isso o texto é curto.
+            "mx-3 mt-3 shrink-0 flex items-center justify-center gap-1.5 rounded-full text-sm font-medium px-4 py-2.5 whitespace-nowrap shadow-sm hover:shadow active:scale-[0.99] transition " +
+            (temLinha
+              ? "bg-[#1D9E75] hover:bg-[#0F6E56] text-white"
+              : "bg-[#E1F5EE] text-[#0F6E56]")
+          }>
+          {temLinha
+            ? `📋 Resumo · ${qtdProdutos} ${qtdProdutos === 1 ? "produto" : "produtos"} →`
+            : "📋 Resumo do pedido"}
         </button>
         <div className="border-t border-gray-100 p-2.5 sm:p-3 shrink-0">
           {/* tray de anexos */}
@@ -502,13 +516,12 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
         </div>
       </div>
 
-      {/* Embutido: a ação principal fica logo abaixo do chat, no lugar onde o
-          cliente já esperava o "Continuar" dos passos 1 a 3. */}
-      {embutido && (
-        <div className="mt-4 space-y-2">
-          {resumoAcoes()}
-        </div>
-      )}
+      {/* 25/08/2026 — o "Concluir/Ir para os produtos" NÃO fica mais solto
+          embaixo do chat. Ele mora dentro do Resumo do pedido (o bottom-sheet),
+          junto da lista do que foi montado: quem conclui deve conferir antes.
+          Embaixo do chat o botão competia com a conversa e convidava a sair no
+          meio. O caminho agora é a barra "Resumo do pedido" logo acima do
+          input — que vira botão cheio assim que existe produto no pedido. */}
 
       {/* RESUMO + AÇÕES (desktop, só na página inteira) */}
       <aside className={embutido ? "hidden" : "hidden lg:block lg:sticky lg:top-6 self-start"}>
