@@ -1,14 +1,34 @@
 "use client";
 
 // app/components/PedidoSteps.tsx
-// Etapa 1 do pedido em FORMATO DE PASSOS (botões + barra de progresso no topo).
-// Substitui o chat na home, mas grava no MESMO pipeline atual:
+// O pedido inteiro em QUATRO PASSOS, num cartão só:
+//   1 categoria · 2 entrega (CEP) · 3 contato · 4 a conversa da produção
+//
 //   POST /api/pedido/assistente/criar  → tabela pedidos_assistente
-//   → redireciona pro /visualizador/{id} (mockups, orçamento, oferta, preços).
-// Coleta categoria, quantidade, prazo, UF e descrição + contato (nome/WhatsApp/e-mail).
+//   → o passo 4 conversa e grava as linhas → /visualizador/{id}
+//
+// O PASSO 4 NÃO TROCA DE TELA — 24/08/2026.
+// Até aqui, terminado o contato, o cliente era jogado pra /alinhar/{id}: outra
+// página, outro layout, outro começo de conversa. A maior parte não chegava ao
+// fim do chat, e a troca de tela era o ponto de fuga mais provável. Agora o
+// mesmo componente do chat (AlinharCliente, com `embutido`) roda aqui dentro,
+// no lugar onde estavam os campos dos passos 1 a 3.
+//
+// A URL vira /alinhar/{id} por `replaceState` assim que o pedido é criado —
+// sem recarregar nada. É o que faz F5, "voltar" e o link do WhatsApp caírem
+// exatamente onde o cliente parou, com a MESMA tela renderizada pela rota
+// /alinhar/[id] (que usa o mesmo componente, no shell de página inteira).
+//
+// QUANTIDADE E PRAZO NÃO SÃO PERGUNTADOS AQUI — 24/08/2026.
+// Os dois campos saíram do passo 2 por decisão do Fernando: são assunto do chat
+// de alinhamento (/alinhar/{id}), onde a conversa já pergunta modelo, cor,
+// quantidade e divisão por tamanho. Perguntar antes obrigava o cliente a chutar
+// um número no primeiro contato e ainda assim virava conversa depois.
+// A linha vai daqui com `total: null` de propósito — não é "zero peças", é
+// "ainda não perguntamos". Quem preenche é o chat.
 
 import { useEffect, useState } from "react";
-import SelectModal from "@/app/components/SelectModal";
+import AlinharCliente from "@/app/alinhar/[id]/AlinharCliente";
 
 const nichosPrincipais = [
   { id: "interclasse",   icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
@@ -28,20 +48,9 @@ const nichosExtras = [
 const nichosTodos = [...nichosPrincipais, ...nichosExtras];
 function cepFmt(v: string): string { const d = (v || "").replace(/\D/g, ""); return d.length === 8 ? `${d.slice(0,5)}-${d.slice(5)}` : (v || ""); }
 
-const prazos: Record<string, string> = {
-  urgente: "Urgente (até 7 dias)",
-  normal: "Normal (8 a 21 dias)",
-  sempressa: "Sem pressa (21+ dias)",
-};
-const PRAZO_DIAS: Record<string, number> = { urgente: 7, normal: 14, sempressa: 25 };
-
-const ufs = ["AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT","PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"];
-
 export default function PedidoSteps() {
   const [step, setStep] = useState(0);
   const [tipo, setTipo] = useState("");
-  const [qty, setQty] = useState(10);
-  const [prazo, setPrazo] = useState("");
   const [estado, setEstado] = useState("");
   const [cep, setCep] = useState("");
   const [numero, setNumero] = useState("");
@@ -57,6 +66,8 @@ export default function PedidoSteps() {
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [showExtras, setShowExtras] = useState(false);
+  // Preenchido quando o pedido é criado (fim do passo 3). É o que liga o passo 4.
+  const [pedidoId, setPedidoId] = useState<string | null>(null);
   const [contaExistente, setContaExistente] = useState(false);
   const [emailChecado, setEmailChecado] = useState("");
 
@@ -93,8 +104,6 @@ export default function PedidoSteps() {
   async function avancarParaContatos() {
     setErro(null);
     const faltando: string[] = [];
-    if (!qty || qty <= 0) faltando.push("quantidade");
-    if (!prazo) faltando.push("prazo");
     if (cep.replace(/\D/g, "").length !== 8) faltando.push("CEP");
     if (!numero.trim()) faltando.push("número");
     if (faltando.length > 0) { setErro(`Preencha: ${faltando.join(", ")}`); return; }
@@ -133,7 +142,8 @@ export default function PedidoSteps() {
       cor: "a definir",
       material: null as string | null,
       publico: null as string | null,
-      total: qty,
+      // null = ainda não perguntamos. O chat de alinhamento preenche.
+      total: null as number | null,
       tamanhos: [] as { tamanho: string; qtd: number | null }[],
       estampas: [] as { posicao: string; tamanho: string }[],
       estampado: null as boolean | null,
@@ -148,7 +158,6 @@ export default function PedidoSteps() {
       numero: numero.trim() || null,
       complemento: complemento.trim() || null,
       uf: estado || null,
-      prazoDias: PRAZO_DIAS[prazo] ?? null,
     };
 
     setEnviando(true);
@@ -167,9 +176,20 @@ export default function PedidoSteps() {
       try {
         const w = window as unknown as { dataLayer?: Record<string, unknown>[] };
         w.dataLayer = w.dataLayer || [];
-        w.dataLayer.push({ event: "generate_lead", pedido_id: String(data.id), pecas: qty, value: 1, currency: "BRL" });
+        // Sem `pecas`: a quantidade só existe depois do chat de alinhamento.
+        // Mandar um número aqui seria inventar dado dentro do GA4.
+        w.dataLayer.push({ event: "generate_lead", pedido_id: String(data.id), value: 1, currency: "BRL" });
       } catch { /* analytics nunca quebra o fluxo */ }
-      window.location.href = `/alinhar/${data.id}`;
+
+      // Sem navegação: o passo 4 é o chat, aqui mesmo. A URL passa a ser
+      // /alinhar/{id} pra F5 e "voltar" caírem no mesmo pedido — a rota
+      // renderiza o MESMO componente, só que no shell de página inteira.
+      try {
+        window.history.replaceState(null, "", `/alinhar/${data.id}`);
+      } catch { /* navegador sem history: a URL fica na home, o passo 4 abre igual */ }
+      setPedidoId(String(data.id));
+      setStep(3);
+      setEnviando(false);
     } catch {
       setErro("Erro de conexão. Verifique sua internet e tente de novo.");
       setEnviando(false);
@@ -182,12 +202,12 @@ export default function PedidoSteps() {
     <div>
       {/* barra de progresso */}
       <div className="flex items-center mb-8">
-        {[0, 1, 2].map((i) => (
+        {[0, 1, 2, 3].map((i) => (
           <div key={i} className="flex items-center flex-1 last:flex-none">
             <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0 shadow-sm transition-all ${i < step ? "bg-[#1D9E75] text-white" : i === step ? "bg-[#111] text-white" : "bg-white border border-gray-300 text-gray-500"}`}>
               {i < step ? "✓" : i + 1}
             </div>
-            {i < 2 && <div className={`flex-1 h-px mx-2 transition-colors ${i < step ? "bg-[#1D9E75]" : "bg-gray-200"}`} />}
+            {i < 3 && <div className={`flex-1 h-px mx-2 transition-colors ${i < step ? "bg-[#1D9E75]" : "bg-gray-200"}`} />}
           </div>
         ))}
       </div>
@@ -244,30 +264,10 @@ export default function PedidoSteps() {
 
         {step === 1 && (
           <>
-            <p className="text-gray-900 font-medium mb-1">Detalhes do pedido</p>
-            <p className="text-gray-500 text-sm mb-5">Quanto você precisa produzir, o prazo e os detalhes.</p>
-            <div className="mb-5">
-              <label className="text-sm font-medium text-gray-700 mb-2 block">Quantidade de peças</label>
-              <div className="flex items-center gap-3">
-                <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-9 h-9 border border-gray-400 text-gray-700 rounded-lg text-lg flex items-center justify-center hover:bg-gray-100">−</button>
-                <input type="number" min={1} step={1} value={qty} onChange={(e) => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="w-16 h-9 border border-gray-300 rounded-lg text-center text-sm font-medium text-gray-900 focus:outline-none focus:border-[#1D9E75]" />
-                <button onClick={() => setQty(qty + 1)} className="w-9 h-9 border border-gray-400 text-gray-700 rounded-lg text-lg flex items-center justify-center hover:bg-gray-100">+</button>
-                <span className="text-sm text-gray-500">peças</span>
-              </div>
-            </div>
-            <div className="mb-4">
-              <label className="text-sm font-medium text-gray-700 mb-1 block">Prazo desejado</label>
-              <SelectModal
-                label="Prazo desejado"
-                placeholder="Selecione..."
-                value={prazo}
-                onChange={setPrazo}
-                triggerClassName="w-full border border-gray-300 rounded-xl px-3 py-2 bg-white text-sm"
-                options={Object.entries(prazos).map(([value, label]) => ({ value, label }))}
-              />
-            </div>
+            <p className="text-gray-900 font-medium mb-1">Onde a gente entrega</p>
+            <p className="text-gray-500 text-sm mb-5">Só o endereço, pra já calcular o frete da produção.</p>
             <div className="mb-6">
-              <label className="text-sm font-medium text-gray-700 mb-1 block">Endereço de entrega <span className="text-gray-300">(pro cálculo do frete)</span></label>
+              <label className="text-sm font-medium text-gray-700 mb-1 block">Endereço de entrega <span className="text-gray-400">(pro cálculo do frete)</span></label>
               <div className="flex items-start gap-2">
                 <input value={cepFmt(cep)} onChange={(e) => { const d = e.target.value.replace(/\D/g, "").slice(0, 8); setCep(d); setCepInfo(null); setCepFalhou(false); if (d.length === 8) void buscarCep(d); }} onBlur={() => { if (!cepInfo && !buscandoCep) void buscarCep(); }} inputMode="numeric" placeholder="CEP" className={inputCls + " w-40"} />
                 <button type="button" onClick={() => void buscarCep()} disabled={buscandoCep || cep.replace(/\D/g, "").length !== 8} className="shrink-0 border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 text-sm px-3 py-2 rounded-xl whitespace-nowrap">{buscandoCep ? "buscando…" : "buscar CEP"}</button>
@@ -285,7 +285,7 @@ export default function PedidoSteps() {
                 <input value={numero} onChange={(e) => setNumero(e.target.value.slice(0, 20))} placeholder="Número" className={inputCls} />
                 <input value={complemento} onChange={(e) => setComplemento(e.target.value.slice(0, 80))} placeholder="Complemento (opcional)" className={inputCls} />
               </div>
-              <p className="text-[11px] text-gray-500 mt-2">Não precisa escolher o estado — pegamos pelo CEP. Os detalhes de cada modelo (cor, estampa…) você ajusta na próxima página.</p>
+              <p className="text-[11px] text-gray-500 mt-2">Não precisa escolher o estado — pegamos pelo CEP. Quantidade, prazo e os detalhes de cada modelo (cor, estampa…) a gente combina no chat da próxima página.</p>
             </div>
           </>
         )}
@@ -327,8 +327,6 @@ export default function PedidoSteps() {
               <p className="text-xs text-gray-500 font-medium mb-3">Resumo do pedido</p>
               <div className="space-y-2">
                 <div className="flex justify-between text-gray-600"><span>Categoria</span><span>{nichosTodos.find((n) => n.id === tipo)?.title}</span></div>
-                <div className="flex justify-between text-gray-600"><span>Quantidade</span><span>{qty} peças</span></div>
-                {prazo && <div className="flex justify-between text-gray-600"><span>Prazo</span><span>{prazos[prazo]}</span></div>}
                 {(cepInfo || cep) && (
                   <div className="flex justify-between gap-4 text-gray-600"><span>Entrega</span><span className="text-right">{[cepInfo, numero ? `nº ${numero}` : "", complemento].filter(Boolean).join(" · ") || `CEP ${cepFmt(cep)}`}</span></div>
                 )}
@@ -338,9 +336,29 @@ export default function PedidoSteps() {
 
           </>
         )}
+
+        {step === 3 && pedidoId && (
+          <>
+            <p className="text-gray-900 font-medium mb-1">Agora a sua produção</p>
+            <p className="text-gray-500 text-sm mb-4">
+              Seu pedido já está salvo — se precisar sair, é só voltar neste link que a conversa continua daqui.
+            </p>
+            <AlinharCliente
+              embutido
+              pedidoId={pedidoId}
+              categoria={nichosTodos.find((n) => n.id === tipo)?.title ?? null}
+              // Zero de propósito: a home não pergunta mais quantidade, e o chat
+              // trata 0 como "ainda não perguntamos" (não como zero peças).
+              totalPecas={0}
+            />
+          </>
+        )}
         </div>
 
-        <div className="pt-4 mt-2 border-t border-gray-100">
+        {/* Do passo 4 em diante quem manda no rodapé é o chat: ele tem o próprio
+            "Concluir e ver os produtos", e um "Voltar" aqui só levaria o cliente
+            de volta a um formulário de contato que já foi gravado. */}
+        <div className={step === 3 ? "hidden" : "pt-4 mt-2 border-t border-gray-100"}>
           {erro && <div className="mb-2 text-red-600 text-sm text-right">{erro}</div>}
           <div className="flex justify-between items-center">
             {step > 0 ? (
