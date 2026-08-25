@@ -63,7 +63,22 @@ async function arquivoParaRef(file: File): Promise<string> {
   return cv.toDataURL("image/jpeg", 0.85);
 }
 
-export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhasIniciais = [] }: { pedidoId: string; categoria: string | null; totalPecas: number; linhasIniciais?: LinhaInicial[] }) {
+/* ---------------------------------------------------------------------------
+ * DOIS SHELLS, UM CHAT — 24/08/2026
+ * ---------------------------------------------------------------------------
+ * `embutido` liga a variante que roda DENTRO do cartão do pedido, como passo 4
+ * (app/components/PedidoSteps.tsx). O que muda é só a moldura:
+ *
+ *   página inteira  →  grid de 2 colunas, chat em 70vh, resumo numa aside fixa
+ *                      no desktop e num bottom-sheet no celular
+ *   embutido        →  só a coluna do chat, altura menor, e o resumo SEMPRE no
+ *                      bottom-sheet — dentro de um cartão de ~640px não sobra
+ *                      largura pra uma aside de 320px
+ *
+ * A conversa, os anexos, o `concluir` e o mapa de fotos são os mesmos nos dois.
+ * Duplicar esse componente pra fazer o passo 4 significaria manter dois chats.
+ * ------------------------------------------------------------------------- */
+export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhasIniciais = [], embutido = false }: { pedidoId: string; categoria: string | null; totalPecas: number; linhasIniciais?: LinhaInicial[]; embutido?: boolean }) {
   const linhasBase: Linha[] = (linhasIniciais ?? []).map((l) => ({
     modelo: l?.modelo ?? null, cor: l?.cor ?? null, material: l?.material ?? null,
     publico: l?.publico ?? null, total: l?.total ?? null,
@@ -346,11 +361,22 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   );
 
   return (
-    <div className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+    <div className={embutido ? "w-full" : "flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6"}>
       {/* CHAT */}
-      <div ref={cardRef} style={alturaTeclado ? { height: alturaTeclado } : undefined} className="flex flex-col bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden h-[70vh] lg:h-[70vh] scroll-mt-2 transition-[height] duration-200 ease-out">
+      <div
+        ref={cardRef}
+        style={alturaTeclado ? { height: alturaTeclado } : undefined}
+        className={
+          "flex flex-col bg-white overflow-hidden scroll-mt-2 transition-[height] duration-200 ease-out " +
+          (embutido
+            // Dentro do cartão do pedido a borda e a sombra já vêm de fora —
+            // repetir as duas desenharia um cartão dentro do outro.
+            ? "h-[62vh] max-h-[520px] min-h-[380px] rounded-xl border border-gray-200"
+            : "h-[70vh] lg:h-[70vh] rounded-2xl border border-gray-200 shadow-sm")
+        }
+      >
         <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between shrink-0">
-          <p className="text-gray-900 font-medium text-sm">💬 Vamos alinhar seu pedido</p>
+          <p className="text-gray-900 font-medium text-sm">{embutido ? "Sua produção" : "💬 Vamos alinhar seu pedido"}</p>
           <button type="button" onClick={pular} className="text-xs text-gray-400 hover:text-[#0F6E56]">prefiro organizar eu mesmo →</button>
         </div>
         <div ref={listaRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
@@ -407,7 +433,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
         </div>
         {/* gatilho mobile do resumo — slim bar logo acima do input */}
         <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => { inputRef.current?.blur(); setAlturaTeclado(null); setSheetAberto(true); }}
-          className="lg:hidden mx-3 mt-3 shrink-0 flex items-center justify-center gap-1.5 rounded-full bg-[#E1F5EE] text-[#0F6E56] text-sm font-medium px-4 py-2.5 shadow-sm hover:shadow active:scale-[0.99] transition">
+          className={(embutido ? "" : "lg:hidden ") + "mx-3 mt-3 shrink-0 flex items-center justify-center gap-1.5 rounded-full bg-[#E1F5EE] text-[#0F6E56] text-sm font-medium px-4 py-2.5 shadow-sm hover:shadow active:scale-[0.99] transition"}>
           📋 Resumo do pedido{qtdProdutos > 0 ? ` · ${qtdProdutos} ${qtdProdutos === 1 ? "produto" : "produtos"}` : ""}
         </button>
         <div className="border-t border-gray-100 p-3 shrink-0">
@@ -448,8 +474,16 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
         </div>
       </div>
 
-      {/* RESUMO + AÇÕES (desktop) */}
-      <aside className="hidden lg:block lg:sticky lg:top-6 self-start">
+      {/* Embutido: a ação principal fica logo abaixo do chat, no lugar onde o
+          cliente já esperava o "Continuar" dos passos 1 a 3. */}
+      {embutido && (
+        <div className="mt-4 space-y-2">
+          {resumoAcoes()}
+        </div>
+      )}
+
+      {/* RESUMO + AÇÕES (desktop, só na página inteira) */}
+      <aside className={embutido ? "hidden" : "hidden lg:block lg:sticky lg:top-6 self-start"}>
         <div className="space-y-3">
           {resumoLista()}
           {resumoAcoes()}
@@ -458,7 +492,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
 
       {/* RESUMO — bottom-sheet (mobile) */}
       {sheetAberto && (
-        <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
+        <div className={"fixed inset-0 z-50 " + (embutido ? "" : "lg:hidden")} role="dialog" aria-modal="true">
           <div className="absolute inset-0 bg-black/40" onClick={() => setSheetAberto(false)} />
           <div className="absolute inset-x-0 bottom-0 bg-white rounded-t-2xl shadow-xl max-h-[72vh] flex flex-col">
             <div className="mx-auto mt-2 h-1.5 w-10 rounded-full bg-gray-200 shrink-0" />
