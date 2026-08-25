@@ -103,10 +103,13 @@ export default function Home() {
         <div className="px-6 pt-12 pb-16 max-w-5xl mx-auto">
           <div className="flex flex-col items-start gap-2 md:flex-row md:items-center md:gap-3 mb-1">
             <h2 className="text-gray-900 text-xl font-medium">Faça seu pedido</h2>
-            <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">3 passos simples</span>
+            {/* 4 desde 24/08/2026: a conversa da produção virou o passo 4, aqui
+                dentro. Se este número divergir da barra do PedidoSteps, é este
+                aqui que está errado — a barra vem do componente. */}
+            <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">4 passos simples</span>
           </div>
           <p className="text-gray-400 text-sm mb-6">
-            Preencha em 3 passos rápidos: a gente gera os mockups e o orçamento na sequência.
+            Categoria, entrega e contato — depois a gente conversa sobre a produção e gera os mockups e o orçamento.
           </p>
 
           <PedidoSteps />
