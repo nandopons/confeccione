@@ -129,9 +129,74 @@ const CoresSchema = z.object({
   opcoes: z.array(CorOpcaoSchema).catch([]),
 }).nullable().catch(null)
 
+/* ---------------------------------------------------------------------------
+ * CARDS DE RESPOSTA RÁPIDA — 24/08/2026
+ * ---------------------------------------------------------------------------
+ * O chat continua conduzindo a conversa. Quando a pergunta da vez tem resposta
+ * FECHADA, a tela mostra cards pra tocar em vez de esperar digitação.
+ *
+ * A divisão de trabalho é de propósito:
+ *   - o MODELO diz apenas QUAL campo está perguntando (`perguntando`);
+ *   - as OPÇÕES saem daqui, de uma tabela fixa.
+ *
+ * Por que não deixar o modelo montar as opções: elas mudavam de um cliente pro
+ * outro e saíam sem explicação — "algodão, algodão premium" foi o caso real que
+ * motivou isso. Tabela fixa também responde na hora, sem esperar a IA.
+ *
+ * `perguntando: null` (ou um valor fora da lista) = pergunta aberta: nenhum card,
+ * só a caixa de texto. É o caso de "o que você quer produzir?" e da descrição da
+ * estampa, onde card só limitaria a resposta.
+ * ------------------------------------------------------------------------- */
+const CAMPOS_COM_CARD = [
+  'quantidade',
+  'publico',
+  'material',
+  'estampado',
+  'tamanhos',
+] as const
+type CampoComCard = (typeof CAMPOS_COM_CARD)[number]
+
+const CARDS: Record<CampoComCard, Array<{ titulo: string; nota?: string }>> = {
+  quantidade: [
+    { titulo: 'Menos de 10', nota: 'Amostra ou time pequeno' },
+    { titulo: 'De 10 a 50', nota: 'O pedido mais comum' },
+    { titulo: 'Mais de 50', nota: 'Produção maior' },
+  ],
+  publico: [
+    { titulo: 'Unissex', nota: 'Serve pros dois' },
+    { titulo: 'Masculino', nota: 'Corte reto' },
+    { titulo: 'Feminino', nota: 'Cintura marcada' },
+    { titulo: 'Infantil', nota: 'Grade 2 a 14' },
+  ],
+  material: [
+    { titulo: 'Algodão', nota: 'O clássico. Macio, respira bem' },
+    { titulo: 'Malha PV', nota: 'Mais em conta, não amassa' },
+    { titulo: 'Dry fit', nota: 'Seca rápido. Esporte' },
+    { titulo: 'Não sei', nota: 'Me ajuda a escolher' },
+  ],
+  estampado: [
+    { titulo: 'Lisa', nota: 'Sem estampa nem bordado' },
+    { titulo: 'Personalizada', nota: 'Estampa, bordado ou DTF' },
+  ],
+  tamanhos: [
+    { titulo: 'Dividir agora', nota: 'P, M, G, GG, XG' },
+    { titulo: 'Depois, no WhatsApp', nota: 'A gente te chama' },
+  ],
+}
+
+function cardsDaPergunta(perguntando: string | null | undefined) {
+  if (!perguntando) return null
+  const campo = perguntando as CampoComCard
+  if (!CAMPOS_COM_CARD.includes(campo)) return null
+  return { campo, opcoes: CARDS[campo] }
+}
+
 const RespostaModeloSchema = z.object({
   mensagem: z.string().min(1),
   cores: CoresSchema.optional(),
+  // Fora da lista, vazio ou ausente vira null lá em cardsDaPergunta — nunca
+  // derruba a resposta inteira por causa de um rótulo inventado.
+  perguntando: z.string().nullable().optional().catch(null),
   pedido: PedidoModeloSchema.default({ ...PEDIDO_VAZIO }),
   fotosPorLinha: z.record(z.string(), z.array(z.number())).nullable().optional(),
 })
@@ -210,7 +275,7 @@ REGRAS DE CONFIABILIDADE DO CONTATO:
 Quando tudo estiver coletado (linhas + contato), faça uma confirmação curta e simpática do resumo e diga que ele já pode prosseguir para ver a pré-visualização dos produtos.
 
 A cada resposta, devolva SOMENTE um JSON válido (sem markdown, sem cercas de código, sem texto fora dele), com o PEDIDO INTEIRO e atualizado neste formato exato:
-{"mensagem": string, "cores": {"termo": string, "opcoes": [{"nome": string, "hex": string}]} | null, "pedido": {"linhas": [{"modelo": string|null, "cor": string|null, "material": string|null, "publico": "feminino"|"masculino"|"infantil"|"unissex"|null, "total": number|null, "tamanhos": [{"tamanho": string, "qtd": number|null}], "estampado": boolean|null, "descricao": string|null}], "contato": {"nome": string|null, "telefone": string|null, "email": string|null, "cep": string|null, "complemento": string|null, "prazoDias": number|null}}, "fotosPorLinha": {"0": [1, 2], "1": [3]} | null}
+{"mensagem": string, "perguntando": "quantidade"|"publico"|"material"|"estampado"|"tamanhos"|null, "cores": {"termo": string, "opcoes": [{"nome": string, "hex": string}]} | null, "pedido": {"linhas": [{"modelo": string|null, "cor": string|null, "material": string|null, "publico": "feminino"|"masculino"|"infantil"|"unissex"|null, "total": number|null, "tamanhos": [{"tamanho": string, "qtd": number|null}], "estampado": boolean|null, "descricao": string|null}], "contato": {"nome": string|null, "telefone": string|null, "email": string|null, "cep": string|null, "complemento": string|null, "prazoDias": number|null}}, "fotosPorLinha": {"0": [1, 2], "1": [3]} | null}
 
 Regras do JSON:
 - "mensagem" é só o que você fala com o cliente (a próxima pergunta ou a confirmação). Nunca coloque JSON dentro da mensagem.
@@ -219,6 +284,13 @@ Regras do JSON:
 - "total" é a quantidade de unidades daquela linha. "tamanhos" é a divisão por tamanho (cada item {tamanho, qtd}); se ainda não sabe — ou se for brinde/gráfica — deixe [].
 - "publico": "feminino", "masculino", "infantil" ou "unissex". Em VESTUÁRIO é OBRIGATÓRIO — NUNCA deixe null numa peça de roupa (infira do contexto/fotos ou faça UMA pergunta curta); só use null enquanto ainda não chegou a hora de perguntar. Em brinde/gráfica preencha direto "unissex" sem perguntar. Afeta a modelagem do mockup, não o preço.
 - "estampado" é booleano: true se o produto leva estampa, bordado, impressão ou gravação; false se liso; null se ainda não perguntou. Isso define a faixa de preço (liso vs personalizado).
+- "perguntando": diz QUAL campo a sua "mensagem" está perguntando AGORA, pra tela mostrar botões prontos em vez de o cliente ter que digitar. Preencha SÓ quando a pergunta principal do turno for exatamente uma destas, e SÓ quando ela ainda não foi respondida:
+  · "quantidade" — quantas peças (a tela oferece faixas: menos de 10 / 10 a 50 / mais de 50; NÃO peça o número exato, a faixa basta nesta altura)
+  · "publico" — feminino, masculino, infantil ou unissex
+  · "material" — o tecido
+  · "estampado" — lisa ou personalizada
+  · "tamanhos" — se ele quer dividir por tamanho agora
+  Em QUALQUER outro caso use null: pergunta aberta (o que quer produzir, descrição da estampa, posição da arte), confirmação, resumo, mais de uma pergunta no mesmo turno, ou pergunta sobre um campo que já está preenchido. Você NÃO escolhe as opções — a tela já tem a lista de cada um desses campos; você só diz qual é o campo. Não cite as opções na "mensagem" (ficaria repetido na tela); faça a pergunta de forma curta e natural.
 - "cores": só preencha quando estiver oferecendo 5 tonalidades de uma cor (hexes #RRGGBB reais, claro→escuro); nos outros turnos é null. A escolha final vai pro campo "cor" da linha (nome do tom + hex).
 - "prazoDias" (dentro de contato): número de dias de produção que o cliente precisa; null se ainda não perguntou.
 - "descricao" guarda detalhes úteis da linha: estampa/bordado, posição da arte (frente/costas/manga), a COR da estampa/bordado, e qual CAMINHO do visualizador foi escolhido — se o cliente JÁ TEM a arte/visualizador pronto (vai enviar a imagem) ou se vamos MONTAR o visualizador com IA a partir da descrição —, além de observações.
@@ -427,9 +499,16 @@ export async function POST(req: Request) {
     const faltamTxt = (contexto?.faltam ?? []).filter(Boolean).join(', ')
     const produtosCtx = (contexto?.produtos ?? []).filter(Boolean)
     const emEdicao = Boolean(contexto?.edicao) || produtosCtx.length > 0
-    const ctxTxt = contexto
-      ? `O cliente JÁ sinalizou ${contexto.totalPecas ?? 'algumas'} peças${contexto.categoria ? ` da categoria "${contexto.categoria}"` : ''}.`
-      : ''
+    // Desde 24/08/2026 a home NÃO pergunta mais quantidade — chega 0 (ou null)
+    // quando ninguém informou nada. Dizer "JÁ sinalizou 0 peças" faria o modelo
+    // tratar zero como escolha do cliente e não perguntar. Zero aqui é ausência
+    // de informação, e a instrução tem que dizer isso com todas as letras.
+    const catTxt = contexto?.categoria ? ` da categoria "${contexto.categoria}"` : ''
+    const ctxTxt = !contexto
+      ? ''
+      : contexto.totalPecas && contexto.totalPecas > 0
+      ? `O cliente JÁ sinalizou ${contexto.totalPecas} peças${catTxt}.`
+      : `O cliente escolheu produzir${catTxt || ' algo'}, mas AINDA NÃO informou a quantidade — o formulário não pergunta isso. Levante a quantidade (total e, em vestuário, a divisão por tamanho) durante a conversa.`
     const aberturaInstr = emProduto
       ? `FOCO EM UM ÚNICO PRODUTO${produtoCtx ? ` — ${produtoCtx}` : ''}. O cliente está só COMPLETANDO os detalhes desse produto pra gerar o visualizador. ${faltamTxt ? `Falta(m): ${faltamTxt}. ` : ''}Pergunte SÓ o que falta desse produto, uma coisa por vez, de forma curta e simpática. NUNCA pergunte sobre outros produtos, NUNCA crie produto novo, NUNCA mexa em quantidade/tamanhos se não foi pedido. Se for VESTUÁRIO e o "publico" ainda estiver null, trate o PÚBLICO como um dos detalhes a capturar ANTES de gerar: infira da foto/contexto se der, senão pergunte de forma curta ("É feminino, masculino, infantil ou unissex?") e preencha "publico" — não deixe null em peça de roupa (a IA precisa disso pra gerar o mockup certo). Em brinde/gráfica não pergunte público: mantenha "unissex". Se a peça for ESTAMPADA/BORDADA, ofereça os DOIS caminhos do visualizador numa ÚNICA pergunta amigável, sempre amarrada A ESTE produto: (a) o cliente JÁ TEM a arte/um visualizador pronto dessa peça (imagem com a estampa aplicada) — aí oriente que ele pode ENVIAR essa imagem e registre na descricao que ele já tem a arte/visualizador pronto — OU (b) prefere que a gente MONTE um visualizador com IA a partir da descrição — aí capture a DESCRIÇÃO da estampa (o que é + COR + POSIÇÃO frente/costas/mangas). NÃO exija arte/imagem (basta o cliente descrever, ex.: "símbolo da Nike branco no meio do peito"); pergunte de forma curta (no máximo um par de perguntas) e só o que ainda não dá pra inferir da foto/descrição; grave tudo em descricao. Se o cliente ENVIAR uma imagem desse produto, associe-a a ESTA linha via "fotosPorLinha" (índice 0); se uma imagem veio no começo da conversa, confirme de leve que ela é o visualizador/arte final desta peça antes de associar. Devolva SEMPRE o pedido com APENAS esse 1 produto (a linha já vem preenchida no JSON). Quando estiver completo, faça um resuminho de 1 linha e diga que ele já pode tocar em "Concluir e gerar".`
       : emEdicao
@@ -486,6 +565,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       mensagem: mensagemFallback(anteriorEnriq),
       cores: null,
+      cards: null,
       pedido: anteriorEnriq,
       fase: faseAnt,
       completo: faseAnt === 'completo',
@@ -497,6 +577,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     mensagem: parsed.mensagem,
     cores: sanitizarCores(parsed.cores),
+    cards: cardsDaPergunta(parsed.perguntando),
     pedido,
     fotosPorLinha: parsed.fotosPorLinha ?? null,
     fase,
