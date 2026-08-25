@@ -212,7 +212,10 @@ export default function PedidoSteps() {
         ))}
       </div>
 
-      <div className="bg-white shadow-sm border border-gray-200 rounded-2xl p-6 flex flex-col min-h-[560px]">
+      {/* p-4 no celular (era p-6 em toda largura): com a seção da home já
+          gastando px-6, o cartão devolvia só ~264px pro chat do passo 4 numa
+          tela de 360px. Cada 8px aqui vale duas letras nos cards de resposta. */}
+      <div className="bg-white shadow-sm border border-gray-200 rounded-2xl p-4 sm:p-6 flex flex-col min-h-[560px]">
         <div className="flex-1">
         {step === 0 && (
           <>
