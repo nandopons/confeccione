@@ -18,6 +18,12 @@ type Turno = { role: "user" | "assistant"; display: string; raw?: string; fotos?
 type CorOpcao = { nome: string; hex: string };
 type Cores = { termo: string; opcoes: CorOpcao[] } | null;
 
+/* Cards de resposta rápida. Quem monta a lista é o backend (app/api/pedido/
+ * assistente), a partir do campo que o modelo disse estar perguntando — aqui
+ * é só desenho. Clicar num card manda o título como se o cliente tivesse
+ * escrito, então nada muda no resto do fluxo. */
+type Cards = { campo: string; opcoes: Array<{ titulo: string; nota?: string }> } | null;
+
 const PEDIDO_VAZIO: Pedido = { linhas: [], contato: {} };
 const MAX_FOTOS = 6;
 const MAX_COLETA = 12; // total de fotos de referência que o chat pode juntar (distribuídas entre os modelos)
@@ -68,7 +74,16 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   const jaTem = resumoProdutos.length > 0;
   const abertura = jaTem
     ? `Seu pedido já tem: ${resumoProdutos.join(", ")}. O que você quer ajustar? Pode pedir pra mudar cor, tecido, tamanhos, quantidade, estampa, ou adicionar/remover um produto — eu mexo SÓ no que você pedir, o resto fica como está. 😊`
-    : `Boa! ${totalPecas > 0 ? `Você sinalizou ${totalPecas} ${totalPecas === 1 ? "peça" : "peças"}${categoria ? ` de ${categoria}` : ""}. ` : ""}` +
+    // Desde 24/08/2026 a home não pergunta mais quantidade, então `totalPecas`
+    // costuma vir 0. Nesse caso a abertura ainda repete a CATEGORIA escolhida —
+    // sem isso o cliente cai num "e aí?" que ignora o que ele acabou de marcar.
+    : `Boa! ${
+        totalPecas > 0
+          ? `Você sinalizou ${totalPecas} ${totalPecas === 1 ? "peça" : "peças"}${categoria ? ` de ${categoria}` : ""}. `
+          : categoria
+          ? `Você marcou ${categoria}. `
+          : ""
+      }` +
       `Pra deixar tudo organizado: quantos modelos diferentes você quer produzir? (ex.: só 1 modelo, ou camiseta + moletom…) — se já tiver fotos do que quer, pode me enviar pelo 📎.`;
   const pedidoInicial: Pedido = jaTem ? { linhas: linhasBase, contato: {} } : PEDIDO_VAZIO;
   const aberturaRaw = jaTem ? JSON.stringify({ mensagem: abertura, cores: null, pedido: pedidoInicial }) : undefined;
@@ -78,6 +93,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   const [erro, setErro] = useState<string | null>(null);
   const [pedido, setPedido] = useState<Pedido>(pedidoInicial);
   const [cores, setCores] = useState<Cores>(null);
+  const [cards, setCards] = useState<Cards>(null);
   const [concluindo, setConcluindo] = useState(false);
   const [anexos, setAnexos] = useState<string[]>([]);
   const [fotosColetadas, setFotosColetadas] = useState<{ id: number; url: string }[]>([]);
@@ -194,7 +210,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     const texto = (textoForcado ?? input).trim();
     const fotos = anexos;
     if ((!texto && fotos.length === 0) || enviando) return;
-    setErro(null); setCores(null);
+    setErro(null); setCores(null); setCards(null);
     const novos: Turno[] = [...turnos, { role: "user", display: texto, fotos: fotos.length ? fotos : undefined }];
     setTurnos(novos); setInput(""); setAnexos([]);
     // limpa a altura do textarea após enviar e mantém o teclado aberto no mobile.
@@ -227,6 +243,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
       const novoPedido: Pedido = data.pedido ?? PEDIDO_VAZIO;
       setPedido(novoPedido);
       setCores(data.cores ?? null);
+      setCards(data.cards ?? null);
       if (data.fotosPorLinha && typeof data.fotosPorLinha === "object") setMapaFotos(data.fotosPorLinha);
       const raw = JSON.stringify({ mensagem: data.mensagem, cores: data.cores ?? null, pedido: novoPedido });
       setTurnos([...novos, { role: "assistant", display: data.mensagem, raw }]);
@@ -359,6 +376,27 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
                   className="flex items-center gap-1.5 border border-gray-200 rounded-full pl-1 pr-2.5 py-1 text-xs text-gray-700 hover:border-[#1D9E75]">
                   <span className="h-5 w-5 rounded-full border border-black/10" style={{ backgroundColor: o.hex }} />
                   {o.nome}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Cards de resposta rápida da pergunta da vez. Uma fila só: o número
+              de colunas é o número de opções, então 3 faixas dividem a linha em
+              3 e 4 tecidos em 4. No celular quebram sozinhos. */}
+          {cards && cards.opcoes.length > 0 && !enviando && (
+            <div
+              className="grid gap-2 pt-1"
+              style={{ gridTemplateColumns: `repeat(${cards.opcoes.length}, minmax(0, 1fr))` }}
+            >
+              {cards.opcoes.map((o) => (
+                <button
+                  key={o.titulo}
+                  type="button"
+                  onClick={() => void enviar(o.titulo)}
+                  className="text-left border border-gray-300 hover:border-[#1D9E75] hover:bg-[#F6FCFA] rounded-xl px-3 py-2.5 min-w-0 transition-colors"
+                >
+                  <span className="block text-[13px] font-medium text-gray-900 leading-tight">{o.titulo}</span>
+                  {o.nota && <span className="block text-[11px] text-gray-500 leading-snug mt-0.5">{o.nota}</span>}
                 </button>
               ))}
             </div>
