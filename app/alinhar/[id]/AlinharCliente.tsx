@@ -87,19 +87,23 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   }));
   const resumoProdutos = linhasBase.filter(linhaCompleta).map((l) => `${l.modelo}${corLabel(l.cor) ? ` ${corLabel(l.cor)}` : ""}${l.total ? ` (${l.total})` : ""}`);
   const jaTem = resumoProdutos.length > 0;
+  /* Aberturas curtas de propósito (25/08/2026). As anteriores tinham ~200
+   * caracteres e ocupavam OITO linhas no celular — a primeira coisa que o
+   * cliente via era um paredão de texto, e os cards de resposta nasciam abaixo
+   * da dobra do chat. Menos texto aqui é layout, não só tom. */
   const abertura = jaTem
-    ? `Seu pedido já tem: ${resumoProdutos.join(", ")}. O que você quer ajustar? Pode pedir pra mudar cor, tecido, tamanhos, quantidade, estampa, ou adicionar/remover um produto — eu mexo SÓ no que você pedir, o resto fica como está. 😊`
+    ? `Seu pedido já tem: ${resumoProdutos.join(", ")}. O que você quer ajustar? Mexo só no que você pedir — o resto fica como está. 😊`
     // Desde 24/08/2026 a home não pergunta mais quantidade, então `totalPecas`
     // costuma vir 0. Nesse caso a abertura ainda repete a CATEGORIA escolhida —
     // sem isso o cliente cai num "e aí?" que ignora o que ele acabou de marcar.
-    : `Boa! ${
+    : `${
         totalPecas > 0
-          ? `Você sinalizou ${totalPecas} ${totalPecas === 1 ? "peça" : "peças"}${categoria ? ` de ${categoria}` : ""}. `
+          ? `Boa, ${totalPecas} ${totalPecas === 1 ? "peça" : "peças"}${categoria ? ` de ${categoria}` : ""}! `
           : categoria
-          ? `Você marcou ${categoria}. `
-          : ""
+          ? `Boa, ${categoria}! `
+          : "Boa! "
       }` +
-      `Pra deixar tudo organizado: quantos modelos diferentes você quer produzir? (ex.: só 1 modelo, ou camiseta + moletom…) — se já tiver fotos do que quer, pode me enviar pelo 📎.`;
+      `Quantos modelos diferentes você quer produzir? Se já tiver foto do que quer, manda pelo 📎.`;
   const pedidoInicial: Pedido = jaTem ? { linhas: linhasBase, contato: {} } : PEDIDO_VAZIO;
   const aberturaRaw = jaTem ? JSON.stringify({ mensagem: abertura, cores: null, pedido: pedidoInicial }) : undefined;
   const [turnos, setTurnos] = useState<Turno[]>([{ role: "assistant", display: abertura, raw: aberturaRaw }]);
@@ -129,7 +133,10 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     const el = listaRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     else fimRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [turnos, enviando, anexos]);
+    // `cards` entra nas dependências porque a fila de cards nasce DEPOIS da
+    // última mensagem: sem isso, num celular ela podia aparecer abaixo da
+    // dobra do chat e o cliente nem via que tinha o que clicar.
+  }, [turnos, enviando, anexos, cards]);
 
   // Teclado virtual (mobile): encolhe o card pra caber exatamente no espaço
   // visível acima do teclado, mantendo o input sempre à vista — sensação de app.
@@ -371,18 +378,26 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
           (embutido
             // Dentro do cartão do pedido a borda e a sombra já vêm de fora —
             // repetir as duas desenharia um cartão dentro do outro.
-            ? "h-[62vh] max-h-[520px] min-h-[380px] rounded-xl border border-gray-200"
-            : "h-[70vh] lg:h-[70vh] rounded-2xl border border-gray-200 shadow-sm")
+            // svh (e não vh): no celular o vh conta a barra de endereço, então
+            // 62vh estourava a tela quando a barra estava visível. svh usa o
+            // viewport pequeno — altura estável, sem pular quando a barra some.
+            ? "h-[64svh] max-h-[520px] min-h-[360px] rounded-xl border border-gray-200"
+            : "h-[72svh] lg:h-[70vh] rounded-2xl border border-gray-200 shadow-sm")
         }
       >
-        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between shrink-0">
-          <p className="text-gray-900 font-medium text-sm">{embutido ? "Sua produção" : "💬 Vamos alinhar seu pedido"}</p>
-          <button type="button" onClick={pular} className="text-xs text-gray-400 hover:text-[#0F6E56]">prefiro organizar eu mesmo →</button>
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-2 shrink-0">
+          <p className="text-gray-900 font-medium text-sm truncate">{embutido ? "Sua produção" : "💬 Vamos alinhar seu pedido"}</p>
+          {/* Embutido, o mesmo atalho já aparece embaixo do chat ("organizar eu
+              mesmo na página de produtos") — repetir aqui só roubava largura
+              do título no celular. */}
+          {!embutido && (
+            <button type="button" onClick={pular} className="text-xs text-gray-400 hover:text-[#0F6E56] whitespace-nowrap shrink-0">prefiro organizar eu mesmo →</button>
+          )}
         </div>
-        <div ref={listaRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
+        <div ref={listaRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-3.5 sm:px-4 sm:py-4 space-y-3">
           {turnos.map((t, i) => (
             <div key={i} className={"flex " + (t.role === "user" ? "justify-end" : "justify-start")}>
-              <div className={"max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap " + (t.role === "user" ? "bg-[#1D9E75] text-white" : "bg-gray-100 text-gray-800")}>
+              <div className={"max-w-[88%] sm:max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] " + (t.role === "user" ? "bg-[#1D9E75] text-white" : "bg-gray-100 text-gray-800")}>
                 {t.fotos && t.fotos.length > 0 && (
                   <div className="grid grid-cols-3 gap-1.5 mb-1.5">
                     {t.fotos.map((u, j) => (
@@ -406,20 +421,28 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
               ))}
             </div>
           )}
-          {/* Cards de resposta rápida da pergunta da vez. Uma fila só: o número
-              de colunas é o número de opções, então 3 faixas dividem a linha em
-              3 e 4 tecidos em 4. No celular quebram sozinhos. */}
+          {/* Cards de resposta rápida da pergunta da vez.
+           *
+           * 25/08/2026 — a versão anterior forçava UMA fila em qualquer tela
+           * (`repeat(N, 1fr)` inline). No celular, dentro do cartão do passo 4,
+           * sobram ~230px pra lista: 4 opções viravam colunas de ~58px e
+           * "Masculino"/"Feminino" vazavam por cima da borda do card ao lado.
+           *
+           * Agora: 2 colunas no celular (com a última ocupando a linha inteira
+           * quando o total é ímpar, pra não deixar buraco) e uma fila só a
+           * partir de md, onde a largura comporta. A contagem de opções é 2, 3
+           * ou 4 — ver CARDS em app/api/pedido/assistente. */}
           {cards && cards.opcoes.length > 0 && !enviando && (
             <div
-              className="grid gap-2 pt-1"
-              style={{ gridTemplateColumns: `repeat(${cards.opcoes.length}, minmax(0, 1fr))` }}
+              className="grid grid-cols-2 gap-2 pt-1 md:[grid-template-columns:var(--fila)] [&>*:last-child:nth-child(odd)]:col-span-2 md:[&>*:last-child]:col-span-1"
+              style={{ "--fila": `repeat(${cards.opcoes.length}, minmax(0, 1fr))` } as React.CSSProperties}
             >
               {cards.opcoes.map((o) => (
                 <button
                   key={o.titulo}
                   type="button"
                   onClick={() => void enviar(o.titulo)}
-                  className="text-left border border-gray-300 hover:border-[#1D9E75] hover:bg-[#F6FCFA] rounded-xl px-3 py-2.5 min-w-0 transition-colors"
+                  className="text-left border border-gray-300 hover:border-[#1D9E75] hover:bg-[#F6FCFA] active:bg-[#E1F5EE] rounded-xl px-3 py-2.5 min-w-0 [overflow-wrap:anywhere] transition-colors"
                 >
                   <span className="block text-[13px] font-medium text-gray-900 leading-tight">{o.titulo}</span>
                   {o.nota && <span className="block text-[11px] text-gray-500 leading-snug mt-0.5">{o.nota}</span>}
@@ -436,7 +459,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
           className={(embutido ? "" : "lg:hidden ") + "mx-3 mt-3 shrink-0 flex items-center justify-center gap-1.5 rounded-full bg-[#E1F5EE] text-[#0F6E56] text-sm font-medium px-4 py-2.5 shadow-sm hover:shadow active:scale-[0.99] transition"}>
           📋 Resumo do pedido{qtdProdutos > 0 ? ` · ${qtdProdutos} ${qtdProdutos === 1 ? "produto" : "produtos"}` : ""}
         </button>
-        <div className="border-t border-gray-100 p-3 shrink-0">
+        <div className="border-t border-gray-100 p-2.5 sm:p-3 shrink-0">
           {/* tray de anexos */}
           {(anexos.length > 0 || subindo) && (
             <div className="flex flex-wrap gap-2 mb-2">
@@ -461,10 +484,15 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
               onFocus={aoFocarInput}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void enviar(); } }}
               onPaste={(e) => void onColar(e)}
-              rows={1} placeholder="Escreva ou cole uma foto aqui…" enterKeyHint="send"
+              // O placeholder antigo ("Escreva ou cole uma foto aqui…") não
+              // cabia numa linha no celular: sobram ~195px entre o 📎 e o
+              // enviar, o texto quebrava em duas linhas e a segunda ficava
+              // cortada, porque o textarea nasce com altura de UMA linha.
+              // Curto aqui, e a dica da foto fica no 📎 e na abertura do chat.
+              rows={1} placeholder="Escreva aqui…" enterKeyHint="send"
               autoCapitalize="sentences" autoCorrect="on" spellCheck
               style={{ scrollbarWidth: "none" }}
-              className="flex-1 resize-none border border-gray-300 rounded-xl px-3 py-2.5 text-base text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75] max-h-28 overflow-y-auto [&::-webkit-scrollbar]:hidden"
+              className="flex-1 min-w-0 resize-none border border-gray-300 rounded-xl px-3 py-2.5 text-base leading-6 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75] min-h-11 max-h-28 overflow-y-auto [&::-webkit-scrollbar]:hidden"
             />
             <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => void enviar()} disabled={enviando || (!input.trim() && anexos.length === 0)}
               className="shrink-0 h-11 w-11 rounded-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-40 text-white flex items-center justify-center" aria-label="Enviar">
