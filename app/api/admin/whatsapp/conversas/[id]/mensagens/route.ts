@@ -2,6 +2,13 @@
 // GET → mensagens da conversa (asc). Zera não-lidas, marca a última mensagem
 // do contato como lida no WhatsApp (✓✓ azul) e gera signed URLs pra mídia
 // (bucket wa-midia é privado). Suporta ?after=<ISO> pra polling incremental.
+//
+// 26/08/2026 — o polling incremental filtrava por `criado_em > after`, então
+// só trazia mensagem NOVA. Status de mensagem que já estava na tela nunca
+// voltava: o relógio de "enviando" ficava lá até você trocar de conversa e
+// voltar, mesmo quando o banco já dizia 'entregue'. Agora a resposta do
+// polling leva junto um `statuses` com o estado atual das últimas mensagens,
+// e o cliente costura isso no que já tem.
 
 import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
@@ -50,6 +57,20 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     midia_url: m.midia_path ? urls[m.midia_path] ?? null : null,
   }))
 
+  // Estado atual das últimas mensagens da conversa. Só no polling: na carga
+  // completa o próprio `mensagens` já traz o status de todas. Payload minúsculo
+  // (id + status + erro), e é o que faz o ✓✓ mudar sem trocar de conversa.
+  let statuses: Array<{ id: string; status: string; erro: string | null }> = []
+  if (after) {
+    const { data: recentes } = await supabaseAdmin
+      .from('wa_mensagens')
+      .select('id, status, erro')
+      .eq('conversa_id', id)
+      .order('criado_em', { ascending: false })
+      .limit(80)
+    statuses = recentes ?? []
+  }
+
   // Efeitos de leitura só na carga completa (não no polling incremental)
   if (!after) {
     await supabaseAdmin.from('wa_conversas').update({ nao_lidas: 0 }).eq('id', id)
@@ -61,5 +82,5 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (novaEntrada?.wamid) await marcarComoLida(novaEntrada.wamid)
   }
 
-  return NextResponse.json({ mensagens: resposta })
+  return NextResponse.json({ mensagens: resposta, statuses })
 }

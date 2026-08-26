@@ -13,6 +13,7 @@
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type Diagnostico, diaCurto, estadoDoEnvio } from '@/app/lib/wa-saude'
 
 type Contato = {
   id: string
@@ -184,8 +185,15 @@ function idadeCurta(iso: string | null): string {
   return meses === 1 ? 'há 1 mês' : `há ${meses} meses`
 }
 
-function restanteJanela(ultimaMsgContato: string | null): { aberta: boolean; rotulo: string } {
-  if (!ultimaMsgContato) return { aberta: false, rotulo: 'Cliente ainda não escreveu' }
+function restanteJanela(ultimaMsgContato: string | null, recibosOk: boolean): { aberta: boolean; rotulo: string } {
+  // "Cliente ainda não escreveu" é uma afirmação sobre o cliente. Com o
+  // webhook mudo, o painel não tem como sustentá-la — o que ele sabe é que
+  // não recebeu nada. Dizer a verdade menor evita cobrar o cliente errado.
+  if (!ultimaMsgContato) {
+    return recibosOk
+      ? { aberta: false, rotulo: 'Cliente ainda não escreveu' }
+      : { aberta: false, rotulo: 'Nada recebido — ver aviso' }
+  }
   const fim = new Date(ultimaMsgContato).getTime() + JANELA_MS
   const resta = fim - Date.now()
   if (resta <= 0) return { aberta: false, rotulo: 'Janela de 24h encerrada' }
@@ -194,9 +202,42 @@ function restanteJanela(ultimaMsgContato: string | null): { aberta: boolean; rot
   return { aberta: true, rotulo: h > 0 ? `Janela aberta · ${h}h${min ? ` ${min}min` : ''} restantes` : `Janela aberta · ${min}min restantes` }
 }
 
-function Ticks({ status }: { status: string }) {
+/**
+ * Os ✓✓ da bolha. Para 'enviando' o relógio deixou de ser um só: uma mensagem
+ * de 9 dias parada não pode parecer igual a uma que saiu agora — era isso que
+ * dava a sensação de painel quebrado. `agora` vem do relógio do componente e
+ * é 0 até montar (evita divergência de hidratação); com 0, comporta-se como
+ * antes.
+ */
+function Ticks({ status, criadoEm, agora }: { status: string; criadoEm: string; agora: number }) {
   if (status === 'falhou') return <span title="Falhou" className="text-red-500">⚠</span>
-  if (status === 'enviando') return <span title="Enviando" className="text-neutral-400">🕓</span>
+
+  if (status === 'enviando') {
+    const estado = agora === 0 ? 'normal' : estadoDoEnvio(criadoEm, agora)
+    if (estado === 'sem_confirmacao') {
+      return (
+        <span
+          title="Enviada, mas o WhatsApp não confirmou a entrega. Veja o aviso no topo da lista."
+          aria-label="Sem confirmação de entrega"
+          className="text-amber-500"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="inline-block align-[-1px]">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7.5v5M12 16v.01" />
+          </svg>
+        </span>
+      )
+    }
+    return (
+      <span
+        title={estado === 'demorando' ? 'Enviando… ainda sem confirmação' : 'Enviando'}
+        className={estado === 'demorando' ? 'text-amber-400' : 'text-neutral-400'}
+      >
+        🕓
+      </span>
+    )
+  }
+
   const cor = status === 'lido' ? 'text-sky-500' : 'text-neutral-400'
   const duplo = status === 'entregue' || status === 'lido'
   return (
@@ -405,12 +446,24 @@ export function WhatsAppInbox({
   const [contexto, setContexto] = useState<Contexto | null>(null)
   const [painelMobileAberto, setPainelMobileAberto] = useState(false)
   const [rapidasAberto, setRapidasAberto] = useState(false)
+  const [saude, setSaude] = useState<Diagnostico | null>(null)
+  const [avisoFechado, setAvisoFechado] = useState(false)
+  // 0 até montar: no primeiro render (servidor e cliente) o relógio precisa
+  // dar o mesmo resultado, senão a hidratação reclama.
+  const [agora, setAgora] = useState(0)
 
   const fimRef = useRef<HTMLDivElement>(null)
   const inputArquivoRef = useRef<HTMLInputElement>(null)
   const ativaIdRef = useRef<string | null>(null)
   ativaIdRef.current = ativaId
+  // O polling da thread lê a última mensagem daqui em vez da state: assim o
+  // intervalo é criado uma vez por conversa, e não a cada mensagem que chega.
+  const mensagensRef = useRef<Mensagem[]>([])
   const deepLinkFeito = useRef(false)
+
+  useEffect(() => {
+    mensagensRef.current = mensagens
+  }, [mensagens])
 
   // ------------------------------------------------- deep-link (?abrir=…)
   useEffect(() => {
@@ -435,7 +488,10 @@ export function WhatsAppInbox({
   }, [abrirTelefone, abrirNome, abrirTexto])
 
   const ativa = useMemo(() => conversas.find((c) => c.id === ativaId) ?? null, [conversas, ativaId])
-  const janela = useMemo(() => restanteJanela(ativa?.ultima_msg_contato_em ?? null), [ativa, mensagens.length])
+  const janela = useMemo(
+    () => restanteJanela(ativa?.ultima_msg_contato_em ?? null, saude?.recibosOk !== false),
+    [ativa, mensagens.length, saude?.recibosOk]
+  )
 
   // ---------------------------------------------------------------- lista
   const carregarConversas = useCallback(async (q?: string) => {
@@ -454,6 +510,40 @@ export function WhatsAppInbox({
     return () => clearInterval(t)
   }, [busca, carregarConversas])
 
+  // ------------------------------------------------------- relógio + saúde
+  // O relógio só serve pra decidir se um 'enviando' já passou do ponto —
+  // 30s de granularidade sobra.
+  useEffect(() => {
+    const marcar = () => setAgora(Date.now())
+    const primeiro = setTimeout(marcar, 0)
+    const t = setInterval(marcar, 30_000)
+    return () => {
+      clearTimeout(primeiro)
+      clearInterval(t)
+    }
+  }, [])
+
+  // Os recibos da Meta são o que promove 'enviando' → 'entregue'/'lido'. Se
+  // pararem, tudo congela no relógio e nada que os contatos escreverem chega
+  // aqui. 2min é de sobra pra um problema que dura dias.
+  useEffect(() => {
+    let vivo = true
+    const buscar = () => {
+      fetch('/api/admin/whatsapp/saude', { cache: 'no-store' })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((d: Diagnostico | null) => {
+          if (vivo && d && typeof d.recibosOk === 'boolean') setSaude(d)
+        })
+        .catch(() => { /* sem aviso é melhor que inbox quebrado */ })
+    }
+    buscar()
+    const t = setInterval(buscar, 120_000)
+    return () => {
+      vivo = false
+      clearInterval(t)
+    }
+  }, [])
+
   // ---------------------------------------------------------------- thread
   const carregarMensagens = useCallback(async (conversaId: string, after?: string) => {
     try {
@@ -463,12 +553,27 @@ export function WhatsAppInbox({
       const data = await res.json()
       const novas: Mensagem[] = data.mensagens ?? []
       if (after) {
-        if (novas.length > 0) {
-          setMensagens((prev) => {
-            const ids = new Set(prev.map((m) => m.id))
-            return [...prev, ...novas.filter((m) => !ids.has(m.id))]
+        // `statuses` traz o estado atual das últimas mensagens — é por ele que
+        // o ✓✓ de uma bolha que já está na tela muda sozinho.
+        const statuses: Array<{ id: string; status: string; erro: string | null }> = data.statuses ?? []
+        const porId = new Map(statuses.map((s) => [s.id, s]))
+        setMensagens((prev) => {
+          const ids = new Set(prev.map((m) => m.id))
+          const acrescentar = novas.filter((m) => !ids.has(m.id))
+
+          let mudou = false
+          const atualizadas = prev.map((m) => {
+            const s = porId.get(m.id)
+            if (!s || (s.status === m.status && s.erro === m.erro)) return m
+            mudou = true
+            return { ...m, status: s.status, erro: s.erro }
           })
-        }
+
+          // Devolver `prev` quando nada mudou evita re-render a cada 3s — e o
+          // efeito de polling depende desta referência.
+          if (!mudou && acrescentar.length === 0) return prev
+          return acrescentar.length === 0 ? atualizadas : [...atualizadas, ...acrescentar]
+        })
       } else {
         setMensagens(novas)
       }
@@ -506,11 +611,12 @@ export function WhatsAppInbox({
   useEffect(() => {
     if (!ativaId) return
     const t = setInterval(() => {
-      const ultima = mensagens[mensagens.length - 1]
+      const atuais = mensagensRef.current
+      const ultima = atuais[atuais.length - 1]
       carregarMensagens(ativaId, ultima?.criado_em)
     }, 3000)
     return () => clearInterval(t)
-  }, [ativaId, mensagens, carregarMensagens])
+  }, [ativaId, carregarMensagens])
 
   useEffect(() => {
     fimRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -654,6 +760,38 @@ export function WhatsAppInbox({
           <div className="p-4 pb-3 border-b border-neutral-100">
             <h1 className="text-[17px] font-semibold text-neutral-900">WhatsApp</h1>
             <p className="text-[12px] text-neutral-500 mb-3">Atendimento oficial (Cloud API)</p>
+
+            {saude && !saude.recibosOk && !avisoFechado && (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+                <div className="flex items-start gap-2">
+                  <span className="text-amber-600 leading-none mt-[1px]">⚠</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12.5px] font-medium text-amber-900">
+                      A Meta parou de responder{diaCurto(saude.mudoDesde) ? ` em ${diaCurto(saude.mudoDesde)}` : ''}
+                      {saude.diasMudo && saude.diasMudo > 0 ? ` — ${saude.diasMudo} dias` : ''}
+                    </p>
+                    <p className="text-[12px] text-amber-800 leading-relaxed mt-0.5">
+                      As mensagens continuam saindo, mas o WhatsApp não confirma a entrega
+                      {saude.presas > 0 ? ` (${saude.presas} sem confirmação)` : ''}. Pelo mesmo canal,
+                      <strong> nada que os contatos escreverem aparece aqui</strong>.
+                    </p>
+                    <p className="text-[11.5px] text-amber-700 leading-relaxed mt-1.5">
+                      Conserto: no app da Meta, WhatsApp → Configuração → conferir a URL de callback e
+                      o campo <em>messages</em> assinado.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setAvisoFechado(true)}
+                    className="shrink-0 text-amber-500 hover:text-amber-700 text-[15px] leading-none"
+                    title="Esconder até recarregar"
+                    aria-label="Esconder aviso"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            )}
+
             <input
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
@@ -780,7 +918,7 @@ export function WhatsAppInbox({
                             <div className="flex items-center justify-end gap-1 mt-0.5 -mb-0.5">
                               {m.erro && <span className="text-[11px] text-red-500 mr-1">{m.erro}</span>}
                               <span className="text-[10.5px] text-neutral-400">{horaCurta(m.criado_em)}</span>
-                              {saida && <Ticks status={m.status} />}
+                              {saida && <Ticks status={m.status} criadoEm={m.criado_em} agora={agora} />}
                             </div>
                           </div>
                         </div>
