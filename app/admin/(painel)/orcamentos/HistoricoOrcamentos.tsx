@@ -97,7 +97,17 @@ const FILTROS: { id: Filtro; texto: string }[] = [
   { id: 'todos', texto: 'Todos' },
 ]
 
-export default function HistoricoOrcamentos() {
+/**
+ * `aoDuplicar` e `duplicando` sao OPCIONAIS de proposito: o historico continua
+ * funcionando sozinho (e o botao Duplicar simplesmente nao aparece) em
+ * qualquer lugar que renderize <HistoricoOrcamentos /> sem props.
+ */
+type Props = {
+  aoDuplicar?: (id: string) => void | Promise<void>
+  duplicando?: string | null
+}
+
+export default function HistoricoOrcamentos({ aoDuplicar, duplicando = null }: Props = {}) {
   const [lista, setLista] = useState<Orcamento[] | null>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [filtro, setFiltro] = useState<Filtro>('vencidos')
@@ -282,10 +292,14 @@ export default function HistoricoOrcamentos() {
                 vencido ? 'border-red-200' : 'border-gray-200'
               }`}
             >
+              {/* O cabecalho E um <button> (abre/fecha as parcelas). Botao
+                  dentro de botao e HTML invalido e o clique vira loteria —
+                  entao o Duplicar entra como IRMAO, num flex ao lado. */}
+              <div className="flex items-stretch">
               <button
                 type="button"
                 onClick={() => setAberto((a) => (a === o.id ? null : o.id))}
-                className="w-full text-left px-4 py-3 hover:bg-gray-50/70 transition-colors"
+                className="flex-1 min-w-0 text-left px-4 py-3 hover:bg-gray-50/70 transition-colors"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -328,6 +342,21 @@ export default function HistoricoOrcamentos() {
                   </div>
                 </div>
               </button>
+
+              {aoDuplicar ? (
+                <div className="flex items-center pr-3 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => void aoDuplicar(o.id)}
+                    disabled={duplicando !== null}
+                    title="Cria um novo orçamento com os mesmos itens e cliente. O original não é tocado."
+                    className="text-xs text-gray-600 hover:text-gray-900 border border-gray-200 rounded-lg px-2.5 py-1.5 disabled:opacity-40 bg-white"
+                  >
+                    {duplicando === o.id ? 'Abrindo…' : 'Duplicar'}
+                  </button>
+                </div>
+              ) : null}
+              </div>
 
               {aberto === o.id ? (
                 <PainelParcelas orcamento={o} aoMudar={carregar} />

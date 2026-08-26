@@ -81,6 +81,8 @@ function validarItem(item: ItemEntrada, indice: number): ItemValido | string {
   }
 }
 
+const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 // ---------------------------------------------------------------------------
 // GET — lista os orcamentos avulsos ja emitidos.
 //
@@ -89,10 +91,37 @@ function validarItem(item: ItemEntrada, indice: number): ItemValido | string {
 //
 // Nao devolve pix_copia_cola nem pix_qr_imagem: sao campos grandes (o QR e um
 // PNG em base64) e a listagem nao precisa deles.
+//
+// GET ?id=<uuid> — devolve UM orcamento inteiro, com itens, observacoes,
+// email e endereco. E o que a duplicacao precisa (26/08/2026). Esses campos
+// ficam fora da listagem de proposito: `itens` e jsonb e ficaria pesado em
+// 200 linhas. Continua sem pix_copia_cola / pix_qr_imagem — PIX nao se copia.
 // ---------------------------------------------------------------------------
 export async function GET(req: NextRequest) {
   if (!ehTokenAdminValido(req.cookies.get(COOKIE_ADMIN)?.value)) {
     return NextResponse.json({ erro: 'Nao autenticado' }, { status: 401 })
+  }
+
+  const id = req.nextUrl.searchParams.get('id')
+  if (id !== null) {
+    if (!RE_UUID.test(id)) {
+      return NextResponse.json({ erro: 'id invalido.' }, { status: 400 })
+    }
+    const { data: um, error: errUm } = await supabaseAdmin
+      .from('orcamentos')
+      .select(
+        'id, numero, cliente_nome, cliente_documento, cliente_email, ' +
+          'cep, logradouro, endereco_numero, endereco_complemento, bairro, cidade, uf, ' +
+          'itens, frete_centavos, subtotal_centavos, total_centavos, observacoes, ' +
+          'data_orcamento, validade, status, pagamento_status, modalidade, ' +
+          'desconto_pix_percentual, criado_em'
+      )
+      .eq('id', id)
+      .maybeSingle()
+
+    if (errUm) return NextResponse.json({ erro: errUm.message }, { status: 500 })
+    if (!um) return NextResponse.json({ erro: 'Orcamento nao encontrado.' }, { status: 404 })
+    return NextResponse.json({ orcamento: um })
   }
 
   const { data, error } = await supabaseAdmin

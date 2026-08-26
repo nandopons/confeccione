@@ -63,6 +63,44 @@ function brl(centavos: number): string {
   return (centavos / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
+// ---------------------------------------------------------------------------
+// Volta do banco pro form (duplicacao, 26/08/2026).
+//
+// paraCentavos() e o caminho de ida; estas duas sao a volta, e tem que fechar
+// o round-trip exato: centavos -> texto -> centavos devolve o mesmo inteiro.
+// Item com formato estranho vira LINHA VAZIA em vez de quebrar a tela — um
+// orcamento antigo com jsonb diferente nao pode derrubar o admin.
+// ---------------------------------------------------------------------------
+
+/** 647569 → "6475,69" (o mesmo dialeto que paraCentavos entende). */
+function centavosParaInput(centavos: number): string {
+  if (!Number.isFinite(centavos)) return ''
+  return (Math.round(centavos) / 100).toFixed(2).replace('.', ',')
+}
+
+/** 2.5 → "2,5" · 3 → "3" */
+function quantidadeParaInput(quantidade: number): string {
+  if (!Number.isFinite(quantidade) || quantidade <= 0) return '1'
+  return String(quantidade).replace('.', ',')
+}
+
+function itensParaLinhas(cru: unknown): LinhaItem[] {
+  if (!Array.isArray(cru) || cru.length === 0) return [{ ...LINHA_VAZIA }]
+  return cru.map((item): LinhaItem => {
+    if (typeof item !== 'object' || item === null) return { ...LINHA_VAZIA }
+    const o = item as Record<string, unknown>
+    const tipo: TipoItem = o.tipo === 'servico' ? 'servico' : 'produto'
+    const descricao = typeof o.descricao === 'string' ? o.descricao : ''
+    const quantidade =
+      typeof o.quantidade === 'number' ? quantidadeParaInput(o.quantidade) : '1'
+    const valorUnitario =
+      typeof o.valor_unitario_centavos === 'number'
+        ? centavosParaInput(o.valor_unitario_centavos)
+        : ''
+    return { tipo, descricao, quantidade, valorUnitario }
+  })
+}
+
 /** Data local (America/Recife na prática) em YYYY-MM-DD, sem sustos de UTC. */
 function hojeISO(): string {
   const d = new Date()
@@ -104,6 +142,9 @@ export default function OrcamentosAdmin() {
   const [erro, setErro] = useState<string | null>(null)
   const [cobrancaAviso, setCobrancaAviso] = useState<string | null>(null)
   const [gerado, setGerado] = useState<OrcamentoPDFDados | null>(null)
+  // Duplicacao (26/08/2026): id em voo + numero do ORC que originou o rascunho.
+  const [duplicandoId, setDuplicandoId] = useState<string | null>(null)
+  const [duplicadoDe, setDuplicadoDe] = useState<string | null>(null)
 
   /** CEP completo → preenche endereço via ViaCEP (só campos ainda vazios;
    *  o server resolve de novo com fallback BrasilAPI na criação). */
@@ -242,6 +283,7 @@ export default function OrcamentosAdmin() {
     setGerado(null)
     setErro(null)
     setCobrancaAviso(null)
+    setDuplicadoDe(null)
     setGerarCobranca(true)
     setModalidade('integral')
     setDescontoPix(true)
@@ -260,6 +302,72 @@ export default function OrcamentosAdmin() {
     setItens([{ ...LINHA_VAZIA }])
     setFrete('')
     setObservacoes('')
+  }
+
+  // ---- duplicar (26/08/2026) ----------------------------------------------
+  // Le UM orcamento e devolve o form preenchido, na aba "Novo". O ORIGINAL NAO
+  // E TOCADO em momento nenhum — duplicar so le.
+  //
+  // Tres coisas NAO sao copiadas, cada uma por um motivo:
+  //   numero    — quem gera ORC-<ano>-<seq> e o DEFAULT da coluna no Postgres.
+  //               Duplicata nasce com numero novo, sempre.
+  //   cobranca  — "Gerar cobranca PIX" vem DESMARCADO. Duplicar e quase sempre
+  //               reemitir pro mesmo cliente; marcado por padrao abriria uma
+  //               SEGUNDA cobranca no Asaas sem ninguem pedir.
+  //   validade  — nasce vazia, e data_orcamento vira hoje. Copiar validade de
+  //               agosto pra um orcamento reemitido em setembro e emitir ja
+  //               vencido.
+  async function duplicar(id: string) {
+    setDuplicandoId(id)
+    setErro(null)
+    try {
+      const r = await fetch(`/api/admin/orcamentos?id=${encodeURIComponent(id)}`, {
+        cache: 'no-store',
+      })
+      const j = await r.json().catch(() => null)
+      if (!r.ok || !j?.orcamento) {
+        setErro(j?.erro ?? `Não consegui abrir o orçamento (HTTP ${r.status}).`)
+        return
+      }
+      const o = j.orcamento as Record<string, unknown>
+      const texto = (v: unknown) => (typeof v === 'string' ? v : '')
+
+      setClienteNome(texto(o.cliente_nome))
+      setClienteDocumento(texto(o.cliente_documento))
+      setClienteEmail(texto(o.cliente_email))
+      setCep(texto(o.cep))
+      setLogradouro(texto(o.logradouro))
+      setEnderecoNumero(texto(o.endereco_numero))
+      setEnderecoComplemento(texto(o.endereco_complemento))
+      setBairro(texto(o.bairro))
+      setCidade(texto(o.cidade))
+      setUfEstado(texto(o.uf))
+      setItens(itensParaLinhas(o.itens))
+      setFrete(
+        typeof o.frete_centavos === 'number' && o.frete_centavos > 0
+          ? centavosParaInput(o.frete_centavos)
+          : ''
+      )
+      setObservacoes(texto(o.observacoes))
+      setModalidade(o.modalidade === 'sinal_50' ? 'sinal_50' : 'integral')
+      setDescontoPix(
+        typeof o.desconto_pix_percentual === 'number' && o.desconto_pix_percentual > 0
+      )
+
+      setDataOrcamento(hojeISO())
+      setValidade('')
+      setGerarCobranca(false)
+
+      setGerado(null)
+      setCobrancaAviso(null)
+      setDuplicadoDe(texto(o.numero) || 'orçamento anterior')
+      setAba('novo')
+      if (typeof window !== 'undefined') window.scrollTo({ top: 0 })
+    } catch {
+      setErro('Falha de rede ao abrir o orçamento para duplicar.')
+    } finally {
+      setDuplicandoId(null)
+    }
   }
 
   // ---- tela de sucesso ----------------------------------------------------
@@ -318,6 +426,22 @@ export default function OrcamentosAdmin() {
   function telaForm() {
     return (
       <div className="bg-white border border-gray-200 rounded-2xl p-5 space-y-5">
+        {duplicadoDe ? (
+          <div className="flex items-start justify-between gap-3 text-xs text-indigo-800 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2">
+            <span>
+              Rascunho duplicado de <strong>{duplicadoDe}</strong>. Nasce com número novo, sem
+              cobrança e sem validade — confira antes de gerar. O original não foi alterado.
+            </span>
+            <button
+              type="button"
+              onClick={novoOrcamento}
+              className="shrink-0 underline text-indigo-700 hover:text-indigo-900"
+            >
+              limpar
+            </button>
+          </div>
+        ) : null}
+
         {/* Cliente */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -685,7 +809,13 @@ export default function OrcamentosAdmin() {
         ))}
       </div>
 
-      {aba === 'historico' ? <HistoricoOrcamentos /> : gerado ? telaSucesso() : telaForm()}
+      {aba === 'historico' ? (
+        <HistoricoOrcamentos aoDuplicar={duplicar} duplicando={duplicandoId} />
+      ) : gerado ? (
+        telaSucesso()
+      ) : (
+        telaForm()
+      )}
     </div>
   )
 }
