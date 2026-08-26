@@ -49,6 +49,17 @@ const nichosExtras = [
 const nichosTodos = [...nichosPrincipais, ...nichosExtras];
 function cepFmt(v: string): string { const d = (v || "").replace(/\D/g, ""); return d.length === 8 ? `${d.slice(0,5)}-${d.slice(5)}` : (v || ""); }
 
+// Máscara do WhatsApp (26/08/2026). O estado guarda SÓ DÍGITOS — a máscara é
+// desenho de tela. Quem normaliza de verdade é o server (normalizarWhatsApp).
+function telFmt(digitos: string): string {
+  const n = (digitos || "").replace(/\D/g, "").slice(0, 11);
+  if (n.length === 0) return "";
+  if (n.length <= 2) return `(${n}`;
+  if (n.length <= 6) return `(${n.slice(0, 2)}) ${n.slice(2)}`;
+  if (n.length <= 10) return `(${n.slice(0, 2)}) ${n.slice(2, 6)}-${n.slice(6)}`;
+  return `(${n.slice(0, 2)}) ${n.slice(2, 7)}-${n.slice(7)}`;
+}
+
 export default function PedidoSteps() {
   const [step, setStep] = useState(0);
   const [tipo, setTipo] = useState("");
@@ -205,20 +216,43 @@ export default function PedidoSteps() {
     }
   }
 
-  const inputCls = "w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75] focus:ring-2 focus:ring-[#1D9E75]/20";
+  // text-base sm:text-sm — 26/08/2026, o conserto do "a tela fica pulando".
+  // O iOS Safari dá ZOOM AUTOMÁTICO em qualquer input com fonte < 16px: o
+  // cliente tocava no CEP, a tela ampliava, ele pinçava de volta, tocava no
+  // próximo, ampliava de novo. Nas gravações do Clarity isso é a definição de
+  // falta de fluidez. 16px no celular mata o zoom; do `sm` pra cima o desktop
+  // continua com os 14px de antes.
+  const inputCls = "w-full border border-gray-300 rounded-xl px-3 py-2 text-base sm:text-sm text-gray-800 focus:outline-none focus:border-[#1D9E75] focus:ring-2 focus:ring-[#1D9E75]/20";
 
   return (
     <div>
       {/* barra de progresso */}
+      {/* Os círculos 1-2-3-4 eram <div>. Número dentro de círculo PARECE botão,
+          e as gravações do Clarity mostravam toques sem resposta bem aqui
+          (cliques mortos em 29,51% das sessões). Agora são botões de VOLTAR:
+          passo já concluído volta; passo futuro fica inerte; e depois que o
+          pedido é criado (passo 4) nada volta — o contato já está gravado, e
+          reabrir o formulário só criaria um segundo pedido. */}
       <div className="flex items-center mb-8">
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="flex items-center flex-1 last:flex-none">
-            <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0 shadow-sm transition-all ${i < step ? "bg-[#1D9E75] text-white" : i === step ? "bg-[#111] text-white" : "bg-white border border-gray-300 text-gray-500"}`}>
-              {i < step ? "✓" : i + 1}
+        {[0, 1, 2, 3].map((i) => {
+          const concluido = i < step;
+          const podeVoltar = concluido && !pedidoId;
+          return (
+            <div key={i} className="flex items-center flex-1 last:flex-none">
+              <button
+                type="button"
+                disabled={!podeVoltar}
+                onClick={() => { setErro(null); setStep(i); }}
+                aria-label={podeVoltar ? `Voltar ao passo ${i + 1}` : `Passo ${i + 1}`}
+                aria-current={i === step ? "step" : undefined}
+                className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0 shadow-sm transition-all ${podeVoltar ? "cursor-pointer hover:opacity-80" : "cursor-default"} ${i < step ? "bg-[#1D9E75] text-white" : i === step ? "bg-[#111] text-white" : "bg-white border border-gray-300 text-gray-500"}`}
+              >
+                {concluido ? "✓" : i + 1}
+              </button>
+              {i < 3 && <div className={`flex-1 h-px mx-2 transition-colors ${i < step ? "bg-[#1D9E75]" : "bg-gray-200"}`} />}
             </div>
-            {i < 3 && <div className={`flex-1 h-px mx-2 transition-colors ${i < step ? "bg-[#1D9E75]" : "bg-gray-200"}`} />}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* p-4 no celular (era p-6 em toda largura): com a seção da home já
@@ -281,7 +315,7 @@ export default function PedidoSteps() {
             <div className="mb-6">
               <label className="text-sm font-medium text-gray-700 mb-1 block">Endereço de entrega <span className="text-gray-400">(pro cálculo do frete)</span></label>
               <div className="flex items-start gap-2">
-                <input value={cepFmt(cep)} onChange={(e) => { const d = e.target.value.replace(/\D/g, "").slice(0, 8); setCep(d); setCepInfo(null); setCepFalhou(false); if (d.length === 8) void buscarCep(d); }} onBlur={() => { if (!cepInfo && !buscandoCep) void buscarCep(); }} inputMode="numeric" placeholder="CEP" className={inputCls + " w-40"} />
+                <input value={cepFmt(cep)} onChange={(e) => { const d = e.target.value.replace(/\D/g, "").slice(0, 8); setCep(d); setCepInfo(null); setCepFalhou(false); if (d.length === 8) void buscarCep(d); }} onBlur={() => { if (!cepInfo && !buscandoCep) void buscarCep(); }} inputMode="numeric" autoComplete="postal-code" placeholder="CEP" className={inputCls + " w-40"} />
                 <button type="button" onClick={() => void buscarCep()} disabled={buscandoCep || cep.replace(/\D/g, "").length !== 8} className="shrink-0 border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 text-sm px-3 py-2 rounded-xl whitespace-nowrap">{buscandoCep ? "buscando…" : "buscar CEP"}</button>
               </div>
               {!buscandoCep && cepInfo && (
@@ -294,7 +328,7 @@ export default function PedidoSteps() {
                 <p className="text-[11px] text-amber-600 mt-1">Não achamos esse CEP — confira os números.</p>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
-                <input value={numero} onChange={(e) => setNumero(e.target.value.slice(0, 20))} placeholder="Número" className={inputCls} />
+                <input value={numero} onChange={(e) => setNumero(e.target.value.slice(0, 20))} inputMode="numeric" autoComplete="address-line2" placeholder="Número" className={inputCls} />
                 <input value={complemento} onChange={(e) => setComplemento(e.target.value.slice(0, 80))} placeholder="Complemento (opcional)" className={inputCls} />
               </div>
               <p className="text-[11px] text-gray-500 mt-2">Não precisa escolher o estado — pegamos pelo CEP. Quantidade, prazo e os detalhes de cada modelo (cor, estampa…) a gente combina no chat da próxima página.</p>
@@ -308,16 +342,21 @@ export default function PedidoSteps() {
             <p className="text-gray-500 text-sm mb-5">Vamos montar seus mockups e o orçamento — você acompanha tudo no visualizador.</p>
             <div className="mb-4">
               <label className="text-sm font-medium text-gray-700 mb-1 block">Nome completo</label>
-              <input type="text" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome" className={inputCls} />
+              {/* autoComplete/inputMode em todos os campos (26/08/2026): a
+                  gravação de 25/08 mostrava o cliente digitando os três na
+                  unha e alternando de aba pra conferir o próprio e-mail. Sem
+                  esses atributos o teclado do celular não oferece o
+                  preenchimento automático; com eles, é um toque. */}
+              <input type="text" value={nome} onChange={(e) => setNome(e.target.value)} autoComplete="name" autoCapitalize="words" placeholder="Seu nome" className={inputCls} />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-1 block">WhatsApp</label>
-                <input type="tel" value={tel} onChange={(e) => setTel(e.target.value)} placeholder="(00) 00000-0000" className={inputCls} />
+                <input type="tel" value={telFmt(tel)} onChange={(e) => setTel(e.target.value.replace(/\D/g, "").slice(0, 11))} inputMode="tel" autoComplete="tel-national" placeholder="(00) 00000-0000" className={inputCls} />
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-1 block">E-mail</label>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onBlur={checarContaExistente} placeholder="seu@email.com" className={inputCls} />
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onBlur={checarContaExistente} inputMode="email" autoComplete="email" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="seu@email.com" className={inputCls} />
               </div>
             </div>
             {contaExistente && (

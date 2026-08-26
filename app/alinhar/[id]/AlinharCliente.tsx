@@ -27,6 +27,9 @@ type Cards = { campo: string; opcoes: Array<{ titulo: string; nota?: string }> }
 const PEDIDO_VAZIO: Pedido = { linhas: [], contato: {} };
 const MAX_FOTOS = 6;
 const MAX_COLETA = 12; // total de fotos de referência que o chat pode juntar (distribuídas entre os modelos)
+// Teto da espera pela resposta do assistente. 60s é folgado pro caminho normal
+// e curto o bastante pra o cliente não ficar olhando "digitando…" sem fim.
+const TIMEOUT_CHAT_MS = 60_000;
 
 function corHex(s: string | null | undefined): string | null {
   const m = (s || "").match(/#([0-9a-fA-F]{6})/);
@@ -185,6 +188,10 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   }
 
   const temLinha = pedido.linhas.some(linhaCompleta);
+  // Botão apagado engole o toque sem resposta nenhuma — mais um clique morto.
+  // Sem mensagem, o toque no enviar FOCA o input (o visual continua apagado);
+  // durante o envio ele fica desabilitado de verdade.
+  const semMensagem = !input.trim() && anexos.length === 0;
   const totalFotos = fotosColetadas.length + anexos.length;
   const qtdProdutos = pedido.linhas.length;
 
@@ -233,6 +240,10 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     const fotos = anexos;
     if ((!texto && fotos.length === 0) || enviando) return;
     setErro(null); setCores(null); setCards(null);
+    // Snapshot pro ROLLBACK do envio otimista (26/08/2026). Antes, uma falha
+    // deixava o turno do cliente no histórico: reenviar duplicava a fala dele
+    // na conversa (e o operador recebia a mesma frase duas vezes).
+    const anteriores = turnos;
     const novos: Turno[] = [...turnos, { role: "user", display: texto, fotos: fotos.length ? fotos : undefined }];
     setTurnos(novos); setInput(""); setAnexos([]);
     // limpa a altura do textarea após enviar e mantém o teclado aberto no mobile.
@@ -242,7 +253,23 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     }
     const novasColetadas = fotos.map((u) => ({ id: proxIdRef.current++, url: u }));
     if (novasColetadas.length) setFotosColetadas((p) => [...p, ...novasColetadas].slice(0, MAX_COLETA));
+    const idsNovos = new Set(novasColetadas.map((c) => c.id));
+
+    /** Devolve tudo pro estado de antes do envio e explica o que fazer. */
+    const desfazerEnvio = (aviso: string) => {
+      setTurnos(anteriores);
+      setInput(texto);
+      setAnexos(fotos);
+      if (idsNovos.size) setFotosColetadas((p) => p.filter((c) => !idsNovos.has(c.id)));
+      setErro(aviso);
+      requestAnimationFrame(autoSize);
+    };
+
     setEnviando(true);
+    // Sem timeout, uma resposta pendurada virava "digitando…" pra sempre — o
+    // padrão exato da sessão de 25/08 que some no minuto 1 e nunca volta.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), TIMEOUT_CHAT_MS);
     try {
       const nums = novasColetadas.map((c) => `#${c.id}`).join(", ");
       const notaFoto = fotos.length ? `${texto ? " " : ""}(enviei a(s) foto(s) ${nums} de referência do que quero produzir)` : "";
@@ -259,9 +286,13 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
       const res = await fetch("/api/pedido/assistente", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: payloadMsgs, modo: "alinhar", contexto: { categoria, totalPecas, edicao: jaTem, produtos: resumoProdutos } }),
+        signal: ctrl.signal,
       });
       const data = await res.json();
-      if (!res.ok || !data?.mensagem) { setErro(data?.error || "Não consegui responder agora. Tenta de novo."); return; }
+      if (!res.ok || !data?.mensagem) {
+        desfazerEnvio((data?.error || "Não consegui responder agora.") + " Sua mensagem voltou pra caixa — é só enviar de novo.");
+        return;
+      }
       const novoPedido: Pedido = data.pedido ?? PEDIDO_VAZIO;
       setPedido(novoPedido);
       setCores(data.cores ?? null);
@@ -269,9 +300,14 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
       if (data.fotosPorLinha && typeof data.fotosPorLinha === "object") setMapaFotos(data.fotosPorLinha);
       const raw = JSON.stringify({ mensagem: data.mensagem, cores: data.cores ?? null, pedido: novoPedido });
       setTurnos([...novos, { role: "assistant", display: data.mensagem, raw }]);
-    } catch {
-      setErro("Falha de conexão. Tenta de novo.");
-    } finally { setEnviando(false); }
+    } catch (e) {
+      const abortou = e instanceof DOMException && e.name === "AbortError";
+      desfazerEnvio(
+        abortou
+          ? "A resposta demorou demais. Sua mensagem voltou pra caixa — é só enviar de novo."
+          : "Falha de conexão. Sua mensagem voltou pra caixa — é só enviar de novo.",
+      );
+    } finally { clearTimeout(timer); setEnviando(false); }
   }
 
   async function concluir() {
@@ -508,8 +544,10 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
               style={{ scrollbarWidth: "none" }}
               className="flex-1 min-w-0 resize-none border border-gray-300 rounded-xl px-3 py-2.5 text-base leading-6 text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75] min-h-11 max-h-28 overflow-y-auto [&::-webkit-scrollbar]:hidden"
             />
-            <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => void enviar()} disabled={enviando || (!input.trim() && anexos.length === 0)}
-              className="shrink-0 h-11 w-11 rounded-full bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-40 text-white flex items-center justify-center" aria-label="Enviar">
+            <button type="button" onPointerDown={(e) => e.preventDefault()}
+              onClick={() => { if (semMensagem) { inputRef.current?.focus(); return; } void enviar(); }}
+              disabled={enviando} aria-disabled={semMensagem || undefined}
+              className={"shrink-0 h-11 w-11 rounded-full bg-[#1D9E75] text-white flex items-center justify-center disabled:opacity-40 " + (semMensagem ? "opacity-40" : "hover:bg-[#0F6E56]")} aria-label="Enviar">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4Z" /></svg>
             </button>
           </div>
