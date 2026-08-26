@@ -75,7 +75,37 @@ function limitar(valor: number): number {
 }
 
 /**
+ * Onde o topo do card está DENTRO da área visível.
+ * Negativo = o card começa acima da dobra (o cabeçalho sumiu).
+ */
+export function topoRelativo(topoDoCard: number, deslocamentoVisual: number): number {
+  return topoDoCard - deslocamentoVisual
+}
+
+/**
+ * Quanto rolar a janela pra encostar o topo do card no topo da área visível.
+ * 0 = já está alinhado o bastante (tolerância de 8px pra não brigar por nada).
+ *
+ * Isto roda UMA VEZ por abertura de teclado (trava no componente). Rodar a
+ * cada medição foi o laço da 1ª rodada: rolar dispara evento de scroll, que
+ * reagenda a medição, que rola de novo.
+ */
+export function ajusteDeRolagem(topoDoCard: number, deslocamentoVisual: number): number {
+  const delta = topoRelativo(topoDoCard, deslocamentoVisual)
+  return Math.abs(delta) > 8 ? Math.round(delta) : 0
+}
+
+/**
  * A altura que o card deve ter, ou `null` para "deixa o CSS mandar".
+ *
+ * Dois tetos, e os DOIS importam (26/08/2026, 3ª rodada):
+ *
+ *   a) o espaço abaixo do topo do card — impede que o card passe por baixo do
+ *      teclado quando ele não pôde ser rolado até o topo;
+ *   b) a própria altura da área visível — impede que o card fique MAIOR que a
+ *      tela quando o navegador rolou a página além do topo dele. Sem este,
+ *      `topoDoCard` vem negativo, a conta (a) infla, e o cabeçalho do chat
+ *      ("Sua Produção") fica acima da dobra. Foi o defeito relatado.
  *
  * Devolve `alturaAtual` inalterada quando a mudança seria menor que
  * DEGRAU_MINIMO — é o amortecedor que mata a oscilação.
@@ -84,9 +114,8 @@ export function alturaDoCard(m: MedidaViewport): number | null {
   if (m.larguraJanela >= LARGURA_DESKTOP) return null
   if (!tecladoAberto(m.alturaVisual, m.baseVisual)) return null
 
-  // topoDoCard vem do layout; deslocamentoVisual diz onde o viewport visual
-  // começa dentro dele. O espaço útil abaixo do topo do card é a diferença.
-  const disponivel = m.alturaVisual + m.deslocamentoVisual - m.topoDoCard - FOLGA
+  const abaixoDoTopo = m.alturaVisual - topoRelativo(m.topoDoCard, m.deslocamentoVisual)
+  const disponivel = Math.min(m.alturaVisual, abaixoDoTopo) - FOLGA
   const alvo = limitar(disponivel)
 
   if (m.alturaAtual !== null && Math.abs(alvo - m.alturaAtual) < DEGRAU_MINIMO) {

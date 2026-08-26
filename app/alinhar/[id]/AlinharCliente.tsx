@@ -5,7 +5,7 @@
 // concluir, grava as linhas (PATCH) + as fotos (mockup) e segue pro
 // visualizador. Tem "pular" pra quem prefere organizar lá mesmo.
 import { useEffect, useRef, useState } from "react";
-import { alturaDoCard, atualizarBase } from "@/app/lib/teclado";
+import { ajusteDeRolagem, alturaDoCard, atualizarBase } from "@/app/lib/teclado";
 
 type Tamanho = { tamanho: string; qtd: number | null };
 type Linha = {
@@ -204,6 +204,10 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   const [alturaTeclado, setAlturaTeclado] = useState<number | null>(null);
   // Maior altura de viewport visual já vista — a régua do "sem teclado".
   const baseRef = useRef(0);
+  // Espelho da altura aplicada, pra medir sem depender do estado do React.
+  const alturaRef = useRef<number | null>(null);
+  // Já encostei o topo do card no topo da tela nesta abertura de teclado?
+  const alinhadoRef = useRef(false);
 
   // Rola apenas o container de mensagens (nunca a janela) — evita o "pulo" da
   // página ao enviar.
@@ -248,16 +252,31 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
       const card = cardRef.current;
       if (!card) return;
       baseRef.current = atualizarBase(baseRef.current, vv.height);
-      setAlturaTeclado((atual) =>
-        alturaDoCard({
-          larguraJanela: window.innerWidth,
-          alturaVisual: vv.height,
-          deslocamentoVisual: vv.offsetTop,
-          baseVisual: baseRef.current,
-          topoDoCard: card.getBoundingClientRect().top,
-          alturaAtual: atual,
-        }),
-      );
+      const topoDoCard = card.getBoundingClientRect().top;
+      const nova = alturaDoCard({
+        larguraJanela: window.innerWidth,
+        alturaVisual: vv.height,
+        deslocamentoVisual: vv.offsetTop,
+        baseVisual: baseRef.current,
+        topoDoCard,
+        alturaAtual: alturaRef.current,
+      });
+      alturaRef.current = nova;
+      setAlturaTeclado(nova);
+
+      if (nova === null) {
+        // Teclado fechou: rearma o alinhamento pra próxima abertura.
+        alinhadoRef.current = false;
+      } else if (!alinhadoRef.current) {
+        // UMA vez por abertura de teclado: encosta o topo do card no topo da
+        // área visível, pra o cabeçalho do chat não ficar acima da dobra.
+        // Uma vez só porque rolar dispara evento de scroll — repetir seria o
+        // laço da 1ª rodada de volta.
+        alinhadoRef.current = true;
+        const ajuste = ajusteDeRolagem(topoDoCard, vv.offsetTop);
+        if (ajuste !== 0) window.scrollBy({ top: ajuste, behavior: "auto" });
+      }
+
       requestAnimationFrame(() => {
         const el = listaRef.current;
         if (el) el.scrollTop = el.scrollHeight;
@@ -273,6 +292,8 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     // senão a base de retrato condena a paisagem a achar que há teclado.
     const aoGirar = () => {
       baseRef.current = 0;
+      alturaRef.current = null;
+      alinhadoRef.current = false;
       setAlturaTeclado(null);
       agendar();
     };
@@ -569,7 +590,17 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
             <button type="button" onClick={pular} className="text-xs text-gray-400 hover:text-[#0F6E56] whitespace-nowrap shrink-0">prefiro organizar eu mesmo →</button>
           )}
         </div>
-        <div ref={listaRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-3.5 sm:px-4 sm:py-4 space-y-3">
+        {/* role="log" + aria-live: leitor de tela anuncia a resposta nova sem
+            roubar o foco da caixa de texto. "polite" espera a pessoa terminar
+            de digitar — "assertive" interromperia no meio da frase. */}
+        <div
+          ref={listaRef}
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-label="Conversa do alinhamento"
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-3.5 sm:px-4 sm:py-4 space-y-3"
+        >
           {turnos.map((t, i) => (
             <div key={i} className={"flex " + (t.role === "user" ? "justify-end" : "justify-start")}>
               <div className={"max-w-[88%] sm:max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] " + (t.role === "user" ? "bg-[#1D9E75] text-white" : "bg-gray-100 text-gray-800")}>
@@ -638,7 +669,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
             a AÇÃO PRINCIPAL da tela. Enquanto o pedido está vazio ela é discreta
             (fundo claro), pra não gritar "conclua" antes de ter o que concluir;
             com produto vira botão cheio e chama pra conferir e concluir. */}
-        <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => { inputRef.current?.blur(); setAlturaTeclado(null); setSheetAberto(true); }}
+        <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => { inputRef.current?.blur(); alturaRef.current = null; alinhadoRef.current = false; setAlturaTeclado(null); setSheetAberto(true); }}
           className={
             (embutido ? "" : "lg:hidden ") +
             // whitespace-nowrap: em 360px sobram ~208px de texto dentro da
@@ -653,7 +684,14 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
             ? `📋 Resumo · ${qtdProdutos} ${qtdProdutos === 1 ? "produto" : "produtos"} →`
             : "📋 Resumo do pedido"}
         </button>
-        <div className="border-t border-gray-100 p-2.5 sm:p-3 shrink-0">
+        {/* pb com safe-area: em celular com barra de gestos (sem botões), o
+            enviar ficava rente à faixa do sistema e o toque às vezes virava
+            "voltar pra home". Com o teclado aberto o inset é 0, então isto
+            só age quando precisa. */}
+        <div
+          className="border-t border-gray-100 p-2.5 sm:p-3 shrink-0"
+          style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.625rem)" }}
+        >
           {/* tray de anexos */}
           {(anexos.length > 0 || subindo) && (
             <div className="flex flex-wrap gap-2 mb-2">
