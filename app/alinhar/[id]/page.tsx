@@ -20,7 +20,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const { id } = await params
   const { data } = await supabase
     .from('pedidos_assistente')
-    .select('id, categoria, linhas')
+    .select('id, categoria, linhas, conversa')
     .eq('id', id)
     .single()
 
@@ -44,7 +44,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   return (
     <main className="min-h-screen bg-[#F7F8F9] font-sans flex flex-col">
       <SiteHeader />
-      <AlinharCliente pedidoId={data.id} categoria={data.categoria ?? null} totalPecas={totalPecas} linhasIniciais={linhas as unknown as LinhaInicial[]} />
+      {/* conversaInicial: F5, reabrir o link pelo WhatsApp ou o iOS descartando
+          a aba não recomeçam mais o papo do zero. O componente só retoma o que
+          o PRÓPRIO alinhar gravou (turnos com `raw`) — o chat da fase produto
+          da home mora na mesma coluna e não serve aqui. */}
+      <AlinharCliente pedidoId={data.id} categoria={data.categoria ?? null} totalPecas={totalPecas} linhasIniciais={linhas as unknown as LinhaInicial[]} conversaInicial={data.conversa ?? null} />
     </main>
   )
 }

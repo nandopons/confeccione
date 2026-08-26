@@ -45,6 +45,64 @@ function corLabel(s: string | null | undefined): string {
 function linhaCompleta(l: Linha): boolean {
   return Boolean(l.modelo && l.total);
 }
+/* ---------------------------------------------------------------------------
+ * CONVERSA PERSISTIDA — 26/08/2026
+ * ---------------------------------------------------------------------------
+ * O chat vivia só em memória. F5, reabrir o link pelo WhatsApp, ou o iOS
+ * descartando a aba em segundo plano (acontece toda hora no celular — a
+ * gravação do Clarity de 25/08 termina exatamente com Page hidden)
+ * recomeçavam a conversa do zero. As linhas do pedido voltavam (gravadas no
+ * concluir), mas o papo não — e no meio do alinhamento as linhas ainda nem
+ * existem.
+ * ------------------------------------------------------------------------- */
+export type ConversaTurnoInicial = { role?: unknown; texto?: unknown; raw?: unknown };
+
+const MAX_TEXTO_TURNO = 20000;
+const MAX_RAW_TURNO = 40000;
+
+/** Filtra o que vier do banco: só turnos com papel válido e texto de verdade. */
+function turnosDaConversa(conversa: unknown): Turno[] {
+  if (!Array.isArray(conversa)) return [];
+  const saida: Turno[] = [];
+  for (const item of conversa) {
+    if (!item || typeof item !== "object") continue;
+    const t = item as ConversaTurnoInicial;
+    const role = t.role === "user" || t.role === "assistant" ? t.role : null;
+    if (!role) continue;
+    const display = typeof t.texto === "string" ? t.texto : "";
+    if (!display) continue;
+    const raw = role === "assistant" && typeof t.raw === "string" && t.raw ? t.raw : undefined;
+    saida.push({ role, display, raw });
+  }
+  return saida;
+}
+
+/**
+ * Guarda importante: só restaura conversa gravada PELO PRÓPRIO alinhar —
+ * reconhecível por ter `raw` em algum turno do assistant. A coluna `conversa`
+ * também guarda o chat da fase produto da home (salvo no `criar`, sem raw);
+ * retomar aquele transcript aqui perderia a abertura contextual do
+ * alinhamento.
+ */
+function ehConversaDoAlinhar(turnos: Turno[]): boolean {
+  return turnos.some((t) => t.role === "assistant" && Boolean(t.raw));
+}
+
+/** Reconstrói o pedido do ÚLTIMO raw válido (raw corrompido cai pro anterior). */
+function pedidoDoUltimoRaw(turnos: Turno[]): Pedido | null {
+  for (let i = turnos.length - 1; i >= 0; i--) {
+    const raw = turnos[i].raw;
+    if (!raw) continue;
+    try {
+      const j = JSON.parse(raw) as { pedido?: { linhas?: unknown; contato?: unknown } };
+      if (j?.pedido && Array.isArray(j.pedido.linhas)) {
+        return { linhas: j.pedido.linhas as Linha[], contato: j.pedido.contato ?? {} };
+      }
+    } catch { /* raw corrompido: tenta o anterior */ }
+  }
+  return null;
+}
+
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((res, rej) => {
     const r = new FileReader();
@@ -85,7 +143,7 @@ async function arquivoParaRef(file: File): Promise<string> {
  * A conversa, os anexos, o `concluir` e o mapa de fotos são os mesmos nos dois.
  * Duplicar esse componente pra fazer o passo 4 significaria manter dois chats.
  * ------------------------------------------------------------------------- */
-export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhasIniciais = [], embutido = false }: { pedidoId: string; categoria: string | null; totalPecas: number; linhasIniciais?: LinhaInicial[]; embutido?: boolean }) {
+export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhasIniciais = [], conversaInicial = null, embutido = false }: { pedidoId: string; categoria: string | null; totalPecas: number; linhasIniciais?: LinhaInicial[]; conversaInicial?: unknown; embutido?: boolean }) {
   const linhasBase: Linha[] = (linhasIniciais ?? []).map((l) => ({
     modelo: l?.modelo ?? null, cor: l?.cor ?? null, material: l?.material ?? null,
     publico: l?.publico ?? null, total: l?.total ?? null,
@@ -113,11 +171,21 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
       `Quantos modelos diferentes você quer produzir? Se já tiver foto do que quer, manda pelo 📎.`;
   const pedidoInicial: Pedido = jaTem ? { linhas: linhasBase, contato: {} } : PEDIDO_VAZIO;
   const aberturaRaw = jaTem ? JSON.stringify({ mensagem: abertura, cores: null, pedido: pedidoInicial }) : undefined;
-  const [turnos, setTurnos] = useState<Turno[]>([{ role: "assistant", display: abertura, raw: aberturaRaw }]);
+  // Inicializadores preguiçosos: rodam UMA vez, no primeiro render.
+  const [turnos, setTurnos] = useState<Turno[]>(() => {
+    const restaurados = turnosDaConversa(conversaInicial);
+    return ehConversaDoAlinhar(restaurados)
+      ? restaurados
+      : [{ role: "assistant", display: abertura, raw: aberturaRaw }];
+  });
   const [input, setInput] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [pedido, setPedido] = useState<Pedido>(pedidoInicial);
+  const [pedido, setPedido] = useState<Pedido>(() => {
+    const restaurados = turnosDaConversa(conversaInicial);
+    const doRaw = ehConversaDoAlinhar(restaurados) ? pedidoDoUltimoRaw(restaurados) : null;
+    return doRaw ?? pedidoInicial;
+  });
   const [cores, setCores] = useState<Cores>(null);
   const [cards, setCards] = useState<Cards>(null);
   const [concluindo, setConcluindo] = useState(false);
@@ -198,6 +266,28 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
       vv.removeEventListener("scroll", agendar);
     };
   }, []);
+
+  /**
+   * Grava a conversa inteira depois de CADA resposta do assistente.
+   * Fire-and-forget, keepalive e failure-soft: gravar histórico NUNCA pode
+   * travar o chat nem virar erro na cara do cliente. Fotos ficam de fora — a
+   * nota "(enviei a(s) foto(s) #N…)" no texto preserva o contexto.
+   */
+  function salvarConversa(lista: Turno[]) {
+    try {
+      const conversa = lista.map((t) => {
+        const texto = t.display.slice(0, MAX_TEXTO_TURNO);
+        const raw = t.raw && t.raw.length <= MAX_RAW_TURNO ? t.raw : undefined;
+        return raw ? { role: t.role, texto, raw } : { role: t.role, texto };
+      });
+      void fetch(`/api/pedido/assistente/${pedidoId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversa: conversa.slice(-600) }),
+        keepalive: true,
+      }).catch(() => undefined);
+    } catch { /* histórico é bônus: falhou, o chat continua */ }
+  }
 
   // Textarea cresce com o conteúdo (até ~4 linhas) e volta ao normal ao limpar.
   function autoSize() {
@@ -319,7 +409,9 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
       setCards(data.cards ?? null);
       if (data.fotosPorLinha && typeof data.fotosPorLinha === "object") setMapaFotos(data.fotosPorLinha);
       const raw = JSON.stringify({ mensagem: data.mensagem, cores: data.cores ?? null, pedido: novoPedido });
-      setTurnos([...novos, { role: "assistant", display: data.mensagem, raw }]);
+      const finais: Turno[] = [...novos, { role: "assistant", display: data.mensagem, raw }];
+      setTurnos(finais);
+      salvarConversa(finais);
     } catch (e) {
       const abortou = e instanceof DOMException && e.name === "AbortError";
       desfazerEnvio(

@@ -45,10 +45,25 @@ const ContatoSchema = z.object({
   numero: z.string().trim().max(40).nullable().optional(),
   complemento: z.string().trim().max(120).nullable(),
 })
+// Conversa do /alinhar (26/08/2026). Cada turno é {role, texto, raw?}:
+//   texto — o que o humano vê. Mesmo formato que o admin já transcreve em
+//           /admin/pedidos-pagos (que lê {role, texto} e ignora extras).
+//   raw   — só do assistant: o JSON interno {mensagem, cores, pedido}. É ele
+//           que carrega o ESTADO do pedido em cada ponto da conversa, e é por
+//           ele que o chat sabe que a conversa foi gravada por ELE.
+// Fotos NÃO entram aqui (data URLs de megabytes) — quem guarda imagem é o
+// /mockup, no concluir.
+const ConversaTurnoSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  texto: z.string().max(20000),
+  raw: z.string().max(40000).optional(),
+})
+
 const PatchSchema = z.object({
   linhas: z.array(LinhaSchema).optional(),
   status: z.enum(['completo', 'em_visualizacao', 'confirmado']).optional(),
   contato: ContatoSchema.optional(),
+  conversa: z.array(ConversaTurnoSchema).max(600).optional(),
 })
 
 // Resolve logradouro/bairro/cidade/uf pelo CEP (ViaCEP -> BrasilAPI).
@@ -94,6 +109,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     } catch { /* nunca bloqueia o PATCH principal */ }
   }
   if (parsed.data.status) patch.status = parsed.data.status
+  if (parsed.data.conversa) patch.conversa = parsed.data.conversa
   if (parsed.data.contato) {
     const c = parsed.data.contato
     patch.nome = c.nome
