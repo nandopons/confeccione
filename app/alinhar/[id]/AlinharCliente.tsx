@@ -30,6 +30,10 @@ const MAX_COLETA = 12; // total de fotos de referência que o chat pode juntar (
 // Teto da espera pela resposta do assistente. 60s é folgado pro caminho normal
 // e curto o bastante pra o cliente não ficar olhando "digitando…" sem fim.
 const TIMEOUT_CHAT_MS = 60_000;
+// O iOS dispara uma RAJADA de resizes do visualViewport durante a animação do
+// teclado (~6 eventos em 250ms). 140ms espera a rajada assentar sem parecer
+// lento — abaixo disso volta o sobe-e-desce; acima, o card demora a acomodar.
+const DEBOUNCE_TECLADO_MS = 140;
 
 function corHex(s: string | null | undefined): string | null {
   const m = (s || "").match(/#([0-9a-fA-F]{6})/);
@@ -144,40 +148,56 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   // Teclado virtual (mobile): encolhe o card pra caber exatamente no espaço
   // visível acima do teclado, mantendo o input sempre à vista — sensação de app.
   // Desktop (lg) nunca entra aqui (guard innerWidth) e mantém lg:h-[70vh].
+  //
+  // 26/08/2026 — O CARD SUBIA E DESCIA ao focar a caixa de texto. Eram TRÊS
+  // animações brigando enquanto o teclado abria:
+  //   (a) o iOS rola a página pro campo focado, por conta própria;
+  //   (b) um scrollIntoView SUAVE disparava no onFocus 350ms depois;
+  //   (c) o visualViewport emite VÁRIOS resizes durante a animação do teclado,
+  //       e cada um recalculava a altura com o rect.top ainda em movimento —
+  //       cada aplicação com transição de 200ms por cima da anterior.
+  //
+  // O conserto: (b) foi removido; (c) passa por um DEBOUNCE — espera os
+  // eventos assentarem e só então mede uma vez; e a medição começa com um
+  // scroll INSTANTÂNEO do card pro topo, pra medir um rect parado.
   useEffect(() => {
     const vv = typeof window !== "undefined" ? window.visualViewport : null;
     if (!vv) return;
-    const ajustar = () => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const aplicar = () => {
       if (window.innerWidth >= 1024) { setAlturaTeclado(null); return; }
+      const card = cardRef.current;
       const tecladoAberto = vv.height < window.innerHeight - 120;
-      if (tecladoAberto && document.activeElement === inputRef.current && cardRef.current) {
-        const rect = cardRef.current.getBoundingClientRect();
-        const disponivel = vv.height + vv.offsetTop - rect.top - 10;
-        setAlturaTeclado(Math.max(240, Math.min(Math.round(disponivel), 620)));
-        requestAnimationFrame(() => {
-          const el = listaRef.current;
-          if (el) el.scrollTop = el.scrollHeight;
-        });
-      } else {
+      if (!tecladoAberto || document.activeElement !== inputRef.current || !card) {
         setAlturaTeclado(null);
+        return;
       }
+      // Instantâneo (behavior: "auto"): rolar suave aqui seria medir um alvo
+      // em movimento — foi exatamente o que produzia o sobe-e-desce.
+      card.scrollIntoView({ block: "start", behavior: "auto" });
+      const rect = card.getBoundingClientRect();
+      const disponivel = vv.height + vv.offsetTop - rect.top - 10;
+      setAlturaTeclado(Math.max(240, Math.min(Math.round(disponivel), 620)));
+      requestAnimationFrame(() => {
+        const el = listaRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
     };
-    vv.addEventListener("resize", ajustar);
-    vv.addEventListener("scroll", ajustar);
+
+    const agendar = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(aplicar, DEBOUNCE_TECLADO_MS);
+    };
+
+    vv.addEventListener("resize", agendar);
+    vv.addEventListener("scroll", agendar);
     return () => {
-      vv.removeEventListener("resize", ajustar);
-      vv.removeEventListener("scroll", ajustar);
+      if (timer) clearTimeout(timer);
+      vv.removeEventListener("resize", agendar);
+      vv.removeEventListener("scroll", agendar);
     };
   }, []);
-
-  // Ao focar o input no mobile, alinha o chat com o topo da tela (deixa o
-  // máximo de espaço útil acima do teclado que vai abrir).
-  function aoFocarInput() {
-    if (typeof window === "undefined" || window.innerWidth >= 1024) return;
-    setTimeout(() => {
-      cardRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
-    }, 350);
-  }
 
   // Textarea cresce com o conteúdo (até ~4 linhas) e volta ao normal ao limpar.
   function autoSize() {
@@ -449,7 +469,9 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
           {cores && cores.opcoes.length > 0 && (
             <div className="flex flex-wrap gap-2 pt-1">
               {cores.opcoes.map((o) => (
-                <button key={o.hex} type="button" onClick={() => void enviar(`${o.nome} (${o.hex})`)}
+                // preventDefault no pointerdown: sem isso o toque rouba o foco
+                // do textarea, o teclado cai e o card redimensiona no meio.
+                <button key={o.hex} type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => void enviar(`${o.nome} (${o.hex})`)}
                   className="flex items-center gap-1.5 border border-gray-200 rounded-full pl-1 pr-2.5 py-1 text-xs text-gray-700 hover:border-[#1D9E75]">
                   <span className="h-5 w-5 rounded-full border border-black/10" style={{ backgroundColor: o.hex }} />
                   {o.nome}
@@ -477,6 +499,9 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
                 <button
                   key={o.titulo}
                   type="button"
+                  // Mantém o teclado aberto (o botão de enviar e o 📎 já
+                  // faziam isso). Dá pra encadear card → digitar sem reabrir.
+                  onPointerDown={(e) => e.preventDefault()}
                   onClick={() => void enviar(o.titulo)}
                   className="text-left border border-gray-300 hover:border-[#1D9E75] hover:bg-[#F6FCFA] active:bg-[#E1F5EE] rounded-xl px-3 py-2.5 min-w-0 [overflow-wrap:anywhere] transition-colors"
                 >
@@ -531,7 +556,6 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
             <textarea
               ref={inputRef}
               value={input} onChange={(e) => { setInput(e.target.value); autoSize(); }}
-              onFocus={aoFocarInput}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void enviar(); } }}
               onPaste={(e) => void onColar(e)}
               // O placeholder antigo ("Escreva ou cole uma foto aqui…") não
