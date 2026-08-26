@@ -94,7 +94,7 @@ export default function EntrarFornecedor() {
       <section className="px-6 pt-10 pb-16 max-w-md mx-auto">
         <h2 className="text-gray-900 text-xl font-medium mb-1">Entrar como fornecedor</h2>
         <p className="text-gray-400 text-sm mb-6">
-          Acesse seu painel para ver pedidos, gerenciar seu plano e seus dados.
+          Acesse seu painel para ver pedidos, sua carteira e seus dados.
         </p>
 
         <div className="border border-gray-200 rounded-2xl p-6">

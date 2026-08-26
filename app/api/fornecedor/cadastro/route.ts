@@ -39,12 +39,17 @@ export async function POST(req: Request) {
     )
   }
 
-  // Trial Pro de 90 dias para fornecedores NOVOS.
-  // Existentes mantêm o plano que já têm (não reseta com novo cadastro/edição).
-  const TRIAL_DIAS = 90
-  const planoExpiraEm = new Date(
-    Date.now() + TRIAL_DIAS * 24 * 60 * 60 * 1000
-  ).toISOString()
+  // O trial Pro de 90 dias SAIU daqui em 26/08/2026.
+  //
+  // O plano Pro foi encerrado em 25/08 (a monetização passou a ser % no
+  // orçamento) e a mensagem de aprovação parou de prometê-lo — mas o cadastro
+  // continuava gravando `plano_expira_em`. Consequência: 90 dias depois,
+  // `planoEfetivo()` rebaixava o fornecedor pra 'free' (3 pedidos/mês, contra
+  // 30) e o cron mandava uma mensagem oferecendo planos pagos que não
+  // existem. Ver `api/cron/scheduler` (tarefa 5, desligada).
+  //
+  // Sem gravar nada, o DEFAULT da coluna vale: `plano = 'pro'` e
+  // `plano_expira_em = NULL` — sem prazo, sem rebaixamento, sem mensagem.
 
   const payload = {
     nome,
@@ -78,15 +83,16 @@ export async function POST(req: Request) {
       .eq('whatsapp', numero)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   } else {
-    // Novo cadastro: aplica trial Pro de 90 dias
+    // Novo cadastro. `plano` e `plano_expira_em` NÃO são gravados: os DEFAULTs
+    // da coluna dão 'pro' sem prazo. `plano_ativado_em` continua porque é a
+    // âncora da janela de contagem de ofertas (`contarOfertasMesAtual`), não
+    // um marcador de trial.
     const { data: novo, error } = await supabase
       .from('leads_fornecedores')
       .insert({
         ...payload,
         aprovacao_status: 'pendente',
-        plano: 'pro',
         plano_ativado_em: new Date().toISOString(),
-        plano_expira_em: planoExpiraEm,
         creditos_extras: 0,
       })
       .select('id')

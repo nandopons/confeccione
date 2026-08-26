@@ -183,49 +183,30 @@ export async function GET(req: Request) {
   // automaticamente.
 
   // ===========================================================
-  // TAREFA 5: expirar trial Pro (vira free automaticamente)
+  // TAREFA 5: DESLIGADA — o plano Pro não existe mais (26/08/2026)
   // ===========================================================
-  // Fornecedores que ainda estão como 'pro' mas com plano_expira_em
-  // no passado → vira 'free'. Notificação por WhatsApp.
-  const { data: trialsExpirando, error: errTrials } = await supabase
-    .from('leads_fornecedores')
-    .select('id, nome, whatsapp, plano')
-    .eq('status', 'ativo')
-    .neq('plano', 'free')
-    .not('plano_expira_em', 'is', null)
-    .lt('plano_expira_em', agoraISO)
-
-  if (errTrials) {
-    resumo.erros.push(`buscar trials: ${errTrials.message}`)
-  } else if (trialsExpirando && trialsExpirando.length > 0) {
-    for (const f of trialsExpirando) {
-      const { error: errUpdate } = await supabase
-        .from('leads_fornecedores')
-        .update({
-          plano: 'free',
-          plano_ativado_em: new Date().toISOString(),
-          plano_expira_em: null,
-        })
-        .eq('id', f.id)
-
-      if (errUpdate) {
-        resumo.erros.push(`expirar trial ${f.id}: ${errUpdate.message}`)
-        continue
-      }
-
-      resumo.trials_expirados += 1
-
-      // Notifica fornecedor que o trial acabou
-      try {
-        await enviarMensagem(
-          f.whatsapp,
-          `Olá ${f.nome}! 👋\n\nSeu trial de 90 dias do plano *Pro* terminou. A partir de hoje você está no plano *Free* (3 pedidos por mês).\n\nQuer continuar recebendo mais pedidos? Responda aqui que te conto sobre os planos pagos.`
-        )
-      } catch (err) {
-        console.error('[scheduler] notificar trial expirado falhou:', err)
-      }
-    }
-  }
+  // A tarefa rebaixava o fornecedor pra 'free' quando o trial de 90 dias
+  // vencia e mandava no WhatsApp: "Seu trial de 90 dias do plano *Pro*
+  // terminou... quer continuar recebendo mais pedidos? Responda aqui que te
+  // conto sobre os planos pagos."
+  //
+  // Em 25/08/2026 o Fernando encerrou o plano Pro — a monetização passou a
+  // ser % no orçamento — e a mensagem de aprovação parou de prometê-lo. Mas
+  // o cadastro seguia gravando o trial, e em 26/08 havia 20 trials ativos
+  // com o primeiro vencendo em 29/08. Essa mensagem seria a primeira cobrança
+  // que a base veria, por um produto que a empresa não vende.
+  //
+  // Desligada aqui, e o cadastro parou de gravar `plano_expira_em`
+  // (`api/fornecedor/cadastro`). Os 20 registros existentes tiveram a data
+  // limpa pela migration `20260826230000_encerrar_trial_pro.sql` — sem isso,
+  // `planoEfetivo()` (app/lib/planos.ts) rebaixaria pra 'free' sozinho, com
+  // ou sem esta tarefa, e o fornecedor cairia de 30 pra 3 pedidos por mês em
+  // silêncio.
+  //
+  // O que sobreviveu de propósito: as colunas, o PLANOS_CONFIG e o
+  // `planoEfetivo`. Se um dia voltar a existir plano pago, a estrutura está
+  // aqui — o que não pode voltar sozinha é a mensagem.
+  resumo.trials_expirados = 0
 
   // ===========================================================
   // TAREFA 6: retry passivo de pedidos sem fornecedor

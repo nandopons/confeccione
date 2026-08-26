@@ -19,6 +19,12 @@ export type FornecedorSessao = {
   whatsapp: string
   email: string | null
   status: string
+  /**
+   * 'pendente' | 'aprovado' | 'recusado'. O matching só distribui pedido pra
+   * quem está 'aprovado' (app/lib/matching.ts) — sem este campo na sessão, o
+   * painel dizia "a gente avisa quando chegar" pra quem nunca vai receber.
+   */
+  aprovacao_status: string | null
 }
 
 /**

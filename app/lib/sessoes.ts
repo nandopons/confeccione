@@ -71,6 +71,9 @@ export async function validarSessao(token: string): Promise<{
     whatsapp: string
     email: string | null
     status: string
+    // O painel precisa saber se o cadastro ainda está em análise: o matching
+    // só distribui pedido pra 'aprovado'.
+    aprovacao_status: string | null
   }
 } | null> {
   if (!token || typeof token !== 'string' || token.length < 20) {
@@ -92,7 +95,7 @@ export async function validarSessao(token: string): Promise<{
   // Busca dados do fornecedor
   const { data: fornecedor } = await supabase
     .from('leads_fornecedores')
-    .select('id, nome, whatsapp, email, status')
+    .select('id, nome, whatsapp, email, status, aprovacao_status')
     .eq('id', sessao.fornecedor_id)
     .single()
 

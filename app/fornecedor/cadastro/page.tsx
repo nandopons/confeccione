@@ -38,6 +38,7 @@ export default function CadastroFornecedor() {
   const [cpfCnpj, setCpfCnpj]         = useState("");
   const [cpfCnpjErro, setCpfCnpjErro] = useState<string | null>(null);
   const [enviando, setEnviando]       = useState(false);
+  const [erroEnvio, setErroEnvio]     = useState<string | null>(null);
   const [showExtras, setShowExtras]   = useState(false);
 
   function toggleTipo(id: string) {
@@ -74,10 +75,16 @@ export default function CadastroFornecedor() {
     raio !== "" &&
     validarCpfCnpj(cpfCnpj).valido;
 
+  // 26/08/2026 — ANTES, esta função avançava pro passo 3 ("Cadastro feito!")
+  // acontecesse o que acontecesse: não olhava `res.ok` e o catch só fazia
+  // console.error. CPF recusado pela API, erro 500 ou queda de sinal no
+  // celular e a pessoa via o check verde, fechava a aba e nunca se cadastrou
+  // — descobria semanas depois, quando nenhum pedido chegou.
   async function enviar() {
     setEnviando(true);
+    setErroEnvio(null);
     try {
-      await fetch("/api/fornecedor/cadastro", {
+      const res = await fetch("/api/fornecedor/cadastro", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -93,11 +100,22 @@ export default function CadastroFornecedor() {
           cpf_cnpj: apenasDigitos(cpfCnpj),
         }),
       });
-    } catch (e) {
-      console.error(e);
+      const dados = await res.json().catch(() => null);
+      if (!res.ok || dados?.error) {
+        setErroEnvio(
+          dados?.error ??
+            `Não conseguimos concluir o cadastro (erro ${res.status}). Confira os dados e tente de novo.`
+        );
+        return;
+      }
+      setStep(3);
+    } catch {
+      setErroEnvio(
+        "Sem conexão com o servidor. Seus dados continuam preenchidos aqui — tente de novo em instantes."
+      );
+    } finally {
+      setEnviando(false);
     }
-    setEnviando(false);
-    setStep(3);
   }
 
   return (
@@ -302,9 +320,15 @@ export default function CadastroFornecedor() {
                   <p className="text-xs text-red-500 mt-1">{cpfCnpjErro}</p>
                 )}
                 <p className="text-xs text-gray-500 mt-1">
-                  Necessário para emissão de cobrança quando você quiser planos pagos. Não é exibido publicamente.
+                  Usado para o repasse do seu pagamento e a emissão fiscal. Não é exibido publicamente.
                 </p>
               </div>
+
+              {erroEnvio && (
+                <div role="alert" className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
+                  {erroEnvio}
+                </div>
+              )}
 
               <div className="flex justify-between">
                 <button onClick={() => setStep(1)} className="border border-gray-300 text-gray-600 px-5 py-3 rounded-xl text-sm hover:bg-gray-50">← Voltar</button>
@@ -320,9 +344,14 @@ export default function CadastroFornecedor() {
               <div className="w-14 h-14 bg-[#E1F5EE] rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0F6E56" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
               </div>
-              <h3 className="text-gray-900 text-lg font-medium mb-2">Cadastro feito!</h3>
+              <h3 className="text-gray-900 text-lg font-medium mb-2">Cadastro enviado!</h3>
+              {/* O cadastro entra como `pendente` e o matching só distribui pedido
+                  pra quem está `aprovado`. Prometer "em breve enviaremos pedidos"
+                  fazia a pessoa esperar por algo que ainda depende de análise —
+                  e o WhatsApp que a API dispara já dizia "em análise", em
+                  contradição com esta tela. */}
               <p className="text-gray-500 text-sm max-w-xs mx-auto mb-6 leading-relaxed">
-                Você vai receber uma mensagem no WhatsApp em instantes. Em breve enviaremos pedidos que batem com o seu perfil.
+                Seu perfil vai passar por uma análise rápida da nossa equipe. Assim que for aprovado, você recebe um aviso no WhatsApp e começa a receber pedidos que batem com o que você produz.
               </p>
               <Link href="/" className="inline-block bg-[#111] hover:opacity-85 text-white font-medium px-6 py-3 rounded-xl text-sm transition-opacity">Voltar pro site</Link>
             </div>

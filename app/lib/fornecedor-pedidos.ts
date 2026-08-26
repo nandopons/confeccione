@@ -97,13 +97,25 @@ function mapRow(o: Row): OfertaFornecedor {
   }
 }
 
+/**
+ * 26/08/2026 — o `error` do Supabase era descartado aqui. Quando a leitura
+ * falhava, `data` vinha null e o painel renderizava ESTADO VAZIO: "Nenhum
+ * pedido agora" e carteira em R$ 0,00. O fornecedor concluía que não tinha
+ * trabalho podendo ter pedido pago esperando. Falha de leitura agora é erro,
+ * e quem chama decide o que mostrar — nunca "você não tem nada".
+ */
 async function buscar(fornecedorId: string, status: StatusOferta[]): Promise<OfertaFornecedor[]> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
     .select('id, pedido_id, status, repasse_status, valor_repasse_centavos, criado_em, pedidos_assistente(linhas, imagens, pagamento_status, orcamento_status, nome, telefone, prazo_dias)')
     .eq('fornecedor_id', fornecedorId)
     .in('status', status)
     .order('criado_em', { ascending: false })
+
+  if (error) {
+    console.error('[fornecedor-pedidos] buscar falhou:', error)
+    throw new Error('Não conseguimos carregar seus pedidos agora.')
+  }
 
   const ofertas = ((data ?? []) as unknown as Row[]).map(mapRow)
 
@@ -205,12 +217,25 @@ export type DadosRepasse = {
   banco_titular: string | null
 }
 
+/**
+ * 26/08/2026 — este também engolia o erro, e a consequência era pior que uma
+ * tela vazia: com a leitura falha o formulário da carteira abria em branco, e
+ * um clique em "Salvar dados" gravava null por cima da chave PIX real (o form
+ * sempre envia os 6 campos). Falha de leitura agora impede a tela de abrir
+ * mentindo que não há dados.
+ */
 export async function obterDadosRepasse(fornecedorId: string): Promise<DadosRepasse> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('leads_fornecedores')
     .select('pix_chave, pix_tipo, banco_nome, banco_agencia, banco_conta, banco_titular')
     .eq('id', fornecedorId)
     .maybeSingle<DadosRepasse>()
+
+  if (error) {
+    console.error('[fornecedor-pedidos] obterDadosRepasse falhou:', error)
+    throw new Error('Não conseguimos carregar seus dados de recebimento agora.')
+  }
+
   return (
     data ?? {
       pix_chave: null, pix_tipo: null, banco_nome: null,

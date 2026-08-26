@@ -79,19 +79,43 @@ function labelTipoProduto(tipo: string): string {
   return labels[tipo] || tipo;
 }
 
-function labelStatus(status: string | null | undefined): {
+// O status visível tem que considerar a APROVAÇÃO, não só `status`.
+// Antes, um cadastro pendente lia "Ativo" aqui enquanto o matching o ignorava
+// (app/lib/matching.ts só distribui pra 'aprovado') — 11 fornecedores nessa
+// contradição em 26/08/2026.
+function labelStatus(
+  status: string | null | undefined,
+  aprovacao?: string | null,
+): {
   texto: string;
   classe: string;
+  ajuda?: string;
 } {
+  if (aprovacao === "pendente") {
+    return {
+      texto: "Em análise",
+      classe: "bg-amber-100 text-amber-800",
+      ajuda: "Você ainda não recebe pedidos. Avisamos no WhatsApp assim que aprovar.",
+    };
+  }
+  if (aprovacao === "recusado") {
+    return {
+      texto: "Não aprovado",
+      classe: "bg-gray-200 text-gray-700",
+      ajuda: "Fale com a gente pelo WhatsApp abaixo para revisar seu cadastro.",
+    };
+  }
   if (status === "ativo") {
     return {
       texto: "Ativo",
       classe: "bg-[#E1F5EE] text-[#0F6E56]",
+      ajuda: "Você está recebendo pedidos que combinam com o seu perfil.",
     };
   }
   return {
     texto: "Pausado",
     classe: "bg-orange-100 text-orange-700",
+    ajuda: "Enquanto pausado você não recebe pedidos novos.",
   };
 }
 
@@ -123,7 +147,7 @@ export default async function PaginaDados() {
   const { data: fornecedor } = await supabase
     .from("leads_fornecedores")
     .select(
-      "id, nome, whatsapp, email, cpf_cnpj, tipos_produto, pedido_minimo, estado, cidade, raio_atendimento, status"
+      "id, nome, whatsapp, email, cpf_cnpj, tipos_produto, pedido_minimo, estado, cidade, raio_atendimento, status, aprovacao_status"
     )
     .eq("id", sessao.id)
     .single();
@@ -140,7 +164,7 @@ export default async function PaginaDados() {
     );
   }
 
-  const status = labelStatus(fornecedor.status);
+  const status = labelStatus(fornecedor.status, fornecedor.aprovacao_status);
   const tiposProduto: string[] = fornecedor.tipos_produto || [];
 
   return (
@@ -202,6 +226,9 @@ export default async function PaginaDados() {
             {status.texto}
           </span>
         </Linha>
+        {status.ajuda && (
+          <p className="text-xs text-gray-500 leading-relaxed mt-1">{status.ajuda}</p>
+        )}
       </div>
 
       {/* Rodapé — Suporte */}

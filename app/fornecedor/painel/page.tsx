@@ -22,6 +22,12 @@ export default async function PainelDashboard() {
     carteiraFornecedor(fornecedor.id),
   ]);
   const inativo = fornecedor.status === "inativo";
+  // O matching só distribui pedido pra quem está 'aprovado' (app/lib/matching.ts).
+  // Sem esta checagem, o cadastro pendente lia "Nenhum pedido agora — a gente
+  // avisa quando chegar" e esperava indefinidamente por algo bloqueado. Em
+  // 26/08/2026 eram 11 fornecedores nessa situação.
+  const emAnalise = fornecedor.aprovacao_status === "pendente";
+  const recusado = fornecedor.aprovacao_status === "recusado";
   const nPend = pendentes.length;
 
   return (
@@ -45,6 +51,37 @@ export default async function PainelDashboard() {
         </div>
       )}
 
+      {emAnalise && (
+        <div className="mb-6 bg-amber-50 border border-amber-200 rounded-2xl p-5">
+          <div className="flex items-start gap-3">
+            <div className="text-2xl">🔍</div>
+            <div>
+              <div className="text-amber-900 font-medium mb-1">Seu perfil está em análise</div>
+              <p className="text-amber-800 text-sm leading-relaxed">
+                Enquanto a análise não termina, você ainda <strong>não recebe pedidos</strong>.
+                Assim que for aprovado a gente te avisa no WhatsApp — normalmente leva pouco tempo.
+                Aproveite pra deixar seus dados e seu portfólio completos: é o que a gente olha.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {recusado && (
+        <div className="mb-6 bg-gray-50 border border-gray-300 rounded-2xl p-5">
+          <div className="flex items-start gap-3">
+            <div className="text-2xl">✋</div>
+            <div>
+              <div className="text-gray-900 font-medium mb-1">Seu cadastro não foi aprovado</div>
+              <p className="text-gray-700 text-sm leading-relaxed">
+                Você não está recebendo pedidos no momento. Se quiser entender o motivo ou
+                revisar seus dados, fale com a gente pelo WhatsApp no rodapé desta página.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Card grande: pedidos pendentes */}
       <Link
         href="/fornecedor/painel/pedidos"
@@ -56,7 +93,11 @@ export default async function PainelDashboard() {
             {nPend === 0 ? (
               <>
                 <div className="text-gray-900 text-2xl font-medium mb-1">Nenhum pedido agora</div>
-                <div className="text-gray-500 text-sm">A gente avisa por WhatsApp e e-mail quando chegar um pedido pra você.</div>
+                <div className="text-gray-500 text-sm">
+                  {emAnalise
+                    ? "Os pedidos começam a chegar assim que seu perfil for aprovado."
+                    : "A gente avisa por WhatsApp e e-mail quando chegar um pedido pra você."}
+                </div>
               </>
             ) : (
               <>

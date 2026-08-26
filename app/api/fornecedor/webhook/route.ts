@@ -6,12 +6,7 @@ import { enviarMensagem } from '@/app/lib/zapi'
 import { emailContatoFornecedor } from '@/app/lib/email'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
 import { processarProximaAgendadaSeHouver } from '@/app/lib/fila'
-import {
-  PLANOS_CONFIG,
-  contarOfertasMesAtual,
-  planoEfetivo,
-} from '@/app/lib/planos'
-import { painelClientePedidoUrl } from '@/app/lib/url'
+import { painelClientePedidoUrl, SITE_URL } from '@/app/lib/url'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -139,13 +134,14 @@ async function tratarRespostaFornecedor(
       .update({ status: 'em_negociacao', fornecedor_aceito_id: fornecedor.id })
       .eq('id', oferta.pedido_id)
 
-    // Envia dados do cliente pro fornecedor + resumo de leads do mês
-    const resumoCota = await montarResumoCotaMes(fornecedor.id)
+    // O resumo de cota ("Você usou X de Y pedidos do plano Z") saiu daqui em
+    // 26/08/2026: o plano Pro acabou em 25/08 e essa linha anunciava um limite
+    // de um produto que não existe mais, logo depois de cada aceite.
     const tipo = tipoLabel[pedido.tipo] ?? pedido.tipo
 
     await enviarMensagem(
       fornecedor.whatsapp,
-      `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${formatarWhatsappBR(pedido.whatsapp)}\nE-mail: ${pedido.email}\n\n👉 Falar com o cliente: ${linkWhatsApp(pedido.whatsapp)}\n\nEntre em contato direto pra combinar detalhes. Boa venda!\n\n${resumoCota}`
+      `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${formatarWhatsappBR(pedido.whatsapp)}\nE-mail: ${pedido.email}\n\n👉 Falar com o cliente: ${linkWhatsApp(pedido.whatsapp)}\n\nEntre em contato direto pra combinar detalhes. Boa venda!`
     )
 
     // ============================================================
@@ -221,9 +217,12 @@ async function tratarRespostaFornecedor(
       console.error('[webhook/nao] processar fila falhou:', err)
     }
   } else {
+    // O fluxo de responder SIM/NAO por WhatsApp foi substituído por
+    // botão/link no painel. Manter a instrução antiga mandava o fornecedor
+    // repetir uma resposta que ninguém mais processa.
     await enviarMensagem(
       fornecedor.whatsapp,
-      'Não entendi sua resposta, por favor responda apenas SIM ou NAO pro pedido que te mandei.'
+      `Não entendi sua resposta. Pra aceitar ou recusar um pedido, abre o seu painel: ${SITE_URL}/fornecedor/painel/pedidos`
     )
   }
 
@@ -294,37 +293,6 @@ async function tratarRespostaSemCredito(
   )
 
   return NextResponse.json({ ok: true })
-}
-
-// ============================================================
-// Helper: monta resumo da cota mensal pra incluir após aceite
-// ============================================================
-async function montarResumoCotaMes(fornecedorId: string): Promise<string> {
-  const { data: f } = await supabase
-    .from('leads_fornecedores')
-    .select('plano, plano_expira_em, plano_ativado_em, creditos_extras')
-    .eq('id', fornecedorId)
-    .single()
-
-  if (!f) return ''
-
-  const planoAtual = planoEfetivo({
-    plano: f.plano,
-    plano_expira_em: f.plano_expira_em,
-  })
-  const config = PLANOS_CONFIG[planoAtual]
-  const usados = await contarOfertasMesAtual({
-    id: fornecedorId,
-    plano_ativado_em: f.plano_ativado_em,
-  })
-
-  let resumo = `📊 Você usou ${usados} de ${config.leads_inclusos} pedidos do plano *${config.nome}* este mês.`
-
-  if (f.creditos_extras > 0) {
-    resumo += `\n💎 Créditos extras disponíveis: ${f.creditos_extras}`
-  }
-
-  return resumo
 }
 
 // ============================================================
