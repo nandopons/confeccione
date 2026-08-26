@@ -58,8 +58,8 @@ export async function POST(
       await avisoOficial({
         telefone: forn.whatsapp,
         nome: forn.nome ?? null,
-        texto: `Boa notícia, ${forn.nome}! 🎉\n\nSeu cadastro no *Confeccione* foi *aprovado* pela nossa equipe.\n\n🎁 *Bônus de boas-vindas:* 90 dias do plano *Pro* — até 30 pedidos por mês nesse período.\n\nA partir de agora você passa a receber pedidos de clientes que combinam com a sua produção. Quando um pedido chegar, é só responder se quer atender. 🚀`,
-        resumo: 'Cadastro aprovado! Bônus: 90 dias do plano Pro',
+        texto: `Boa notícia, ${forn.nome}! 🎉\n\nSeu cadastro no *Confeccione* foi *aprovado* pela nossa equipe.\n\nBem-vindo à nossa base de fornecedores!\n\nA partir de agora você passa a receber pedidos de clientes que combinam com a sua produção. Quando um pedido chegar, é só responder se quer atender. 🚀`,
+        resumo: 'Cadastro aprovado! Bem-vindo à nossa base de fornecedores',
         caminhoBotao: 'fornecedor/entrar',
       })
     } catch (err) {
