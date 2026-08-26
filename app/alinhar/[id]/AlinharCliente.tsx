@@ -5,6 +5,7 @@
 // concluir, grava as linhas (PATCH) + as fotos (mockup) e segue pro
 // visualizador. Tem "pular" pra quem prefere organizar lá mesmo.
 import { useEffect, useRef, useState } from "react";
+import { alturaDoCard, atualizarBase } from "@/app/lib/teclado";
 
 type Tamanho = { tamanho: string; qtd: number | null };
 type Linha = {
@@ -201,6 +202,8 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   const cardRef = useRef<HTMLDivElement | null>(null);
   // Altura do card quando o teclado virtual está aberto (mobile). null = padrão (lg:h-[70vh]).
   const [alturaTeclado, setAlturaTeclado] = useState<number | null>(null);
+  // Maior altura de viewport visual já vista — a régua do "sem teclado".
+  const baseRef = useRef(0);
 
   // Rola apenas o container de mensagens (nunca a janela) — evita o "pulo" da
   // página ao enviar.
@@ -217,36 +220,44 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   // visível acima do teclado, mantendo o input sempre à vista — sensação de app.
   // Desktop (lg) nunca entra aqui (guard innerWidth) e mantém lg:h-[70vh].
   //
-  // 26/08/2026 — O CARD SUBIA E DESCIA ao focar a caixa de texto. Eram TRÊS
-  // animações brigando enquanto o teclado abria:
-  //   (a) o iOS rola a página pro campo focado, por conta própria;
-  //   (b) um scrollIntoView SUAVE disparava no onFocus 350ms depois;
-  //   (c) o visualViewport emite VÁRIOS resizes durante a animação do teclado,
-  //       e cada um recalculava a altura com o rect.top ainda em movimento —
-  //       cada aplicação com transição de 200ms por cima da anterior.
+  // 26/08/2026, 2ª rodada — o sobe-e-desce continuou no Chrome do Android.
   //
-  // O conserto: (b) foi removido; (c) passa por um DEBOUNCE — espera os
-  // eventos assentarem e só então mede uma vez; e a medição começa com um
-  // scroll INSTANTÂNEO do card pro topo, pra medir um rect parado.
+  // A tentativa anterior era calibrada pro iOS: debounce, scroll instantâneo
+  // antes de medir, e detecção por `vv.height < window.innerHeight - 120`.
+  // Essa detecção é o furo. Onde o teclado encolhe TAMBÉM o viewport de
+  // layout (Chrome/Android), `innerHeight` diminui junto e a conta vira
+  // `x < x - 120` — sempre falsa. O código jurava que o teclado estava
+  // fechado, o card ficava com altura cheia e o navegador rolava a página
+  // atrás do campo. Detalhe e teste em `app/lib/teclado.ts`.
+  //
+  // O que mudou, em três frentes:
+  //   1. a régua virou a MAIOR altura de viewport visual já vista (baseRef),
+  //      que não depende de o layout encolher ou não;
+  //   2. o `scrollIntoView` saiu do caminho de medição — ele disparava um
+  //      evento de scroll que reagendava a própria medição, num laço. Quem
+  //      leva o campo pra vista é o navegador, que já faz isso sozinho;
+  //   3. amortecedor: mudança menor que 24px não vira nova altura.
+  // A transição de altura também saiu do CSS: encolher instantâneo lê como
+  // "o layout se ajustou"; encolher animado lê como "o card está deslizando".
   useEffect(() => {
     const vv = typeof window !== "undefined" ? window.visualViewport : null;
     if (!vv) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const aplicar = () => {
-      if (window.innerWidth >= 1024) { setAlturaTeclado(null); return; }
+    const medir = () => {
       const card = cardRef.current;
-      const tecladoAberto = vv.height < window.innerHeight - 120;
-      if (!tecladoAberto || document.activeElement !== inputRef.current || !card) {
-        setAlturaTeclado(null);
-        return;
-      }
-      // Instantâneo (behavior: "auto"): rolar suave aqui seria medir um alvo
-      // em movimento — foi exatamente o que produzia o sobe-e-desce.
-      card.scrollIntoView({ block: "start", behavior: "auto" });
-      const rect = card.getBoundingClientRect();
-      const disponivel = vv.height + vv.offsetTop - rect.top - 10;
-      setAlturaTeclado(Math.max(240, Math.min(Math.round(disponivel), 620)));
+      if (!card) return;
+      baseRef.current = atualizarBase(baseRef.current, vv.height);
+      setAlturaTeclado((atual) =>
+        alturaDoCard({
+          larguraJanela: window.innerWidth,
+          alturaVisual: vv.height,
+          deslocamentoVisual: vv.offsetTop,
+          baseVisual: baseRef.current,
+          topoDoCard: card.getBoundingClientRect().top,
+          alturaAtual: atual,
+        }),
+      );
       requestAnimationFrame(() => {
         const el = listaRef.current;
         if (el) el.scrollTop = el.scrollHeight;
@@ -255,15 +266,25 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
 
     const agendar = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(aplicar, DEBOUNCE_TECLADO_MS);
+      timer = setTimeout(medir, DEBOUNCE_TECLADO_MS);
+    };
+
+    // Girar o aparelho muda o viewport "sem teclado": a régua tem que zerar,
+    // senão a base de retrato condena a paisagem a achar que há teclado.
+    const aoGirar = () => {
+      baseRef.current = 0;
+      setAlturaTeclado(null);
+      agendar();
     };
 
     vv.addEventListener("resize", agendar);
     vv.addEventListener("scroll", agendar);
+    window.addEventListener("orientationchange", aoGirar);
     return () => {
       if (timer) clearTimeout(timer);
       vv.removeEventListener("resize", agendar);
       vv.removeEventListener("scroll", agendar);
+      window.removeEventListener("orientationchange", aoGirar);
     };
   }, []);
 
@@ -520,9 +541,15 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
       {/* CHAT */}
       <div
         ref={cardRef}
-        style={alturaTeclado ? { height: alturaTeclado } : undefined}
+        // minHeight/maxHeight zerados junto: a variante embutida tem
+        // `min-h-[360px] max-h-[520px]` no CSS, e min-height VENCE a altura
+        // inline. Sem isto, uma altura calculada de 280px renderizaria 360px
+        // — o card continuaria atrás do teclado, com o conserto "aplicado".
+        style={alturaTeclado ? { height: alturaTeclado, minHeight: 0, maxHeight: "none" } : undefined}
         className={
-          "flex flex-col bg-white overflow-hidden scroll-mt-2 transition-[height] duration-200 ease-out " +
+          // Sem transição de altura: animar o encolhimento é justamente o que
+          // o cliente lê como "o card está subindo e descendo".
+          "flex flex-col bg-white overflow-hidden scroll-mt-2 " +
           (embutido
             // Dentro do cartão do pedido a borda e a sombra já vêm de fora —
             // repetir as duas desenharia um cartão dentro do outro.
