@@ -5,7 +5,7 @@
 // concluir, grava as linhas (PATCH) + as fotos (mockup) e segue pro
 // visualizador. Tem "pular" pra quem prefere organizar lá mesmo.
 import { useEffect, useRef, useState } from "react";
-import { ajusteDeRolagem, alturaDoCard, atualizarBase } from "@/app/lib/teclado";
+import { atualizarBase, mesmaMoldura, moldura as calcularMoldura, type Moldura } from "@/app/lib/teclado";
 
 type Tamanho = { tamanho: string; qtd: number | null };
 type Linha = {
@@ -31,10 +31,6 @@ const MAX_COLETA = 12; // total de fotos de referência que o chat pode juntar (
 // Teto da espera pela resposta do assistente. 60s é folgado pro caminho normal
 // e curto o bastante pra o cliente não ficar olhando "digitando…" sem fim.
 const TIMEOUT_CHAT_MS = 60_000;
-// O iOS dispara uma RAJADA de resizes do visualViewport durante a animação do
-// teclado (~6 eventos em 250ms). 140ms espera a rajada assentar sem parecer
-// lento — abaixo disso volta o sobe-e-desce; acima, o card demora a acomodar.
-const DEBOUNCE_TECLADO_MS = 140;
 
 function corHex(s: string | null | undefined): string | null {
   const m = (s || "").match(/#([0-9a-fA-F]{6})/);
@@ -200,14 +196,14 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   const listaRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
-  // Altura do card quando o teclado virtual está aberto (mobile). null = padrão (lg:h-[70vh]).
-  const [alturaTeclado, setAlturaTeclado] = useState<number | null>(null);
+  // Com o teclado aberto o card vira a área visível (position: fixed).
+  // null = sem teclado, o CSS manda.
+  const [moldura, setMoldura] = useState<Moldura | null>(null);
+  const molduraRef = useRef<Moldura | null>(null);
   // Maior altura de viewport visual já vista — a régua do "sem teclado".
   const baseRef = useRef(0);
-  // Espelho da altura aplicada, pra medir sem depender do estado do React.
-  const alturaRef = useRef<number | null>(null);
-  // Já encostei o topo do card no topo da tela nesta abertura de teclado?
-  const alinhadoRef = useRef(false);
+  // Altura que o card ocupava no fluxo, pra o espaçador não deixar a página pular.
+  const alturaNoFluxoRef = useRef(0);
 
   // Rola apenas o container de mensagens (nunca a janela) — evita o "pulo" da
   // página ao enviar.
@@ -220,81 +216,66 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     // dobra do chat e o cliente nem via que tinha o que clicar.
   }, [turnos, enviando, anexos, cards]);
 
-  // Teclado virtual (mobile): encolhe o card pra caber exatamente no espaço
-  // visível acima do teclado, mantendo o input sempre à vista — sensação de app.
-  // Desktop (lg) nunca entra aqui (guard innerWidth) e mantém lg:h-[70vh].
+  // TECLADO VIRTUAL: o card VIRA a área visível (26/08/2026, 3ª rodada).
   //
-  // 26/08/2026, 2ª rodada — o sobe-e-desce continuou no Chrome do Android.
+  // As duas tentativas anteriores tentavam encolher o card no fluxo da página
+  // e alinhar o topo rolando. A sonda em /sonda-teclado.html provou que isso
+  // é impossível no Chrome do Android: ele não rola o documento, ele DESLOCA
+  // o viewport visual (`offsetTop` 0 → 267 no aparelho medido), e esse
+  // deslocamento não é gravável. Pior: a página /alinhar é mais curta que o
+  // viewport de layout, então `window.scrollBy` não tinha para onde rolar.
+  // O topo do card ficava 150px acima da dobra — cabeçalho cortado — e no
+  // lugar dele aparecia o bloco "Precisa de ajuda?", que mora abaixo do chat.
   //
-  // A tentativa anterior era calibrada pro iOS: debounce, scroll instantâneo
-  // antes de medir, e detecção por `vv.height < window.innerHeight - 120`.
-  // Essa detecção é o furo. Onde o teclado encolhe TAMBÉM o viewport de
-  // layout (Chrome/Android), `innerHeight` diminui junto e a conta vira
-  // `x < x - 120` — sempre falsa. O código jurava que o teclado estava
-  // fechado, o card ficava com altura cheia e o navegador rolava a página
-  // atrás do campo. Detalhe e teste em `app/lib/teclado.ts`.
+  // Agora, com o teclado aberto, o card sai do fluxo e é fixado exatamente
+  // sobre o viewport visual. Sem depender de rolagem, sem depender de o card
+  // caber onde a página o deixou. A razão de cada número está em
+  // `app/lib/teclado.ts`.
   //
-  // O que mudou, em três frentes:
-  //   1. a régua virou a MAIOR altura de viewport visual já vista (baseRef),
-  //      que não depende de o layout encolher ou não;
-  //   2. o `scrollIntoView` saiu do caminho de medição — ele disparava um
-  //      evento de scroll que reagendava a própria medição, num laço. Quem
-  //      leva o campo pra vista é o navegador, que já faz isso sozinho;
-  //   3. amortecedor: mudança menor que 24px não vira nova altura.
-  // A transição de altura também saiu do CSS: encolher instantâneo lê como
-  // "o layout se ajustou"; encolher animado lê como "o card está deslizando".
+  // Aqui usamos requestAnimationFrame em vez de debounce: o card está COLADO
+  // no viewport, então acompanhar cada evento é o comportamento correto — é o
+  // que faz ele parecer parado enquanto o teclado anima. O debounce servia pra
+  // outra coisa (evitar recalcular altura no meio da animação) que não existe
+  // mais.
   useEffect(() => {
     const vv = typeof window !== "undefined" ? window.visualViewport : null;
     if (!vv) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let quadro = 0;
 
     const medir = () => {
       const card = cardRef.current;
       if (!card) return;
       baseRef.current = atualizarBase(baseRef.current, vv.height);
-      const topoDoCard = card.getBoundingClientRect().top;
-      const nova = alturaDoCard({
+      const nova = calcularMoldura({
         larguraJanela: window.innerWidth,
         alturaVisual: vv.height,
         deslocamentoVisual: vv.offsetTop,
         baseVisual: baseRef.current,
-        topoDoCard,
-        alturaAtual: alturaRef.current,
       });
-      alturaRef.current = nova;
-      setAlturaTeclado(nova);
-
-      if (nova === null) {
-        // Teclado fechou: rearma o alinhamento pra próxima abertura.
-        alinhadoRef.current = false;
-      } else if (!alinhadoRef.current) {
-        // UMA vez por abertura de teclado: encosta o topo do card no topo da
-        // área visível, pra o cabeçalho do chat não ficar acima da dobra.
-        // Uma vez só porque rolar dispara evento de scroll — repetir seria o
-        // laço da 1ª rodada de volta.
-        alinhadoRef.current = true;
-        const ajuste = ajusteDeRolagem(topoDoCard, vv.offsetTop);
-        if (ajuste !== 0) window.scrollBy({ top: ajuste, behavior: "auto" });
+      if (nova && !molduraRef.current) {
+        // Guarda a altura que o card ocupava no fluxo ANTES de sair dele —
+        // o espaçador usa esse número pra página não colapsar por baixo.
+        alturaNoFluxoRef.current = Math.round(card.getBoundingClientRect().height);
       }
-
-      requestAnimationFrame(() => {
-        const el = listaRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
-      });
+      if (!mesmaMoldura(nova, molduraRef.current)) {
+        molduraRef.current = nova;
+        setMoldura(nova);
+      }
+      const el = listaRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
     };
 
     const agendar = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(medir, DEBOUNCE_TECLADO_MS);
+      if (quadro) cancelAnimationFrame(quadro);
+      quadro = requestAnimationFrame(medir);
     };
 
     // Girar o aparelho muda o viewport "sem teclado": a régua tem que zerar,
     // senão a base de retrato condena a paisagem a achar que há teclado.
     const aoGirar = () => {
       baseRef.current = 0;
-      alturaRef.current = null;
-      alinhadoRef.current = false;
-      setAlturaTeclado(null);
+      molduraRef.current = null;
+      setMoldura(null);
       agendar();
     };
 
@@ -302,7 +283,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
     vv.addEventListener("scroll", agendar);
     window.addEventListener("orientationchange", aoGirar);
     return () => {
-      if (timer) clearTimeout(timer);
+      if (quadro) cancelAnimationFrame(quadro);
       vv.removeEventListener("resize", agendar);
       vv.removeEventListener("scroll", agendar);
       window.removeEventListener("orientationchange", aoGirar);
@@ -560,18 +541,40 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
   return (
     <div className={embutido ? "w-full" : "flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6"}>
       {/* CHAT */}
+      {/* Espaçador: enquanto o card está fixo ele não ocupa espaço no fluxo.
+          Sem isto a página colapsa por baixo dele e, ao fechar o teclado, o
+          conteúdo dá um salto. */}
+      {moldura ? <div aria-hidden="true" style={{ height: alturaNoFluxoRef.current }} /> : null}
       <div
         ref={cardRef}
-        // minHeight/maxHeight zerados junto: a variante embutida tem
-        // `min-h-[360px] max-h-[520px]` no CSS, e min-height VENCE a altura
-        // inline. Sem isto, uma altura calculada de 280px renderizaria 360px
-        // — o card continuaria atrás do teclado, com o conserto "aplicado".
-        style={alturaTeclado ? { height: alturaTeclado, minHeight: 0, maxHeight: "none" } : undefined}
+        // Com o teclado aberto: fixo sobre o viewport visual. `top` compensa o
+        // deslocamento — elemento fixed se posiciona pelo viewport de LAYOUT,
+        // e sem isso ele nasceria acima da área visível.
+        // minHeight/maxHeight zerados porque a variante embutida traz
+        // `min-h-[360px] max-h-[520px]`, e min-height VENCE a altura inline.
+        style={
+          moldura
+            ? {
+                position: "fixed",
+                top: moldura.top,
+                left: 0,
+                right: 0,
+                height: moldura.altura,
+                minHeight: 0,
+                maxHeight: "none",
+                zIndex: 40,
+              }
+            : undefined
+        }
         className={
-          // Sem transição de altura: animar o encolhimento é justamente o que
-          // o cliente lê como "o card está subindo e descendo".
+          // Sem transição de altura: animar o redimensionamento é justamente o
+          // que o cliente lê como "o card está subindo e descendo".
           "flex flex-col bg-white overflow-hidden scroll-mt-2 " +
-          (embutido
+          (moldura
+            // Colado nas bordas da tela: canto arredondado e sombra viram
+            // sujeira quando o card É a tela.
+            ? "border-0 rounded-none"
+            : embutido
             // Dentro do cartão do pedido a borda e a sombra já vêm de fora —
             // repetir as duas desenharia um cartão dentro do outro.
             // svh (e não vh): no celular o vh conta a barra de endereço, então
@@ -669,7 +672,7 @@ export default function AlinharCliente({ pedidoId, categoria, totalPecas, linhas
             a AÇÃO PRINCIPAL da tela. Enquanto o pedido está vazio ela é discreta
             (fundo claro), pra não gritar "conclua" antes de ter o que concluir;
             com produto vira botão cheio e chama pra conferir e concluir. */}
-        <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => { inputRef.current?.blur(); alturaRef.current = null; alinhadoRef.current = false; setAlturaTeclado(null); setSheetAberto(true); }}
+        <button type="button" onPointerDown={(e) => e.preventDefault()} onClick={() => { inputRef.current?.blur(); molduraRef.current = null; setMoldura(null); setSheetAberto(true); }}
           className={
             (embutido ? "" : "lg:hidden ") +
             // whitespace-nowrap: em 360px sobram ~208px de texto dentro da

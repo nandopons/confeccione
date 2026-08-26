@@ -1,46 +1,58 @@
 // app/lib/teclado.ts
 // ============================================================================
-// A DECISÃO de que altura o card do chat deve ter quando o teclado virtual
-// abre — separada da tela de propósito, porque é aqui que estava o bug e
-// lógica de layout dentro de um useEffect não dá pra testar.
+// Onde o card do chat deve ficar quando o teclado virtual está aberto.
 //
-// POR QUE ISTO EXISTE (26/08/2026)
-// A primeira versão detectava o teclado assim:
+// HISTÓRICO CURTO, PORQUE ELE EXPLICA O DESENHO (26/08/2026)
 //
-//     tecladoAberto = vv.height < window.innerHeight - 120
+// 1ª tentativa — encolher o card e alinhar o topo rolando a página.
+// 2ª tentativa — trocar a régua de detecção (`window.innerHeight`).
 //
-// Isso só vale onde o teclado encolhe SÓ o viewport visual e deixa o layout
-// do mesmo tamanho — o comportamento do iOS Safari. Onde o navegador encolhe
-// TAMBÉM o viewport de layout (Chrome no Android, dependendo da versão e do
-// `interactive-widget`), `window.innerHeight` diminui junto e a conta vira
-// `x < x - 120`: SEMPRE falsa. O teclado abre e o código jura que está
-// fechado, o card fica com a altura cheia, o campo some atrás do teclado e o
-// navegador rola a página atrás dele. É a "doidera" relatada no Android.
+// As duas falharam, e a sonda em /sonda-teclado.html mostrou por quê, num
+// Chrome 151 / Android, tela 384×832:
 //
-// O conserto: comparar contra a MAIOR altura de viewport visual já observada
-// (a régua de "sem teclado"), que não depende de o layout encolher ou não.
+//     t=134   vv.height cai 692 → 425     (teclado ocupa 267px)
+//     t=184…301  vv.offsetTop sobe 0 → 267
+//                card.top praticamente parado (155 → 117)
+//
+// O Chrome NÃO rola o documento pra revelar o campo: ele DESLOCA O VIEWPORT
+// VISUAL por cima da página. Duas consequências fatais pra abordagem antiga:
+//
+//   · `window.scrollBy` mexe no documento, e a página /alinhar é mais curta
+//     que o viewport de layout (692px) — não há para onde rolar. O
+//     alinhamento era um no-op.
+//   · `visualViewport.offsetTop` não é gravável. Não dá pra desfazer o
+//     deslocamento que o navegador aplicou.
+//
+// Resultado: o topo do card ficava 150px acima da área visível (cabeçalho
+// "Sua produção" cortado) e o que aparecia no lugar era o bloco "Precisa de
+// ajuda?", que mora ABAIXO do chat na página.
+//
+// O DESENHO DE AGORA: em vez de encolher o card e torcer pra ele caber, o
+// card VIRA A ÁREA VISÍVEL. Com o teclado aberto ele sai do fluxo
+// (position: fixed) e é fixado exatamente sobre o viewport visual — topo em
+// `offsetTop`, altura igual a `height`. Cabeçalho no topo, caixa de texto
+// logo acima do teclado, nada de página aparecendo por baixo.
+//
+// `top: offsetTop` não é enfeite: elemento `fixed` se posiciona em relação ao
+// viewport de LAYOUT, então sem essa compensação ele ficaria 267px acima da
+// área visível — exatamente o defeito que estamos consertando.
 // ============================================================================
 
 /** Quanto o viewport precisa encolher pra contar como teclado aberto. */
 const LIMIAR_TECLADO = 120
 
-/** Piso e teto da altura do card. */
-export const ALTURA_MIN = 240
-export const ALTURA_MAX = 620
-
-/** Respiro entre o fim do card e o topo do teclado. */
-const FOLGA = 10
-
-/**
- * Diferença mínima pra valer uma nova aplicação de altura.
- *
- * Sem isto, cada pixel que o viewport mexe vira um `setState` e o card
- * reposiciona. Somado à animação do teclado, é o sobe-e-desce.
- */
-const DEGRAU_MINIMO = 24
-
-/** Abaixo disto não tentamos encolher o card — vira desktop. */
+/** Abaixo disto não mexemos em nada — vira desktop. */
 const LARGURA_DESKTOP = 1024
+
+/** Área visível pequena demais pra valer a pena fixar (teclado + tela minúscula). */
+const ALTURA_MINIMA_UTIL = 180
+
+export type Moldura = {
+  /** `top` do elemento fixo, em pixels — compensa o deslocamento do viewport. */
+  top: number
+  /** Altura do card: exatamente a área visível. */
+  altura: number
+}
 
 export type MedidaViewport = {
   /** window.innerWidth */
@@ -51,16 +63,16 @@ export type MedidaViewport = {
   deslocamentoVisual: number
   /** Maior alturaVisual já vista nesta orientação — a régua do "sem teclado". */
   baseVisual: number
-  /** getBoundingClientRect().top do card, relativo ao viewport de LAYOUT. */
-  topoDoCard: number
-  /** Altura aplicada agora (null = altura padrão do CSS). */
-  alturaAtual: number | null
 }
 
 /**
  * A régua de "sem teclado". Só cresce: enquanto o teclado está aberto o
  * viewport é menor, então ele nunca contamina a base. Quem zera é a troca de
- * orientação, que chama `baseInicial` de novo.
+ * orientação.
+ *
+ * Comparar contra isto, e não contra `window.innerHeight`, mantém a detecção
+ * correta tanto onde o teclado encolhe só o viewport visual (Chrome/Android
+ * medido, iOS) quanto onde ele encolhe o layout junto.
  */
 export function atualizarBase(baseAtual: number, alturaVisual: number): number {
   return alturaVisual > baseAtual ? alturaVisual : baseAtual
@@ -70,56 +82,21 @@ export function tecladoAberto(alturaVisual: number, baseVisual: number): boolean
   return alturaVisual < baseVisual - LIMIAR_TECLADO
 }
 
-function limitar(valor: number): number {
-  return Math.max(ALTURA_MIN, Math.min(Math.round(valor), ALTURA_MAX))
-}
-
 /**
- * Onde o topo do card está DENTRO da área visível.
- * Negativo = o card começa acima da dobra (o cabeçalho sumiu).
+ * A moldura do card com o teclado aberto, ou `null` para "deixa o CSS mandar".
  */
-export function topoRelativo(topoDoCard: number, deslocamentoVisual: number): number {
-  return topoDoCard - deslocamentoVisual
-}
-
-/**
- * Quanto rolar a janela pra encostar o topo do card no topo da área visível.
- * 0 = já está alinhado o bastante (tolerância de 8px pra não brigar por nada).
- *
- * Isto roda UMA VEZ por abertura de teclado (trava no componente). Rodar a
- * cada medição foi o laço da 1ª rodada: rolar dispara evento de scroll, que
- * reagenda a medição, que rola de novo.
- */
-export function ajusteDeRolagem(topoDoCard: number, deslocamentoVisual: number): number {
-  const delta = topoRelativo(topoDoCard, deslocamentoVisual)
-  return Math.abs(delta) > 8 ? Math.round(delta) : 0
-}
-
-/**
- * A altura que o card deve ter, ou `null` para "deixa o CSS mandar".
- *
- * Dois tetos, e os DOIS importam (26/08/2026, 3ª rodada):
- *
- *   a) o espaço abaixo do topo do card — impede que o card passe por baixo do
- *      teclado quando ele não pôde ser rolado até o topo;
- *   b) a própria altura da área visível — impede que o card fique MAIOR que a
- *      tela quando o navegador rolou a página além do topo dele. Sem este,
- *      `topoDoCard` vem negativo, a conta (a) infla, e o cabeçalho do chat
- *      ("Sua Produção") fica acima da dobra. Foi o defeito relatado.
- *
- * Devolve `alturaAtual` inalterada quando a mudança seria menor que
- * DEGRAU_MINIMO — é o amortecedor que mata a oscilação.
- */
-export function alturaDoCard(m: MedidaViewport): number | null {
+export function moldura(m: MedidaViewport): Moldura | null {
   if (m.larguraJanela >= LARGURA_DESKTOP) return null
   if (!tecladoAberto(m.alturaVisual, m.baseVisual)) return null
-
-  const abaixoDoTopo = m.alturaVisual - topoRelativo(m.topoDoCard, m.deslocamentoVisual)
-  const disponivel = Math.min(m.alturaVisual, abaixoDoTopo) - FOLGA
-  const alvo = limitar(disponivel)
-
-  if (m.alturaAtual !== null && Math.abs(alvo - m.alturaAtual) < DEGRAU_MINIMO) {
-    return m.alturaAtual
+  if (m.alturaVisual < ALTURA_MINIMA_UTIL) return null
+  return {
+    top: Math.max(0, Math.round(m.deslocamentoVisual)),
+    altura: Math.round(m.alturaVisual),
   }
-  return alvo
+}
+
+/** Duas molduras são iguais o bastante pra não valer um novo render? */
+export function mesmaMoldura(a: Moldura | null, b: Moldura | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.top === b.top && a.altura === b.altura
 }
