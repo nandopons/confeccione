@@ -54,12 +54,35 @@ const ContatoSchema = z.object({
   prazoDias: z.number().int().positive().nullable().optional(),
 })
 const ConversaItemSchema = z.object({ role: z.enum(['user', 'assistant']), texto: z.string().max(20000) })
+
+// Atribuição da visita (26/08/2026) — tudo opcional e nullable, e o objeto
+// inteiro tem .catch(): atribuição malformada NÃO pode derrubar o pedido com
+// um 400 genérico na cara do cliente. Sem atribuição, o pedido salva igual.
+const AtribuicaoSchema = z
+  .object({
+    gclid: z.string().nullable().optional(),
+    utm_source: z.string().nullable().optional(),
+    utm_medium: z.string().nullable().optional(),
+    utm_campaign: z.string().nullable().optional(),
+    referrer: z.string().nullable().optional(),
+  })
+  .optional()
+  .catch(undefined)
+
 const BodySchema = z.object({
   linhas: z.array(LinhaSchema),
   contato: ContatoSchema,
   observacoes: z.string().nullable().optional(),
   conversa: z.array(ConversaItemSchema).max(600).optional(),
+  atribuicao: AtribuicaoSchema,
 })
+
+/** Corte de tamanho no server — o cliente não decide o tamanho do que grava. */
+function corta(v: string | null | undefined, max: number): string | null {
+  if (typeof v !== 'string') return null
+  const t = v.trim()
+  return t ? t.slice(0, max) : null
+}
 
 export async function POST(req: Request) {
   let bruto: unknown
@@ -122,10 +145,18 @@ export async function POST(req: Request) {
     linhasValidas.find((l) => l.categoria)?.categoria ??
     (parsed.data.observacoes ? (parsed.data.observacoes.match(/Categoria:\s*(.+)/)?.[1]?.trim() || null) : null)
 
+  // Atribuição: é ela que responde "quais dos pedidos da semana o Ads trouxe".
+  const atr = parsed.data.atribuicao
+
   const { data, error } = await supabase
     .from('pedidos_assistente')
     .insert({
       linhas: linhasValidas,
+      gclid: corta(atr?.gclid, 120),
+      utm_source: corta(atr?.utm_source, 120),
+      utm_medium: corta(atr?.utm_medium, 120),
+      utm_campaign: corta(atr?.utm_campaign, 160),
+      referrer: corta(atr?.referrer, 300),
       categoria: categoriaPedido ?? null,
       nome: contato.nome,
       telefone: contato.telefone ? normalizarWhatsApp(contato.telefone) : null,

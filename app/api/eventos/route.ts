@@ -37,6 +37,9 @@ export async function POST(req: NextRequest) {
       utm_source: corta(b.utm_source, 120),
       utm_medium: corta(b.utm_medium, 120),
       utm_campaign: corta(b.utm_campaign, 160),
+      // gclid: o Google Ads usa marcação automática, não UTM — sem esta coluna
+      // não dá pra provar que o anúncio trouxe a visita (26/08/2026).
+      gclid: corta(b.gclid, 120),
       referrer: corta(b.referrer, 300),
       referencia_id: corta(b.referencia_id, 64),
     })

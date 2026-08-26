@@ -29,6 +29,7 @@
 
 import { useEffect, useState } from "react";
 import AlinharCliente from "@/app/alinhar/[id]/AlinharCliente";
+import { atribuicao } from "@/app/lib/rastreio";
 
 const nichosPrincipais = [
   { id: "interclasse",   icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
@@ -165,7 +166,15 @@ export default function PedidoSteps() {
       const res = await fetch("/api/pedido/assistente/criar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ linhas: [linha], contato, observacoes: `Categoria: ${nichoTitle}` }),
+        // atribuicao(): gclid do Ads + utm_* + referrer da primeira visita.
+        // É o que permite responder, em SQL, quais pedidos o anúncio trouxe —
+        // sem depender do GA4 nem do painel do Ads (26/08/2026).
+        body: JSON.stringify({
+          linhas: [linha],
+          contato,
+          observacoes: `Categoria: ${nichoTitle}`,
+          atribuicao: atribuicao(),
+        }),
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.ok) {

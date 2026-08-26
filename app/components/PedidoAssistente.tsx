@@ -11,7 +11,7 @@
 // ============================================================================
 
 import { useEffect, useRef, useState } from "react";
-import { track } from "@/app/lib/rastreio";
+import { atribuicao, track } from "@/app/lib/rastreio";
 import { WHATSAPP_SUPORTE_FORMATADO } from "@/app/lib/contatos";
 
 type Tamanho = { tamanho: string; qtd: number | null };
@@ -172,7 +172,13 @@ export default function PedidoAssistente() {
       const res = await fetch("/api/pedido/assistente/criar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ linhas: p.linhas, contato: p.contato, conversa: (conversaTurnos ?? turnos).map((t) => ({ role: t.role, texto: t.display })) }),
+        body: JSON.stringify({
+          linhas: p.linhas,
+          contato: p.contato,
+          conversa: (conversaTurnos ?? turnos).map((t) => ({ role: t.role, texto: t.display })),
+          // gclid + utm_* + referrer, iguais aos do fluxo de 4 passos.
+          atribuicao: atribuicao(),
+        }),
       });
       const data = await res.json().catch(() => null);
       if (res.ok && data?.ok) {

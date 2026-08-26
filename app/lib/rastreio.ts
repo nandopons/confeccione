@@ -17,8 +17,31 @@ export type Origem = {
   source: string | null
   medium: string | null
   campaign: string | null
+  /**
+   * Identificador do clique do Google Ads (26/08/2026).
+   *
+   * O Ads usa MARCAÇÃO AUTOMÁTICA: o clique chega com `?gclid=...` e nenhum
+   * `utm_*`. Guardar só UTM era guardar nada — 346 pageviews desde que a
+   * campanha subiu, zero rastreáveis até o anúncio.
+   *
+   * `gbraid`/`wbraid` (o par que o iOS manda quando não há gclid) entram
+   * nesta MESMA chave, com prefixo `gbraid:` / `wbraid:`, pra não multiplicar
+   * coluna por variante do Google.
+   */
+  gclid: string | null
   referrer: string | null
 }
+
+/** O que vai no corpo do POST — nomes já no formato das colunas do banco. */
+export type Atribuicao = {
+  gclid: string | null
+  utm_source: string | null
+  utm_medium: string | null
+  utm_campaign: string | null
+  referrer: string | null
+}
+
+const MAX_GCLID = 120 // o gclid real tem ~90
 
 function seguro<T>(fn: () => T, fallback: T): T {
   try {
@@ -43,23 +66,47 @@ export function sessaoId(): string {
   }, 'anon')
 }
 
+/** gclid / gbraid / wbraid da URL, já cortado e com prefixo quando é variante. */
+function cliquePago(p: URLSearchParams): string | null {
+  const gclid = p.get('gclid')
+  if (gclid) return gclid.slice(0, MAX_GCLID)
+  const gbraid = p.get('gbraid')
+  if (gbraid) return `gbraid:${gbraid}`.slice(0, MAX_GCLID)
+  const wbraid = p.get('wbraid')
+  if (wbraid) return `wbraid:${wbraid}`.slice(0, MAX_GCLID)
+  return null
+}
+
 /**
  * Captura a origem do tráfego. Regras:
- * - URL com utm_* → sobrescreve (last non-direct touch: o anúncio mais
- *   recente leva o crédito).
- * - Sem utm e nada gravado → guarda o referrer externo (ou vazio = direto).
+ * - URL com utm_* OU com gclid/gbraid/wbraid → sobrescreve (last non-direct
+ *   touch: o anúncio mais recente leva o crédito). Um UTM novo de outra
+ *   campanha zera o gclid antigo junto — senão o crédito ficaria dividido
+ *   entre dois anúncios.
+ * - Clique pago SEM utm (o caso normal do Google Ads, que usa marcação
+ *   automática) vira origem `google` / `cpc`.
+ * - Sem nada disso e nada gravado → guarda o referrer externo (ou vazio =
+ *   direto). Navegação interna e visita direta POSTERIOR não apagam o clique
+ *   já gravado.
  */
 export function capturarOrigem(): void {
   seguro(() => {
     const p = new URLSearchParams(location.search)
-    const utm: Origem = {
-      source: p.get('utm_source'),
-      medium: p.get('utm_medium'),
-      campaign: p.get('utm_campaign'),
-      referrer: null,
-    }
-    if (utm.source || utm.medium || utm.campaign) {
-      localStorage.setItem(K_ORIGEM, JSON.stringify(utm))
+    const gclid = cliquePago(p)
+    const source = p.get('utm_source')
+    const medium = p.get('utm_medium')
+    const campaign = p.get('utm_campaign')
+    const temUtm = Boolean(source || medium || campaign)
+
+    if (temUtm || gclid) {
+      const nova: Origem = {
+        source: source ?? (gclid ? 'google' : null),
+        medium: medium ?? (gclid ? 'cpc' : null),
+        campaign,
+        gclid,
+        referrer: null,
+      }
+      localStorage.setItem(K_ORIGEM, JSON.stringify(nova))
       return
     }
     if (localStorage.getItem(K_ORIGEM)) return
@@ -69,19 +116,51 @@ export function capturarOrigem(): void {
         : null
     localStorage.setItem(
       K_ORIGEM,
-      JSON.stringify({ source: null, medium: null, campaign: null, referrer: refExterno }),
+      JSON.stringify({
+        source: null,
+        medium: null,
+        campaign: null,
+        gclid: null,
+        referrer: refExterno,
+      }),
     )
   }, undefined)
 }
 
 export function origem(): Origem {
-  const vazio: Origem = { source: null, medium: null, campaign: null, referrer: null }
-  return (
-    seguro<Origem | null>(() => {
-      const raw = localStorage.getItem(K_ORIGEM)
-      return raw ? (JSON.parse(raw) as Origem) : null
-    }, null) ?? vazio
-  )
+  const vazio: Origem = {
+    source: null,
+    medium: null,
+    campaign: null,
+    gclid: null,
+    referrer: null,
+  }
+  const lido = seguro<Partial<Origem> | null>(() => {
+    const raw = localStorage.getItem(K_ORIGEM)
+    return raw ? (JSON.parse(raw) as Partial<Origem>) : null
+  }, null)
+  if (!lido) return vazio
+  // Origem gravada ANTES de 26/08 não tem `gclid` — sem o ?? null ela voltaria
+  // undefined e entraria no JSON do POST como campo ausente.
+  return {
+    source: lido.source ?? null,
+    medium: lido.medium ?? null,
+    campaign: lido.campaign ?? null,
+    gclid: lido.gclid ?? null,
+    referrer: lido.referrer ?? null,
+  }
+}
+
+/** Origem no formato do corpo do POST (criar pedido). Nunca lança. */
+export function atribuicao(): Atribuicao {
+  const o = origem()
+  return {
+    gclid: o.gclid,
+    utm_source: o.source,
+    utm_medium: o.medium,
+    utm_campaign: o.campaign,
+    referrer: o.referrer,
+  }
 }
 
 export type TipoEvento = 'pageview' | 'assistente_iniciado' | 'pedido_enviado' | 'whatsapp_click'
@@ -97,6 +176,7 @@ export function track(tipo: TipoEvento, extra?: { pagina?: string; referenciaId?
       utm_source: o.source,
       utm_medium: o.medium,
       utm_campaign: o.campaign,
+      gclid: o.gclid,
       referrer: o.referrer,
       referencia_id: extra?.referenciaId ?? null,
     })
