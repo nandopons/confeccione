@@ -409,6 +409,9 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
     return init;
   });
   const [salvando, setSalvando] = useState(false);
+  // Mensagem de falha ao salvar. Fica visível até a próxima gravação dar certo
+  // — some sozinha era o problema, não a solução.
+  const [erroSalvar, setErroSalvar] = useState<string | null>(null);
   const [iaImgs, setIaImgs] = useState<Record<number, { url: string; prompt?: string }[]>>(() => {
     const m = pedido.mockups || {}; const init: Record<number, { url: string; prompt?: string }[]> = {};
     for (const k of Object.keys(m)) { const v = (m as Record<string, { ia?: { url: string; prompt?: string }[] }>)[k] || {}; if (Array.isArray(v.ia) && v.ia.length) init[Number(k)] = v.ia; }
@@ -461,26 +464,53 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [subindoIdx, setSubindoIdx] = useState<number | null>(null);
   const [produtoChatIdx, setProdutoChatIdx] = useState<number | null>(null);
 
+  // 26/08/2026 — as duas funções abaixo tinham `catch { }` vazio e o indicador
+  // "salvando…" sumia igual no sucesso e no erro. Offline no 4G, 400 ou 500: a
+  // tela continuava mostrando o produto editado e o dado nunca chegava ao
+  // banco; as fotos da peça sumiam no carregamento seguinte. O cliente só
+  // descobria quando o orçamento vinha errado.
   async function salvarMockup(payload: { index?: number; liso?: string | null; arte?: string | null; fotos?: string[] | null; resetAll?: boolean }) {
     try {
-      await fetch(`/api/pedido/assistente/${pedido.id}/mockup`, {
+      const res = await fetch(`/api/pedido/assistente/${pedido.id}/mockup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-    } catch { /* silencioso */ }
+      if (!res.ok) {
+        setErroSalvar("Não conseguimos salvar a imagem da peça. Tente de novo.");
+        return false;
+      }
+      setErroSalvar(null);
+      return true;
+    } catch {
+      setErroSalvar("Sem conexão. A imagem da peça não foi salva.");
+      return false;
+    }
   }
 
   async function persistir(novas: Linha[]) {
     setSalvando(true);
     try {
-      await fetch(`/api/pedido/assistente/${pedido.id}`, {
+      const res = await fetch(`/api/pedido/assistente/${pedido.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ linhas: novas }),
       });
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        setErroSalvar(
+          (j?.error as string | undefined) ??
+            "Não conseguimos salvar sua alteração. Ela ainda está na tela — tente de novo."
+        );
+        return false;
+      }
+      setErroSalvar(null);
+      return true;
     } catch {
-      // silencioso
+      setErroSalvar(
+        "Sem conexão. Sua alteração ainda está na tela, mas não foi salva — tente de novo."
+      );
+      return false;
     } finally {
       setSalvando(false);
     }
@@ -892,6 +922,11 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         <Link href="/cliente/painel" className="text-sm text-gray-500 hover:text-gray-800">← Voltar aos meus pedidos</Link>
         <div className="flex items-center gap-3">
           {salvando && <span className="text-xs text-gray-400">salvando…</span>}
+          {!salvando && erroSalvar && (
+            <span role="alert" className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
+              {erroSalvar}
+            </span>
+          )}
           <a
             href={`/api/pedido/assistente/${pedido.id}/resumo-pdf`}
             target="_blank"

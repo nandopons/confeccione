@@ -7,6 +7,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { recusaPorDono } from '@/app/lib/pedido-acesso'
 import { z } from 'zod'
 import { buscarEnderecoCep } from '@/app/lib/cep'
 
@@ -74,6 +75,12 @@ type Ctx = { params: Promise<{ id: string }> }
 export async function PATCH(req: Request, ctx: Ctx) {
   const { id } = await ctx.params
   if (!id) return NextResponse.json({ error: 'id ausente.' }, { status: 400 })
+
+  // Se houver sessão de cliente, ela passa a valer: logado como A, não mexe
+  // no pedido de B. Anônimo com o link continua passando — é o caminho
+  // principal do produto. Ver app/lib/pedido-acesso.ts.
+  const recusa = await recusaPorDono(id)
+  if (recusa) return NextResponse.json({ error: recusa }, { status: 403 })
 
   let bruto: unknown
   try {
