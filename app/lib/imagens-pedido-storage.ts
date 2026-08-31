@@ -74,6 +74,10 @@ function partesDataUrl(dataUrl: string): { mime: string; bytes: Buffer } | null 
  * Um pedido pesado salvo é melhor que um pedido perdido.
  */
 export async function guardarImagem(valor: string, pedidoId: string): Promise<string> {
+  // O navegador devolve a URL de exibição que nós mesmos geramos; ela vira
+  // referência de novo antes de encostar no banco.
+  const deVolta = urlParaRef(valor, pedidoId)
+  if (deVolta) return deVolta
   if (!ehDataUrl(valor)) return valor
   const p = partesDataUrl(valor)
   if (!p) return valor
@@ -119,4 +123,59 @@ export async function lerImagem(valor: string): Promise<{ bytes: Buffer; mime: s
   const ext = caminho.split('.').pop()?.toLowerCase() ?? ''
   const mimePorExt = Object.entries(EXT_POR_MIME).find(([, e]) => e === ext)?.[0]
   return { bytes, mime: mimePorExt ?? data.type ?? 'application/octet-stream' }
+}
+
+// ============================================================================
+// EXIBIÇÃO NO NAVEGADOR — 31/08/2026
+//
+// O `storage:` acima é ótimo pro banco e péssimo pro <img src>: o navegador
+// não sabe resolver esse esquema. O visualizador do cliente põe a string do
+// mockup direto no src, então logo depois da migração as fotos apareceram
+// quebradas na tela — o dado estava certo, a apresentação é que não era.
+//
+// A tradução acontece na saída (servidor → navegador) e o caminho de volta
+// (navegador → servidor) desfaz. O banco nunca vê uma URL de exibição:
+// `guardarImagem` reconhece a nossa e converte de volta pra referência antes
+// de gravar. Sem isso, o cliente devolveria a URL no próximo save e a linha
+// ficaria apontando pra um endereço em vez do arquivo.
+// ============================================================================
+
+/** Só o nome do arquivo é aceito na URL — sem barra, sem "..", sem subir pasta. */
+const NOME_ARQUIVO = /^[a-f0-9]{32}\.[a-z0-9]{2,5}$/
+
+export function refParaUrl(valor: string, pedidoId: string): string {
+  if (!ehRefStorage(valor)) return valor
+  const arquivo = valor.slice(PREFIXO.length).split('/').pop() ?? ''
+  if (!NOME_ARQUIVO.test(arquivo)) return valor
+  return `/api/pedido/assistente/${pedidoId}/arquivo?f=${arquivo}`
+}
+
+/** Caminho de volta: desfaz refParaUrl. Devolve null se não for uma URL nossa. */
+export function urlParaRef(valor: string, pedidoId: string): string | null {
+  const esperado = `/api/pedido/assistente/${pedidoId}/arquivo?f=`
+  if (typeof valor !== 'string' || !valor.startsWith(esperado)) return null
+  const arquivo = valor.slice(esperado.length)
+  return NOME_ARQUIVO.test(arquivo) ? `${PREFIXO}pedidos/${pedidoId}/${arquivo}` : null
+}
+
+/** Monta o caminho no bucket a partir do nome de arquivo validado. */
+export function caminhoDoArquivo(pedidoId: string, arquivo: string): string | null {
+  return NOME_ARQUIVO.test(arquivo) ? `pedidos/${pedidoId}/${arquivo}` : null
+}
+
+type MapaVisual = Record<string, { liso?: string; arte?: string; fotos?: string[]; ia?: { url: string; prompt?: string }[] }>
+
+/** Traduz o mapa inteiro de mockups pra exibição. Data URIs legados passam batido. */
+export function mockupsParaExibicao<T extends MapaVisual | null | undefined>(mapa: T, pedidoId: string): T {
+  if (!mapa || typeof mapa !== 'object') return mapa
+  const saida: MapaVisual = {}
+  for (const [k, v] of Object.entries(mapa as MapaVisual)) {
+    const novo = { ...v }
+    if (typeof v?.liso === 'string') novo.liso = refParaUrl(v.liso, pedidoId)
+    if (typeof v?.arte === 'string') novo.arte = refParaUrl(v.arte, pedidoId)
+    if (Array.isArray(v?.fotos)) novo.fotos = v.fotos.map((f) => (typeof f === 'string' ? refParaUrl(f, pedidoId) : f))
+    if (Array.isArray(v?.ia)) novo.ia = v.ia.map((it) => (typeof it?.url === 'string' ? { ...it, url: refParaUrl(it.url, pedidoId) } : it))
+    saida[k] = novo
+  }
+  return saida as T
 }
