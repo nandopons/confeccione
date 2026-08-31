@@ -4,6 +4,7 @@
 // Público por uuid. 404 se não houver nada salvo ainda.
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import { lerImagem } from '@/app/lib/imagens-pedido-storage'
 
 export const runtime = 'nodejs'
 
@@ -35,11 +36,11 @@ export async function GET(_req: Request, ctx: Ctx) {
   if (!dataUrl && Array.isArray(data.imagens) && data.imagens[0]) dataUrl = data.imagens[0]
   if (!dataUrl) return NextResponse.json({ erro: 'Sem mockup' }, { status: 404 })
 
-  const m = /^data:([^;,]+);base64,(.+)$/.exec(dataUrl)
-  if (!m) return NextResponse.json({ erro: 'Imagem inválida' }, { status: 500 })
-  const bytes = Buffer.from(m[2], 'base64')
-  return new NextResponse(new Uint8Array(bytes), {
+  // Aceita data URI legado e referência de Storage.
+  const img = await lerImagem(dataUrl)
+  if (!img) return NextResponse.json({ erro: 'Imagem inválida' }, { status: 500 })
+  return new NextResponse(new Uint8Array(img.bytes), {
     status: 200,
-    headers: { 'Content-Type': m[1], 'Cache-Control': 'private, max-age=60' },
+    headers: { 'Content-Type': img.mime, 'Cache-Control': 'private, max-age=60' },
   })
 }

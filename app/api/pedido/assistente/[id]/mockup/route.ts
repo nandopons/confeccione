@@ -7,6 +7,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
+import { guardarImagem, guardarImagens } from '@/app/lib/imagens-pedido-storage'
 
 export const runtime = 'nodejs'
 
@@ -49,11 +50,11 @@ export async function POST(req: Request, ctx: Ctx) {
     const k = String(p.data.index)
     const atual = mapa[k] ?? {}
     const novo: { liso?: string; arte?: string; fotos?: string[]; ia?: { url: string; prompt?: string }[] } = { ...atual }
-    if (p.data.liso !== undefined) { if (p.data.liso === null) delete novo.liso; else novo.liso = p.data.liso }
-    if (p.data.arte !== undefined) { if (p.data.arte === null) delete novo.arte; else novo.arte = p.data.arte }
+    if (p.data.liso !== undefined) { if (p.data.liso === null) delete novo.liso; else novo.liso = await guardarImagem(p.data.liso, id) }
+    if (p.data.arte !== undefined) { if (p.data.arte === null) delete novo.arte; else novo.arte = await guardarImagem(p.data.arte, id) }
     if (p.data.fotos !== undefined) {
       if (!p.data.fotos || p.data.fotos.length === 0) delete novo.fotos
-      else novo.fotos = p.data.fotos
+      else novo.fotos = await guardarImagens(p.data.fotos, id)
       // ao usar o novo modelo de múltiplas fotos, descarta o campo legado liso/arte
       delete novo.liso; delete novo.arte
     }
