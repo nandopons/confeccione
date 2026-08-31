@@ -15,6 +15,7 @@ import { z } from 'zod'
 import { enviarEmailPedidoRecebido } from '@/app/lib/email-pedido'
 import { notificarPedidoRecebido } from '@/app/lib/whatsapp-notify'
 import { primeiroNome } from '@/app/lib/nome'
+import { guardarImagens } from '@/app/lib/imagens-pedido-storage'
 
 export const runtime = 'nodejs'
 
@@ -86,7 +87,8 @@ export async function POST(req: Request, ctx: Ctx) {
     .from('pedidos_assistente')
     .update({
       linhas: p.data.linhas,
-      imagens: p.data.imagens,
+      // Sobe pro bucket antes de gravar: o banco fica só com a referência.
+      imagens: await guardarImagens(p.data.imagens, id),
       status: 'confirmado',
       confirmado_em: pedido.confirmado_em ?? agora,
       atualizado_em: agora,

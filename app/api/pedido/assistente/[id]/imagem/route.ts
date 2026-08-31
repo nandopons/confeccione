@@ -3,6 +3,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { coletarVisuaisPedido, type MapaMockups } from '@/app/lib/pedido-visuais'
+import { lerImagem } from '@/app/lib/imagens-pedido-storage'
 
 export const runtime = 'nodejs'
 
@@ -19,15 +20,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
   const { data } = await supabase.from('pedidos_assistente').select('imagens, mockups').eq('id', id).maybeSingle<{ imagens: unknown[] | null; mockups: MapaMockups | null }>()
   const lista = coletarVisuaisPedido(data?.mockups, data?.imagens)
-  const dataUrl = lista[i]
-  if (!dataUrl) return NextResponse.json({ erro: 'Não encontrado' }, { status: 404 })
+  const ref = lista[i]
+  if (!ref) return NextResponse.json({ erro: 'Não encontrado' }, { status: 404 })
 
-  const m = /^data:([^;,]+);base64,(.+)$/.exec(dataUrl)
-  if (!m) return NextResponse.json({ erro: 'Imagem inválida' }, { status: 500 })
+  // Entende os dois formatos: data URI legado (gravado no banco) e referência
+  // de Storage. Ver app/lib/imagens-pedido-storage.ts.
+  const img = await lerImagem(ref)
+  if (!img) return NextResponse.json({ erro: 'Imagem inválida' }, { status: 500 })
 
-  const bytes = Buffer.from(m[2], 'base64')
-  return new NextResponse(new Uint8Array(bytes), {
+  return new NextResponse(new Uint8Array(img.bytes), {
     status: 200,
-    headers: { 'Content-Type': m[1], 'Cache-Control': 'public, max-age=86400' },
+    headers: { 'Content-Type': img.mime, 'Cache-Control': 'public, max-age=86400' },
   })
 }

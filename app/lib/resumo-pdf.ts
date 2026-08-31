@@ -1,5 +1,6 @@
 // Gera o PDF "Resumo do pedido" com a marca da Confeccione (logo vetorial + site).
 import { PDFDocument, StandardFonts, rgb, PDFName, PDFString, type PDFPage, type PDFFont } from 'pdf-lib'
+import { lerImagem } from '@/app/lib/imagens-pedido-storage'
 
 type MapaMockups = Record<string, { liso?: string; arte?: string; fotos?: string[]; ia?: { url: string; prompt?: string }[] }>
 
@@ -152,11 +153,13 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
     if (opts.gap) y -= opts.gap
   }
 
-  async function embedDataUrl(dataUrl: string) {
-    const m = /^data:([^;,]+);base64,(.+)$/.exec(dataUrl || '')
-    if (!m) return null
-    const mime = m[1].toLowerCase()
-    const bytes = Uint8Array.from(Buffer.from(m[2], 'base64'))
+  // Aceita data URI legado (banco) e referência de Storage — é o único ponto
+  // do PDF que toca nos bytes da imagem.
+  async function embedDataUrl(ref: string) {
+    const img = await lerImagem(ref || '')
+    if (!img) return null
+    const mime = img.mime.toLowerCase()
+    const bytes = Uint8Array.from(img.bytes)
     try {
       if (mime.includes('png')) return await doc.embedPng(bytes)
       if (mime.includes('jpg') || mime.includes('jpeg')) return await doc.embedJpg(bytes)
