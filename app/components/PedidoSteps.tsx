@@ -27,7 +27,7 @@
 // A linha vai daqui com `total: null` de propósito — não é "zero peças", é
 // "ainda não perguntamos". Quem preenche é o chat.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AlinharCliente from "@/app/alinhar/[id]/AlinharCliente";
 import { atribuicao } from "@/app/lib/rastreio";
 
@@ -106,6 +106,29 @@ export default function PedidoSteps() {
   useEffect(() => {
     if (tipo && nichosExtras.some((n) => n.id === tipo)) setShowExtras(true);
   }, [tipo]);
+
+  // AVANÇO AUTOMÁTICO NO PASSO 1 — 31/08/2026.
+  // Escolher a categoria era um clique; sair do passo 1 era outro, no
+  // "Continuar →" lá embaixo. Como o passo só tem essa pergunta, o segundo
+  // clique não decide nada — só cobra do cliente uma viagem até o rodapé
+  // depois de ele já ter respondido. Agora o card leva junto.
+  //
+  // Os ~180ms existem pra ele VER a borda verde antes da tela trocar: sem a
+  // pausa a categoria pisca e a transição parece um clique errado, e não uma
+  // escolha aceita.
+  //
+  // O "Continuar →" continua no rodapé porque quem volta pro passo 1 (pelo
+  // "← Voltar" ou pelos círculos) chega com a categoria já escolhida e
+  // precisa de um caminho pra frente sem ter que trocar de card.
+  const avancoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (avancoRef.current) clearTimeout(avancoRef.current); }, []);
+
+  function escolherNicho(id: string) {
+    setErro(null);
+    setTipo(id);
+    if (avancoRef.current) clearTimeout(avancoRef.current);
+    avancoRef.current = setTimeout(() => setStep(1), 180);
+  }
 
   function avancarParaDetalhes() {
     setErro(null);
@@ -269,7 +292,7 @@ export default function PedidoSteps() {
                 <div className="flex-shrink-0 w-full">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                     {nichosPrincipais.map((n) => (
-                      <button key={n.id} onClick={() => setTipo(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-300 hover:border-[#1D9E75]"}`}>
+                      <button key={n.id} onClick={() => escolherNicho(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-300 hover:border-[#1D9E75]"}`}>
                         <span className="text-2xl shrink-0 sm:mb-2">{n.icon}</span>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-gray-900 leading-tight">{n.title}</div>
@@ -293,7 +316,7 @@ export default function PedidoSteps() {
                   <button type="button" onClick={() => setShowExtras(false)} className="text-xs text-gray-500 hover:text-gray-800 mb-3 inline-flex items-center gap-1">← Voltar</button>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                     {nichosExtras.map((n) => (
-                      <button key={n.id} onClick={() => setTipo(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-300 hover:border-[#1D9E75]"}`}>
+                      <button key={n.id} onClick={() => escolherNicho(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-300 hover:border-[#1D9E75]"}`}>
                         <span className="text-2xl shrink-0 sm:mb-2">{n.icon}</span>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-gray-900 leading-tight">{n.title}</div>
