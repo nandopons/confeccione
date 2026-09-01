@@ -3,11 +3,11 @@
 // com foco nos NÃO concluídos (não pagos), pra revisar conversa + mockups/artes.
 import { supabaseAdmin } from './supabase-server'
 import { lerImagem } from './imagens-pedido-storage'
-import { enviarMensagem } from './zapi'
 import { SITE_URL } from './url'
 import { emailFeedbackMockup } from './email'
 import { registrarContato } from './marketing-contatos'
-import { corpoRetomadaPedido, enviarTemplateRetomadaPedido } from './whatsapp-cloud'
+import { corpoRetomadaPedido } from './whatsapp-cloud'
+import { avisoOficial, notificarRetomadaPedido } from './whatsapp-notify'
 
 type LinhaJson = {
   modelo?: string | null; cor?: string | null; material?: string | null
@@ -136,7 +136,10 @@ export async function imagemMockup(id: string, linha: number, tipo: 'liso' | 'ar
 // ---------------------------------------------------------------------------
 export type AcaoPedidoChat = 'excluir' | 'lembrete' | 'feedback'
 
-export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<{ ok: boolean; erro?: string; whats?: boolean; email?: boolean }> {
+export async function acaoPedidoChat(
+  id: string,
+  acao: AcaoPedidoChat
+): Promise<{ ok: boolean; erro?: string; whats?: boolean; email?: boolean; erroWhats?: string }> {
   const { data: p } = await supabaseAdmin
     .from('pedidos_assistente')
     .select('id, nome, telefone, email')
@@ -153,22 +156,33 @@ export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<
   const link = `${SITE_URL}/visualizador/${id}`
   let whats = false
   let email = false
+  let erroWhats: string | undefined
 
-  // Lembrete = template OFICIAL de retomada (Meta, retomar_pedido_v3): botão
-  // "Continuar meu pedido" leva cada cliente direto ao PRÓPRIO pedido no
-  // visualizador. Feedback segue texto livre com link.
+  // Os dois avisos saem pelo número OFICIAL (Meta Cloud API) e ficam
+  // registrados no inbox: lembrete = template de retomada `retomar_pedido_v3`
+  // (botão "Continuar meu pedido" abre o PRÓPRIO pedido); feedback = texto
+  // rico dentro da janela de 24h, com fallback pro template `pedido_atualizacao`
+  // fora dela.
   const msg =
     acao === 'lembrete'
       ? corpoRetomadaPedido(p.nome, id)
       : `Oi${p.nome ? ' ' + p.nome.split(' ')[0] : ''}! 👀 O mockup ficou como você queria? Dá uma olhada e, se precisar mudar algo (posição da arte, tamanho, cor…), use o botão "Ajustar detalhe" na peça que a gente atualiza na hora:\n${link}`
 
-  if (p.telefone) {
-    try {
-      whats =
-        acao === 'lembrete'
-          ? (await enviarTemplateRetomadaPedido(p.telefone, p.nome, id)).ok
-          : await enviarMensagem(p.telefone, msg)
-    } catch { whats = false }
+  if (!p.telefone) {
+    erroWhats = 'Pedido sem telefone'
+  } else {
+    const r =
+      acao === 'lembrete'
+        ? await notificarRetomadaPedido({ telefone: p.telefone, nome: p.nome, pedidoId: id })
+        : await avisoOficial({
+            telefone: p.telefone,
+            nome: p.nome,
+            texto: msg,
+            resumo: 'Seu mockup está pronto — confira e ajuste o que quiser',
+            caminhoBotao: `visualizador/${id}`,
+          })
+    whats = r.ok
+    erroWhats = r.ok ? undefined : r.erro
     if (whats) {
       try { await registrarContato(id, { tipo: acao, origem: 'manual', mensagem: msg }) } catch { /* histórico não bloqueia */ }
     }
@@ -179,5 +193,5 @@ export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<
       email = true
     } catch { email = false }
   }
-  return { ok: true, whats, email }
+  return { ok: true, whats, email, erroWhats }
 }

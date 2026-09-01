@@ -324,7 +324,14 @@ export default function PedidosPagosAdmin() {
         if (aberto === id) setAberto(null)
         setAviso('Pedido excluído.')
       } else {
-        setAviso(`${ac === 'lembrete' ? 'Lembrete' : 'Pedido de feedback'} enviado` + (j.whats || j.email ? ` (${[j.whats ? 'WhatsApp' : null, j.email ? 'e-mail' : null].filter(Boolean).join(' + ')}).` : ', mas nenhum canal disponível.'))
+        // Sem canal, o operador precisa saber POR QUE — o motivo vem da Meta.
+        const canais = [j.whats ? 'WhatsApp' : null, j.email ? 'e-mail' : null].filter(Boolean)
+        const rotulo = ac === 'lembrete' ? 'Lembrete' : 'Pedido de feedback'
+        setAviso(
+          canais.length > 0
+            ? `${rotulo} enviado (${canais.join(' + ')}). Acompanhe a entrega em WhatsApp.`
+            : `${rotulo} NÃO enviado${j.erroWhats ? `: ${j.erroWhats}` : ' — nenhum canal disponível.'}`
+        )
       }
     } catch (e: any) { setAviso(e.message || 'Erro') }
     finally { setAgindo(null) }

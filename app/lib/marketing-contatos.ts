@@ -25,7 +25,8 @@
 
 import { supabaseAdmin } from './supabase-server'
 import { enviarMensagem } from './zapi'
-import { corpoRetomadaPedido, enviarTemplateRetomadaPedido } from './whatsapp-cloud'
+import { corpoRetomadaPedido } from './whatsapp-cloud'
+import { notificarRetomadaPedido } from './whatsapp-notify'
 import { visualizadorPedidoUrl } from './url'
 import { listarLeadsMarketing, type FaseLead, type LeadMarketing } from './marketing'
 
@@ -193,7 +194,9 @@ export async function executarNutricao(opts?: { forcar?: boolean }): Promise<Res
   for (const l of alvo) {
     let ok = false
     try {
-      ok = (await enviarTemplateRetomadaPedido(l.telefone!, l.nome, l.id)).ok
+      // Mesmo caminho do botão do admin: envia E registra no inbox, pra
+      // nutrição automática também aparecer em /admin/whatsapp com status.
+      ok = (await notificarRetomadaPedido({ telefone: l.telefone!, nome: l.nome, pedidoId: l.id })).ok
     } catch {
       ok = false
     }

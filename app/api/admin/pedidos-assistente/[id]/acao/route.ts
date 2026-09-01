@@ -19,5 +19,5 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!p.success) return NextResponse.json({ erro: 'Ação inválida' }, { status: 400 })
   const r = await acaoPedidoChat(id, p.data.acao)
   if (!r.ok) return NextResponse.json({ erro: r.erro ?? 'Falha' }, { status: 422 })
-  return NextResponse.json({ ok: true, whats: r.whats, email: r.email })
+  return NextResponse.json({ ok: true, whats: r.whats, email: r.email, erroWhats: r.erroWhats })
 }
