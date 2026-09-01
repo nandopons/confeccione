@@ -17,9 +17,15 @@ import {
   enviarMidiaPorId,
   uploadMidia,
   normalizarWaId,
+  corpoRetomadaPedido,
+  enviarTemplateRetomadaPedido,
+  TEMPLATE_RETOMADA_PEDIDO,
   type EnvioResultado,
 } from './whatsapp-cloud'
 import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
+
+/** Envio oficial: `ok` pro fluxo, `erro` pro operador ver o que a Meta disse. */
+export type ResultadoAviso = { ok: boolean; erro?: string }
 
 async function vincularContato(waId: string): Promise<{ clienteId: string | null; fornecedorId: string | null }> {
   const last8 = waId.slice(-8)
@@ -81,6 +87,50 @@ async function garantirConversa(waId: string, nome: string | null): Promise<stri
     return retry?.id ?? null
   }
   return nova.id
+}
+
+/**
+ * Registra uma saída no inbox (/admin/whatsapp), criando contato+conversa se
+ * preciso. Guardar o `wamid` é o próprio motivo deste helper: o webhook de
+ * status procura a mensagem POR wamid pra carimbar entregue/lido/falhou. Sem
+ * esse registro o envio existe só na Meta — some do painel, e ninguém descobre
+ * quando a mensagem é aceita mas recusada na entrega (o caso clássico é o
+ * limite de marketing por usuário, erro 131049).
+ *
+ * Failure-soft: o envio já aconteceu, histórico nunca derruba o fluxo.
+ */
+export async function registrarSaidaInbox(p: {
+  waId: string
+  nome: string | null
+  wamid: string
+  corpo: string
+  /** Default: 'template' quando há templateNome, senão 'text'. */
+  tipo?: string
+  templateNome?: string | null
+  /** Linha curta da lista de conversas. Default: inicio do corpo. */
+  preview?: string
+}): Promise<void> {
+  try {
+    const conversaId = await garantirConversa(p.waId, p.nome)
+    if (!conversaId) return
+    const agora = new Date().toISOString()
+    await supabaseAdmin.from('wa_mensagens').insert({
+      conversa_id: conversaId,
+      wamid: p.wamid,
+      direcao: 'saida',
+      tipo: p.tipo ?? (p.templateNome ? 'template' : 'text'),
+      corpo: p.corpo,
+      status: 'enviando',
+      template_nome: p.templateNome ?? null,
+      criado_em: agora,
+    })
+    await supabaseAdmin
+      .from('wa_conversas')
+      .update({ preview: `Você: ${(p.preview ?? p.corpo).slice(0, 110)}`, ultima_mensagem_em: agora })
+      .eq('id', conversaId)
+  } catch (err) {
+    console.error('[wa-notify] registro no inbox falhou', { err })
+  }
 }
 
 /**
@@ -397,6 +447,10 @@ export async function enviarResumoPdfPedido(params: {
  *    informado (site/{{1}}).
  * Substitui o Z-API nos avisos de aceite, pagamento, orçamento, perguntas etc.
  * Failure-soft. Registra a saída no inbox.
+ *
+ * Devolve o motivo da recusa junto com o `ok` — quem chama por um botão do
+ * admin precisa mostrar ao operador o que a Meta respondeu, em vez de um
+ * silêncio que parece bug.
  */
 export async function avisoOficial(params: {
   telefone: string
@@ -407,10 +461,10 @@ export async function avisoOficial(params: {
   resumo: string
   /** Caminho no site pro botão do template, ex.: `visualizador/<id>`. */
   caminhoBotao: string
-}): Promise<boolean> {
+}): Promise<ResultadoAviso> {
   try {
     const waId = normalizarWaId(params.telefone)
-    if (waId.replace(/\D/g, '').length < 10) return false
+    if (waId.replace(/\D/g, '').length < 10) return { ok: false, erro: 'Telefone inválido' }
 
     const primeiro = (params.nome ?? '').trim().split(/\s+/)[0] || 'cliente'
     let corpoRegistrado = params.texto
@@ -440,35 +494,60 @@ export async function avisoOficial(params: {
     }
     if (!resultado.ok) {
       console.error('[wa-notify] avisoOficial falhou', { erro: resultado.erro })
-      return false
+      return { ok: false, erro: resultado.erro }
     }
 
-    try {
-      const conversaId = await garantirConversa(waId, params.nome)
-      if (conversaId) {
-        const agora = new Date().toISOString()
-        await supabaseAdmin.from('wa_mensagens').insert({
-          conversa_id: conversaId,
-          wamid: resultado.wamid,
-          direcao: 'saida',
-          tipo: templateUsado ? 'template' : 'text',
-          corpo: corpoRegistrado,
-          status: 'enviando',
-          template_nome: templateUsado,
-          criado_em: agora,
-        })
-        await supabaseAdmin
-          .from('wa_conversas')
-          .update({ preview: `Você: ${corpoRegistrado.slice(0, 110)}`, ultima_mensagem_em: agora })
-          .eq('id', conversaId)
-      }
-    } catch (err) {
-      console.error('[wa-notify] registro inbox aviso falhou', { err })
-    }
+    await registrarSaidaInbox({
+      waId,
+      nome: params.nome,
+      wamid: resultado.wamid,
+      corpo: corpoRegistrado,
+      templateNome: templateUsado,
+    })
 
-    return true
+    return { ok: true }
   } catch (err) {
     console.error('[wa-notify] avisoOficial exception', { err })
-    return false
+    return { ok: false, erro: 'Falha inesperada ao enviar' }
+  }
+}
+
+/**
+ * Retomada de pedido pelo número oficial (template MARKETING
+ * `retomar_pedido_v3`, botão direto pro próprio pedido no visualizador).
+ *
+ * Usado pelo botão "Lembrar de continuar" do admin e pela nutrição
+ * automática. Registra no inbox pelo mesmo caminho dos avisos — sem isso o
+ * disparo não aparecia em /admin/whatsapp e o recibo da Meta era descartado,
+ * que era exatamente o sintoma de "não vi envio pelo WhatsApp".
+ */
+export async function notificarRetomadaPedido(params: {
+  telefone: string
+  nome: string | null
+  pedidoId: string
+}): Promise<ResultadoAviso> {
+  try {
+    const waId = normalizarWaId(params.telefone)
+    if (waId.replace(/\D/g, '').length < 10) return { ok: false, erro: 'Telefone inválido' }
+
+    const resultado = await enviarTemplateRetomadaPedido(params.telefone, params.nome, params.pedidoId)
+    if (!resultado.ok) {
+      console.error('[wa-notify] retomada falhou', { erro: resultado.erro })
+      return { ok: false, erro: resultado.erro }
+    }
+
+    await registrarSaidaInbox({
+      waId,
+      nome: params.nome,
+      wamid: resultado.wamid,
+      corpo: corpoRetomadaPedido(params.nome, params.pedidoId),
+      templateNome: TEMPLATE_RETOMADA_PEDIDO,
+      preview: 'Lembrete pra continuar o pedido 🧵',
+    })
+
+    return { ok: true }
+  } catch (err) {
+    console.error('[wa-notify] retomada exception', { err })
+    return { ok: false, erro: 'Falha inesperada ao enviar' }
   }
 }
