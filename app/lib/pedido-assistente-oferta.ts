@@ -87,6 +87,7 @@ export type FornecedorOpcao = {
   estado: string | null
   status: string | null
   tipos_produto: string[] | null
+  pedido_minimo: number | null
 }
 
 // 97% do total (Confeccione fica com 3%).
@@ -227,7 +228,7 @@ export async function listarPedidosPagos(): Promise<{
   // interrompe o disparo automático, não a escolha manual).
   const { data: fornRaw } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto')
+    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pedido_minimo')
     .order('nome', { ascending: true })
 
   return {

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { tipoLabel } from '@/app/lib/ofertas-labels'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 type Estampa = { posicao?: string | null; tamanho?: string | null }
@@ -49,6 +50,7 @@ type Fornecedor = {
   estado: string | null
   status: string | null
   tipos_produto: string[] | null
+  pedido_minimo: number | null
 }
 
 // Detalhe do chat (reusa /api/admin/pedidos-assistente/[id])
@@ -370,6 +372,7 @@ export default function PedidosPagosAdmin() {
           const f = (filtroForn[p.id] || '').toLowerCase()
           const listaForn = fornecedores.filter((x) =>
             !f || (x.nome || '').toLowerCase().includes(f) || (x.cidade || '').toLowerCase().includes(f) || (x.estado || '').toLowerCase().includes(f)
+              || (x.tipos_produto ?? []).some((t) => (tipoLabel[t] ?? t).toLowerCase().includes(f))
           )
           const sel = selecao[p.id] ?? new Set<string>()
           const jaOfertados = new Set(p.ofertas.filter((o) => o.status === 'ofertada' || o.status === 'aceita').map((o) => o.fornecedor_id))
@@ -602,7 +605,7 @@ export default function PedidosPagosAdmin() {
                     <input
                       value={filtroForn[p.id] || ''}
                       onChange={(e) => setFiltroForn((prev) => ({ ...prev, [p.id]: e.target.value }))}
-                      placeholder="filtrar por nome/cidade/UF"
+                      placeholder="filtrar por nome/cidade/UF/tipo"
                       className="text-sm border border-gray-300 rounded px-2 py-1 w-56"
                     />
                   </div>
@@ -617,10 +620,22 @@ export default function PedidosPagosAdmin() {
                             checked={sel.has(x.id)}
                             onChange={() => toggleForn(p.id, x.id)}
                           />
-                          <span className="text-gray-800">{x.nome || x.id.slice(0, 8)}</span>
-                          <span className="text-gray-400">{[x.cidade, x.estado].filter(Boolean).join('/')}</span>
-                          {x.status !== 'ativo' && <span className="text-xs text-amber-600">({x.status})</span>}
-                          {ja && <span className="text-xs text-gray-400 ml-auto">já ofertado</span>}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-gray-800">{x.nome || x.id.slice(0, 8)}</span>
+                              <span className="text-gray-400">{[x.cidade, x.estado].filter(Boolean).join('/')}</span>
+                              {x.status !== 'ativo' && <span className="text-xs text-amber-600">({x.status})</span>}
+                              {x.pedido_minimo != null && x.pedido_minimo > 0 && (
+                                <span className="text-xs text-gray-500">mín. {x.pedido_minimo} pç</span>
+                              )}
+                            </div>
+                            {(x.tipos_produto?.length ?? 0) > 0 && (
+                              <div className="text-xs text-gray-500 truncate">
+                                {(x.tipos_produto ?? []).map((t) => tipoLabel[t] ?? t.replace(/_/g, ' ')).join(' · ')}
+                              </div>
+                            )}
+                          </div>
+                          {ja && <span className="text-xs text-gray-400 shrink-0">já ofertado</span>}
                         </label>
                       )
                     })}
