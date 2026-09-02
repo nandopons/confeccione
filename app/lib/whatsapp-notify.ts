@@ -18,6 +18,9 @@ import {
   uploadMidia,
   normalizarWaId,
   type EnvioResultado,
+  enviarTemplateRetomadaPedido,
+  corpoRetomadaPedido,
+  TEMPLATE_RETOMADA_PEDIDO,
 } from './whatsapp-cloud'
 import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
 
@@ -443,32 +446,78 @@ export async function avisoOficial(params: {
       return false
     }
 
-    try {
-      const conversaId = await garantirConversa(waId, params.nome)
-      if (conversaId) {
-        const agora = new Date().toISOString()
-        await supabaseAdmin.from('wa_mensagens').insert({
-          conversa_id: conversaId,
-          wamid: resultado.wamid,
-          direcao: 'saida',
-          tipo: templateUsado ? 'template' : 'text',
-          corpo: corpoRegistrado,
-          status: 'enviando',
-          template_nome: templateUsado,
-          criado_em: agora,
-        })
-        await supabaseAdmin
-          .from('wa_conversas')
-          .update({ preview: `Você: ${corpoRegistrado.slice(0, 110)}`, ultima_mensagem_em: agora })
-          .eq('id', conversaId)
-      }
-    } catch (err) {
-      console.error('[wa-notify] registro inbox aviso falhou', { err })
-    }
+    await registrarSaidaInbox(waId, params.nome, resultado.wamid, corpoRegistrado, templateUsado)
 
     return true
   } catch (err) {
     console.error('[wa-notify] avisoOficial exception', { err })
+    return false
+  }
+}
+
+/**
+ * Espelha uma mensagem de saída (já enviada pela Cloud API) no inbox
+ * (wa_mensagens + preview da conversa). Failure-soft: erro aqui nunca
+ * desfaz um envio que já aconteceu.
+ */
+async function registrarSaidaInbox(
+  waId: string,
+  nome: string | null,
+  wamid: string | undefined,
+  corpo: string,
+  templateNome: string | null
+): Promise<void> {
+  try {
+    const conversaId = await garantirConversa(waId, nome)
+    if (!conversaId) return
+    const agora = new Date().toISOString()
+    await supabaseAdmin.from('wa_mensagens').insert({
+      conversa_id: conversaId,
+      wamid,
+      direcao: 'saida',
+      tipo: templateNome ? 'template' : 'text',
+      corpo,
+      status: 'enviando',
+      template_nome: templateNome,
+      criado_em: agora,
+    })
+    await supabaseAdmin
+      .from('wa_conversas')
+      .update({ preview: `Você: ${corpo.slice(0, 110)}`, ultima_mensagem_em: agora })
+      .eq('id', conversaId)
+  } catch (err) {
+    console.error('[wa-notify] registro inbox saída falhou', { err })
+  }
+}
+
+/**
+ * Lembrete "continuar meu pedido" pelo número OFICIAL: template de marketing
+ * retomar_pedido_v3 (funciona fora da janela de 24h) + espelho no inbox pra
+ * conversa aparecer no /admin/whatsapp. Failure-soft.
+ */
+export async function lembreteRetomadaOficial(params: {
+  telefone: string
+  nome: string | null
+  pedidoId: string
+}): Promise<boolean> {
+  try {
+    const waId = normalizarWaId(params.telefone)
+    if (waId.replace(/\D/g, '').length < 10) return false
+    const resultado = await enviarTemplateRetomadaPedido(waId, params.nome, params.pedidoId)
+    if (!resultado.ok) {
+      console.error('[wa-notify] lembreteRetomadaOficial falhou', { erro: resultado.erro })
+      return false
+    }
+    await registrarSaidaInbox(
+      waId,
+      params.nome,
+      resultado.wamid,
+      corpoRetomadaPedido(params.nome, params.pedidoId),
+      TEMPLATE_RETOMADA_PEDIDO
+    )
+    return true
+  } catch (err) {
+    console.error('[wa-notify] lembreteRetomadaOficial exception', { err })
     return false
   }
 }

@@ -2,11 +2,11 @@
 // Admin: lista e detalha os pedidos do fluxo de chat (pedidos_assistente),
 // com foco nos NÃO concluídos (não pagos), pra revisar conversa + mockups/artes.
 import { supabaseAdmin } from './supabase-server'
-import { enviarMensagem } from './zapi'
 import { SITE_URL } from './url'
 import { emailFeedbackMockup } from './email'
 import { registrarContato } from './marketing-contatos'
-import { corpoRetomadaPedido, enviarTemplateRetomadaPedido } from './whatsapp-cloud'
+import { corpoRetomadaPedido } from './whatsapp-cloud'
+import { avisoOficial, lembreteRetomadaOficial } from './whatsapp-notify'
 
 type LinhaJson = {
   modelo?: string | null; cor?: string | null; material?: string | null
@@ -153,9 +153,11 @@ export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<
   let whats = false
   let email = false
 
-  // Lembrete = template OFICIAL de retomada (Meta, retomar_pedido_v3): botão
-  // "Continuar meu pedido" leva cada cliente direto ao PRÓPRIO pedido no
-  // visualizador. Feedback segue texto livre com link.
+  // Tudo pelo número OFICIAL (Cloud API) — Z-API morreu.
+  // Lembrete = template de marketing retomar_pedido_v3 (botão "Continuar meu
+  // pedido" leva ao PRÓPRIO pedido). Feedback = texto livre se a janela de
+  // 24h estiver aberta, senão template utility pedido_atualizacao. Os dois
+  // ficam espelhados no inbox do /admin/whatsapp.
   const msg =
     acao === 'lembrete'
       ? corpoRetomadaPedido(p.nome, id)
@@ -165,8 +167,14 @@ export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<
     try {
       whats =
         acao === 'lembrete'
-          ? (await enviarTemplateRetomadaPedido(p.telefone, p.nome, id)).ok
-          : await enviarMensagem(p.telefone, msg)
+          ? await lembreteRetomadaOficial({ telefone: p.telefone, nome: p.nome, pedidoId: id })
+          : await avisoOficial({
+              telefone: p.telefone,
+              nome: p.nome,
+              texto: msg,
+              resumo: 'O mockup ficou como você queria? Veja e ajuste o que precisar',
+              caminhoBotao: `visualizador/${id}`,
+            })
     } catch { whats = false }
     if (whats) {
       try { await registrarContato(id, { tipo: acao, origem: 'manual', mensagem: msg }) } catch { /* histórico não bloqueia */ }
