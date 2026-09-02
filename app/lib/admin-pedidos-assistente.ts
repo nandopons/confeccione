@@ -2,6 +2,7 @@
 // Admin: lista e detalha os pedidos do fluxo de chat (pedidos_assistente),
 // com foco nos NÃO concluídos (não pagos), pra revisar conversa + mockups/artes.
 import { supabaseAdmin } from './supabase-server'
+import { lerImagem } from './imagens-pedido-storage'
 import { SITE_URL } from './url'
 import { emailFeedbackMockup } from './email'
 import { registrarContato } from './marketing-contatos'
@@ -122,11 +123,11 @@ export async function detalharPedidoChat(id: string): Promise<PedidoChatDetalhe 
 export async function imagemMockup(id: string, linha: number, tipo: 'liso' | 'arte'): Promise<{ mime: string; bytes: Buffer } | null> {
   const { data } = await supabaseAdmin.from('pedidos_assistente').select('mockups').eq('id', id).maybeSingle<{ mockups: Record<string, { liso?: string; arte?: string; fotos?: string[] }> | null }>()
   const mk = data?.mockups?.[String(linha)]
-  const dataUrl = mk?.[tipo] ?? mk?.fotos?.[0]
-  if (!dataUrl) return null
-  const m = /^data:([^;,]+);base64,(.+)$/.exec(dataUrl)
-  if (!m) return null
-  return { mime: m[1], bytes: Buffer.from(m[2], 'base64') }
+  const ref = mk?.[tipo] ?? mk?.fotos?.[0]
+  if (!ref) return null
+  // Entende data URI legado e referência de Storage. Sem isso a miniatura do
+  // painel some depois da migração das imagens pro bucket.
+  return lerImagem(ref)
 }
 
 // ---------------------------------------------------------------------------

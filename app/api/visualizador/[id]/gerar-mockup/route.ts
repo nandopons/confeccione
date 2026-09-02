@@ -8,6 +8,8 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { gerarImagem, type ImagemEntrada } from '@/app/lib/mockup-image'
 import { normalizarMockup } from '@/app/lib/imagem-normalizar'
+import { guardarImagem } from '@/app/lib/imagens-pedido-storage'
+import { refParaUrl } from '@/app/lib/imagens-pedido-storage'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -195,7 +197,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const r = await gerarImagem({ prompt, imagens, aspectRatio: '1:1', imageSize: '2K' })
   if (!r.disponivel) return NextResponse.json({ disponivel: false, motivo: r.motivo })
 
-  const url = await normalizarMockup(`data:${r.mime};base64,${r.imagemBase64}`)
+  // Vai pro bucket: o mockup de IA era o maior peso no TOAST do pedido.
+  const url = await guardarImagem(await normalizarMockup(`data:${r.mime};base64,${r.imagemBase64}`), id)
   const novoItem: IAItem = { url, prompt: instr || undefined }
   let iaNova: IAItem[]
   if (ajustando) {
@@ -213,5 +216,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     .eq('id', id)
   if (error) return NextResponse.json({ erro: 'Erro ao salvar o mockup gerado' }, { status: 500 })
 
-  return NextResponse.json({ disponivel: true, ia: iaNova })
+  // Devolve em formato exibível — o navegador não resolve `storage:`.
+  return NextResponse.json({ disponivel: true, ia: iaNova.map((it) => ({ ...it, url: refParaUrl(it.url, id) })) })
 }

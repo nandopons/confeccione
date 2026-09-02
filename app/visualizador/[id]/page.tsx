@@ -7,6 +7,7 @@ import Link from 'next/link'
 import SiteHeader from '@/app/components/SiteHeader'
 import SiteFooter from '@/app/components/SiteFooter'
 import VisualizadorCliente, { type PedidoVis } from './VisualizadorCliente'
+import { mockupsParaExibicao } from '@/app/lib/imagens-pedido-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -108,7 +109,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           </Link>
         </div>
       ) : (
-        <VisualizadorCliente pedido={{ ...(pedido as PedidoVis), fornecedor_nome: fornecedorNome, fornecedor_whatsapp: fornecedorWhatsapp, oferta_id: ofertaId, fornecedor_portfolio: fornecedorPortfolio as PedidoVis['fornecedor_portfolio'], producao_etapa: producaoEtapa, producao_desde: producaoDesde }} />
+        <VisualizadorCliente pedido={{ ...(pedido as PedidoVis), mockups: mockupsParaExibicao((pedido as PedidoVis).mockups, pedido.id), fornecedor_nome: fornecedorNome, fornecedor_whatsapp: fornecedorWhatsapp, oferta_id: ofertaId, fornecedor_portfolio: fornecedorPortfolio as PedidoVis['fornecedor_portfolio'], producao_etapa: producaoEtapa, producao_desde: producaoDesde }} />
       )}
       <SiteFooter />
     </main>
