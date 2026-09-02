@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { linkWhatsApp } from '@/app/lib/phone'
 import { msgFornecedorParaCliente } from '@/app/lib/mensagens-whatsapp'
-import EditorPedidoFornecedor from './EditorPedidoFornecedor'
+import { useEditorLinhas, QuadroLinhaEditavel, VistaLinhaDraft, BarraProntoAjustado } from './EditorPedidoFornecedor'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 type Estampa = { posicao?: string | null; tamanho?: string | null }
@@ -67,6 +67,11 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
   const [erro, setErro] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<number | null>(null)
 
+  // Edição dos produtos pelo fornecedor que assumiu (direto nos quadrinhos;
+  // grava só no "Pronto, ajustado"). Ver EditorPedidoFornecedor.tsx.
+  const editor = useEditorLinhas(oferta.linhas)
+  const podeEditar = status === 'aceita' && !oferta.pago
+
   const localPedido = [oferta.cidade, oferta.uf].filter(Boolean).join('/')
   const destinoFrete = [localPedido, oferta.cep ? `CEP ${oferta.cep}` : ''].filter(Boolean).join(' — ')
 
@@ -126,7 +131,55 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
       )}
 
       {/* Modelos do pedido — visual igual ao da página do cliente */}
-      {oferta.fotosPorLinha ? (
+      {podeEditar ? (
+        <div className="px-6 py-5 border-b border-gray-100">
+          {!oferta.fotosPorLinha && imgs.length > 0 && (
+            <div className="mb-4">
+              <h2 className="text-sm font-semibold text-gray-700 mb-2">Visualizadores do cliente</h2>
+              <div className="flex gap-2 overflow-x-auto">
+                {imgs.map((i) => (
+                  <button key={i} type="button" onClick={() => setLightbox(i)} className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-gray-50" aria-label={`Abrir visualizador ${i + 1}`}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={`/api/pedido/assistente/${oferta.pedidoId}/imagem?i=${i}`} alt="" className="h-full w-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="flex items-baseline justify-between gap-2 mb-3">
+            <h2 className="text-sm font-semibold text-gray-700">Itens do pedido</h2>
+            <span className="text-xs text-gray-400">toque em Editar pra ajustar direto no item</span>
+          </div>
+          <ul className="space-y-3">
+            {editor.itens.map((l, i) => {
+              const fpl = oferta.fotosPorLinha
+              const count = fpl && l.origIdx != null ? fpl[l.origIdx] ?? 0 : 0
+              const offset = fpl && l.origIdx != null ? fpl.slice(0, l.origIdx).reduce((a, b) => a + b, 0) : 0
+              return (
+                <li key={l.lid ?? `n${i}`} className={'rounded-lg border px-4 py-3 ' + (l.alterada ? 'bg-amber-50/40 border-amber-200' : 'bg-gray-50 border-gray-100')}>
+                  {count > 0 && (
+                    <div className="mb-3 flex gap-2 overflow-x-auto">
+                      {Array.from({ length: count }).map((_, j) => {
+                        const gi = offset + j
+                        return (
+                          <button key={j} type="button" onClick={() => setLightbox(gi)} className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-white" aria-label={`Ampliar foto ${j + 1}`}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={`/api/pedido/assistente/${oferta.pedidoId}/imagem?i=${gi}`} alt="" className="h-full w-full object-cover" />
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <QuadroLinhaEditavel editor={editor} i={i}>
+                    <VistaLinhaDraft l={l} />
+                  </QuadroLinhaEditavel>
+                </li>
+              )
+            })}
+          </ul>
+          <BarraProntoAjustado editor={editor} ofertaId={oferta.ofertaId} orcamentoDefinido={oferta.orcamentoStatus === 'definido'} />
+        </div>
+      ) : oferta.fotosPorLinha ? (
         <div className="px-6 py-5 border-b border-gray-100 space-y-6">
           <h2 className="text-sm font-semibold text-gray-700">Pedido do cliente</h2>
           {oferta.linhas.map((l, idx) => {
@@ -324,14 +377,6 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
                   <p className="text-sm text-amber-800">📍 Destino do frete: <strong>{destinoFrete}</strong></p>
                 )}
               </div>
-            )}
-            {!oferta.pago && (
-              <EditorPedidoFornecedor
-                ofertaId={oferta.ofertaId}
-                linhas={oferta.linhas}
-                orcamentoDefinido={oferta.orcamentoStatus === 'definido'}
-                onSalvo={() => window.location.reload()}
-              />
             )}
             {!oferta.pago && oferta.linkOrcamento && (
               <a href={oferta.linkOrcamento} className="mt-4 block w-full text-center bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 rounded-xl">
