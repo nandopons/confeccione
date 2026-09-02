@@ -957,7 +957,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
         {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
       </p>
 
-      {!orcamentoDefinido && (
+      {!orcamentoDefinido && pedido.status !== "cancelado" && (
         <div className="mb-6 flex flex-wrap items-center gap-2">
           <a href={`/alinhar/${pedido.id}`} className="inline-flex items-center gap-1.5 bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">💬 Organizar pedido por chat</a>
           <button type="button" onClick={() => setCatalogoOpen(true)} className="border-2 border-dashed border-gray-300 text-gray-600 hover:border-[#1D9E75] hover:text-[#0F6E56] text-sm font-medium px-4 py-2.5 rounded-xl transition-colors">+ Adicionar produto</button>

@@ -192,7 +192,7 @@ export async function listarPedidosPagos(): Promise<{
 }> {
   const { data: pedidosRaw } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, codigo, criado_em, nome, cep, valor_centavos, pagamento_status, confirmado_em, orcamento_status, status, telefone, email, prazo_dias, linhas')
+    .select('id, codigo, criado_em, atualizado_em, nome, cep, valor_centavos, pagamento_status, confirmado_em, orcamento_status, status, telefone, email, prazo_dias, linhas')
     .order('criado_em', { ascending: false })
 
   const pedidos = (pedidosRaw ?? []) as Omit<PedidoPago, 'ofertas'>[]
@@ -251,10 +251,11 @@ export async function ofertarPedido(
 ): Promise<{ ok: boolean; criadas: number; notificadas: number; erro?: string }> {
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, pagamento_status, confirmado_em, valor_centavos, linhas, cep, imagens, mockups, prazo_dias, uf, categoria')
+    .select('id, status, pagamento_status, confirmado_em, valor_centavos, linhas, cep, imagens, mockups, prazo_dias, uf, categoria')
     .eq('id', pedidoId)
     .maybeSingle<{
       id: string
+      status: string | null
       pagamento_status: string | null
       confirmado_em: string | null
       valor_centavos: number | null
@@ -268,6 +269,7 @@ export async function ofertarPedido(
     }>()
 
   if (!pedido) return { ok: false, criadas: 0, notificadas: 0, erro: 'Pedido não encontrado' }
+  if (pedido.status === 'cancelado') return { ok: false, criadas: 0, notificadas: 0, erro: 'Pedido cancelado pelo cliente — não dá pra ofertar.' }
   const pago = pedido.pagamento_status === 'pago'
   const linhas = Array.isArray(pedido.linhas) ? pedido.linhas : []
   // Oferta manual pelo admin é permitida em qualquer pedido com itens — não

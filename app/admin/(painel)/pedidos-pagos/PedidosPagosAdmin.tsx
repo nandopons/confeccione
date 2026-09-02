@@ -39,6 +39,7 @@ type Pedido = {
   telefone?: string | null
   email?: string | null
   prazo_dias?: number | null
+  atualizado_em?: string | null
   linhas: Linha[]
   ofertas: Oferta[]
 }
@@ -99,7 +100,7 @@ const STATUS_COR: Record<Oferta['status'], string> = {
   cancelada: 'bg-gray-100 text-gray-500',
 }
 
-type FiltroChip = 'todos' | 'ofertar' | 'oferta' | 'aceitos' | 'pagos' | 'finalizados' | 'incompletos'
+type FiltroChip = 'todos' | 'ofertar' | 'oferta' | 'aceitos' | 'pagos' | 'finalizados' | 'incompletos' | 'cancelados'
 const FILTROS: { id: FiltroChip; label: string }[] = [
   { id: 'todos', label: 'Todos' },
   { id: 'ofertar', label: 'Para ofertar' },
@@ -108,6 +109,7 @@ const FILTROS: { id: FiltroChip; label: string }[] = [
   { id: 'pagos', label: 'Pagos' },
   { id: 'finalizados', label: 'Finalizados' },
   { id: 'incompletos', label: 'Incompletos' },
+  { id: 'cancelados', label: 'Cancelados' },
 ]
 
 function casaFiltro(p: Pedido, f: FiltroChip): boolean {
@@ -116,12 +118,13 @@ function casaFiltro(p: Pedido, f: FiltroChip): boolean {
   const pago = p.pagamento_status === 'pago'
   switch (f) {
     case 'todos': return true
-    case 'ofertar': return !p.orcamento_status && !temAceita && !pago
+    case 'ofertar': return !p.orcamento_status && !temAceita && !pago && p.status !== 'cancelado'
     case 'oferta': return temOfertada
     case 'aceitos': return temAceita
     case 'pagos': return pago
     case 'finalizados': return p.finalizado_em != null
-    case 'incompletos': return p.status !== 'completo'
+    case 'incompletos': return p.status !== 'completo' && p.status !== 'cancelado'
+    case 'cancelados': return p.status === 'cancelado'
     default: return true
   }
 }
@@ -410,8 +413,8 @@ export default function PedidosPagosAdmin() {
                   {p.prazo_dias ? <div className="text-sm text-[#0F6E56]">⏱️ Prazo: {p.prazo_dias} dias (a partir do pagamento)</div> : null}
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  <span className={'text-xs px-2 py-1 rounded-full ' + (p.finalizado_em ? 'bg-[#0E1814] text-white' : p.pagamento_status === 'pago' ? 'bg-green-100 text-green-800' : p.orcamento_status === 'definido' ? 'bg-amber-100 text-amber-800' : p.orcamento_status === 'aguardando_fornecedor' ? 'bg-blue-100 text-blue-800' : p.status !== 'completo' ? 'bg-gray-100 text-gray-500' : 'bg-gray-100 text-gray-600')}>
-                    {p.finalizado_em ? '✅ Finalizado' : p.pagamento_status === 'pago' ? 'Pago' : p.orcamento_status === 'definido' ? 'Orçamento enviado' : p.orcamento_status === 'aguardando_fornecedor' ? 'Com fornecedor' : p.status !== 'completo' ? 'Incompleto' : 'Aguardando oferta'}
+                  <span className={'text-xs px-2 py-1 rounded-full ' + (p.status === 'cancelado' ? 'bg-red-100 text-red-800 font-medium' : p.finalizado_em ? 'bg-[#0E1814] text-white' : p.pagamento_status === 'pago' ? 'bg-green-100 text-green-800' : p.orcamento_status === 'definido' ? 'bg-amber-100 text-amber-800' : p.orcamento_status === 'aguardando_fornecedor' ? 'bg-blue-100 text-blue-800' : p.status !== 'completo' ? 'bg-gray-100 text-gray-500' : 'bg-gray-100 text-gray-600')}>
+                    {p.status === 'cancelado' ? 'Cancelado pelo cliente' : p.finalizado_em ? '✅ Finalizado' : p.pagamento_status === 'pago' ? 'Pago' : p.orcamento_status === 'definido' ? 'Orçamento enviado' : p.orcamento_status === 'aguardando_fornecedor' ? 'Com fornecedor' : p.status !== 'completo' ? 'Incompleto' : 'Aguardando oferta'}
                   </span>
                   {aceita && (
                     <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">
@@ -600,8 +603,13 @@ export default function PedidosPagosAdmin() {
                 </div>
               )}
 
-              {/* Seletor de fornecedores */}
-              {!aceita && (
+              {/* Seletor de fornecedores (nunca pra pedido cancelado pelo cliente) */}
+              {p.status === 'cancelado' && (
+                <div className="mt-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+                  Este pedido foi <strong>cancelado pelo cliente</strong>{p.atualizado_em ? ` em ${new Date(p.atualizado_em).toLocaleDateString('pt-BR')}` : ''}. Não dá pra ofertar a fornecedores; se ele quiser retomar, é pelo visualizador.
+                </div>
+              )}
+              {!aceita && p.status !== 'cancelado' && (
                 <div className="mt-3 border-t border-gray-100 pt-3">
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="text-xs font-medium text-gray-500">{temOfertada ? 'Reofertar a fornecedores' : 'Ofertar a fornecedores'}</div>
