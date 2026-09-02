@@ -21,6 +21,12 @@ import {
   enviarTemplateRetomadaPedido,
   corpoRetomadaPedido,
   TEMPLATE_RETOMADA_PEDIDO,
+  enviarBotoes,
+  TEMPLATE_FEEDBACK_NEGOCIACAO,
+  FEEDBACK_NEG_TITULO_OK,
+  FEEDBACK_NEG_TITULO_OUTRO,
+  FEEDBACK_NEG_TITULO_OUTRO_TEMPLATE,
+  payloadFeedbackNeg,
 } from './whatsapp-cloud'
 import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
 
@@ -519,5 +525,89 @@ export async function lembreteRetomadaOficial(params: {
   } catch (err) {
     console.error('[wa-notify] lembreteRetomadaOficial exception', { err })
     return false
+  }
+}
+
+/**
+ * Pergunta ao CLIENTE como está a negociação com o fornecedor que aceitou.
+ * Dentro da janela de 24h: mensagem interativa com 2 botões de resposta.
+ * Fora: template utility feedback_negociacao com os mesmos 2 quick replies.
+ * O clique volta pelo webhook com payload feedback_neg_ok|outro:<pedidoId>.
+ * Espelhado no inbox. Failure-soft.
+ */
+export async function feedbackNegociacaoOficial(params: {
+  telefone: string
+  nome: string | null
+  pedidoId: string
+  fornecedorNome: string | null
+}): Promise<boolean> {
+  try {
+    const waId = normalizarWaId(params.telefone)
+    if (waId.replace(/\D/g, '').length < 10) return false
+
+    const primeiro = (params.nome ?? '').trim().split(/\s+/)[0] || 'cliente'
+    const forn = (params.fornecedorNome ?? '').trim() || 'o fornecedor'
+    const corpo = `Oi, ${primeiro}! Seu pedido na Confeccione está com ${forn}. Como está a conversa com eles — foi bem atendido?`
+    const idOk = payloadFeedbackNeg('ok', params.pedidoId)
+    const idOutro = payloadFeedbackNeg('outro', params.pedidoId)
+
+    let resultado: EnvioResultado = { ok: false, erro: 'Janela de 24h fechada (pré-check) — indo direto pro template' }
+    let templateUsado: string | null = null
+    let corpoRegistrado = `${corpo}\n▸ ${FEEDBACK_NEG_TITULO_OK}  ▸ ${FEEDBACK_NEG_TITULO_OUTRO}`
+    if (await janela24hAberta(waId)) {
+      resultado = await enviarBotoes(waId, corpo, [
+        { id: idOk, titulo: FEEDBACK_NEG_TITULO_OK },
+        { id: idOutro, titulo: FEEDBACK_NEG_TITULO_OUTRO },
+      ])
+    }
+    if (!resultado.ok) {
+      resultado = await enviarTemplate(waId, TEMPLATE_FEEDBACK_NEGOCIACAO, 'pt_BR', [
+        { type: 'body', parameters: [{ type: 'text', text: primeiro }, { type: 'text', text: forn.slice(0, 60) }] },
+        { type: 'button', sub_type: 'quick_reply', index: 0, parameters: [{ type: 'payload', payload: idOk }] },
+        { type: 'button', sub_type: 'quick_reply', index: 1, parameters: [{ type: 'payload', payload: idOutro }] },
+      ])
+      templateUsado = TEMPLATE_FEEDBACK_NEGOCIACAO
+      corpoRegistrado = `${corpo}\n▸ ${FEEDBACK_NEG_TITULO_OK}  ▸ ${FEEDBACK_NEG_TITULO_OUTRO_TEMPLATE}`
+    }
+    if (!resultado.ok) {
+      console.error('[wa-notify] feedbackNegociacaoOficial falhou', { erro: resultado.erro })
+      return false
+    }
+    await registrarSaidaInbox(waId, params.nome, resultado.wamid, corpoRegistrado, templateUsado)
+    return true
+  } catch (err) {
+    console.error('[wa-notify] feedbackNegociacaoOficial exception', { err })
+    return false
+  }
+}
+
+/**
+ * Resposta do cliente ao feedback da negociação (chamado pelo webhook).
+ * "outro" → reabre o pedido (cancela a oferta aceita, limpa orçamento) e
+ * avisa o cliente; "ok" → só agradece. Texto livre: o clique reabriu a
+ * janela de 24h. Failure-soft.
+ */
+export async function responderFeedbackNegociacao(params: {
+  waId: string
+  nome: string | null
+  acao: 'ok' | 'outro'
+  pedidoId: string
+}): Promise<void> {
+  try {
+    let texto: string
+    if (params.acao === 'outro') {
+      const { reabrirPedido } = await import('./pedido-assistente-oferta')
+      const r = await reabrirPedido(params.pedidoId)
+      texto = r.ok
+        ? 'Entendido. Vamos buscar outro fornecedor pro seu pedido e te avisamos por aqui assim que tiver novidade.'
+        : 'Entendido. Nossa equipe vai olhar seu pedido e te retorna por aqui em breve.'
+      if (!r.ok) console.error('[wa-notify] reabrirPedido via feedback falhou', { pedidoId: params.pedidoId, erro: r.erro })
+    } else {
+      texto = 'Que bom! Qualquer coisa, é só chamar por aqui.'
+    }
+    const resultado = await enviarTexto(params.waId, texto)
+    if (resultado.ok) await registrarSaidaInbox(params.waId, params.nome, resultado.wamid, texto, null)
+  } catch (err) {
+    console.error('[wa-notify] responderFeedbackNegociacao exception', { err })
   }
 }

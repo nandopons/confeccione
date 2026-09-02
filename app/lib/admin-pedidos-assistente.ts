@@ -7,7 +7,7 @@ import { SITE_URL } from './url'
 import { emailFeedbackMockup } from './email'
 import { registrarContato } from './marketing-contatos'
 import { corpoRetomadaPedido } from './whatsapp-cloud'
-import { avisoOficial, lembreteRetomadaOficial } from './whatsapp-notify'
+import { avisoOficial, lembreteRetomadaOficial, feedbackNegociacaoOficial } from './whatsapp-notify'
 
 type LinhaJson = {
   modelo?: string | null; cor?: string | null; material?: string | null
@@ -134,7 +134,7 @@ export async function imagemMockup(id: string, linha: number, tipo: 'liso' | 'ar
 // Ações do admin sobre um pedido do chat: excluir, lembrete, pedir feedback.
 // Todo envio bem-sucedido fica registrado em contatos_marketing (histórico).
 // ---------------------------------------------------------------------------
-export type AcaoPedidoChat = 'excluir' | 'lembrete' | 'feedback'
+export type AcaoPedidoChat = 'excluir' | 'lembrete' | 'feedback' | 'feedback_negociacao'
 
 export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<{ ok: boolean; erro?: string; whats?: boolean; email?: boolean }> {
   const { data: p } = await supabaseAdmin
@@ -153,6 +153,30 @@ export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<
   const link = `${SITE_URL}/visualizador/${id}`
   let whats = false
   let email = false
+
+  // Feedback da negociação: só faz sentido com fornecedor aceito. Pergunta ao
+  // cliente se está sendo bem atendido, com botões "Sim, tudo bem" / "Quero
+  // outro fornecedor" (o segundo reabre o pedido via webhook).
+  if (acao === 'feedback_negociacao') {
+    if (!p.telefone) return { ok: false, erro: 'Pedido sem telefone do cliente' }
+    const { data: aceita } = await supabaseAdmin
+      .from('ofertas')
+      .select('id, leads_fornecedores(nome)')
+      .eq('pedido_id', id)
+      .eq('status', 'aceita')
+      .maybeSingle<{ id: string; leads_fornecedores: { nome: string | null } | null }>()
+    if (!aceita) return { ok: false, erro: 'Nenhum fornecedor aceitou este pedido ainda' }
+    whats = await feedbackNegociacaoOficial({
+      telefone: p.telefone,
+      nome: p.nome,
+      pedidoId: id,
+      fornecedorNome: aceita.leads_fornecedores?.nome ?? null,
+    })
+    if (whats) {
+      try { await registrarContato(id, { tipo: 'feedback', origem: 'manual', mensagem: 'Feedback da negociação com o fornecedor (botões Sim / Quero outro fornecedor)' }) } catch { /* histórico não bloqueia */ }
+    }
+    return { ok: true, whats, email }
+  }
 
   // Tudo pelo número OFICIAL (Cloud API) — Z-API morreu.
   // Lembrete = template de marketing retomar_pedido_v3 (botão "Continuar meu

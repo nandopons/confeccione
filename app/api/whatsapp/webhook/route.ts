@@ -21,7 +21,8 @@
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
-import { baixarMidia } from '@/app/lib/whatsapp-cloud'
+import { baixarMidia, lerPayloadFeedbackNeg } from '@/app/lib/whatsapp-cloud'
+import { responderFeedbackNegociacao } from '@/app/lib/whatsapp-notify'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -59,8 +60,8 @@ type MetaMensagem = {
   location?: { latitude: number; longitude: number; name?: string; address?: string }
   contacts?: unknown[]
   reaction?: { message_id: string; emoji?: string }
-  button?: { text?: string }
-  interactive?: { button_reply?: { title?: string }; list_reply?: { title?: string } }
+  button?: { text?: string; payload?: string }
+  interactive?: { button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string } }
 }
 
 type MetaStatus = {
@@ -320,6 +321,13 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
       arquivada: false,
     })
     .eq('id', conversaId)
+
+  // Clique nos botões do feedback da negociação (template quick_reply ou
+  // interativo): payload feedback_neg_ok|outro:<pedidoId>.
+  const feedback = lerPayloadFeedbackNeg(msg.button?.payload ?? msg.interactive?.button_reply?.id)
+  if (feedback) {
+    await responderFeedbackNegociacao({ waId, nome: nomePerfil ?? null, acao: feedback.acao, pedidoId: feedback.pedidoId })
+  }
 }
 
 async function processarStatus(st: MetaStatus): Promise<void> {

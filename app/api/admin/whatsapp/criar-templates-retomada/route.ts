@@ -30,6 +30,30 @@ const EXEMPLO_VISUALIZADOR =
   'https://www.confeccione.com.br/visualizador/a1591a0f-007e-4e0d-a299-582138cc9bad'
 
 const TEMPLATES = [
+  // Feedback da negociação (utility) — depois que um fornecedor aceita, o
+  // admin pergunta ao CLIENTE se está sendo bem atendido. Dois quick replies;
+  // o payload volta pelo webhook e "Quero outro fornecedor" reabre o pedido.
+  {
+    name: 'feedback_negociacao',
+    language: 'pt_BR',
+    category: 'UTILITY',
+    allow_category_change: false,
+    components: [
+      {
+        type: 'BODY',
+        text: 'Oi, {{1}}! Seu pedido na Confeccione está com {{2}}. Como está a conversa com eles — foi bem atendido?',
+        example: { body_text: [['Ana', 'Malharia Recife']] },
+      },
+      { type: 'FOOTER', text: 'Confeccione · confeccione.com.br' },
+      {
+        type: 'BUTTONS',
+        buttons: [
+          { type: 'QUICK_REPLY', text: 'Sim, tudo bem' },
+          { type: 'QUICK_REPLY', text: 'Quero outro fornecedor' },
+        ],
+      },
+    ],
+  },
   // Atualização genérica de pedido (utility) — fallback oficial pra QUALQUER
   // aviso transacional fora da janela de 24h. O sufixo do botão é o caminho
   // completo no site (visualizador/…, fornecedor/oferta/…, fornecedor/painel).

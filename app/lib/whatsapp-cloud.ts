@@ -229,6 +229,34 @@ export async function enviarTemplateRetomadaPedido(
 // body e no botão (exigência do formato de autenticação).
 // ─────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────
+// Feedback da negociação (cliente ↔ fornecedor aceito)
+// Template feedback_negociacao (utility) com 2 quick replies. O clique volta
+// pelo webhook como `button.payload` (template) ou `interactive.button_reply.id`
+// (mensagem interativa dentro da janela de 24h) — mesmo id nos dois casos.
+// ──────────────────────────────────────────────────────────
+
+export const TEMPLATE_FEEDBACK_NEGOCIACAO = 'feedback_negociacao'
+export const FEEDBACK_NEG_OK = 'feedback_neg_ok'
+export const FEEDBACK_NEG_OUTRO = 'feedback_neg_outro'
+export const FEEDBACK_NEG_TITULO_OK = 'Sim, tudo bem'
+/** Título do botão interativo (limite 20 chars); o template usa a frase completa. */
+export const FEEDBACK_NEG_TITULO_OUTRO = 'Outro fornecedor'
+export const FEEDBACK_NEG_TITULO_OUTRO_TEMPLATE = 'Quero outro fornecedor'
+
+/** `feedback_neg_ok:<pedidoId>` — id dos botões, com o pedido embutido. */
+export function payloadFeedbackNeg(acao: 'ok' | 'outro', pedidoId: string): string {
+  return `${acao === 'ok' ? FEEDBACK_NEG_OK : FEEDBACK_NEG_OUTRO}:${pedidoId}`
+}
+
+/** Inverso de payloadFeedbackNeg. null se o id não for de feedback. */
+export function lerPayloadFeedbackNeg(id: string | null | undefined): { acao: 'ok' | 'outro'; pedidoId: string } | null {
+  if (!id) return null
+  const m = /^(feedback_neg_ok|feedback_neg_outro):([0-9a-f-]{36})$/i.exec(id.trim())
+  if (!m) return null
+  return { acao: m[1] === FEEDBACK_NEG_OK ? 'ok' : 'outro', pedidoId: m[2] }
+}
+
 export const TEMPLATE_CODIGO_ACESSO = 'codigo_acesso'
 
 export async function enviarCodigoAcesso(telefone: string, codigo: string): Promise<EnvioResultado> {

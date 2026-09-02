@@ -1,4 +1,4 @@
-// POST /api/admin/pedidos-assistente/[id]/acao { acao: excluir|lembrete|feedback }
+// POST /api/admin/pedidos-assistente/[id]/acao { acao: excluir|lembrete|feedback|feedback_negociacao }
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
@@ -6,7 +6,7 @@ import { acaoPedidoChat } from '@/app/lib/admin-pedidos-assistente'
 
 export const runtime = 'nodejs'
 type Ctx = { params: Promise<{ id: string }> }
-const BodySchema = z.object({ acao: z.enum(['excluir', 'lembrete', 'feedback']) })
+const BodySchema = z.object({ acao: z.enum(['excluir', 'lembrete', 'feedback', 'feedback_negociacao']) })
 
 export async function POST(req: NextRequest, ctx: Ctx) {
   if (!ehTokenAdminValido(req.cookies.get(COOKIE_ADMIN)?.value)) {

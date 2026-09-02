@@ -312,7 +312,7 @@ export default function PedidosPagosAdmin() {
     } finally { setSalvandoEntrega(false) }
   }
 
-  async function acao(id: string, ac: 'excluir' | 'lembrete' | 'feedback') {
+  async function acao(id: string, ac: 'excluir' | 'lembrete' | 'feedback' | 'feedback_negociacao') {
     if (ac === 'excluir' && !confirm('Excluir este pedido? Não dá pra desfazer.')) return
     setAgindo(id + ac); setAviso(null)
     try {
@@ -326,7 +326,7 @@ export default function PedidosPagosAdmin() {
         if (aberto === id) setAberto(null)
         setAviso('Pedido excluído.')
       } else {
-        setAviso(`${ac === 'lembrete' ? 'Lembrete' : 'Pedido de feedback'} enviado` + (j.whats || j.email ? ` (${[j.whats ? 'WhatsApp' : null, j.email ? 'e-mail' : null].filter(Boolean).join(' + ')}).` : ', mas nenhum canal disponível.'))
+        setAviso(`${ac === 'lembrete' ? 'Lembrete' : ac === 'feedback_negociacao' ? 'Pergunta sobre a negociação' : 'Pedido de feedback'} enviado` + (j.whats || j.email ? ` (${[j.whats ? 'WhatsApp' : null, j.email ? 'e-mail' : null].filter(Boolean).join(' + ')}).` : ', mas nenhum canal disponível.'))
       }
     } catch (e: any) { setAviso(e.message || 'Erro') }
     finally { setAgindo(null) }
@@ -563,6 +563,9 @@ export default function PedidosPagosAdmin() {
                         <a href={`/visualizador/${p.id}`} target="_blank" rel="noopener noreferrer" className="text-sm text-[#0F6E56] underline mr-auto">Abrir visualizador do cliente ↗</a>
                         <button type="button" onClick={() => acao(p.id, 'lembrete')} disabled={agindo === p.id + 'lembrete'} className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50">{agindo === p.id + 'lembrete' ? '…' : 'Lembrar de continuar'}</button>
                         <button type="button" onClick={() => acao(p.id, 'feedback')} disabled={agindo === p.id + 'feedback'} className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50">{agindo === p.id + 'feedback' ? '…' : 'Pedir feedback do mockup'}</button>
+                        {aceita && (
+                          <button type="button" onClick={() => acao(p.id, 'feedback_negociacao')} disabled={agindo === p.id + 'feedback_negociacao'} title="Pergunta ao cliente se está sendo bem atendido pelo fornecedor, com botões Sim / Quero outro fornecedor" className="text-sm px-3 py-1.5 rounded-lg border border-[#0F6E56]/30 text-[#0F6E56] hover:bg-[#0F6E56]/5 disabled:opacity-50">{agindo === p.id + 'feedback_negociacao' ? '…' : 'Como está a negociação?'}</button>
+                        )}
                         <button type="button" onClick={() => acao(p.id, 'excluir')} disabled={agindo === p.id + 'excluir'} className="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">Excluir</button>
                       </div>
                     </>
