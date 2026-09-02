@@ -7,6 +7,7 @@ import Link from 'next/link'
 import SiteHeader from '@/app/components/SiteHeader'
 import SiteFooter from '@/app/components/SiteFooter'
 import VisualizadorCliente, { type PedidoVis } from './VisualizadorCliente'
+import { ultimaEdicaoFornecedor } from '@/app/lib/pedido-linhas-edicao'
 import { mockupsParaExibicao } from '@/app/lib/imagens-pedido-storage'
 
 export const runtime = 'nodejs'
@@ -83,6 +84,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // Etapa de fabrica, quando o pedido ja esta em producao. Sem join: se nao ha
   // linha em producao_pedido, e porque o pedido ainda nao foi pago — e ai nao
   // existe producao pra mostrar.
+  // Última edição feita pelo FORNECEDOR nos produtos (selo "ajustado pelo
+  // fornecedor" no card). Só enquanto não pago — depois a produção já rodou.
+  let edicaoFornecedor: PedidoVis['edicao_fornecedor'] = null
+  if (pedido && ofertaId && pedido.pagamento_status !== 'pago') {
+    const e = await ultimaEdicaoFornecedor(pedido.id)
+    if (e) edicaoFornecedor = { em: e.em, resumo: e.resumo, lids: e.lids }
+  }
+
   let producaoEtapa: string | null = null
   let producaoDesde: string | null = null
   if (pedido) {
@@ -109,7 +118,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           </Link>
         </div>
       ) : (
-        <VisualizadorCliente pedido={{ ...(pedido as PedidoVis), mockups: mockupsParaExibicao((pedido as PedidoVis).mockups, pedido.id), fornecedor_nome: fornecedorNome, fornecedor_whatsapp: fornecedorWhatsapp, oferta_id: ofertaId, fornecedor_portfolio: fornecedorPortfolio as PedidoVis['fornecedor_portfolio'], producao_etapa: producaoEtapa, producao_desde: producaoDesde }} />
+        <VisualizadorCliente pedido={{ ...(pedido as PedidoVis), mockups: mockupsParaExibicao((pedido as PedidoVis).mockups, pedido.id), fornecedor_nome: fornecedorNome, fornecedor_whatsapp: fornecedorWhatsapp, oferta_id: ofertaId, fornecedor_portfolio: fornecedorPortfolio as PedidoVis['fornecedor_portfolio'], producao_etapa: producaoEtapa, producao_desde: producaoDesde, edicao_fornecedor: edicaoFornecedor }} />
       )}
       <SiteFooter />
     </main>

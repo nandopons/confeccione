@@ -160,7 +160,7 @@ export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<
   if (acao === 'feedback_negociacao') {
     if (!p.telefone) return { ok: false, erro: 'Pedido sem telefone do cliente' }
     const { data: aceita } = await supabaseAdmin
-      .from('ofertas')
+      .from('ofertas_pedido_assistente')
       .select('id, leads_fornecedores(nome)')
       .eq('pedido_id', id)
       .eq('status', 'aceita')

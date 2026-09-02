@@ -21,8 +21,8 @@
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
-import { baixarMidia, lerPayloadFeedbackNeg } from '@/app/lib/whatsapp-cloud'
-import { responderFeedbackNegociacao } from '@/app/lib/whatsapp-notify'
+import { baixarMidia, lerPayloadFeedbackNeg, QUICK_REPLY_ATENDENTE } from '@/app/lib/whatsapp-cloud'
+import { responderFeedbackNegociacao, responderPedidoAtendente } from '@/app/lib/whatsapp-notify'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -327,6 +327,11 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
   const feedback = lerPayloadFeedbackNeg(msg.button?.payload ?? msg.interactive?.button_reply?.id)
   if (feedback) {
     await responderFeedbackNegociacao({ waId, nome: nomePerfil ?? null, acao: feedback.acao, pedidoId: feedback.pedidoId })
+  }
+  // "Falar com atendente" (quick reply dos lembretes): confirma que alguém responde.
+  const tituloBotao = (msg.button?.text ?? msg.interactive?.button_reply?.title ?? '').trim().toLowerCase()
+  if (tituloBotao === QUICK_REPLY_ATENDENTE.toLowerCase()) {
+    await responderPedidoAtendente(waId, nomePerfil ?? null)
   }
 }
 

@@ -30,6 +30,30 @@ const EXEMPLO_VISUALIZADOR =
   'https://www.confeccione.com.br/visualizador/a1591a0f-007e-4e0d-a299-582138cc9bad'
 
 const TEMPLATES = [
+  // Confirmar pedido (marketing) — lembrete pro cliente que parou no caminho.
+  // Copy curta e pessoal, sem emoji, sem link no texto: botão URL "Concluir
+  // pedido" (visualizador/{{1}}) + quick reply "Falar com atendente". Substitui
+  // retomar_pedido_v3 quando aprovado: basta WHATSAPP_TEMPLATE_RETOMADA=
+  // confirmar_pedido_v1 no env (ver whatsapp-cloud.ts), sem deploy.
+  {
+    name: 'confirmar_pedido_v1',
+    language: 'pt_BR',
+    category: 'MARKETING',
+    components: [
+      {
+        type: 'BODY',
+        text: 'Oi, {{1}}. Seu pedido na Confeccione ficou salvo, do jeito que você montou. Gostaria de confirmar seu pedido?',
+        example: { body_text: [['Ana']] },
+      },
+      {
+        type: 'BUTTONS',
+        buttons: [
+          { type: 'URL', text: 'Concluir pedido', url: URL_VISUALIZADOR_DINAMICA, example: [EXEMPLO_VISUALIZADOR] },
+          { type: 'QUICK_REPLY', text: 'Falar com atendente' },
+        ],
+      },
+    ],
+  },
   // Feedback da negociação (utility) — depois que um fornecedor aceita, o
   // admin pergunta ao CLIENTE se está sendo bem atendido. Dois quick replies;
   // o payload volta pelo webhook e "Quero outro fornecedor" reabre o pedido.

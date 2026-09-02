@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { linkWhatsApp } from '@/app/lib/phone'
 import { msgFornecedorParaCliente } from '@/app/lib/mensagens-whatsapp'
+import EditorPedidoFornecedor from './EditorPedidoFornecedor'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 type Estampa = { posicao?: string | null; tamanho?: string | null }
@@ -323,6 +324,14 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
                   <p className="text-sm text-amber-800">📍 Destino do frete: <strong>{destinoFrete}</strong></p>
                 )}
               </div>
+            )}
+            {!oferta.pago && (
+              <EditorPedidoFornecedor
+                ofertaId={oferta.ofertaId}
+                linhas={oferta.linhas}
+                orcamentoDefinido={oferta.orcamentoStatus === 'definido'}
+                onSalvo={() => window.location.reload()}
+              />
             )}
             {!oferta.pago && oferta.linkOrcamento && (
               <a href={oferta.linkOrcamento} className="mt-4 block w-full text-center bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 rounded-xl">

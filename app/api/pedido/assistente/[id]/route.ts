@@ -10,6 +10,9 @@ import { NextResponse } from 'next/server'
 import { recusaPorDono } from '@/app/lib/pedido-acesso'
 import { z } from 'zod'
 import { buscarEnderecoCep } from '@/app/lib/cep'
+import { registrarEdicaoCliente } from '@/app/lib/pedido-linhas-edicao'
+import type { LinhaPedido } from '@/app/lib/pedido-assistente-oferta'
+import { randomUUID } from 'crypto'
 
 export const runtime = 'nodejs'
 
@@ -94,8 +97,14 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
 
   const patch: Record<string, unknown> = { atualizado_em: new Date().toISOString() }
+  // Linhas ANTES da edição: pro histórico e pro aviso ao fornecedor (se houver
+  // oferta aceita). Ver app/lib/pedido-linhas-edicao.ts.
+  let linhasAntes: Record<string, unknown>[] | null = null
   if (parsed.data.linhas) {
-    const linhasValidas = parsed.data.linhas.filter((l) => l.modelo || l.cor || l.total || l.tamanhos.length > 0)
+    // lid estável em toda linha — é por ele que fornecedor/cliente casam versões.
+    const linhasValidas = parsed.data.linhas
+      .filter((l) => l.modelo || l.cor || l.total || l.tamanhos.length > 0)
+      .map((l) => ({ ...l, lid: l.lid || randomUUID() }))
     if (linhasValidas.length === 0) {
       return NextResponse.json({ error: 'O pedido precisa ter pelo menos um produto.' }, { status: 400 })
     }
@@ -103,7 +112,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
     // Guard anti-embaralhamento: ao mudar as linhas, remove mockups órfãos
     // (chaves cujo índice >= nº de linhas) pra imagem nunca aparecer no produto errado.
     try {
-      const { data: atual } = await supabase.from('pedidos_assistente').select('mockups').eq('id', id).single()
+      const { data: atual } = await supabase.from('pedidos_assistente').select('mockups, linhas').eq('id', id).single()
+      linhasAntes = Array.isArray(atual?.linhas) ? (atual!.linhas as Record<string, unknown>[]) : []
       const mk = (atual?.mockups ?? null) as Record<string, unknown> | null
       if (mk && typeof mk === 'object') {
         const limpo: Record<string, unknown> = {}
@@ -147,6 +157,11 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (error || !data) {
     console.error('[pedido/assistente PATCH] falhou:', error)
     return NextResponse.json({ error: error?.message ?? 'Erro ao atualizar.' }, { status: 500 })
+  }
+  if (linhasAntes && Array.isArray(data.linhas)) {
+    // Histórico + aviso ao fornecedor que aceitou. Failure-soft (nunca derruba
+    // o PATCH), mas com await: em serverless, trabalho depois do return morre.
+    await registrarEdicaoCliente(id, linhasAntes as unknown as LinhaPedido[], data.linhas as unknown as LinhaPedido[])
   }
   return NextResponse.json({ ok: true, pedido: data })
 }

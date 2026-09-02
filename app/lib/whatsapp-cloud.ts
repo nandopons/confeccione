@@ -184,7 +184,12 @@ export async function enviarTemplate(
 // /api/admin/whatsapp/criar-templates-retomada.
 // ─────────────────────────────────────────────────────────────
 
-export const TEMPLATE_RETOMADA_PEDIDO = 'retomar_pedido_v3'
+// Cutover sem deploy: quando confirmar_pedido_v1 for aprovado pela Meta, defina
+// WHATSAPP_TEMPLATE_RETOMADA=confirmar_pedido_v1 na Vercel. Os dois templates
+// têm a mesma forma (body {{1}} = nome, botão URL índice 0 = visualizador/{{1}}).
+export const TEMPLATE_RETOMADA_PEDIDO = process.env.WHATSAPP_TEMPLATE_RETOMADA || 'retomar_pedido_v3'
+export const TEMPLATE_CONFIRMAR_PEDIDO = 'confirmar_pedido_v1'
+export const QUICK_REPLY_ATENDENTE = 'Falar com atendente'
 
 /** Sufixo que a Meta cola na URL base do botão (id do pedido + UTMs). */
 export function sufixoVisualizadorPedido(pedidoId: string): string {
@@ -194,6 +199,13 @@ export function sufixoVisualizadorPedido(pedidoId: string): string {
 /** Corpo renderizado do template — pro histórico (contatos_marketing/inbox). */
 export function corpoRetomadaPedido(nome: string | null, pedidoId: string): string {
   const primeiro = (nome ?? '').trim().split(/\s+/)[0] || 'cliente'
+  if (TEMPLATE_RETOMADA_PEDIDO === TEMPLATE_CONFIRMAR_PEDIDO) {
+    return (
+      `Oi, ${primeiro}. Seu pedido na Confeccione ficou salvo, do jeito que você montou. Gostaria de confirmar seu pedido?\n` +
+      `▸ Concluir pedido → ${visualizadorPedidoUrl(pedidoId)}\n` +
+      `▸ ${QUICK_REPLY_ATENDENTE}`
+    )
+  }
   return (
     `Oi, ${primeiro}! 👋 Vi que você começou um pedido aqui na Confeccione e ele ficou salvo no meio do caminho. ` +
     `Toca no botão pra abrir o seu pedido e continuar de onde parou — leva menos de 2 minutos. 🧵\n` +

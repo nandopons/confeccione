@@ -73,6 +73,8 @@ export type PedidoVis = {
   pagamento_status?: string | null;
   fornecedor_nome?: string | null;
   fornecedor_whatsapp?: string | null;
+  /** Última edição dos produtos feita pelo fornecedor (selo no card). */
+  edicao_fornecedor?: { em: string; resumo: string | null; lids: string[] } | null;
   codigo?: string | null;
   oferta_id?: string | null;
   fornecedor_portfolio?: PortfolioMidiaVis[];
@@ -944,6 +946,13 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       {pedido.status === "cancelado" && (
         <div className="mt-3 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">Este pedido foi cancelado.</div>
       )}
+      {pedido.edicao_fornecedor && !pago && (
+        <div className="mt-3 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-900">
+          <p className="font-medium">✏️ {pedido.fornecedor_nome || "O fornecedor"} ajustou os produtos em {new Date(pedido.edicao_fornecedor.em).toLocaleDateString("pt-BR")}.</p>
+          {pedido.edicao_fornecedor.resumo && <pre className="mt-1 whitespace-pre-wrap font-sans text-xs text-amber-800">{pedido.edicao_fornecedor.resumo}</pre>}
+          <p className="mt-1 text-xs text-amber-800">Confira os itens marcados abaixo. Se não concordar, fale com o fornecedor ou com a gente.</p>
+        </div>
+      )}
       <p className="text-gray-500 text-sm mt-1 mb-6">
         {totalPecas > 0 && <span className="text-gray-700 font-medium">{totalPecas} peças no total.</span>}
       </p>
@@ -999,7 +1008,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                       {l.categoria && <p className="text-sm"><span className="text-gray-500">Categoria:</span> <span className="text-gray-800">{l.categoria}</span></p>}
                     </div>
                   </div>
-                  {l.total ? <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full shrink-0">{l.total} un.</span> : null}
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    {l.total ? <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">{l.total} un.</span> : null}
+                    {!pago && l.lid && pedido.edicao_fornecedor?.lids.includes(l.lid) && (
+                      <span className="bg-amber-100 text-amber-800 text-[11px] font-medium px-2 py-0.5 rounded-full" title="Alterado pelo fornecedor">✏️ ajustado pelo fornecedor</span>
+                    )}
+                  </div>
                 </div>
 
                 {!orcamentoDefinido && (

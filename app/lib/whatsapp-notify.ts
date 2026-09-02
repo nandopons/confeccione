@@ -611,3 +611,19 @@ export async function responderFeedbackNegociacao(params: {
     console.error('[wa-notify] responderFeedbackNegociacao exception', { err })
   }
 }
+
+/**
+ * Cliente tocou em "Falar com atendente" (quick reply do lembrete). A mensagem
+ * já caiu no inbox como não lida; aqui só confirmamos que alguém vai responder.
+ * Texto livre: o clique abriu a janela de 24h. Failure-soft.
+ */
+export async function responderPedidoAtendente(waId: string, nome: string | null): Promise<void> {
+  try {
+    const primeiro = (nome ?? '').trim().split(/\s+/)[0]
+    const texto = `Certo${primeiro ? `, ${primeiro}` : ''}. Um atendente da Confeccione vai falar com você por aqui em instantes.`
+    const r = await enviarTexto(waId, texto)
+    if (r.ok) await registrarSaidaInbox(waId, nome, r.wamid, texto, null)
+  } catch (err) {
+    console.error('[wa-notify] responderPedidoAtendente exception', { err })
+  }
+}
