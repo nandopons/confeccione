@@ -22,18 +22,22 @@ const SITE = "https://confeccione.com.br";
 // a cada requisicao.
 export const revalidate = 86400;
 
+// `atualizado`: data da última mudança real de conteúdo. Antes era "agora" em
+// toda regeneração, e o Google passa a ignorar lastModified quando ele muda
+// todo dia sem a página mudar. Atualize a mão quando editar a página.
 const PAGINAS: Array<{
   caminho: string;
   priority: number;
   changeFrequency: MetadataRoute.Sitemap[number]["changeFrequency"];
+  atualizado: string;
 }> = [
-  { caminho: "/", priority: 1.0, changeFrequency: "weekly" },
-  { caminho: "/saiba-mais", priority: 0.8, changeFrequency: "weekly" },
-  { caminho: "/sobre", priority: 0.6, changeFrequency: "yearly" },
-  { caminho: "/fornecedor/cadastro", priority: 0.7, changeFrequency: "monthly" },
-  { caminho: "/porto-digital", priority: 0.3, changeFrequency: "yearly" },
-  { caminho: "/privacidade", priority: 0.2, changeFrequency: "yearly" },
-  { caminho: "/termos", priority: 0.2, changeFrequency: "yearly" },
+  { caminho: "/", priority: 1.0, changeFrequency: "weekly", atualizado: "2026-09-03" },
+  { caminho: "/saiba-mais", priority: 0.8, changeFrequency: "weekly", atualizado: "2026-09-03" },
+  { caminho: "/sobre", priority: 0.6, changeFrequency: "yearly", atualizado: "2026-09-03" },
+  { caminho: "/fornecedor/cadastro", priority: 0.7, changeFrequency: "monthly", atualizado: "2026-09-03" },
+  { caminho: "/porto-digital", priority: 0.3, changeFrequency: "yearly", atualizado: "2026-08-16" },
+  { caminho: "/privacidade", priority: 0.2, changeFrequency: "yearly", atualizado: "2026-09-03" },
+  { caminho: "/termos", priority: 0.2, changeFrequency: "yearly", atualizado: "2026-09-03" },
 ];
 
 /* A data do artigo vem do frontmatter e e digitada a mao. Se vier em formato
@@ -45,11 +49,9 @@ function dataSegura(valor: string): Date {
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const agora = new Date();
-
   const paginas: MetadataRoute.Sitemap = PAGINAS.map((p) => ({
     url: `${SITE}${p.caminho}`,
-    lastModified: agora,
+    lastModified: dataSegura(p.atualizado),
     changeFrequency: p.changeFrequency,
     priority: p.priority,
   }));

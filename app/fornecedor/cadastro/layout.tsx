@@ -19,18 +19,18 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Cadastre sua confecção | Confeccione",
+  title: "Cadastre sua confecção ou facção e receba pedidos",
   description:
-    "Receba pedidos de marcas que precisam fabricar roupa. Cadastro gratuito de confecções e costureiras no marketplace da Confeccione.",
+    "Confecção, facção, ateliê ou costureira: cadastro gratuito para receber pedidos de uniformes, camisetas e marca própria direto no WhatsApp, com pagamento garantido.",
   alternates: { canonical: "/fornecedor/cadastro" },
   openGraph: {
     type: "website",
     siteName: "Confeccione",
     locale: "pt_BR",
     url: "/fornecedor/cadastro",
-    title: "Cadastre sua confecção | Confeccione",
+    title: "Cadastre sua confecção ou facção e receba pedidos | Confeccione",
     description:
-      "Receba pedidos de marcas que precisam fabricar roupa. Cadastro gratuito de confecções e costureiras.",
+      "Cadastro gratuito para confecções, facções, ateliês e costureiras receberem pedidos com pagamento garantido.",
   },
 };
 

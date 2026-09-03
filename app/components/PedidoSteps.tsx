@@ -293,7 +293,7 @@ export default function PedidoSteps() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                     {nichosPrincipais.map((n) => (
                       <button key={n.id} onClick={() => escolherNicho(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-300 hover:border-[#1D9E75]"}`}>
-                        <span className="text-2xl shrink-0 sm:mb-2">{n.icon}</span>
+                        <span className="text-2xl shrink-0 sm:mb-2" aria-hidden="true">{n.icon}</span>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-gray-900 leading-tight">{n.title}</div>
                           <div className="text-xs text-gray-500 mt-0.5 leading-snug">{n.sub}</div>
@@ -317,7 +317,7 @@ export default function PedidoSteps() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                     {nichosExtras.map((n) => (
                       <button key={n.id} onClick={() => escolherNicho(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-300 hover:border-[#1D9E75]"}`}>
-                        <span className="text-2xl shrink-0 sm:mb-2">{n.icon}</span>
+                        <span className="text-2xl shrink-0 sm:mb-2" aria-hidden="true">{n.icon}</span>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium text-gray-900 leading-tight">{n.title}</div>
                           <div className="text-xs text-gray-500 mt-0.5 leading-snug">{n.sub}</div>

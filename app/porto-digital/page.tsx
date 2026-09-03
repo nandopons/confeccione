@@ -7,14 +7,15 @@ export const metadata: Metadata = {
   // Ver comentario em app/sobre/page.tsx: sem canonical proprio, herda o "/"
   // do layout raiz e sai do indice.
   alternates: { canonical: "/porto-digital" },
-  title: "Confeccione é empresa embarcada no Porto Digital",
+  title: "Confeccione no Porto Digital: empresa embarcada em Recife",
   description:
-    "A Confeccione integra o ecossistema do Porto Digital, distrito de inovação tecnológica de Recife/PE.",
+    "A Confeccione integra o Porto Digital, distrito de inovação tecnológica de Recife/PE. O que isso muda para clientes e fornecedores.",
   openGraph: {
-    title: "Confeccione é empresa embarcada no Porto Digital",
-    description:
-      "A Confeccione integra o ecossistema do Porto Digital, distrito de inovação tecnológica de Recife/PE.",
     type: "website",
+    url: "/porto-digital",
+    title: "Confeccione no Porto Digital: empresa embarcada em Recife",
+    description:
+      "A Confeccione integra o Porto Digital, distrito de inovação tecnológica de Recife/PE.",
   },
 };
 

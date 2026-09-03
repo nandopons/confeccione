@@ -4,10 +4,18 @@ import SiteHeader from "@/app/components/SiteHeader";
 import SiteFooter from "@/app/components/SiteFooter";
 
 export const metadata: Metadata = {
-  title: "Termos de Uso | Confeccione",
+  title: "Termos de Uso",
   description:
     "Regras de uso da plataforma Confeccione para clientes e fornecedores: intermediação, pagamento garantido, comissão, prazos, cancelamentos e planos.",
   alternates: { canonical: "/termos" },
+  openGraph: {
+    type: "website",
+    url: "/termos",
+    title: "Termos de Uso | Confeccione",
+    description:
+      "Regras da plataforma para clientes e fornecedores: intermediação, pagamento garantido, comissão, prazos, cancelamentos e planos.",
+  },
+  robots: { index: true, follow: true },
 };
 
 // Rascunho escrito a partir do que o sistema faz hoje (set/2026). Revisar com

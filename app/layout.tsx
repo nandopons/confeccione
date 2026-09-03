@@ -37,25 +37,80 @@ const manrope = Manrope({
   display: "swap",
 });
 
+// 03/09/2026: o layout raiz NÃO define mais canonical nem og:url. Antes ele
+// declarava "/" e toda página que esquecesse de sobrescrever dizia ao Google
+// que a home era a versão canônica dela (foi assim que /sobre saiu do índice
+// em agosto e que /termos e /privacidade publicavam og:url da home). Agora a
+// home tem metadata própria em app/page.tsx e cada rota pública declara a sua.
 export const metadata: Metadata = {
-  title: "Confeccione | Encontre fornecedores de confecção",
-  description: "Encontre confecções para fabricar suas peças. Orçamento rápido pelo WhatsApp.",
+  title: {
+    default: "Confecção de Uniformes, Camisetas e Private Label | Confeccione",
+    template: "%s | Confeccione",
+  },
+  description:
+    "Conectamos sua empresa a confecções, facções e costureiras verificadas em todo o Brasil. Orçamento de uniformes, camisetas personalizadas, fardamento e marca própria com pagamento garantido.",
   metadataBase: new URL("https://confeccione.com.br"),
-  alternates: { canonical: "/" },
+  applicationName: "Confeccione",
   openGraph: {
     type: "website",
     siteName: "Confeccione",
     locale: "pt_BR",
-    url: "/",
-    title: "Confeccione | Encontre fornecedores de confecção",
-    description:
-      "Encontre confecções para fabricar suas peças. Orçamento rápido pelo WhatsApp.",
+  },
+  twitter: {
+    card: "summary_large_image",
   },
   verification: {
     other: {
       "p:domain_verify": "d43c634ff3dd0e303a70944d1854ebf3",
     },
   },
+};
+
+const ORGANIZATION_JSONLD = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://confeccione.com.br/#organization",
+      name: "Confeccione",
+      url: "https://confeccione.com.br",
+      logo: {
+        "@type": "ImageObject",
+        url: "https://confeccione.com.br/icons/icon-512.png",
+        width: 512,
+        height: 512,
+      },
+      description:
+        "Marketplace brasileiro que conecta empresas, marcas e escolas a confecções, facções e costureiras verificadas para fabricar uniformes, camisetas, fardamento e marca própria sob demanda.",
+      areaServed: { "@type": "Country", name: "Brasil" },
+      knowsLanguage: "pt-BR",
+      address: {
+        "@type": "PostalAddress",
+        streetAddress: "Travessa do Amorim, 66",
+        addressLocality: "Recife",
+        addressRegion: "PE",
+        postalCode: "50030-070",
+        addressCountry: "BR",
+      },
+      contactPoint: [
+        {
+          "@type": "ContactPoint",
+          contactType: "customer support",
+          telephone: "+55-81-99593-2695",
+          email: "contato@confeccione.com.br",
+          availableLanguage: ["Portuguese"],
+        },
+      ],
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://confeccione.com.br/#website",
+      url: "https://confeccione.com.br",
+      name: "Confeccione",
+      inLanguage: "pt-BR",
+      publisher: { "@id": "https://confeccione.com.br/#organization" },
+    },
+  ],
 };
 
 export default function RootLayout({
@@ -78,27 +133,7 @@ export default function RootLayout({
             Se o telefone de atendimento mudar, muda aqui tambem. */}
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{
-            __html: JSON.stringify({
-              "@context": "https://schema.org",
-              "@type": "Organization",
-              name: "Confeccione",
-              url: "https://confeccione.com.br",
-              logo: "https://confeccione.com.br/icon.svg",
-              description:
-                "Plataforma brasileira que conecta marcas, lojistas e criadores a confecções e costureiras para fabricação de roupas sob demanda.",
-              areaServed: { "@type": "Country", name: "Brasil" },
-              knowsLanguage: "pt-BR",
-              contactPoint: [
-                {
-                  "@type": "ContactPoint",
-                  contactType: "customer support",
-                  telephone: "+55-81-99593-2695",
-                  availableLanguage: ["Portuguese"],
-                },
-              ],
-            }),
-          }}
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(ORGANIZATION_JSONLD) }}
         />
         <Script id="gtm-script" strategy="afterInteractive">
           {`(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);})(window,document,'script','dataLayer','GTM-T59XPSZ');`}

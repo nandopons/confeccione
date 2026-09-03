@@ -3,12 +3,17 @@ import SiteHeader from "@/app/components/SiteHeader";
 import SiteFooter from "@/app/components/SiteFooter";
 
 export const metadata: Metadata = {
-  title: "Política de Privacidade | Confeccione",
+  title: "Política de Privacidade",
   description:
     "Como a Confeccione coleta, usa e protege os seus dados pessoais, em conformidade com a LGPD.",
-  // Ver comentario em app/sobre/page.tsx: sem canonical proprio, herda o "/"
-  // do layout raiz e sai do indice.
   alternates: { canonical: "/privacidade" },
+  openGraph: {
+    type: "website",
+    url: "/privacidade",
+    title: "Política de Privacidade | Confeccione",
+    description:
+      "Como a Confeccione coleta, usa e protege dados de clientes e fornecedores, em conformidade com a LGPD.",
+  },
 };
 
 export default function PrivacidadePage() {

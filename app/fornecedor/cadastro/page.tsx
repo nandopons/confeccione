@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import SiteHeader from "@/app/components/SiteHeader";
+import SiteFooter from "@/app/components/SiteFooter";
 import SelectModal from "@/app/components/SelectModal";
 import { formatarCpfCnpj, validarCpfCnpj, apenasDigitos } from "@/app/lib/cpf-cnpj";
 
@@ -124,7 +125,7 @@ export default function CadastroFornecedor() {
 
       <section className="px-6 pt-10 pb-16 max-w-2xl mx-auto">
         <div className="flex flex-col items-start gap-2 md:flex-row md:items-center md:gap-3 mb-1">
-          <h2 className="text-gray-900 text-xl font-medium">Cadastro de fornecedor</h2>
+          <h1 className="text-gray-900 text-xl font-medium">Cadastre sua confecção, facção ou ateliê e receba pedidos</h1>
           <span className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2 py-1 rounded-full">3 passos simples</span>
         </div>
         <p className="text-gray-500 text-sm mb-6">Gratuito e sem burocracia. Comece a receber pedidos hoje.</p>
@@ -181,7 +182,7 @@ export default function CadastroFornecedor() {
                       <div className="grid grid-cols-2 gap-3">
                         {tiposProdutoPrincipais.map((t) => (
                           <button key={t.id} type="button" onClick={() => toggleTipo(t.id)} className={`text-left border-2 rounded-xl p-4 transition-all ${tiposSel.includes(t.id) ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-300 hover:border-[#1D9E75]"}`}>
-                            <span className="text-2xl mb-2 block">{t.icon}</span>
+                            <span className="text-2xl mb-2 block" aria-hidden="true">{t.icon}</span>
                             <div className="text-sm font-medium text-gray-900">{t.title}</div>
                             <div className="text-xs text-gray-500 mt-1">{t.sub}</div>
                           </button>
@@ -205,7 +206,7 @@ export default function CadastroFornecedor() {
                       <div className="grid grid-cols-2 gap-3">
                         {tiposProdutoExtras.map((t) => (
                           <button key={t.id} type="button" onClick={() => toggleTipo(t.id)} className={`text-left border-2 rounded-xl p-4 transition-all ${tiposSel.includes(t.id) ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-300 hover:border-[#1D9E75]"}`}>
-                            <span className="text-2xl mb-2 block">{t.icon}</span>
+                            <span className="text-2xl mb-2 block" aria-hidden="true">{t.icon}</span>
                             <div className="text-sm font-medium text-gray-900">{t.title}</div>
                             <div className="text-xs text-gray-500 mt-1">{t.sub}</div>
                           </button>
@@ -360,6 +361,7 @@ export default function CadastroFornecedor() {
 
         </div>
       </section>
+      <SiteFooter />
     </main>
   );
 }

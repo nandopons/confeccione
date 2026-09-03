@@ -42,6 +42,7 @@ const PRIVADO = [
   "/orcamento/",
   "/fornecedor/painel",
   "/fornecedor/entrar",
+  "/sonda-teclado.html",
 ];
 
 /* Robos de IA e de busca por IA. Nomes conforme a documentacao publica de

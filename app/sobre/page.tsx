@@ -9,14 +9,15 @@ export const metadata: Metadata = {
   // declara a home como sua versao canonica. O Google obedece e tira /sobre do
   // indice - foi o que aconteceu ate 19/08/2026.
   alternates: { canonical: "/sobre" },
-  title: "Sobre a Confeccione",
+  title: "Sobre a Confeccione: marketplace de confecção do Brasil",
   description:
-    "Marketplace brasileiro de confecção. Empresa embarcada no Porto Digital. CNPJ 49.307.439/0001-50.",
+    "A Confeccione conecta marcas, empresas e escolas a confecções verificadas em todo o Brasil. Empresa de Recife embarcada no Porto Digital. CNPJ 49.307.439/0001-50.",
   openGraph: {
-    title: "Sobre a Confeccione",
-    description:
-      "Marketplace brasileiro de confecção, empresa embarcada no Porto Digital.",
     type: "website",
+    url: "/sobre",
+    title: "Sobre a Confeccione: marketplace de confecção do Brasil",
+    description:
+      "Marketplace brasileiro de confecção, empresa de Recife embarcada no Porto Digital.",
   },
 };
 

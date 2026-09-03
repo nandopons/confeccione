@@ -3,21 +3,22 @@ import Link from "next/link";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import SiteHeader from "@/app/components/SiteHeader";
+import SiteFooter from "@/app/components/SiteFooter";
 import { getAllPosts } from "@/app/lib/blog";
 
 export const metadata: Metadata = {
-  title: "Saiba mais | Confeccione",
+  title: "Blog de Confecção: Produção, Estampa e Marca Própria",
   description:
-    "Artigos sobre confecção sob demanda, criação de marcas, tecidos e processos de fabricação.",
+    "Guias escritos por quem está dentro da indústria têxtil: como criar sua marca, escolher estampa (silk, DTF, DTG), tingimento, qualidade de costura e como contratar uma fábrica.",
   alternates: {
     canonical: "/saiba-mais",
   },
   openGraph: {
     type: "website",
     siteName: "Confeccione",
-    title: "Saiba mais | Confeccione",
+    title: "Blog de Confecção: Produção, Estampa e Marca Própria | Confeccione",
     description:
-      "Artigos sobre confecção sob demanda, criação de marcas, tecidos e processos de fabricação.",
+      "Guias de quem está dentro da indústria têxtil: marca própria, estampa, tingimento, costura e como contratar uma fábrica.",
     url: "/saiba-mais",
     locale: "pt_BR",
   },
@@ -42,7 +43,7 @@ export default async function SaibaMaisIndex() {
       <section className="px-6 pt-10 pb-16 max-w-3xl mx-auto">
         <h1 className="text-gray-900 text-2xl md:text-3xl font-medium mb-2">Saiba mais</h1>
         <p className="text-gray-500 text-sm md:text-base mb-10">
-          Conteúdo sobre confecção, marca própria e mercado de moda.
+          Guias práticos de quem está dentro da indústria têxtil: produção, estampa, tecidos, marca própria e como contratar uma confecção.
         </p>
 
         {posts.length === 0 ? (
@@ -76,6 +77,7 @@ export default async function SaibaMaisIndex() {
           </ul>
         )}
       </section>
+      <SiteFooter />
     </main>
   );
 }

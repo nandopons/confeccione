@@ -4,7 +4,8 @@ import { notFound } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import SiteHeader from "@/app/components/SiteHeader";
-import { getAllSlugs, getPostBySlug } from "@/app/lib/blog";
+import SiteFooter from "@/app/components/SiteFooter";
+import { getAllPosts, getAllSlugs, getPostBySlug } from "@/app/lib/blog";
 
 const SITE_URL = "https://confeccione.com.br";
 
@@ -30,7 +31,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     : undefined;
 
   return {
-    title: `${post.metadata.title} | Confeccione`,
+    title: post.metadata.title,
     description: post.metadata.description,
     keywords: post.metadata.keywords,
     authors: [{ name: post.metadata.author }],
@@ -70,6 +71,7 @@ export default async function BlogPostPage({ params }: PageProps) {
   if (!post) notFound();
 
   const { metadata: meta, contentHtml } = post;
+  const relacionados = (await getAllPosts()).filter((p) => p.slug !== slug).slice(0, 3);
   const url = `${SITE_URL}/saiba-mais/${slug}`;
   const ogImage = meta.image
     ? meta.image.startsWith("http")
@@ -83,15 +85,28 @@ export default async function BlogPostPage({ params }: PageProps) {
     headline: meta.title,
     description: meta.description,
     datePublished: `${meta.date}T00:00:00-03:00`,
+    dateModified: `${meta.date}T00:00:00-03:00`,
+    inLanguage: "pt-BR",
     author: { "@type": "Organization", name: meta.author, url: SITE_URL },
     publisher: {
       "@type": "Organization",
       name: "Confeccione",
       url: SITE_URL,
+      logo: { "@type": "ImageObject", url: `${SITE_URL}/icons/icon-512.png` },
     },
     mainEntityOfPage: { "@type": "WebPage", "@id": url },
     ...(ogImage ? { image: ogImage } : {}),
     ...(meta.keywords.length > 0 ? { keywords: meta.keywords.join(", ") } : {}),
+  };
+
+  const breadcrumbSchema = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Início", item: SITE_URL },
+      { "@type": "ListItem", position: 2, name: "Saiba mais", item: `${SITE_URL}/saiba-mais` },
+      { "@type": "ListItem", position: 3, name: meta.title, item: url },
+    ],
   };
 
   return (
@@ -101,6 +116,10 @@ export default async function BlogPostPage({ params }: PageProps) {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(articleSchema) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbSchema) }}
       />
 
       <article className="px-6 pt-8 pb-16 max-w-2xl mx-auto">
@@ -114,7 +133,7 @@ export default async function BlogPostPage({ params }: PageProps) {
               <Link href="/saiba-mais" className="hover:text-[#0F6E56]">Saiba mais</Link>
             </li>
             <li aria-hidden="true">›</li>
-            <li className="text-gray-600">{meta.category}</li>
+            <li className="text-gray-600 truncate max-w-[60vw]" aria-current="page">{meta.title}</li>
           </ol>
         </nav>
 
@@ -151,6 +170,25 @@ export default async function BlogPostPage({ params }: PageProps) {
           dangerouslySetInnerHTML={{ __html: contentHtml }}
         />
 
+        {relacionados.length > 0 && (
+          <aside className="mt-12 border-t border-gray-200 pt-8" aria-labelledby="leia-tambem">
+            <h2 id="leia-tambem" className="text-gray-900 text-lg font-medium mb-4">Leia também</h2>
+            <ul className="grid gap-3 sm:grid-cols-3">
+              {relacionados.map((r) => (
+                <li key={r.slug}>
+                  <Link
+                    href={`/saiba-mais/${r.slug}`}
+                    className="block h-full border border-gray-200 rounded-2xl p-4 hover:border-[#1D9E75] transition-colors"
+                  >
+                    <span className="text-[11px] text-[#0F6E56] font-medium">{r.category}</span>
+                    <p className="text-gray-900 text-sm font-medium leading-snug mt-1">{r.title}</p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        )}
+
         <footer className="mt-12 border-t border-gray-200 pt-8">
           <div className="bg-[#F7FBF9] border border-[#E1F5EE] rounded-2xl p-6 text-center">
             <p className="text-gray-900 font-medium mb-2">Pronto para produzir suas peças?</p>
@@ -163,9 +201,16 @@ export default async function BlogPostPage({ params }: PageProps) {
             >
               Faça seu pedido
             </Link>
+            <p className="text-xs text-gray-400 mt-4">
+              É confecção ou facção?{" "}
+              <Link href="/fornecedor/cadastro" className="text-[#0F6E56] font-medium hover:underline">
+                Cadastre-se para receber pedidos
+              </Link>
+            </p>
           </div>
         </footer>
       </article>
+      <SiteFooter />
     </main>
   );
 }

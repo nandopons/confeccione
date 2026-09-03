@@ -1,15 +1,47 @@
-"use client";
+import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
 import SiteHeader from "@/app/components/SiteHeader";
 import SiteFooter from "@/app/components/SiteFooter";
 import PortoDigitalBadge from "@/app/components/PortoDigitalBadge";
 import PedidoSteps from "@/app/components/PedidoSteps";
+import BotaoIrParaPedido from "@/app/components/BotaoIrParaPedido";
+import SegmentosEFaq, { FAQ_HOME } from "@/app/components/SegmentosEFaq";
 import { linkWhatsAppSuporte, WHATSAPP_SUPORTE_FORMATADO } from "@/app/lib/contatos";
+
+export const metadata: Metadata = {
+  title: "Confecção de Uniformes, Camisetas e Private Label | Confeccione",
+  description:
+    "Conectamos sua empresa a confecções, facções e costureiras verificadas em todo o Brasil. Peça orçamento de uniformes, camisetas personalizadas, fardamento e marca própria com pagamento garantido.",
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    siteName: "Confeccione",
+    locale: "pt_BR",
+    url: "/",
+    title: "Confecção de Uniformes, Camisetas e Private Label | Confeccione",
+    description:
+      "Confecções, facções e costureiras verificadas em todo o Brasil. Orçamento de uniformes, camisetas, fardamento e marca própria com pagamento garantido.",
+  },
+};
+
+const FAQ_JSONLD = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: FAQ_HOME.map((f) => ({
+    "@type": "Question",
+    name: f.pergunta,
+    acceptedAnswer: { "@type": "Answer", text: f.resposta },
+  })),
+};
 
 export default function Home() {
   return (
     <main className="min-h-screen bg-white font-sans">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(FAQ_JSONLD) }}
+      />
 
       <section className="relative h-[58vh] min-h-[480px] md:h-[72vh] md:min-h-[520px] overflow-hidden bg-[#0a0a0a]">
         {/* Foto em tela cheia (desktop e mobile) */}
@@ -61,23 +93,10 @@ export default function Home() {
               Conectamos você às <span className="text-[#2DD4A7]">melhores confecções e costureiras</span> do Brasil
             </h1>
             <p className="font-light text-sm md:text-base text-gray-300 max-w-md mt-4 leading-relaxed">
-              Faça seu pedido em minutos. A gente gera os mockups, monta o orçamento e acha os fornecedores certos.
+              Uniformes, fardamento, camisetas personalizadas, roupas fitness e marca própria. Faça seu pedido em minutos: a gente gera os mockups, monta o orçamento e acha os fornecedores certos.
             </p>
             <div className="mt-7 flex flex-col items-start gap-3 md:flex-row md:items-center md:gap-6">
-              <button
-                onClick={() => {
-                  const el = document.getElementById("pedido");
-                  if (!el) return;
-                  const isMobile = window.innerWidth < 768;
-                  const vh = window.innerHeight;
-                  const offset = isMobile ? -Math.round(vh * 0.02) : -80 + Math.round(vh * 0.07);
-                  const y = el.getBoundingClientRect().top + window.scrollY - offset;
-                  window.scrollTo({ top: y, behavior: "smooth" });
-                }}
-                className="bg-[#1D9E75] hover:bg-[#178a64] text-white px-5 md:px-6 py-2.5 rounded text-sm font-medium whitespace-nowrap transition-colors"
-              >
-                Fazer meu pedido →
-              </button>
+              <BotaoIrParaPedido className="bg-[#1D9E75] hover:bg-[#178a64] text-white px-5 md:px-6 py-2.5 rounded text-sm font-medium whitespace-nowrap transition-colors" />
               <Link
                 href="/cliente/login"
                 className="text-xs text-gray-300 hover:text-gray-100 underline underline-offset-4 whitespace-nowrap transition-colors"
@@ -126,6 +145,8 @@ export default function Home() {
         </div>
       </section>
 
+      <SegmentosEFaq />
+
       <section className="bg-[#111] px-6 py-16">
         <div className="max-w-4xl mx-auto">
           <div className="grid md:grid-cols-2 gap-12 items-center">
@@ -153,7 +174,7 @@ export default function Home() {
             <div className="grid grid-cols-2 gap-4">
               {[{icon:"✂️",title:"Costureiras",desc:"Ajustes, reparos e peças únicas"},{icon:"🏭",title:"Confecções",desc:"Produção em escala e fardamentos"},{icon:"🧵",title:"Facções",desc:"Terceirização de costura"},{icon:"👗",title:"Ateliês",desc:"Alta costura e nichos especiais"}].map((item) => (
                 <div key={item.title} className="bg-white/5 border border-white/10 rounded-2xl p-4 hover:bg-white/10 transition-colors">
-                  <span className="text-2xl mb-3 block">{item.icon}</span>
+                  <span className="text-2xl mb-3 block" aria-hidden="true">{item.icon}</span>
                   <p className="text-white text-sm font-medium mb-1">{item.title}</p>
                   <p className="text-gray-400 text-xs leading-relaxed">{item.desc}</p>
                 </div>
