@@ -188,6 +188,7 @@ export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
       >
         {loading ? 'Enviando…' : 'Receber código'}
       </button>
+      <p className="mt-3 text-[11px] text-gray-400 text-center">Ao continuar, você concorda com os <a href="/termos" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-600">Termos de Uso</a> e a <a href="/privacidade" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-600">Política de Privacidade</a>.</p>
     </form>
   )
 }

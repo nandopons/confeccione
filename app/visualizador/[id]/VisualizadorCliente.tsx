@@ -1524,6 +1524,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
               <button type="button" onClick={() => void salvarContato()} disabled={salvandoContato} className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-xl">{salvandoContato ? "Salvando…" : "Salvar"}</button>
               <button type="button" onClick={() => setContatoOpen(false)} disabled={salvandoContato} className="text-sm text-gray-500 px-3 py-2.5 rounded-xl hover:bg-gray-100">Cancelar</button>
             </div>
+            <p className="mt-3 text-[11px] text-gray-400 text-center">Ao continuar, você concorda com os <a href="/termos" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-600">Termos de Uso</a> e a <a href="/privacidade" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-600">Política de Privacidade</a>.</p>
           </div>
         </div>
       )}

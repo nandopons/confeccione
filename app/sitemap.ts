@@ -33,6 +33,7 @@ const PAGINAS: Array<{
   { caminho: "/fornecedor/cadastro", priority: 0.7, changeFrequency: "monthly" },
   { caminho: "/porto-digital", priority: 0.3, changeFrequency: "yearly" },
   { caminho: "/privacidade", priority: 0.2, changeFrequency: "yearly" },
+  { caminho: "/termos", priority: 0.2, changeFrequency: "yearly" },
 ];
 
 /* A data do artigo vem do frontmatter e e digitada a mao. Se vier em formato

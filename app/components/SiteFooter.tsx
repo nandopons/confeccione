@@ -119,6 +119,10 @@ export default function SiteFooter() {
         <div className="mt-10 pt-6 border-t border-white/10 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-gray-500 text-xs">
             © 2026 Confeccione · CNPJ 49.307.439/0001-50
+            <span className="mx-2 text-gray-700" aria-hidden="true">·</span>
+            <Link href="/privacidade" className="hover:text-gray-300 transition-colors">Política de Privacidade</Link>
+            <span className="mx-2 text-gray-700" aria-hidden="true">·</span>
+            <Link href="/termos" className="hover:text-gray-300 transition-colors">Termos de Uso</Link>
           </p>
 
           <Link
