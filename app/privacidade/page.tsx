@@ -27,7 +27,8 @@ export default function PrivacidadePage() {
         <section className="mb-10">
           <h2 className="text-white text-xl font-medium mb-3">Quem somos</h2>
           <p className="text-gray-400 leading-relaxed">
-            A Confeccione (CNPJ 49.307.439/0001-50) é um marketplace brasileiro
+            A Confeccione (49.307.439 Fernando Pons Neto, CNPJ 49.307.439/0001-50,
+            Travessa do Amorim, 66, Recife/PE) é um marketplace brasileiro
             que conecta clientes que precisam fabricar roupas a fornecedores de
             confecção. Esta política explica como coletamos, usamos e protegemos
             os seus dados pessoais quando você usa o site confeccione.com.br e os

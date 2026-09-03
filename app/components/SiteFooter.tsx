@@ -112,6 +112,13 @@ export default function SiteFooter() {
             <p className="text-gray-600 text-[11px] mt-3 leading-relaxed">
               Atendimento de seg. a sáb. — respondemos rapidinho no WhatsApp.
             </p>
+            {/* Identificação legal — mesmo nome/endereço do cadastro do CNPJ
+                (a verificação de empresa da Meta confere o site com o CCMEI). */}
+            <address className="not-italic text-gray-600 text-[11px] mt-3 leading-relaxed">
+              49.307.439 Fernando Pons Neto
+              <br />
+              Travessa do Amorim, 66 — Recife, PE — CEP 50030-070
+            </address>
           </div>
         </div>
 
