@@ -30,7 +30,7 @@ export default function TermosPage() {
         <section className="mb-10">
           <h2 className={h2}>1. O que é a Confeccione</h2>
           <p className={p}>
-            A Confeccione (49.307.439 Fernando Pons Neto, CNPJ 49.307.439/0001-50, Travessa do Amorim, 66, Recife/PE, CEP 50030-070) é uma plataforma de intermediação que
+            A Confeccione (CNPJ 49.307.439/0001-50, Travessa do Amorim, 66, Recife/PE, CEP 50030-070) é uma plataforma de intermediação que
             conecta pessoas e empresas que precisam produzir roupas e acessórios (&quot;clientes&quot;) a
             confecções, facções, ateliês e costureiras (&quot;fornecedores&quot;). A Confeccione não fabrica
             as peças: quem produz é o fornecedor que assume o pedido. Ao usar o site confeccione.com.br,
