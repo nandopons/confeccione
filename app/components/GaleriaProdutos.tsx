@@ -87,7 +87,7 @@ export default function GaleriaProdutos() {
                   width={f.largura}
                   height={f.altura}
                   sizes={i === 0 ? "(min-width: 768px) 66vw, 100vw" : "(min-width: 768px) 33vw, 50vw"}
-                  className={`w-full ${unica ? "h-auto" : "h-full object-cover object-top aspect-square md:aspect-auto"} transition-transform duration-500 group-hover:scale-[1.03]`}
+                  className={`w-full ${unica ? "h-auto" : "h-full object-cover object-top aspect-square"} transition-transform duration-500 group-hover:scale-[1.03]`}
                 />
                 {/* Rótulo discreto no rodapé da foto; o botão central aparece no hover
                     (desktop) e fica sempre visível no toque (mobile não tem hover). */}
