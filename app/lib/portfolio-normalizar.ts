@@ -89,19 +89,54 @@ export const FUNDO_VITRINE = { r: 245, g: 246, b: 247 }
  * Compõe um recorte PNG (com transparência) sobre o fundo padrão da vitrine, no
  * mesmo 1080x1350 das demais fotos.
  *
- * `fit: contain` aqui, não `cover`: a peça já foi isolada, então o que importa é
- * ela caber inteira com respiro. Cortar um recorte seria amputar a peça.
+ * DOIS CASOS, e confundir os dois foi o bug de 04/09/2026:
+ *
+ * a) Recorte SANGRADO — o assunto encosta na borda de baixo do quadro, que é o
+ *    caso normal de foto de modelo cortada na cintura. O corte reto do jeans faz
+ *    parte do enquadramento da foto, não da peça. Centralizar isso com 12% de
+ *    respiro joga o corte reto pro MEIO do quadro (vira uma amputação visível) e
+ *    ainda encolhe a peça — foi o "cortou embaixo e perdeu o zoom".
+ *    Solução: manter o sangramento. Ancora embaixo, encostando na borda, e deixa
+ *    o respiro só no topo. O corte reto some na moldura.
+ *
+ * b) Recorte SOLTO — peça em cabide, produto fotografado inteiro. Aí sim vale
+ *    centralizar com respiro dos quatro lados, que é o padrão de e-commerce.
  */
 export async function comporSobreFundo(recortePng: Buffer): Promise<ImagemNormalizada> {
-  const MARGEM = 0.88 // a peça ocupa 88% do quadro; o resto é respiro
+  const original = await sharp(recortePng).metadata()
 
-  const dentro = await sharp(recortePng)
-    .trim() // tira o transparente sobrando antes de medir, senão a peça fica pequena
-    .resize(Math.round(PORTFOLIO_LARGURA * MARGEM), Math.round(PORTFOLIO_ALTURA * MARGEM), {
-      fit: 'inside',
-      withoutEnlargement: false,
-    })
-    .toBuffer()
+  // trim() devolve, no info, o quanto foi cortado de cada lado — é com isso que
+  // dá pra saber se o assunto encostava na borda ou boiava no meio.
+  const { data: recortado, info } = await sharp(recortePng)
+    .trim()
+    .toBuffer({ resolveWithObject: true })
+
+  const larguraOriginal = original.width ?? info.width
+  const alturaOriginal = original.height ?? info.height
+  const cortadoEsquerda = -(info.trimOffsetLeft ?? 0)
+  const cortadoTopo = -(info.trimOffsetTop ?? 0)
+  // 1.5% de folga: a máscara raramente encosta na borda no pixel exato.
+  const folga = Math.round(alturaOriginal * 0.015)
+  const encostaEmbaixo = cortadoTopo + info.height >= alturaOriginal - folga
+  const encostaNaLateral =
+    cortadoEsquerda <= folga || cortadoEsquerda + info.width >= larguraOriginal - folga
+
+  const sangrado = encostaEmbaixo || encostaNaLateral
+
+  const dentro = sangrado
+    ? // Ocupa a altura quase toda; o respiro fica no topo, pela gravidade south.
+      await sharp(recortado)
+        .resize(Math.round(PORTFOLIO_LARGURA * 0.98), Math.round(PORTFOLIO_ALTURA * 0.97), {
+          fit: 'inside',
+          withoutEnlargement: false,
+        })
+        .toBuffer()
+    : await sharp(recortado)
+        .resize(Math.round(PORTFOLIO_LARGURA * 0.88), Math.round(PORTFOLIO_ALTURA * 0.88), {
+          fit: 'inside',
+          withoutEnlargement: false,
+        })
+        .toBuffer()
 
   const buffer = await sharp({
     create: {
@@ -111,7 +146,7 @@ export async function comporSobreFundo(recortePng: Buffer): Promise<ImagemNormal
       background: { ...FUNDO_VITRINE, alpha: 1 },
     },
   })
-    .composite([{ input: dentro, gravity: 'centre' }])
+    .composite([{ input: dentro, gravity: sangrado ? 'south' : 'centre' }])
     .flatten({ background: FUNDO_VITRINE })
     .jpeg({ quality: 82, progressive: true, mozjpeg: true })
     .toBuffer()

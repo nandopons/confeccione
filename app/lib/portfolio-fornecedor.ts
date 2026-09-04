@@ -371,9 +371,13 @@ export async function aplicarFundoPadrao(
     .maybeSingle<{ id: string; path: string; path_original: string | null }>()
   if (!linha) return { ok: false, motivo: 'foto não encontrada' }
 
+  // Sempre parte da foto ORIGINAL, nunca de um recorte anterior: reaplicar sobre
+  // uma imagem já achatada no cinza degrada o recorte a cada rodada. Assim,
+  // clicar de novo simplesmente refaz — não precisa desfazer antes.
+  const base = linha.path_original ?? linha.path
   const { data: baixado, error: errDown } = await supabaseAdmin.storage
     .from(BUCKET_PORTFOLIO)
-    .download(linha.path)
+    .download(base)
   if (errDown || !baixado) return { ok: false, motivo: 'não consegui ler a foto' }
 
   const entrada = Buffer.from(await baixado.arrayBuffer())
