@@ -14,6 +14,8 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import SiteHeader from "@/app/components/SiteHeader";
+import SiteFooter from "@/app/components/SiteFooter";
 import { getOutrosDoFornecedor, getProdutoPublico } from "@/app/lib/portfolio-fornecedor";
 import { tipoLabel } from "@/app/lib/ofertas-labels";
 import { SITE_URL } from "@/app/lib/url";
@@ -85,11 +87,12 @@ export default async function ProdutoPage({ params }: Props) {
   };
 
   return (
-    <main className="bg-white">
+    <main className="bg-white min-h-screen font-sans">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
+      <SiteHeader />
 
       <div className="max-w-5xl mx-auto px-5 md:px-8 py-8 md:py-12">
         <nav className="text-xs text-gray-400 mb-6">
@@ -201,6 +204,8 @@ export default async function ProdutoPage({ params }: Props) {
           </div>
         )}
       </div>
+
+      <SiteFooter />
     </main>
   );
 }
