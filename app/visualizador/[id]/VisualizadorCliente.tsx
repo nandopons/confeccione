@@ -124,14 +124,6 @@ function corLabel(s: string | null | undefined): string {
   return (s || "").replace(/\s*\(#?[0-9a-fA-F]{6}\)\s*/g, " ").replace(/#[0-9a-fA-F]{6}/g, "").replace(/\s{2,}/g, " ").trim();
 }
 
-const EDIT_HINTS: string[] = [
-  "Quais os tamanhos?",
-  "Qual a cor exata?",
-  "Material: algodão? poliéster?",
-  "Detalhes da estampa/bordado?",
-  "Completar este produto",
-];
-
 const TAM_CHIPS = ["P", "M", "G", "GG", "XG"];
 const TAM_ORDEM = ["PP", "P", "M", "G", "GG", "XG", "XGG", "XXG", "XXXG"];
 function ordemTam(t: string | null | undefined): number {
@@ -452,11 +444,6 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   // edição / adição
   const [editOpen, setEditOpen] = useState(false);
   const [editIndex, setEditIndex] = useState<number | null>(null);
-  const [editHintIdx, setEditHintIdx] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setEditHintIdx((x) => (x + 1) % EDIT_HINTS.length), 2600);
-    return () => clearInterval(t);
-  }, []);
   const [draft, setDraft] = useState<Linha>({ ...linhaVazia });
   const [editStep, setEditStep] = useState<1 | 2>(1);
   const [corPickerOpen, setCorPickerOpen] = useState(false);
@@ -1016,15 +1003,40 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   </div>
                 </div>
 
-                {!orcamentoDefinido && (
-                  <button type="button" onClick={() => abrirEdicao(i)} title="Editar / completar produto" className="group mt-3 w-full sm:w-auto inline-flex items-center justify-center sm:justify-start gap-2 bg-[#E1F5EE] hover:bg-[#1D9E75] text-[#0F6E56] hover:text-white text-sm font-medium px-3.5 py-2.5 rounded-lg ring-1 ring-[#1D9E75]/30 transition-colors">
-                    <span className="relative flex h-5 w-5 items-center justify-center shrink-0">
-                      <span className="absolute inline-flex h-full w-full rounded-full bg-[#1D9E75]/30 motion-safe:animate-ping" aria-hidden="true" />
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="relative"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
-                    </span>
-                    <span key={editHintIdx} style={{ animation: "hintIn .45s ease" }} className="whitespace-nowrap">{EDIT_HINTS[editHintIdx]}</span>
-                  </button>
-                )}
+                {/* AÇÃO DO PRODUTO — antes era um único botão com a frase
+                    trocando a cada 2,6s ("Qual a cor exata?" → "Material?" →…).
+                    Como o texto mudava sozinho, o botão não parecia botão e o
+                    que faltava nunca ficava claro. Agora: uma linha estática
+                    com o que falta e botões de nome fixo abaixo dela. */}
+                {!orcamentoDefinido && (() => {
+                  const faltando = faltamDoProduto(l, (st.urls?.length ?? 0) > 0);
+                  return (
+                    <div className="mt-3">
+                      {faltando.length > 0 && (
+                        <p className="text-[13px] text-gray-500 mb-2 leading-snug">
+                          Falta informar {faltando.join(", ")}.
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => abrirEdicao(i)}
+                          className="inline-flex items-center gap-2 bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+                          {faltando.length > 0 ? "Completar produto" : "Editar produto"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProdutoChatIdx(i)}
+                          className="inline-flex items-center gap-2 border border-gray-200 hover:border-gray-400 text-gray-700 text-sm font-medium px-4 py-2.5 rounded-lg transition-colors"
+                        >
+                          Preencher por chat
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {l.tamanhos.length > 0 && (
                   <div className="mt-3">
@@ -1089,10 +1101,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 ) : (
                   <div className="text-center px-4 py-4 w-full max-w-md mx-auto">
                     <ProdutoVetor id="generico" className="w-14 h-14 mx-auto mb-2 text-gray-300" />
-                    <p className="text-sm font-medium text-gray-800">Adicione as fotos desta peça</p>
-                    <p className="text-[11px] text-gray-400 mt-1 mb-4 leading-snug">Envie uma ou mais fotos/artes desta peça (até {MAX_FOTOS}).</p>
+                    <p className="text-sm font-medium text-gray-800">Fotos desta peça</p>
+                    <p className="text-[11px] text-gray-400 mt-1 mb-4 leading-snug">Até {MAX_FOTOS} fotos ou artes.</p>
                     <label className="inline-block bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-3.5 py-2 rounded-lg transition-colors cursor-pointer text-center">
-                      📤 Enviar fotos
+                      Enviar fotos
                       <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void onUploadVisualizador(e, i)} />
                     </label>
                     {st.motivo && <p className="text-[11px] text-red-500 mt-3">{st.motivo} — tenta de novo.</p>}
@@ -1113,11 +1125,10 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                   const ajustandoEste = iaAjuste && iaAjuste.i === i;
                   return (
                     <div className="mt-4 pt-4 border-t border-gray-100">
-                      <div className="flex items-center gap-2 mb-1">
-                        <p className="text-sm font-medium text-gray-800">✨ Mockup com IA</p>
+                      <div className="flex items-center gap-2 mb-2">
+                        <p className="text-sm font-medium text-gray-800">Mockup com IA</p>
                         <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">opcional</span>
                       </div>
-                      <p className="text-[11px] text-gray-400 mb-2 leading-snug">Não é obrigatório. Se você já tem o mockup/arte da peça, as fotos que você enviou já servem de referência — o mockup com IA é só uma ajuda extra.</p>
                       {lista.length > 0 && (
                         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-3">
                           {lista.map((it, idx) => (
@@ -1136,8 +1147,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                       {liberado ? (
                         <div>
                           {estampadoLinha && !temArte && (
-                            <p className="text-[11px] text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-2 leading-snug">
-                              Sem o arquivo da arte a gente gera uma aproximação a partir da descrição — se tiver o arquivo, suba pra ficar fiel.
+                            <p className="text-[11px] text-gray-500 mb-2 leading-snug">
+                              Sem o arquivo da arte, o mockup sai por aproximação.
                             </p>
                           )}
                           {ajustandoEste && <p className="text-[11px] text-[#0F6E56] mb-1">Ajustando o mockup selecionado — descreva o que mudar.</p>}
@@ -1150,17 +1161,18 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                           />
                           <div className="flex items-center gap-2 mt-2 flex-wrap">
                             <button type="button" onClick={() => void gerarMockupIA(i, ajustandoEste ? iaAjuste!.idx : null)} disabled={iaBusy !== null} className="inline-flex items-center gap-1.5 bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50">
-                              {iaBusy === i ? "Gerando…" : ajustandoEste ? "Atualizar mockup" : "✨ Gerar mockup com IA"}
+                              {iaBusy === i ? "Gerando…" : ajustandoEste ? "Atualizar mockup" : "Gerar mockup"}
                             </button>
                             {ajustandoEste && <button type="button" onClick={() => setIaAjuste(null)} className="text-sm text-gray-500 hover:text-gray-700">cancelar ajuste</button>}
                           </div>
                           {iaErro[i] && <p className="text-xs text-red-600 mt-2">{iaErro[i]}</p>}
-                          <p className="text-[11px] text-gray-400 mt-1">A IA usa as fotos/artes (quando houver) + os detalhes do modelo. Clique numa imagem gerada pra ajustar com outro texto.</p>
                         </div>
                       ) : (
                         <div>
-                          <button type="button" onClick={() => setProdutoChatIdx(i)} className="inline-flex items-center gap-1.5 bg-[#1D9E75] hover:bg-[#0F6E56] text-white text-sm font-medium px-4 py-2 rounded-lg">✨ Gerar mockup com IA</button>
-                          <p className="text-[11px] text-gray-500 mt-1.5 leading-snug">Faltam alguns detalhes desse produto{faltam.length ? ` (${faltam.join(", ")})` : ""} — toque pra completar pelo chat rapidinho.</p>
+                          <p className="text-[12px] text-gray-500 mb-2 leading-snug">
+                            Para gerar o mockup, falta informar{faltam.length ? ` ${faltam.join(", ")}` : " alguns detalhes"}.
+                          </p>
+                          <button type="button" onClick={() => setProdutoChatIdx(i)} className="inline-flex items-center gap-1.5 border border-gray-200 hover:border-gray-400 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors">Completar produto</button>
                         </div>
                       )}
                     </div>

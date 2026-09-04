@@ -86,6 +86,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const cidade = partes[0] || null
   const uf = partes[1] && partes[1].length === 2 ? partes[1].toUpperCase() : null
 
+  // Artes anexadas: data URLs de imagem, no mesmo formato que o visualizador
+  // grava (mockups["0"].fotos). Limite conservador porque tudo isso trafega no
+  // corpo do POST — o cliente já reduz pra ~1600px antes de enviar.
+  const brutas = (body as Record<string, unknown>).artes
+  const artes = (Array.isArray(brutas) ? brutas : [])
+    .filter((v): v is string => typeof v === 'string' && v.startsWith('data:image/'))
+    .slice(0, 3)
+  const pesoArtes = artes.reduce((s, a) => s + a.length, 0)
+  if (pesoArtes > 4_000_000) {
+    return Response.json({ error: 'as imagens estão muito grandes — envie menos ou menores' }, { status: 413 })
+  }
+
   const tamanhos = texto((body as Record<string, unknown>).tamanhos, 200)
   const detalhes = texto((body as Record<string, unknown>).detalhes, 500)
 
@@ -118,6 +130,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       cidade,
       uf,
       prazo_dias: produto.prazoDias ?? null,
+      mockups: artes.length ? { '0': { fotos: artes } } : {},
       observacoes: `Pedido direto pela vitrine para ${produto.fornecedorNome ?? 'fornecedor'}.`,
       status: 'confirmado',
       confirmado_em: new Date().toISOString(),

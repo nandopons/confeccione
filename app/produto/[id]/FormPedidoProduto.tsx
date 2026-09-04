@@ -9,7 +9,42 @@
 // a mais aqui é um pedido a menos.
 // ============================================================================
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+const MAX_ARQUIVOS = 3;
+
+/** Lê o arquivo e, se for grande, reduz pra ≤1600px em JPEG antes de subir.
+ *  Mesma ideia do visualizador: a arte vai no corpo do POST, então imagem de
+ *  celular crua (8MB) estouraria o limite da rota. */
+async function arquivoParaDataUrl(file: File): Promise<string> {
+  const dataUrl = await new Promise<string>((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result));
+    fr.onerror = () => rej(new Error("não consegui ler o arquivo"));
+    fr.readAsDataURL(file);
+  });
+  if (file.size <= 900_000) return dataUrl;
+
+  const img = document.createElement("img");
+  await new Promise<void>((res, rej) => {
+    img.onload = () => res();
+    img.onerror = () => rej(new Error("imagem inválida"));
+    img.src = dataUrl;
+  });
+  const max = 1600;
+  const esc = Math.min(1, max / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+  const w = Math.max(1, Math.round((img.naturalWidth || 1) * esc));
+  const h = Math.max(1, Math.round((img.naturalHeight || 1) * esc));
+  const cv = document.createElement("canvas");
+  cv.width = w;
+  cv.height = h;
+  const cx = cv.getContext("2d");
+  if (!cx) return dataUrl;
+  cx.fillStyle = "#ffffff";
+  cx.fillRect(0, 0, w, h);
+  cx.drawImage(img, 0, 0, w, h);
+  return cv.toDataURL("image/jpeg", 0.82);
+}
 
 export default function FormPedidoProduto({
   produtoId,
@@ -25,6 +60,33 @@ export default function FormPedidoProduto({
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [pronto, setPronto] = useState(false);
+  const [artes, setArtes] = useState<string[]>([]);
+  const [lendoArte, setLendoArte] = useState(false);
+  const arquivoRef = useRef<HTMLInputElement>(null);
+
+  async function anexar(lista: FileList | null) {
+    if (!lista?.length) return;
+    setErro(null);
+    setLendoArte(true);
+    try {
+      const espaco = MAX_ARQUIVOS - artes.length;
+      const novas: string[] = [];
+      for (const file of Array.from(lista).slice(0, Math.max(espaco, 0))) {
+        if (!file.type.startsWith("image/")) continue;
+        if (file.size > 12 * 1024 * 1024) {
+          setErro(`"${file.name}" passa de 12 MB e foi ignorado.`);
+          continue;
+        }
+        novas.push(await arquivoParaDataUrl(file));
+      }
+      if (novas.length) setArtes((a) => [...a, ...novas].slice(0, MAX_ARQUIVOS));
+    } catch {
+      setErro("não consegui ler esse arquivo — tente outro");
+    } finally {
+      setLendoArte(false);
+      if (arquivoRef.current) arquivoRef.current.value = "";
+    }
+  }
 
   async function enviar(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -37,7 +99,7 @@ export default function FormPedidoProduto({
       const r = await fetch(`/api/produto/${produtoId}/pedido`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(corpo),
+        body: JSON.stringify({ ...corpo, artes }),
       });
       const json = await r.json();
       if (!r.ok) {
@@ -101,6 +163,51 @@ export default function FormPedidoProduto({
           className={campo}
         />
       </label>
+
+      {/* ARTE — aqui não existe chat, então este é o único lugar onde o cliente
+          consegue mandar o logo/estampa antes do orçamento. Sem isso a
+          confecção orça no escuro e a conversa volta pro WhatsApp. */}
+      <div className="sm:col-span-2">
+        <span className="text-gray-700 text-xs font-medium block mb-1.5">
+          Arte, logo ou referência <span className="text-gray-400 font-normal">(opcional)</span>
+        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          {artes.map((src, i) => (
+            <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden border border-gray-200 bg-white">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={src} alt={`Arte ${i + 1}`} className="w-full h-full object-contain" />
+              <button
+                type="button"
+                onClick={() => setArtes((a) => a.filter((_, k) => k !== i))}
+                aria-label="Remover arquivo"
+                className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/60 hover:bg-black/80 text-white text-xs leading-none"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {artes.length < MAX_ARQUIVOS && (
+            <button
+              type="button"
+              onClick={() => arquivoRef.current?.click()}
+              disabled={lendoArte}
+              className="w-16 h-16 rounded-lg border border-dashed border-gray-300 hover:border-[#1D9E75] text-gray-400 hover:text-[#1D9E75] text-xl transition-colors"
+              aria-label="Anexar arquivo"
+            >
+              {lendoArte ? "…" : "+"}
+            </button>
+          )}
+          <span className="text-gray-400 text-xs">JPG ou PNG, até {MAX_ARQUIVOS} arquivos.</span>
+        </div>
+        <input
+          ref={arquivoRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => void anexar(e.target.files)}
+        />
+      </div>
 
       <label className="block">
         <span className="text-gray-700 text-xs font-medium block mb-1.5">Seu nome</span>
