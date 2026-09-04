@@ -7,7 +7,8 @@
 
 import { randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
-import { normalizarFotoPortfolio } from '@/app/lib/portfolio-normalizar'
+import { comporSobreFundo, normalizarFotoPortfolio } from '@/app/lib/portfolio-normalizar'
+import { removerFundo } from '@/app/lib/remover-fundo'
 
 export const BUCKET_PORTFOLIO = 'portfolio-fornecedores'
 export const MAX_PORTFOLIO_BYTES = 10 * 1024 * 1024 // 10 MiB por foto (antes de normalizar)
@@ -22,9 +23,11 @@ export type PortfolioItem = {
   destaque: boolean
   largura: number | null
   altura: number | null
+  /** true quando a foto já passou pelo recorte de fundo (dá pra desfazer). */
+  fundoRemovido: boolean
 }
 
-const CAMPOS = 'id, path, legenda, ordem, destaque, largura, altura'
+const CAMPOS = 'id, path, legenda, ordem, destaque, largura, altura, path_original'
 
 type LinhaPortfolio = {
   id: string
@@ -34,6 +37,7 @@ type LinhaPortfolio = {
   destaque: boolean | null
   largura: number | null
   altura: number | null
+  path_original?: string | null
 }
 
 function paraItem(r: LinhaPortfolio): PortfolioItem {
@@ -45,6 +49,7 @@ function paraItem(r: LinhaPortfolio): PortfolioItem {
     destaque: r.destaque ?? false,
     largura: r.largura,
     altura: r.altura,
+    fundoRemovido: Boolean(r.path_original),
   }
 }
 
@@ -233,4 +238,107 @@ export async function getVitrineHome(limite = 12): Promise<ItemVitrine[]> {
     largura: r.largura ?? 1080,
     altura: r.altura ?? 1350,
   }))
+}
+
+// ─────────────────── Recorte de fundo (opt-in do fornecedor) ───────────────────
+
+/**
+ * Recorta o fundo da foto e recompõe sobre o cinza da vitrine.
+ *
+ * A foto original é PRESERVADA em `path_original` — o recorte falha justamente
+ * nas fotos de detalhe, onde a peça sangra pra fora do quadro, e sem o original
+ * o fornecedor ficaria preso a um resultado ruim.
+ */
+export async function aplicarFundoPadrao(
+  fornecedorId: string,
+  itemId: string,
+): Promise<{ ok: true; item: PortfolioItem } | { ok: false; motivo: string }> {
+  const { data: linha } = await supabaseAdmin
+    .from('portfolio_fornecedores')
+    .select('id, path, path_original')
+    .eq('id', itemId)
+    .eq('fornecedor_id', fornecedorId)
+    .maybeSingle<{ id: string; path: string; path_original: string | null }>()
+  if (!linha) return { ok: false, motivo: 'foto não encontrada' }
+
+  const { data: baixado, error: errDown } = await supabaseAdmin.storage
+    .from(BUCKET_PORTFOLIO)
+    .download(linha.path)
+  if (errDown || !baixado) return { ok: false, motivo: 'não consegui ler a foto' }
+
+  const entrada = Buffer.from(await baixado.arrayBuffer())
+  const recorte = await removerFundo(entrada, 'image/jpeg')
+  if (!recorte.ok) return { ok: false, motivo: recorte.motivo }
+
+  let composta
+  try {
+    composta = await comporSobreFundo(recorte.png)
+  } catch {
+    return { ok: false, motivo: 'não consegui montar a foto no fundo padrão' }
+  }
+
+  const novoPath = `${fornecedorId}/${randomUUID()}.${composta.extensao}`
+  const { error: errUp } = await supabaseAdmin.storage
+    .from(BUCKET_PORTFOLIO)
+    .upload(novoPath, composta.buffer, { contentType: composta.mime, upsert: false })
+  if (errUp) return { ok: false, motivo: 'não consegui salvar a foto nova' }
+
+  // Só grava path_original na PRIMEIRA vez: se o fornecedor recortar duas vezes,
+  // o original continua sendo a foto que ele mandou, não o recorte anterior.
+  const original = linha.path_original ?? linha.path
+  const { data, error } = await supabaseAdmin
+    .from('portfolio_fornecedores')
+    .update({
+      path: novoPath,
+      path_original: original,
+      fundo_removido_em: new Date().toISOString(),
+      largura: composta.largura,
+      altura: composta.altura,
+    })
+    .eq('id', itemId)
+    .eq('fornecedor_id', fornecedorId)
+    .select(CAMPOS)
+    .single()
+
+  if (error || !data) {
+    await supabaseAdmin.storage.from(BUCKET_PORTFOLIO).remove([novoPath]).catch(() => {})
+    return { ok: false, motivo: 'não consegui atualizar a foto' }
+  }
+
+  // O recorte antigo (se houve um) vira lixo; o original nunca é apagado.
+  if (linha.path !== original) {
+    await supabaseAdmin.storage.from(BUCKET_PORTFOLIO).remove([linha.path]).catch(() => {})
+  }
+
+  return { ok: true, item: paraItem(data as LinhaPortfolio) }
+}
+
+/** Desfaz o recorte: volta a foto como o fornecedor mandou. */
+export async function desfazerFundoPadrao(
+  fornecedorId: string,
+  itemId: string,
+): Promise<{ ok: true; item: PortfolioItem } | { ok: false; motivo: string }> {
+  const { data: linha } = await supabaseAdmin
+    .from('portfolio_fornecedores')
+    .select('id, path, path_original')
+    .eq('id', itemId)
+    .eq('fornecedor_id', fornecedorId)
+    .maybeSingle<{ id: string; path: string; path_original: string | null }>()
+  if (!linha?.path_original) return { ok: false, motivo: 'essa foto não tem versão original' }
+
+  const recortado = linha.path
+  const { data, error } = await supabaseAdmin
+    .from('portfolio_fornecedores')
+    .update({ path: linha.path_original, path_original: null, fundo_removido_em: null })
+    .eq('id', itemId)
+    .eq('fornecedor_id', fornecedorId)
+    .select(CAMPOS)
+    .single()
+
+  if (error || !data) return { ok: false, motivo: 'não consegui desfazer' }
+
+  if (recortado !== linha.path_original) {
+    await supabaseAdmin.storage.from(BUCKET_PORTFOLIO).remove([recortado]).catch(() => {})
+  }
+  return { ok: true, item: paraItem(data as LinhaPortfolio) }
 }

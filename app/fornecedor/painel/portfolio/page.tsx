@@ -5,6 +5,7 @@
 
 import { exigirFornecedorAtual } from "@/app/lib/auth-server";
 import { getPortfolio } from "@/app/lib/portfolio-fornecedor";
+import { provedorFundoConfigurado } from "@/app/lib/remover-fundo";
 import PortfolioFornecedor from "./PortfolioFornecedor";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,9 @@ export const dynamic = "force-dynamic";
 export default async function PortfolioPage() {
   const fornecedor = await exigirFornecedorAtual();
   const fotos = await getPortfolio(fornecedor.id);
+  // Sem provedor configurado o botão de recorte nem aparece — melhor não ter o
+  // botão do que ter um que sempre falha.
+  const recorteDisponivel = provedorFundoConfigurado() !== null;
 
   return (
     <section className="px-5 md:px-8 pt-8 pb-24 max-w-4xl mx-auto">
@@ -23,7 +27,7 @@ export default async function PortfolioPage() {
         </p>
       </div>
 
-      <PortfolioFornecedor inicial={fotos} />
+      <PortfolioFornecedor inicial={fotos} recorteDisponivel={recorteDisponivel} />
 
       <div className="mt-8 bg-[#F7FBF9] border border-[#E1F5EE] rounded-2xl p-5">
         <p className="text-gray-900 text-sm font-medium mb-2">Dicas para uma boa foto</p>
@@ -32,6 +36,7 @@ export default async function PortfolioPage() {
           <li>Luz natural, sem flash. Perto da janela costuma bastar.</li>
           <li>Uma foto por modelo. Se quiser mostrar detalhe (gola, costura, estampa), mande junto.</li>
           <li>Não coloque texto, preço ou marca d&apos;água sobre a foto.</li>
+          <li>Depois de enviar, use &quot;Isolar em fundo claro&quot; pra deixar a peça no padrão da vitrine. Funciona melhor com a peça inteira; em close de detalhe, confira antes de manter.</li>
         </ul>
       </div>
     </section>

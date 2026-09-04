@@ -16,11 +16,39 @@ import type { PortfolioItem } from "@/app/lib/portfolio-fornecedor";
 
 const MAX_FOTOS = 12;
 
-export default function PortfolioFornecedor({ inicial }: { inicial: PortfolioItem[] }) {
+export default function PortfolioFornecedor({
+  inicial,
+  recorteDisponivel,
+}: {
+  inicial: PortfolioItem[];
+  recorteDisponivel: boolean;
+}) {
   const [fotos, setFotos] = useState<PortfolioItem[]>(inicial);
   const [enviando, setEnviando] = useState(0);
   const [erro, setErro] = useState<string | null>(null);
+  // id da foto em recorte: trava só aquele card, não a página inteira.
+  const [recortando, setRecortando] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  async function alternarFundo(foto: PortfolioItem) {
+    setErro(null);
+    setRecortando(foto.id);
+    try {
+      const r = await fetch(`/api/fornecedor/painel/portfolio/${foto.id}/fundo`, {
+        method: foto.fundoRemovido ? "DELETE" : "POST",
+      });
+      const json = await r.json();
+      if (!r.ok) {
+        setErro(json?.error ?? "não consegui aplicar o fundo padrão");
+        return;
+      }
+      setFotos((atual) => atual.map((f) => (f.id === foto.id ? (json as PortfolioItem) : f)));
+    } catch {
+      setErro("falha de conexão ao aplicar o fundo");
+    } finally {
+      setRecortando(null);
+    }
+  }
 
   const cheio = fotos.length >= MAX_FOTOS;
 
@@ -129,6 +157,21 @@ export default function PortfolioFornecedor({ inicial }: { inicial: PortfolioIte
               >
                 ×
               </button>
+
+              {recorteDisponivel && (
+                <button
+                  type="button"
+                  onClick={() => alternarFundo(f)}
+                  disabled={recortando === f.id}
+                  className="absolute inset-x-2 bottom-2 bg-white/95 hover:bg-white disabled:opacity-70 text-gray-900 text-[11px] font-medium py-1.5 rounded-lg shadow-sm transition-colors md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
+                >
+                  {recortando === f.id
+                    ? "Processando…"
+                    : f.fundoRemovido
+                      ? "Voltar foto original"
+                      : "Isolar em fundo claro"}
+                </button>
+              )}
             </li>
           ))}
           {Array.from({ length: enviando }).map((_, i) => (

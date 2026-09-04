@@ -58,3 +58,47 @@ export async function normalizarFotoPortfolio(entrada: Buffer): Promise<ImagemNo
     altura: PORTFOLIO_ALTURA,
   }
 }
+
+/** Cinza claro da vitrine. Escolhido em vez do branco puro porque boa parte das
+ *  peças é branca/off-white: contra fundo branco elas perdem o contorno. */
+export const FUNDO_VITRINE = { r: 245, g: 246, b: 247 }
+
+/**
+ * Compõe um recorte PNG (com transparência) sobre o fundo padrão da vitrine, no
+ * mesmo 1080x1350 das demais fotos.
+ *
+ * `fit: contain` aqui, não `cover`: a peça já foi isolada, então o que importa é
+ * ela caber inteira com respiro. Cortar um recorte seria amputar a peça.
+ */
+export async function comporSobreFundo(recortePng: Buffer): Promise<ImagemNormalizada> {
+  const MARGEM = 0.88 // a peça ocupa 88% do quadro; o resto é respiro
+
+  const dentro = await sharp(recortePng)
+    .trim() // tira o transparente sobrando antes de medir, senão a peça fica pequena
+    .resize(Math.round(PORTFOLIO_LARGURA * MARGEM), Math.round(PORTFOLIO_ALTURA * MARGEM), {
+      fit: 'inside',
+      withoutEnlargement: false,
+    })
+    .toBuffer()
+
+  const buffer = await sharp({
+    create: {
+      width: PORTFOLIO_LARGURA,
+      height: PORTFOLIO_ALTURA,
+      channels: 4,
+      background: { ...FUNDO_VITRINE, alpha: 1 },
+    },
+  })
+    .composite([{ input: dentro, gravity: 'centre' }])
+    .flatten({ background: FUNDO_VITRINE })
+    .jpeg({ quality: 82, progressive: true, mozjpeg: true })
+    .toBuffer()
+
+  return {
+    buffer,
+    mime: 'image/jpeg',
+    extensao: 'jpg',
+    largura: PORTFOLIO_LARGURA,
+    altura: PORTFOLIO_ALTURA,
+  }
+}
