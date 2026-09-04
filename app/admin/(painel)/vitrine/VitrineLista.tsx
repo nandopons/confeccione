@@ -17,6 +17,7 @@ export type ItemVitrine = {
   id: string
   url: string
   legenda: string | null
+  nome: string | null
   destaque: boolean
   largura: number | null
   altura: number | null
@@ -112,10 +113,12 @@ export default function VitrineLista({ inicial }: { inicial: ItemVitrine[] }) {
                 )}
               </div>
               <div className="p-3">
-                <p className="text-sm text-gray-900 font-medium truncate" title={item.fornecedorNome ?? ''}>
-                  {item.fornecedorNome ?? 'Fornecedor sem nome'}
+                <p className="text-sm text-gray-900 font-medium truncate" title={item.nome ?? ''}>
+                  {item.nome ?? <span className="text-amber-600">Sem ficha de produto</span>}
                 </p>
                 <p className="text-xs text-gray-400 truncate">
+                  {item.fornecedorNome ?? 'Fornecedor sem nome'}
+                  {' · '}
                   {[item.fornecedorCidade, item.fornecedorUf].filter(Boolean).join('/') || '—'}
                 </p>
                 <button

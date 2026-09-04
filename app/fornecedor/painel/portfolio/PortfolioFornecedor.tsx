@@ -14,6 +14,7 @@ import Image from "next/image";
 import { useRef, useState } from "react";
 import type { PortfolioItem } from "@/app/lib/portfolio-fornecedor";
 import type { Enquadramento } from "@/app/lib/portfolio-normalizar";
+import FichaProdutoModal from "./FichaProdutoModal";
 
 const MAX_FOTOS = 12;
 
@@ -38,6 +39,7 @@ export default function PortfolioFornecedor({
   // id da foto em recorte: trava só aquele card, não a página inteira.
   const [recortando, setRecortando] = useState<string | null>(null);
   const [reenquadrando, setReenquadrando] = useState<string | null>(null);
+  const [editando, setEditando] = useState<PortfolioItem | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function mudarEnquadramento(foto: PortfolioItem, posicao: Enquadramento) {
@@ -182,6 +184,11 @@ export default function PortfolioFornecedor({
                   Na página inicial
                 </span>
               )}
+              {!f.nome && !f.destaque && (
+                <span className="absolute top-2 left-2 bg-amber-500 text-white text-[10px] font-medium px-2 py-1 rounded-full">
+                  Sem ficha
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => apagar(f.id)}
@@ -192,6 +199,14 @@ export default function PortfolioFornecedor({
               </button>
 
               <div className="absolute inset-x-2 bottom-2 flex flex-col gap-1.5 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity">
+                <button
+                  type="button"
+                  onClick={() => setEditando(f)}
+                  className="bg-gray-900 hover:bg-black text-white text-[11px] font-medium py-1.5 rounded-lg shadow-sm transition-colors"
+                >
+                  {f.nome ? "Editar ficha" : "Preencher ficha"}
+                </button>
+
                 {f.podeReenquadrar && (
                   <div
                     className="flex bg-white/95 rounded-lg shadow-sm overflow-hidden"
@@ -243,6 +258,17 @@ export default function PortfolioFornecedor({
             />
           ))}
         </ul>
+      )}
+
+      {editando && (
+        <FichaProdutoModal
+          foto={editando}
+          aoFechar={() => setEditando(null)}
+          aoSalvar={(item) => {
+            setFotos((atual) => atual.map((f) => (f.id === item.id ? item : f)));
+            setEditando(null);
+          }}
+        />
       )}
     </div>
   );

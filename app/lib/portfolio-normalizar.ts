@@ -123,20 +123,34 @@ export async function comporSobreFundo(recortePng: Buffer): Promise<ImagemNormal
 
   const sangrado = encostaEmbaixo || encostaNaLateral
 
-  const dentro = sangrado
-    ? // Ocupa a altura quase toda; o respiro fica no topo, pela gravidade south.
-      await sharp(recortado)
-        .resize(Math.round(PORTFOLIO_LARGURA * 0.98), Math.round(PORTFOLIO_ALTURA * 0.97), {
-          fit: 'inside',
-          withoutEnlargement: false,
-        })
-        .toBuffer()
-    : await sharp(recortado)
-        .resize(Math.round(PORTFOLIO_LARGURA * 0.88), Math.round(PORTFOLIO_ALTURA * 0.88), {
-          fit: 'inside',
-          withoutEnlargement: false,
-        })
-        .toBuffer()
+  // Sangrado: NÃO redimensiona nem recentraliza — devolve a peça exatamente
+  // onde ela estava no quadro original. O recorte já veio de uma imagem
+  // 1080x1350, então basta recolar no mesmo offset e trocar o fundo. Qualquer
+  // resize aqui vira margem em algum lado (foi o "no top ainda tá").
+  const escalaX = PORTFOLIO_LARGURA / larguraOriginal
+  const escalaY = PORTFOLIO_ALTURA / alturaOriginal
+
+  const sobreposicao = sangrado
+    ? {
+        input: await sharp(recortado)
+          .resize(Math.max(1, Math.round(info.width * escalaX)), Math.max(1, Math.round(info.height * escalaY)), {
+            fit: 'fill',
+          })
+          .toBuffer(),
+        left: Math.max(0, Math.round(cortadoEsquerda * escalaX)),
+        top: Math.max(0, Math.round(cortadoTopo * escalaY)),
+      }
+    : {
+        // Peça solta (cabide, produto inteiro): aí sim vale padronizar —
+        // centraliza com respiro nos quatro lados, como e-commerce faz.
+        input: await sharp(recortado)
+          .resize(Math.round(PORTFOLIO_LARGURA * 0.88), Math.round(PORTFOLIO_ALTURA * 0.88), {
+            fit: 'inside',
+            withoutEnlargement: false,
+          })
+          .toBuffer(),
+        gravity: 'centre' as const,
+      }
 
   const buffer = await sharp({
     create: {
@@ -146,7 +160,7 @@ export async function comporSobreFundo(recortePng: Buffer): Promise<ImagemNormal
       background: { ...FUNDO_VITRINE, alpha: 1 },
     },
   })
-    .composite([{ input: dentro, gravity: sangrado ? 'south' : 'centre' }])
+    .composite([sobreposicao])
     .flatten({ background: FUNDO_VITRINE })
     .jpeg({ quality: 82, progressive: true, mozjpeg: true })
     .toBuffer()

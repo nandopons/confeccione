@@ -34,10 +34,35 @@ export type PortfolioItem = {
   enquadramento: Enquadramento
   /** false nas fotos antigas, que subiram antes de o upload cru ser guardado. */
   podeReenquadrar: boolean
+  /** Ficha do produto. Preço fica de fora de propósito — só sai na oferta. */
+  nome: string | null
+  tipo: string | null
+  pedidoMinimo: number | null
+  prazoDias: number | null
+  tamanhos: string | null
+  tecido: string | null
+  cores: string | null
+  tecnicas: string | null
+  observacoes: string | null
 }
 
+/** Campos que o fornecedor edita na ficha do produto. */
+export type FichaProduto = {
+  nome?: string | null
+  tipo?: string | null
+  pedidoMinimo?: number | null
+  prazoDias?: number | null
+  tamanhos?: string | null
+  tecido?: string | null
+  cores?: string | null
+  tecnicas?: string | null
+  observacoes?: string | null
+}
+
+// Literal único de propósito: o supabase-js só infere o tipo da linha quando a
+// string do select é literal — concatenar quebra a inferência e derruba o tsc.
 const CAMPOS =
-  'id, path, legenda, ordem, destaque, largura, altura, path_original, path_upload, enquadramento'
+  'id, path, legenda, ordem, destaque, largura, altura, path_original, path_upload, enquadramento, nome, tipo, pedido_minimo, prazo_dias, tamanhos, tecido, cores, tecnicas, observacoes'
 
 type LinhaPortfolio = {
   id: string
@@ -50,6 +75,15 @@ type LinhaPortfolio = {
   path_original?: string | null
   path_upload?: string | null
   enquadramento?: string | null
+  nome?: string | null
+  tipo?: string | null
+  pedido_minimo?: number | null
+  prazo_dias?: number | null
+  tamanhos?: string | null
+  tecido?: string | null
+  cores?: string | null
+  tecnicas?: string | null
+  observacoes?: string | null
 }
 
 function paraItem(r: LinhaPortfolio): PortfolioItem {
@@ -66,7 +100,58 @@ function paraItem(r: LinhaPortfolio): PortfolioItem {
     // Sem recorte de fundo pendurado: o reenquadramento parte do upload cru e
     // desfaria o recorte sem avisar. Melhor exigir "voltar foto original".
     podeReenquadrar: Boolean(r.path_upload) && !r.path_original,
+    nome: r.nome ?? null,
+    tipo: r.tipo ?? null,
+    pedidoMinimo: r.pedido_minimo ?? null,
+    prazoDias: r.prazo_dias ?? null,
+    tamanhos: r.tamanhos ?? null,
+    tecido: r.tecido ?? null,
+    cores: r.cores ?? null,
+    tecnicas: r.tecnicas ?? null,
+    observacoes: r.observacoes ?? null,
   }
+}
+
+/** Texto livre normalizado: vazio vira null, pra não gravar string em branco. */
+function texto(v: unknown, max = 400): string | null {
+  if (typeof v !== 'string') return null
+  const t = v.trim().slice(0, max)
+  return t || null
+}
+
+function inteiro(v: unknown, min: number, max: number): number | null {
+  const n = typeof v === 'number' ? v : Number(v)
+  if (!Number.isFinite(n)) return null
+  const i = Math.round(n)
+  return i >= min && i <= max ? i : null
+}
+
+/** Salva a ficha do produto. Só o dono da foto edita. */
+export async function salvarFichaProduto(
+  fornecedorId: string,
+  itemId: string,
+  ficha: FichaProduto,
+): Promise<PortfolioItem | null> {
+  const { data, error } = await supabaseAdmin
+    .from('portfolio_fornecedores')
+    .update({
+      nome: texto(ficha.nome, 80),
+      tipo: texto(ficha.tipo, 40),
+      pedido_minimo: inteiro(ficha.pedidoMinimo, 1, 100000),
+      prazo_dias: inteiro(ficha.prazoDias, 1, 365),
+      tamanhos: texto(ficha.tamanhos, 120),
+      tecido: texto(ficha.tecido, 160),
+      cores: texto(ficha.cores, 160),
+      tecnicas: texto(ficha.tecnicas, 160),
+      observacoes: texto(ficha.observacoes, 400),
+    })
+    .eq('id', itemId)
+    .eq('fornecedor_id', fornecedorId)
+    .select(CAMPOS)
+    .single()
+
+  if (error || !data) return null
+  return paraItem(data as LinhaPortfolio)
 }
 
 /** Extensão a partir do mime do upload; só pra dar nome ao objeto no bucket. */
@@ -240,11 +325,46 @@ export type ItemVitrine = {
   id: string
   url: string
   legenda: string | null
+  nome: string | null
+  tipo: string | null
+  pedidoMinimo: number | null
+  prazoDias: number | null
+  fornecedorId: string
   fornecedorNome: string | null
   fornecedorCidade: string | null
   fornecedorUf: string | null
   largura: number
   altura: number
+}
+
+/** Teto por confecção no carrossel: sem isso, quem sobe 12 fotos toma a home. */
+export const MAX_POR_FORNECEDOR_NA_HOME = 4
+
+/**
+ * Intercala em rodízio: uma foto de cada fornecedor por rodada, até o teto.
+ * A ordem de chegada de cada fornecedor é preservada dentro do rodízio.
+ */
+function intercalarPorFornecedor<T extends { fornecedorId: string }>(
+  itens: T[],
+  teto: number,
+  limite: number,
+): T[] {
+  const porFornecedor = new Map<string, T[]>()
+  for (const item of itens) {
+    const lista = porFornecedor.get(item.fornecedorId) ?? []
+    if (lista.length < teto) lista.push(item)
+    porFornecedor.set(item.fornecedorId, lista)
+  }
+
+  const filas = [...porFornecedor.values()]
+  const saida: T[] = []
+  for (let rodada = 0; rodada < teto && saida.length < limite; rodada++) {
+    for (const fila of filas) {
+      if (saida.length >= limite) break
+      if (fila[rodada]) saida.push(fila[rodada])
+    }
+  }
+  return saida
 }
 
 /**
@@ -253,15 +373,20 @@ export type ItemVitrine = {
  * sozinha, sem precisar de faxina manual.
  */
 export async function getVitrineHome(limite = 12): Promise<ItemVitrine[]> {
+  // Busca folgado (4x) porque o corte final é feito no rodízio, não no banco:
+  // pedir só `limite` traria 12 fotos possivelmente do mesmo fornecedor.
   const { data } = await supabaseAdmin
     .from('portfolio_fornecedores')
-    .select(`${CAMPOS}, criado_em, leads_fornecedores!inner(nome, cidade, estado, aprovacao_status)`)
+    .select(
+      `${CAMPOS}, fornecedor_id, criado_em, leads_fornecedores!inner(nome, cidade, estado, aprovacao_status)`,
+    )
     .eq('destaque', true)
     .eq('leads_fornecedores.aprovacao_status', 'aprovado')
     .order('destaque_em', { ascending: false })
-    .limit(limite)
+    .limit(limite * 4)
 
   type LinhaVitrine = LinhaPortfolio & {
+    fornecedor_id: string
     leads_fornecedores: {
       nome: string | null
       cidade: string | null
@@ -269,13 +394,115 @@ export async function getVitrineHome(limite = 12): Promise<ItemVitrine[]> {
     } | null
   }
 
-  return ((data ?? []) as unknown as LinhaVitrine[]).map((r) => ({
+  const todos: ItemVitrine[] = ((data ?? []) as unknown as LinhaVitrine[]).map((r) => ({
     id: r.id,
     url: urlPublica(r.path),
     legenda: r.legenda ?? null,
+    nome: r.nome ?? null,
+    tipo: r.tipo ?? null,
+    pedidoMinimo: r.pedido_minimo ?? null,
+    prazoDias: r.prazo_dias ?? null,
+    fornecedorId: r.fornecedor_id,
     fornecedorNome: r.leads_fornecedores?.nome ?? null,
     fornecedorCidade: r.leads_fornecedores?.cidade ?? null,
     fornecedorUf: r.leads_fornecedores?.estado ?? null,
+    largura: r.largura ?? 1080,
+    altura: r.altura ?? 1350,
+  }))
+
+  return intercalarPorFornecedor(todos, MAX_POR_FORNECEDOR_NA_HOME, limite)
+}
+
+// ─────────────────────── Página pública do produto ───────────────────────
+
+export type ProdutoPublico = ItemVitrine & {
+  tecido: string | null
+  cores: string | null
+  tecnicas: string | null
+  tamanhos: string | null
+  observacoes: string | null
+  fornecedorEstado: string | null
+}
+
+/**
+ * Produto da vitrine para a página pública `/produto/[id]`.
+ *
+ * Só devolve foto de fornecedor APROVADO e ATIVO: a página tem um formulário
+ * que dispara oferta direto pra ele, então servir a página de um fornecedor
+ * desativado geraria pedido que nunca seria respondido.
+ */
+export async function getProdutoPublico(id: string): Promise<ProdutoPublico | null> {
+  const { data } = await supabaseAdmin
+    .from('portfolio_fornecedores')
+    .select(
+      `${CAMPOS}, fornecedor_id, leads_fornecedores!inner(nome, cidade, estado, status, aprovacao_status)`,
+    )
+    .eq('id', id)
+    .eq('leads_fornecedores.aprovacao_status', 'aprovado')
+    .maybeSingle()
+
+  if (!data) return null
+  const r = data as unknown as LinhaPortfolio & {
+    fornecedor_id: string
+    leads_fornecedores: {
+      nome: string | null
+      cidade: string | null
+      estado: string | null
+      status: string | null
+    } | null
+  }
+  if (r.leads_fornecedores?.status !== 'ativo') return null
+
+  return {
+    id: r.id,
+    url: urlPublica(r.path),
+    legenda: r.legenda ?? null,
+    nome: r.nome ?? null,
+    tipo: r.tipo ?? null,
+    pedidoMinimo: r.pedido_minimo ?? null,
+    prazoDias: r.prazo_dias ?? null,
+    tamanhos: r.tamanhos ?? null,
+    tecido: r.tecido ?? null,
+    cores: r.cores ?? null,
+    tecnicas: r.tecnicas ?? null,
+    observacoes: r.observacoes ?? null,
+    fornecedorId: r.fornecedor_id,
+    fornecedorNome: r.leads_fornecedores?.nome ?? null,
+    fornecedorCidade: r.leads_fornecedores?.cidade ?? null,
+    fornecedorUf: r.leads_fornecedores?.estado ?? null,
+    fornecedorEstado: r.leads_fornecedores?.estado ?? null,
+    largura: r.largura ?? 1080,
+    altura: r.altura ?? 1350,
+  }
+}
+
+/** Outras peças do mesmo fornecedor, pro rodapé da página do produto. */
+export async function getOutrosDoFornecedor(
+  fornecedorId: string,
+  excetoId: string,
+  limite = 4,
+): Promise<ItemVitrine[]> {
+  const { data } = await supabaseAdmin
+    .from('portfolio_fornecedores')
+    .select(`${CAMPOS}, fornecedor_id`)
+    .eq('fornecedor_id', fornecedorId)
+    .neq('id', excetoId)
+    .not('nome', 'is', null)
+    .order('criado_em', { ascending: false })
+    .limit(limite)
+
+  return ((data ?? []) as unknown as (LinhaPortfolio & { fornecedor_id: string })[]).map((r) => ({
+    id: r.id,
+    url: urlPublica(r.path),
+    legenda: r.legenda ?? null,
+    nome: r.nome ?? null,
+    tipo: r.tipo ?? null,
+    pedidoMinimo: r.pedido_minimo ?? null,
+    prazoDias: r.prazo_dias ?? null,
+    fornecedorId: r.fornecedor_id,
+    fornecedorNome: null,
+    fornecedorCidade: null,
+    fornecedorUf: null,
     largura: r.largura ?? 1080,
     altura: r.altura ?? 1350,
   }))
