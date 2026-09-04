@@ -7,6 +7,7 @@ import PortoDigitalBadge from "@/app/components/PortoDigitalBadge";
 import PedidoSteps from "@/app/components/PedidoSteps";
 import BotaoIrParaPedido from "@/app/components/BotaoIrParaPedido";
 import SegmentosEFaq, { FAQ_HOME } from "@/app/components/SegmentosEFaq";
+import GaleriaProdutos from "@/app/components/GaleriaProdutos";
 import { linkWhatsAppSuporte, WHATSAPP_SUPORTE_FORMATADO } from "@/app/lib/contatos";
 
 export const metadata: Metadata = {
@@ -145,6 +146,7 @@ export default function Home() {
         </div>
       </section>
 
+      <GaleriaProdutos />
       <SegmentosEFaq />
 
       <section className="bg-[#111] px-6 py-16">

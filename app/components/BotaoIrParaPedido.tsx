@@ -24,12 +24,14 @@ export function rolarAtePedido() {
 export default function BotaoIrParaPedido({
   className,
   children = "Fazer meu pedido →",
+  "aria-label": ariaLabel,
 }: {
   className?: string;
   children?: ReactNode;
+  "aria-label"?: string;
 }) {
   return (
-    <button type="button" onClick={rolarAtePedido} className={className}>
+    <button type="button" onClick={rolarAtePedido} className={className} aria-label={ariaLabel}>
       {children}
     </button>
   );
