@@ -168,6 +168,39 @@ const TEMPLATES = [
       },
     ],
   },
+  // Oferta ao fornecedor v3 (04/09/2026) — FICHA SECA.
+  // A v2 era um parágrafo com saudação e explicação; o fornecedor lê no celular,
+  // quase sempre no meio da produção, e decide por quantidade, estado e prazo.
+  // Aqui cada dado tem sua linha e o texto em volta some. O corpo NÃO pode
+  // começar nem terminar com variável (a Meta rejeita) — daí o "Pedido:" na
+  // primeira linha e a pergunta fechando a mensagem.
+  {
+    name: 'oferta_pedido_v3',
+    language: 'pt_BR',
+    category: 'UTILITY',
+    components: [
+      {
+        type: 'BODY',
+        text:
+          'Pedido: {{1}}\nQuantidade: {{2}}\nEstado: {{3}}\nPrazo: {{4}}\nDetalhes: {{5}}\n\nQuer atender este cliente? Toque em Ver pedido.',
+        example: {
+          body_text: [['Bonés', '10 peças', 'PE', '15 dias', 'Bonés azuis, bordado frontal']],
+        },
+      },
+      { type: 'FOOTER', text: 'Confeccione · confeccione.com.br' },
+      {
+        type: 'BUTTONS',
+        buttons: [
+          {
+            type: 'URL',
+            text: 'Ver pedido',
+            url: 'https://www.confeccione.com.br/fornecedor/oferta/{{1}}',
+            example: ['https://www.confeccione.com.br/fornecedor/oferta/12a6aef5-5042-4927-9a68-2276777563d1'],
+          },
+        ],
+      },
+    ],
+  },
   // Confirmação de pedido (utility) — botão dinâmico pro painel do cliente
   // com o e-mail pré-preenchido (login?email={{1}}).
   {

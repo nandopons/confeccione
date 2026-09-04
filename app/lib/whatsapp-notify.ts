@@ -180,35 +180,86 @@ export async function notificarPedidoRecebido(params: {
  * viram linha única (parâmetros da Meta não aceitam quebra de linha).
  * Failure-soft.
  */
+/**
+ * Template da oferta ao fornecedor.
+ *
+ * v3 (04/09/2026, pedido do Fernando): ficha seca em vez de parágrafo. O
+ * fornecedor decide por quantidade, estado e prazo — o texto de vendas em volta
+ * só atrasava a leitura no celular, quase sempre no meio da produção.
+ *
+ * Enquanto a v3 não estiver aprovada pela Meta, basta apontar de volta pra v2.
+ */
+export const TEMPLATE_OFERTA = 'oferta_pedido_v3'
+
 export async function notificarOfertaFornecedor(params: {
   telefone: string
   nome: string | null
-  /** ex.: "50x camiseta preta · 50 peças" */
-  resumo: string
-  /** ex.: "prazo 21 dias · repasse R$ 2.500,00" */
-  condicoes: string
+  /** Tipo da peça, do jeito que o fornecedor pensa. ex.: "Bonés" */
+  produto: string
+  /** ex.: "10 peças" */
+  quantidade: string
+  /** UF do cliente. ex.: "PE" */
+  estado: string
+  /** ex.: "15 dias" ou "a combinar" */
+  prazo: string
+  /** Uma linha com o que caracteriza a peça. ex.: "Bonés azuis, bordado" */
+  detalhes: string
   ofertaId: string
 }): Promise<boolean> {
   try {
     const waId = normalizarWaId(params.telefone)
     if (waId.replace(/\D/g, '').length < 10) return false
 
-    const primeiro = (params.nome ?? '').trim().split(/\s+/)[0] || 'parceiro(a)'
-    const limpa = (s: string) => s.replace(/\s*\n+\s*/g, ' · ').replace(/\s{2,}/g, ' ').trim().slice(0, 300)
-    const resumo = limpa(params.resumo)
-    const condicoes = limpa(params.condicoes)
+    // Parâmetro da Meta é linha única: quebra de linha derruba o envio.
+    const limpa = (s: string, max = 220) =>
+      (s || '').replace(/\s*\n+\s*/g, ' · ').replace(/\s{2,}/g, ' ').trim().slice(0, max) || '—'
 
-    const resultado = await enviarTemplate(waId, 'oferta_pedido_v2', 'pt_BR', [
+    const produto = limpa(params.produto, 60)
+    const quantidade = limpa(params.quantidade, 40)
+    const estado = limpa(params.estado, 30)
+    const prazo = limpa(params.prazo, 60)
+    const detalhes = limpa(params.detalhes)
+
+    const botao = {
+      type: 'button' as const,
+      sub_type: 'url' as const,
+      index: 0,
+      parameters: [{ type: 'text', text: params.ofertaId }],
+    }
+
+    let resultado = await enviarTemplate(waId, TEMPLATE_OFERTA, 'pt_BR', [
       {
         type: 'body',
         parameters: [
-          { type: 'text', text: primeiro },
-          { type: 'text', text: resumo },
-          { type: 'text', text: condicoes },
+          { type: 'text', text: produto },
+          { type: 'text', text: quantidade },
+          { type: 'text', text: estado },
+          { type: 'text', text: prazo },
+          { type: 'text', text: detalhes },
         ],
       },
-      { type: 'button', sub_type: 'url', index: 0, parameters: [{ type: 'text', text: params.ofertaId }] },
+      botao,
     ])
+
+    // A v3 só existe depois que a Meta aprovar. Enquanto isso o envio cairia no
+    // vazio e o fornecedor simplesmente não receberia a oferta — pior do que uma
+    // mensagem feia. Então: falhou a v3, manda a v2 (que já está aprovada).
+    if (!resultado.ok) {
+      console.warn('[wa-notify] v3 recusada, caindo pra v2', { erro: resultado.erro })
+      const primeiro = (params.nome ?? '').trim().split(/\s+/)[0] || 'parceiro(a)'
+      resultado = await enviarTemplate(waId, 'oferta_pedido_v2', 'pt_BR', [
+        {
+          type: 'body',
+          parameters: [
+            { type: 'text', text: primeiro },
+            { type: 'text', text: `${quantidade} · ${produto} · ${estado}` },
+            { type: 'text', text: `prazo ${prazo}` },
+          ],
+        },
+        botao,
+      ])
+    }
+
     if (!resultado.ok) {
       console.error('[wa-notify] oferta_pedido falhou', { erro: resultado.erro })
       return false
@@ -220,9 +271,13 @@ export async function notificarOfertaFornecedor(params: {
       if (conversaId) {
         const agora = new Date().toISOString()
         const corpo =
-          `Oi, ${primeiro}! Há um pedido aguardando sua resposta no seu cadastro de fornecedor da Confeccione: ${resumo} — ${condicoes}. ` +
-          `Acesse pra ver os detalhes e aceitar ou recusar o atendimento.\n` +
-          `▸ Responder ao pedido → https://www.confeccione.com.br/fornecedor/oferta/${params.ofertaId}`
+          `Pedido: ${produto}\n` +
+          `Quantidade: ${quantidade}\n` +
+          `Estado: ${estado}\n` +
+          `Prazo: ${prazo}\n` +
+          `Detalhes: ${detalhes}\n\n` +
+          `Quer atender este cliente? Toque em Ver pedido.\n` +
+          `▸ https://www.confeccione.com.br/fornecedor/oferta/${params.ofertaId}`
         await supabaseAdmin.from('wa_mensagens').insert({
           conversa_id: conversaId,
           wamid: resultado.wamid,
@@ -230,7 +285,7 @@ export async function notificarOfertaFornecedor(params: {
           tipo: 'template',
           corpo,
           status: 'enviando',
-          template_nome: 'oferta_pedido_v2',
+          template_nome: TEMPLATE_OFERTA,
           criado_em: agora,
         })
         await supabaseAdmin

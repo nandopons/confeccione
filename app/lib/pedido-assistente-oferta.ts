@@ -288,15 +288,6 @@ export async function ofertarPedido(
   const repasseTexto = pago ? brl(repasse) : repasse != null ? `~${brl(repasse)} (estimado)` : 'a definir por você'
 
   const { totalPecas, texto } = resumirLinhas(linhas)
-  // Resumo CURTO pro WhatsApp do fornecedor (o detalhe item-a-item ele vê no
-  // link "Responder ao pedido"): total de peças · categoria/estilo · estado.
-  const resumoCurto = [
-    `${totalPecas} ${totalPecas === 1 ? 'peça' : 'peças'}`,
-    pedido.categoria?.trim() || null,
-    pedido.uf?.trim() || null,
-  ]
-    .filter(Boolean)
-    .join(' · ')
   const emailLinhas = resumirLinhasEmail(linhas)
   const numImagens = coletarVisuaisPedido(pedido.mockups, pedido.imagens).length
 
@@ -365,17 +356,18 @@ export async function ofertarPedido(
         `👉 Veja os mockups e detalhes e assuma o pedido aqui:\n${link}`
       // Preferência: template OFICIAL (Meta) com botão pra oferta — o Z-API
       // (assinatura expirada) fica como fallback caso volte a existir.
-      const condicoes = [
-        pedido.prazo_dias ? `prazo ${pedido.prazo_dias} dias` : null,
-        pago ? `pedido JÁ PAGO · valor ${repasseTexto}` : `repasse ${repasseTexto} (você define o orçamento final)`,
-      ]
-        .filter(Boolean)
-        .join(' · ')
+      // Ficha seca (template v3, 04/09/2026): produto, quantidade, estado,
+      // prazo e detalhes — o que o fornecedor precisa pra decidir em segundos.
+      // O repasse fica FORA do WhatsApp de propósito: é estimativa até ele
+      // orçar, e número no primeiro contato vira âncora de negociação.
       const enviadoOficial = await notificarOfertaFornecedor({
         telefone: forn.whatsapp,
         nome: forn.nome ?? null,
-        resumo: resumoCurto,
-        condicoes,
+        produto: pedido.categoria?.trim() || linhas[0]?.modelo?.trim() || 'Produção sob medida',
+        quantidade: `${totalPecas} ${totalPecas === 1 ? 'peça' : 'peças'}`,
+        estado: pedido.uf?.trim() || 'a confirmar',
+        prazo: pedido.prazo_dias ? `${pedido.prazo_dias} dias` : 'a combinar',
+        detalhes: texto,
         ofertaId,
       })
       const enviado = enviadoOficial || (await enviarMensagem(forn.whatsapp, mensagem))
