@@ -2,6 +2,7 @@
 // DELETE /api/fornecedor/painel/portfolio/[id]/fundo — volta pra foto original.
 import { getFornecedorAtual } from '@/app/lib/auth-server'
 import { aplicarFundoPadrao, desfazerFundoPadrao } from '@/app/lib/portfolio-fornecedor'
+import { revalidatePath } from 'next/cache'
 
 export const maxDuration = 60 // o recorte é uma chamada externa; 10s não basta
 
@@ -12,6 +13,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   const { id } = await ctx.params
   const r = await aplicarFundoPadrao(fornecedor.id, id)
   if (!r.ok) return Response.json({ error: r.motivo }, { status: 400 })
+  revalidatePath('/') // o path mudou; a home em ISR apontaria pro objeto antigo
   return Response.json(r.item)
 }
 
@@ -22,5 +24,6 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   const { id } = await ctx.params
   const r = await desfazerFundoPadrao(fornecedor.id, id)
   if (!r.ok) return Response.json({ error: r.motivo }, { status: 400 })
+  revalidatePath('/')
   return Response.json(r.item)
 }

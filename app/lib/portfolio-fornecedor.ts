@@ -7,7 +7,12 @@
 
 import { randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
-import { comporSobreFundo, normalizarFotoPortfolio } from '@/app/lib/portfolio-normalizar'
+import {
+  comporSobreFundo,
+  enquadramentoValido,
+  normalizarFotoPortfolio,
+  type Enquadramento,
+} from '@/app/lib/portfolio-normalizar'
 import { removerFundo } from '@/app/lib/remover-fundo'
 
 export const BUCKET_PORTFOLIO = 'portfolio-fornecedores'
@@ -25,9 +30,14 @@ export type PortfolioItem = {
   altura: number | null
   /** true quando a foto já passou pelo recorte de fundo (dá pra desfazer). */
   fundoRemovido: boolean
+  /** De onde o corte 4:5 partiu. */
+  enquadramento: Enquadramento
+  /** false nas fotos antigas, que subiram antes de o upload cru ser guardado. */
+  podeReenquadrar: boolean
 }
 
-const CAMPOS = 'id, path, legenda, ordem, destaque, largura, altura, path_original'
+const CAMPOS =
+  'id, path, legenda, ordem, destaque, largura, altura, path_original, path_upload, enquadramento'
 
 type LinhaPortfolio = {
   id: string
@@ -38,6 +48,8 @@ type LinhaPortfolio = {
   largura: number | null
   altura: number | null
   path_original?: string | null
+  path_upload?: string | null
+  enquadramento?: string | null
 }
 
 function paraItem(r: LinhaPortfolio): PortfolioItem {
@@ -50,7 +62,19 @@ function paraItem(r: LinhaPortfolio): PortfolioItem {
     largura: r.largura,
     altura: r.altura,
     fundoRemovido: Boolean(r.path_original),
+    enquadramento: enquadramentoValido(r.enquadramento),
+    // Sem recorte de fundo pendurado: o reenquadramento parte do upload cru e
+    // desfaria o recorte sem avisar. Melhor exigir "voltar foto original".
+    podeReenquadrar: Boolean(r.path_upload) && !r.path_original,
   }
+}
+
+/** Extensão a partir do mime do upload; só pra dar nome ao objeto no bucket. */
+function extensaoDoMime(mime: string): string {
+  if (mime.includes('png')) return 'png'
+  if (mime.includes('webp')) return 'webp'
+  if (mime.includes('heic') || mime.includes('heif')) return 'heic'
+  return 'jpg'
 }
 
 function urlPublica(path: string): string {
@@ -105,11 +129,25 @@ export async function uploadPortfolio(
     .upload(path, normalizada.buffer, { contentType: normalizada.mime, upsert: false })
   if (upErr) throw upErr
 
+  // A foto crua fica guardada num prefixo separado: é dela que sai qualquer
+  // reenquadramento posterior. Cortar de novo o 1080x1350 já cortado não
+  // devolveria o que foi descartado no primeiro corte.
+  const mimeUpload = file.type || 'image/jpeg'
+  const pathUpload = `${fornecedorId}/upload/${randomUUID()}.${extensaoDoMime(mimeUpload)}`
+  const { error: errUpload } = await supabaseAdmin.storage
+    .from(BUCKET_PORTFOLIO)
+    .upload(pathUpload, original, { contentType: mimeUpload, upsert: false })
+  // Falhar aqui não invalida o upload: a foto já está publicada, só perde a
+  // opção de reenquadrar. Silenciar é melhor do que recusar a foto inteira.
+  if (errUpload) console.error('[portfolio] não guardei o upload cru:', errUpload)
+
   const { data, error } = await supabaseAdmin
     .from('portfolio_fornecedores')
     .insert({
       fornecedor_id: fornecedorId,
       path,
+      path_upload: errUpload ? null : pathUpload,
+      enquadramento: 'topo',
       ordem: total,
       legenda: legenda?.trim() || null,
       largura: normalizada.largura,
@@ -130,13 +168,16 @@ export async function uploadPortfolio(
 export async function removerPortfolio(fornecedorId: string, itemId: string): Promise<boolean> {
   const { data } = await supabaseAdmin
     .from('portfolio_fornecedores')
-    .select('id, path')
+    .select('id, path, path_original, path_upload')
     .eq('id', itemId)
     .eq('fornecedor_id', fornecedorId)
-    .maybeSingle()
+    .maybeSingle<{ id: string; path: string; path_original: string | null; path_upload: string | null }>()
   if (!data) return false
 
-  await supabaseAdmin.storage.from(BUCKET_PORTFOLIO).remove([data.path]).catch(() => {})
+  // Apaga TODAS as versões: publicada, pré-recorte e upload cru. Deixar o cru
+  // pra trás encheria o bucket com foto que ninguém mais consegue ver.
+  const paths = [data.path, data.path_original, data.path_upload].filter(Boolean) as string[]
+  await supabaseAdmin.storage.from(BUCKET_PORTFOLIO).remove(paths).catch(() => {})
   await supabaseAdmin.from('portfolio_fornecedores').delete().eq('id', itemId).eq('fornecedor_id', fornecedorId)
   return true
 }
@@ -238,6 +279,75 @@ export async function getVitrineHome(limite = 12): Promise<ItemVitrine[]> {
     largura: r.largura ?? 1080,
     altura: r.altura ?? 1350,
   }))
+}
+
+// ─────────────────────── Reenquadramento ───────────────────────
+
+/**
+ * Recorta a foto de novo, a partir do upload cru, com outra âncora.
+ *
+ * Só funciona em foto que tem `path_upload` — as que subiram antes de 04/09/2026
+ * não guardaram o cru e precisam de novo upload. O caminho publicado é sempre um
+ * objeto NOVO: sobrescrever o path atual manteria a versão antiga no cache do
+ * CDN e do next/image, e o fornecedor veria "não mudou nada".
+ */
+export async function reenquadrar(
+  fornecedorId: string,
+  itemId: string,
+  posicao: Enquadramento,
+): Promise<{ ok: true; item: PortfolioItem } | { ok: false; motivo: string }> {
+  const { data: linha } = await supabaseAdmin
+    .from('portfolio_fornecedores')
+    .select('id, path, path_original, path_upload')
+    .eq('id', itemId)
+    .eq('fornecedor_id', fornecedorId)
+    .maybeSingle<{ id: string; path: string; path_original: string | null; path_upload: string | null }>()
+  if (!linha) return { ok: false, motivo: 'foto não encontrada' }
+  if (linha.path_original) {
+    return { ok: false, motivo: 'volte a foto original antes de mudar o enquadramento' }
+  }
+  if (!linha.path_upload) {
+    return { ok: false, motivo: 'essa foto é anterior ao reenquadramento — envie ela de novo' }
+  }
+
+  const { data: baixado, error: errDown } = await supabaseAdmin.storage
+    .from(BUCKET_PORTFOLIO)
+    .download(linha.path_upload)
+  if (errDown || !baixado) return { ok: false, motivo: 'não consegui ler a foto enviada' }
+
+  let normalizada
+  try {
+    normalizada = await normalizarFotoPortfolio(Buffer.from(await baixado.arrayBuffer()), posicao)
+  } catch {
+    return { ok: false, motivo: 'não consegui reprocessar essa foto' }
+  }
+
+  const novoPath = `${fornecedorId}/${randomUUID()}.${normalizada.extensao}`
+  const { error: errUp } = await supabaseAdmin.storage
+    .from(BUCKET_PORTFOLIO)
+    .upload(novoPath, normalizada.buffer, { contentType: normalizada.mime, upsert: false })
+  if (errUp) return { ok: false, motivo: 'não consegui salvar a foto nova' }
+
+  const { data, error } = await supabaseAdmin
+    .from('portfolio_fornecedores')
+    .update({
+      path: novoPath,
+      enquadramento: posicao,
+      largura: normalizada.largura,
+      altura: normalizada.altura,
+    })
+    .eq('id', itemId)
+    .eq('fornecedor_id', fornecedorId)
+    .select(CAMPOS)
+    .single()
+
+  if (error || !data) {
+    await supabaseAdmin.storage.from(BUCKET_PORTFOLIO).remove([novoPath]).catch(() => {})
+    return { ok: false, motivo: 'não consegui atualizar a foto' }
+  }
+
+  await supabaseAdmin.storage.from(BUCKET_PORTFOLIO).remove([linha.path]).catch(() => {})
+  return { ok: true, item: paraItem(data as LinhaPortfolio) }
 }
 
 // ─────────────────── Recorte de fundo (opt-in do fornecedor) ───────────────────

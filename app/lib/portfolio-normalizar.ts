@@ -12,15 +12,34 @@
 // e de Instagram: mostra a peça inteira no corpo sem cortar cabeça/barra, e
 // ocupa bem a tela do celular, que é de onde vem a maioria dos acessos.
 //
-// `fit: cover` + `position: attention`: o sharp escolhe sozinho a região com
-// mais informação visual (a peça, normalmente) em vez de cortar pelo centro
-// cego. Numa foto horizontal de arara isso salva o recorte.
+// ENQUADRAMENTO (revisto em 04/09/2026): o corte é DETERMINÍSTICO, ancorado no
+// topo por padrão. A versão anterior usava `sharp.strategy.attention`, que
+// escolhe a região de maior interesse visual — numa foto de modelo isso trava
+// no rosto e corta a cabeça, e o pior é que o resultado muda de foto pra foto:
+// impossível de explicar pro fornecedor e impossível de corrigir sem sorte.
+// Roupa se fotografa de cima pra baixo; cortar a barra é normal, cortar a
+// cabeça não. Quem quiser outro corte escolhe centro ou base no painel.
 // ============================================================================
 
 import sharp from 'sharp'
 
 export const PORTFOLIO_LARGURA = 1080
 export const PORTFOLIO_ALTURA = 1350 // 4:5 retrato
+
+/** De onde o corte 4:5 parte. É o que o fornecedor escolhe no painel. */
+export type Enquadramento = 'topo' | 'centro' | 'base'
+
+export const ENQUADRAMENTOS: Enquadramento[] = ['topo', 'centro', 'base']
+
+export function enquadramentoValido(v: unknown): Enquadramento {
+  return ENQUADRAMENTOS.includes(v as Enquadramento) ? (v as Enquadramento) : 'topo'
+}
+
+const GRAVIDADE: Record<Enquadramento, string> = {
+  topo: 'north',
+  centro: 'centre',
+  base: 'south',
+}
 
 export type ImagemNormalizada = {
   buffer: Buffer
@@ -38,12 +57,15 @@ export type ImagemNormalizada = {
  * o fornecedor precisa saber disso na hora do upload — publicar um arquivo
  * quebrado na vitrine seria pior do que recusar.
  */
-export async function normalizarFotoPortfolio(entrada: Buffer): Promise<ImagemNormalizada> {
+export async function normalizarFotoPortfolio(
+  entrada: Buffer,
+  enquadramento: Enquadramento = 'topo',
+): Promise<ImagemNormalizada> {
   const buffer = await sharp(entrada, { failOn: 'none' })
     .rotate() // respeita o EXIF do celular; sem isso, foto de iPhone vem deitada
     .resize(PORTFOLIO_LARGURA, PORTFOLIO_ALTURA, {
       fit: 'cover',
-      position: sharp.strategy.attention,
+      position: GRAVIDADE[enquadramento],
       withoutEnlargement: false,
     })
     .flatten({ background: { r: 255, g: 255, b: 255 } }) // PNG com transparência

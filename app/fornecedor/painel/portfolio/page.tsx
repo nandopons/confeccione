@@ -36,6 +36,10 @@ export default async function PortfolioPage() {
           <li>Luz natural, sem flash. Perto da janela costuma bastar.</li>
           <li>Uma foto por modelo. Se quiser mostrar detalhe (gola, costura, estampa), mande junto.</li>
           <li>Não coloque texto, preço ou marca d&apos;água sobre a foto.</li>
+          <li>
+            Se o corte não ficou bom, passe o dedo (ou o mouse) na foto e use{" "}
+            <strong>Cima / Meio / Baixo</strong> para escolher que parte da imagem fica no quadro.
+          </li>
           <li>Depois de enviar, use &quot;Isolar em fundo claro&quot; pra deixar a peça no padrão da vitrine. Funciona melhor com a peça inteira; em close de detalhe, confira antes de manter.</li>
         </ul>
       </div>
