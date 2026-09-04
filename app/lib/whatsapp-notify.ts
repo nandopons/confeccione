@@ -244,8 +244,10 @@ export async function notificarOfertaFornecedor(params: {
     // A v3 só existe depois que a Meta aprovar. Enquanto isso o envio cairia no
     // vazio e o fornecedor simplesmente não receberia a oferta — pior do que uma
     // mensagem feia. Então: falhou a v3, manda a v2 (que já está aprovada).
+    let usouFallback = false
     if (!resultado.ok) {
       console.warn('[wa-notify] v3 recusada, caindo pra v2', { erro: resultado.erro })
+      usouFallback = true
       const primeiro = (params.nome ?? '').trim().split(/\s+/)[0] || 'parceiro(a)'
       resultado = await enviarTemplate(waId, 'oferta_pedido_v2', 'pt_BR', [
         {
@@ -270,14 +272,23 @@ export async function notificarOfertaFornecedor(params: {
       const conversaId = await garantirConversa(waId, params.nome)
       if (conversaId) {
         const agora = new Date().toISOString()
-        const corpo =
-          `Pedido: ${produto}\n` +
-          `Quantidade: ${quantidade}\n` +
-          `Estado: ${estado}\n` +
-          `Prazo: ${prazo}\n` +
-          `Detalhes: ${detalhes}\n\n` +
-          `Quer atender este cliente? Toque em Ver pedido.\n` +
-          `▸ https://www.confeccione.com.br/fornecedor/oferta/${params.ofertaId}`
+        const link = `https://www.confeccione.com.br/fornecedor/oferta/${params.ofertaId}`
+        // O inbox precisa mostrar o texto do template que REALMENTE saiu. Gravar
+        // sempre o corpo da v3 fazia o admin ler a ficha nova enquanto o
+        // fornecedor recebia o parágrafo da v2 — foi assim que a diferença
+        // apareceu no teste de 04/09.
+        const primeiroNome = (params.nome ?? '').trim().split(/\s+/)[0] || 'parceiro(a)'
+        const corpo = usouFallback
+          ? `Oi, ${primeiroNome}! Há um pedido aguardando sua resposta no seu cadastro de fornecedor da Confeccione: ` +
+            `${quantidade} · ${produto} · ${estado} — prazo ${prazo}. ` +
+            `Acesse pra ver os detalhes e aceitar ou recusar o atendimento.\n▸ Responder ao pedido → ${link}`
+          : `Novo pedido:\n\n` +
+            `Tipo: ${produto}\n` +
+            `Quantidade: ${quantidade}\n` +
+            `Estado: ${estado}\n` +
+            `Prazo: ${prazo}\n` +
+            `Detalhes: ${detalhes}\n\n` +
+            `Quer atender este cliente? Toque em Ver pedido.\n▸ ${link}`
         await supabaseAdmin.from('wa_mensagens').insert({
           conversa_id: conversaId,
           wamid: resultado.wamid,
@@ -285,7 +296,7 @@ export async function notificarOfertaFornecedor(params: {
           tipo: 'template',
           corpo,
           status: 'enviando',
-          template_nome: TEMPLATE_OFERTA,
+          template_nome: usouFallback ? 'oferta_pedido_v2' : TEMPLATE_OFERTA,
           criado_em: agora,
         })
         await supabaseAdmin

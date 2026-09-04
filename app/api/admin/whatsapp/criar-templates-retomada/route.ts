@@ -182,7 +182,7 @@ const TEMPLATES = [
       {
         type: 'BODY',
         text:
-          'Pedido: {{1}}\nQuantidade: {{2}}\nEstado: {{3}}\nPrazo: {{4}}\nDetalhes: {{5}}\n\nQuer atender este cliente? Toque em Ver pedido.',
+          'Novo pedido:\n\nTipo: {{1}}\nQuantidade: {{2}}\nEstado: {{3}}\nPrazo: {{4}}\nDetalhes: {{5}}\n\nQuer atender este cliente? Toque em Ver pedido.',
         example: {
           body_text: [['Bonés', '10 peças', 'PE', '15 dias', 'Bonés azuis, bordado frontal']],
         },
