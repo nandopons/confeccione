@@ -183,13 +183,18 @@ export async function notificarPedidoRecebido(params: {
 /**
  * Template da oferta ao fornecedor.
  *
- * v3 (04/09/2026, pedido do Fernando): ficha seca em vez de parágrafo. O
+ * v4 (04/09/2026, pedido do Fernando): ficha seca em vez de parágrafo. O
  * fornecedor decide por quantidade, estado e prazo — o texto de vendas em volta
- * só atrasava a leitura no celular, quase sempre no meio da produção.
+ * só atrasava a leitura no celular, quase sempre no meio da produção. A copy
+ * repete o formato do texto livre antigo do Z-API, que era o que funcionava.
  *
- * Enquanto a v3 não estiver aprovada pela Meta, basta apontar de volta pra v2.
+ * Por que v4 e não v3: a v3 foi submetida com a copy anterior e a Meta não
+ * deixa editar template em análise — e apagar queima o nome por 30 dias. Sai
+ * mais barato pular pra v4 e abandonar a v3.
+ *
+ * Enquanto a v4 não estiver aprovada, o envio cai sozinho na v2 (ver abaixo).
  */
-export const TEMPLATE_OFERTA = 'oferta_pedido_v3'
+export const TEMPLATE_OFERTA = 'oferta_pedido_v4'
 
 export async function notificarOfertaFornecedor(params: {
   telefone: string

@@ -168,14 +168,18 @@ const TEMPLATES = [
       },
     ],
   },
-  // Oferta ao fornecedor v3 (04/09/2026) — FICHA SECA.
+  // Oferta ao fornecedor v4 (04/09/2026) — FICHA SECA.
   // A v2 era um parágrafo com saudação e explicação; o fornecedor lê no celular,
   // quase sempre no meio da produção, e decide por quantidade, estado e prazo.
-  // Aqui cada dado tem sua linha e o texto em volta some. O corpo NÃO pode
-  // começar nem terminar com variável (a Meta rejeita) — daí o "Pedido:" na
+  // Aqui cada dado tem sua linha e o texto em volta some — é o mesmo formato do
+  // texto livre antigo do Z-API, que era o que funcionava. O corpo NÃO pode
+  // começar nem terminar com variável (a Meta rejeita) — daí o "Novo pedido:" na
   // primeira linha e a pergunta fechando a mensagem.
+  //
+  // v3 existiu por algumas horas com outra copy: a Meta não deixa editar
+  // template em análise, e apagar bloqueia o nome por 30 dias. Por isso v4.
   {
-    name: 'oferta_pedido_v3',
+    name: 'oferta_pedido_v4',
     language: 'pt_BR',
     category: 'UTILITY',
     components: [
