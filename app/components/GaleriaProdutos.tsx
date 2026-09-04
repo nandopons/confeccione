@@ -44,13 +44,6 @@ const FOTOS: Array<{ src: string; alt: string; rotulo: string; largura: number; 
     largura: 316,
     altura: 335,
   },
-  {
-    src: "/galeria/estamparia-dtf-silk.jpg",
-    alt: "Camiseta preta 100% algodão com estampa em serigrafia — estamparia DTF ou silk",
-    rotulo: "Estamparia · silk ou DTF",
-    largura: 849,
-    altura: 567,
-  },
 ];
 
 export default function GaleriaProdutos() {
@@ -75,7 +68,7 @@ export default function GaleriaProdutos() {
           className={
             unica
               ? "grid grid-cols-1 md:grid-cols-[3fr_2fr] gap-3 md:gap-4"
-              : "grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3 [&>li:first-child]:col-span-2 [&>li:first-child]:row-span-2 [&>li:last-child]:col-span-2 md:[&>li:last-child]:col-span-1"
+              : "grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 [&>li:first-child]:col-span-2 [&>li:first-child]:row-span-2"
           }
         >
           {FOTOS.map((f, i) => (
@@ -86,7 +79,7 @@ export default function GaleriaProdutos() {
                   alt={f.alt}
                   width={f.largura}
                   height={f.altura}
-                  sizes={i === 0 ? "(min-width: 768px) 66vw, 100vw" : "(min-width: 768px) 33vw, 50vw"}
+                  sizes={i === 0 ? "(min-width: 768px) 50vw, 100vw" : "(min-width: 768px) 25vw, 50vw"}
                   className={`w-full ${unica ? "h-auto" : "h-full object-cover object-top aspect-square"} transition-transform duration-500 group-hover:scale-[1.03]`}
                 />
                 {/* Rótulo discreto no rodapé da foto; o botão central aparece no hover
