@@ -120,6 +120,7 @@ export async function POST(req: Request) {
       nome: primeiroNome(nomePraTemplate),
       codigo,
       validadeMinutos: OTP_VALIDADE_MINUTOS,
+      destino: 'cliente',
     })
       .then(() => {
         canaisEnviados.push('email')

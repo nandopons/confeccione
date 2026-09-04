@@ -6,7 +6,7 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 type Etapa = 'email' | 'codigo'
 
@@ -16,13 +16,31 @@ function payloadIdentificador(v: string): { email?: string; telefone?: string } 
   return valor.includes('@') ? { email: valor } : { telefone: valor }
 }
 
-export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
-  const [etapa, setEtapa] = useState<Etapa>('email')
+export default function LoginForm({
+  emailPrefill,
+  codigoPrefill = '',
+}: {
+  emailPrefill: string
+  /** Vem do botão "Entrar com este código" do e-mail. */
+  codigoPrefill?: string
+}) {
+  const prefillCompleto = codigoPrefill.length === 6 && emailPrefill.length > 0
+  const [etapa, setEtapa] = useState<Etapa>(prefillCompleto ? 'codigo' : 'email')
   const [email, setEmail] = useState(emailPrefill)
-  const [codigo, setCodigo] = useState('')
+  const [codigo, setCodigo] = useState(codigoPrefill)
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const [canais, setCanais] = useState<string[]>([])
+  const formCodigoRef = useRef<HTMLFormElement | null>(null)
+
+  // Chegou pelo botão do e-mail: valida sozinho e tira o código da URL. O
+  // código é de uso único e expira em minutos, mas não precisa ficar no
+  // histórico do navegador nem vazar em referrer.
+  useEffect(() => {
+    if (!prefillCompleto) return
+    window.history.replaceState({}, '', window.location.pathname)
+    formCodigoRef.current?.requestSubmit()
+  }, [prefillCompleto])
 
   async function handleSolicitar(e: React.FormEvent) {
     e.preventDefault()
@@ -99,7 +117,7 @@ export default function LoginForm({ emailPrefill }: { emailPrefill: string }) {
             ? 'no e-mail'
             : 'no e-mail'
     return (
-      <form onSubmit={handleVerificar} className="flex flex-col gap-4">
+      <form ref={formCodigoRef} onSubmit={handleVerificar} className="flex flex-col gap-4">
         <div>
           <p className="text-sm text-gray-700">
             Enviamos um código de 6 dígitos pra <strong>{email}</strong>{' '}

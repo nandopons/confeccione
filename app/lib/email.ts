@@ -529,9 +529,21 @@ export async function emailCodigoLogin(params: {
   nome: string
   codigo: string
   validadeMinutos: number
+  /** Qual login o botão abre. Default: fornecedor (chamador mais antigo). */
+  destino?: 'cliente' | 'fornecedor'
 }): Promise<void> {
   const nomeEsc = escapeHtml(params.nome)
   const codigoEsc = escapeHtml(params.codigo)
+
+  // E-mail não roda JavaScript: um botão "copiar" de verdade não existe aqui.
+  // O equivalente útil é abrir o login com o código JÁ PREENCHIDO — um toque em
+  // vez de copiar, trocar de app e colar. O código segue visível pra quem lê no
+  // computador e digita no celular.
+  const destino = params.destino ?? 'fornecedor'
+  const caminho = destino === 'cliente' ? '/cliente/login' : '/fornecedor/entrar'
+  const link = `${SITE_URL}${caminho}?codigo=${encodeURIComponent(params.codigo)}&id=${encodeURIComponent(params.email)}`
+  const linkEsc = escapeHtml(link)
+
   const subject = `Seu código de acesso: ${params.codigo}`
   const preheader = `Use o código ${params.codigo} para entrar no Confeccione. Válido por ${params.validadeMinutos} minutos.`
 
@@ -541,6 +553,8 @@ export async function emailCodigoLogin(params: {
     <p style="margin:0 0 16px;">Você solicitou acesso ao seu painel do <strong>Confeccione</strong>. Use o código abaixo para entrar:</p>
     <div style="background:#f5f5f7;border-radius:12px;padding:24px;margin:24px 0;text-align:center;">
       <div style="font-size:36px;font-weight:700;color:#1D9E75;letter-spacing:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;">${codigoEsc}</div>
+      <a href="${linkEsc}" style="display:inline-block;margin-top:18px;background:#1D9E75;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 26px;border-radius:999px;">Entrar com este código</a>
+      <div style="margin-top:10px;color:#8b8b93;font-size:12px;">Abre o Confeccione com o código já preenchido.</div>
     </div>
     <p style="margin:0 0 16px;color:#666;font-size:14px;">Este código é válido por <strong>${params.validadeMinutos} minutos</strong>. Se você não solicitou esse acesso, pode ignorar este email — sua conta continua segura.</p>
     <p style="margin:16px 0 0;color:#999;font-size:13px;">Por segurança, nunca compartilhe este código com ninguém. A equipe Confeccione nunca vai pedir seu código.</p>
@@ -553,6 +567,8 @@ export async function emailCodigoLogin(params: {
 Você solicitou acesso ao seu painel do Confeccione.
 
 Seu código de acesso é: ${params.codigo}
+
+Entrar com este código: ${link}
 
 Este código é válido por ${params.validadeMinutos} minutos.
 

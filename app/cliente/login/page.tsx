@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic'
 export default async function ClienteLoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ email?: string }>
+  searchParams: Promise<{ email?: string; id?: string; codigo?: string }>
 }) {
   const conta = await getContaAtual()
   if (conta) {
@@ -24,7 +24,10 @@ export default async function ClienteLoginPage({
   }
 
   const params = await searchParams
-  const emailPrefill = params.email?.trim() ?? ''
+  // `id` vem do botão "Entrar com este código" do e-mail; `email` é o prefill
+  // antigo (link do WhatsApp de pedido recebido).
+  const emailPrefill = (params.id ?? params.email)?.trim() ?? ''
+  const codigoPrefill = (params.codigo ?? '').replace(/\D/g, '').slice(0, 6)
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 py-12">
@@ -44,7 +47,10 @@ export default async function ClienteLoginPage({
           </p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-          <LoginForm emailPrefill={emailPrefill} />
+          <LoginForm
+            emailPrefill={emailPrefill}
+            codigoPrefill={codigoPrefill.length === 6 ? codigoPrefill : ''}
+          />
         </div>
       </div>
     </div>
