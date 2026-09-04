@@ -8,6 +8,8 @@ import PedidoSteps from "@/app/components/PedidoSteps";
 import BotaoIrParaPedido from "@/app/components/BotaoIrParaPedido";
 import SegmentosEFaq, { FAQ_HOME } from "@/app/components/SegmentosEFaq";
 import GaleriaProdutos from "@/app/components/GaleriaProdutos";
+import CarrosselVitrine from "@/app/components/CarrosselVitrine";
+import { getVitrineHome } from "@/app/lib/portfolio-fornecedor";
 import { linkWhatsAppSuporte, WHATSAPP_SUPORTE_FORMATADO } from "@/app/lib/contatos";
 
 export const metadata: Metadata = {
@@ -36,7 +38,16 @@ const FAQ_JSONLD = {
   })),
 };
 
-export default function Home() {
+// ISR de 5 min: a vitrine muda quando o admin promove uma foto, o que é raro.
+// Sem isto a home viraria dinâmica (uma consulta ao banco por visita) só por
+// causa do carrossel.
+export const revalidate = 300;
+
+export default async function Home() {
+  // Enquanto nenhum fornecedor tiver foto em destaque, a home segue com a
+  // galeria fixa. Carrossel vazio seria pior do que não ter carrossel.
+  const vitrine = await getVitrineHome();
+
   return (
     <main className="min-h-screen bg-white font-sans">
       <script
@@ -146,7 +157,7 @@ export default function Home() {
         </div>
       </section>
 
-      <GaleriaProdutos />
+      {vitrine.length >= 4 ? <CarrosselVitrine itens={vitrine} /> : <GaleriaProdutos />}
       <SegmentosEFaq />
 
       <section className="bg-[#111] px-6 py-16">

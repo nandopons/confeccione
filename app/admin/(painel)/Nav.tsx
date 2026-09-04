@@ -154,6 +154,16 @@ const SECOES: Secao[] = [
         ),
       },
       {
+        href: '/admin/vitrine',
+        label: 'Vitrine',
+        icone: (
+          <Ico
+            d="M4 8h16M4 8V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2M4 8v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"
+            extra={<circle cx="12" cy="14" r="3" />}
+          />
+        ),
+      },
+      {
         href: '/admin/mockups',
         label: 'Mockups',
         icone: (

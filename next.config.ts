@@ -177,6 +177,15 @@ function cabecalhosDeIndexacao() {
 const nextConfig: NextConfig = {
   images: {
     qualities: [75, 85],
+    // Fotos do portfólio dos fornecedores: bucket público do Supabase Storage.
+    // Sem isto o next/image recusa a URL e o carrossel da home não renderiza.
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "*.supabase.co",
+        pathname: "/storage/v1/object/public/**",
+      },
+    ],
   },
   async redirects() {
     return [...REDIRECTS_BLOG, ...redirecionamentosDaLoja()];
