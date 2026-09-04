@@ -1,7 +1,8 @@
 // app/api/fornecedor/auth/solicitar-otp/route.ts
 // ============================================================================
 // Recebe email OU whatsapp, gera código OTP de 6 dígitos e envia por
-// email + WhatsApp simultâneos.
+// email + WhatsApp simultâneos (WhatsApp via template oficial `codigo_acesso`,
+// o mesmo do login do cliente).
 //
 // Anti-enumeration: SEMPRE retorna { ok: true } mesmo se identificador não
 // existir. Assim, atacantes não conseguem descobrir quais contatos estão
@@ -12,7 +13,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { criarOtp, OTP_VALIDADE_MINUTOS } from '@/app/lib/otp'
 import { emailCodigoLogin } from '@/app/lib/email'
-import { enviarMensagem } from '@/app/lib/zapi'
+import { enviarCodigoAcesso } from '@/app/lib/whatsapp-cloud'
 import { normalizarWhatsApp } from '@/app/lib/phone'
 
 const supabase = createClient(
@@ -114,13 +115,22 @@ export async function POST(req: Request) {
   }
 
   if (fornecedor.whatsapp) {
+    // 04/09/2026: era `enviarMensagem` do Z-API — serviço desativado. A chamada
+    // falhava, o .catch engolia o erro e só o e-mail chegava; o fornecedor
+    // ficava esperando um WhatsApp que nunca vinha.
+    //
+    // Agora usa o mesmo caminho do login do CLIENTE: template `codigo_acesso`
+    // no WhatsApp Cloud oficial. Precisa ser template (e não texto livre)
+    // porque quem pede código de acesso quase nunca está na janela de 24h —
+    // texto livre fora da janela é recusado pela Meta.
     promises.push(
-      enviarMensagem(
-        fornecedor.whatsapp,
-        `🔐 *Código de acesso ao Confeccione*\n\nOlá ${fornecedor.nome}! Use este código para entrar no seu painel:\n\n*${codigoEnviado}*\n\nEste código é válido por ${OTP_VALIDADE_MINUTOS} minutos.\n\nSe você não solicitou esse acesso, pode ignorar esta mensagem.`
-      ).catch((err) => {
-        console.error('[solicitar-otp] whatsapp falhou:', err)
-      })
+      enviarCodigoAcesso(fornecedor.whatsapp, codigoEnviado)
+        .then((r) => {
+          if (!r.ok) console.error('[solicitar-otp] whatsapp recusado:', r)
+        })
+        .catch((err) => {
+          console.error('[solicitar-otp] whatsapp falhou:', err)
+        })
     )
   }
 
