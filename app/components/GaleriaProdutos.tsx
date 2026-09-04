@@ -10,8 +10,43 @@ import BotaoIrParaPedido from "@/app/components/BotaoIrParaPedido";
 // ajusta a qualquer quantidade; a primeira foto ganha destaque no desktop.
 const FOTOS: Array<{ src: string; alt: string; rotulo: string; largura: number; altura: number }> = [
   {
+    src: "/galeria/camiseta-branca-kingcrest.jpg",
+    alt: "Camiseta branca de marca própria com estampa fotográfica frontal, fabricada por confecção parceira da Confeccione",
+    rotulo: "Marca própria · estampa digital",
+    largura: 663,
+    altura: 860,
+  },
+  {
+    src: "/galeria/camiseta-preta-estampa-soccer.jpg",
+    alt: "Camiseta preta 100% algodão com estampa em serigrafia de jogador de futebol",
+    rotulo: "Camiseta · serigrafia",
+    largura: 435,
+    altura: 798,
+  },
+  {
+    src: "/galeria/camiseta-preta-buda.jpg",
+    alt: "Camiseta preta feminina com estampa de Buda em amarelo, produção para marca própria",
+    rotulo: "Marca própria · silk",
+    largura: 344,
+    altura: 427,
+  },
+  {
+    src: "/galeria/camiseta-costas-estampa-rosa.jpg",
+    alt: "Costas de camiseta preta com estampa tipográfica rosa em serigrafia",
+    rotulo: "Estampa nas costas",
+    largura: 474,
+    altura: 393,
+  },
+  {
+    src: "/galeria/camiseta-costas-volei.jpg",
+    alt: "Costas de camiseta preta com estampa fotográfica de vôlei de praia",
+    rotulo: "Camiseta · estampa fotográfica",
+    largura: 316,
+    altura: 335,
+  },
+  {
     src: "/galeria/estamparia-dtf-silk.jpg",
-    alt: "Camiseta preta 100% algodão com estampa em serigrafia feita por confecção parceira da Confeccione",
+    alt: "Camiseta preta 100% algodão com estampa em serigrafia — estamparia DTF ou silk",
     rotulo: "Estamparia · silk ou DTF",
     largura: 849,
     altura: 567,
@@ -40,7 +75,7 @@ export default function GaleriaProdutos() {
           className={
             unica
               ? "grid grid-cols-1 md:grid-cols-[3fr_2fr] gap-3 md:gap-4"
-              : "grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3 [&>li:first-child]:col-span-2 [&>li:first-child]:row-span-2"
+              : "grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-3 [&>li:first-child]:col-span-2 [&>li:first-child]:row-span-2 [&>li:last-child]:col-span-2 md:[&>li:last-child]:col-span-1"
           }
         >
           {FOTOS.map((f, i) => (
@@ -51,8 +86,8 @@ export default function GaleriaProdutos() {
                   alt={f.alt}
                   width={f.largura}
                   height={f.altura}
-                  sizes={i === 0 ? "(min-width: 768px) 60vw, 100vw" : "(min-width: 768px) 30vw, 50vw"}
-                  className={`w-full ${unica ? "h-auto" : "h-full object-cover aspect-square md:aspect-[4/3]"} transition-transform duration-500 group-hover:scale-[1.03]`}
+                  sizes={i === 0 ? "(min-width: 768px) 66vw, 100vw" : "(min-width: 768px) 33vw, 50vw"}
+                  className={`w-full ${unica ? "h-auto" : "h-full object-cover object-top aspect-square md:aspect-auto"} transition-transform duration-500 group-hover:scale-[1.03]`}
                 />
                 {/* Rótulo discreto no rodapé da foto; o botão central aparece no hover
                     (desktop) e fica sempre visível no toque (mobile não tem hover). */}
