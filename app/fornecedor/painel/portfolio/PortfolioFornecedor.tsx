@@ -16,7 +16,7 @@ import type { PortfolioItem } from "@/app/lib/portfolio-fornecedor";
 import type { Enquadramento } from "@/app/lib/portfolio-normalizar";
 import FichaProdutoModal from "./FichaProdutoModal";
 
-const MAX_FOTOS = 12;
+const MAX_FOTOS = 24;
 
 // Rótulo do que o corte PRESERVA, não da âncora técnica. "Topo" não diz nada
 // pra quem só quer que a peça apareça inteira.

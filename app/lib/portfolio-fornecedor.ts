@@ -17,8 +17,10 @@ import { removerFundo } from '@/app/lib/remover-fundo'
 
 export const BUCKET_PORTFOLIO = 'portfolio-fornecedores'
 export const MAX_PORTFOLIO_BYTES = 10 * 1024 * 1024 // 10 MiB por foto (antes de normalizar)
-/** Teto por fornecedor. Vitrine é seleção, não álbum: 12 já enche a página. */
-export const MAX_FOTOS_POR_FORNECEDOR = 12
+/** Teto por fornecedor no portfólio. Subiu de 12 pra 24 em 05/09/2026: quem
+ *  produz variado enchia o álbum e ficava sem espaço pra peça nova. Quem decide
+ *  o que aparece na home é a curadoria, não este número. */
+export const MAX_FOTOS_POR_FORNECEDOR = 24
 
 export type PortfolioItem = {
   id: string
@@ -337,28 +339,30 @@ export type ItemVitrine = {
   altura: number
 }
 
-/** Teto por confecção no carrossel: sem isso, quem sobe 12 fotos toma a home. */
-export const MAX_POR_FORNECEDOR_NA_HOME = 4
-
 /**
- * Intercala em rodízio: uma foto de cada fornecedor por rodada, até o teto.
- * A ordem de chegada de cada fornecedor é preservada dentro do rodízio.
+ * Intercala em rodízio: uma foto de cada fornecedor por rodada.
+ *
+ * NÃO existe mais teto por fornecedor (decisão do Fernando, 05/09/2026): a
+ * curadoria já é o filtro — se ele marcou como destaque, a foto aparece, tenha
+ * o fornecedor mandado 3 ou 20. O rodízio continua porque resolve o problema
+ * real, que era a home abrir com uma sequência de fotos da mesma confecção;
+ * distribuir sem cortar dá o mesmo efeito sem descartar curadoria.
  */
 function intercalarPorFornecedor<T extends { fornecedorId: string }>(
   itens: T[],
-  teto: number,
   limite: number,
 ): T[] {
   const porFornecedor = new Map<string, T[]>()
   for (const item of itens) {
     const lista = porFornecedor.get(item.fornecedorId) ?? []
-    if (lista.length < teto) lista.push(item)
+    lista.push(item)
     porFornecedor.set(item.fornecedorId, lista)
   }
 
   const filas = [...porFornecedor.values()]
+  const maiorFila = filas.reduce((n, f) => Math.max(n, f.length), 0)
   const saida: T[] = []
-  for (let rodada = 0; rodada < teto && saida.length < limite; rodada++) {
+  for (let rodada = 0; rodada < maiorFila && saida.length < limite; rodada++) {
     for (const fila of filas) {
       if (saida.length >= limite) break
       if (fila[rodada]) saida.push(fila[rodada])
@@ -372,9 +376,10 @@ function intercalarPorFornecedor<T extends { fornecedorId: string }>(
  * cadastro for recusado depois da foto entrar em destaque, ela sai da home
  * sozinha, sem precisar de faxina manual.
  */
-export async function getVitrineHome(limite = 12): Promise<ItemVitrine[]> {
-  // Busca folgado (4x) porque o corte final é feito no rodízio, não no banco:
-  // pedir só `limite` traria 12 fotos possivelmente do mesmo fornecedor.
+export async function getVitrineHome(limite = 60): Promise<ItemVitrine[]> {
+  // O limite é teto de segurança, não curadoria: tudo que estiver marcado como
+  // destaque entra. 60 é o ponto em que a página começaria a pesar — se um dia
+  // encostar aí, a conversa passa a ser paginar o carrossel, não cortar foto.
   const { data } = await supabaseAdmin
     .from('portfolio_fornecedores')
     .select(
@@ -383,7 +388,7 @@ export async function getVitrineHome(limite = 12): Promise<ItemVitrine[]> {
     .eq('destaque', true)
     .eq('leads_fornecedores.aprovacao_status', 'aprovado')
     .order('destaque_em', { ascending: false })
-    .limit(limite * 4)
+    .limit(limite)
 
   type LinhaVitrine = LinhaPortfolio & {
     fornecedor_id: string
@@ -410,7 +415,7 @@ export async function getVitrineHome(limite = 12): Promise<ItemVitrine[]> {
     altura: r.altura ?? 1350,
   }))
 
-  return intercalarPorFornecedor(todos, MAX_POR_FORNECEDOR_NA_HOME, limite)
+  return intercalarPorFornecedor(todos, limite)
 }
 
 // ─────────────────────── Página pública do produto ───────────────────────
