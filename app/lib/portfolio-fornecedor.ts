@@ -9,8 +9,11 @@ import { randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import {
   comporSobreFundo,
+  corteDoEnquadramento,
+  corteValido,
   enquadramentoValido,
   normalizarFotoPortfolio,
+  type Corte,
   type Enquadramento,
 } from '@/app/lib/portfolio-normalizar'
 import { removerFundo } from '@/app/lib/remover-fundo'
@@ -32,8 +35,13 @@ export type PortfolioItem = {
   altura: number | null
   /** true quando a foto já passou pelo recorte de fundo (dá pra desfazer). */
   fundoRemovido: boolean
-  /** De onde o corte 4:5 partiu. */
+  /** De onde o corte 4:5 partiu. Legado das três âncoras. */
   enquadramento: Enquadramento
+  /** Janela de corte atual — é o que o painel edita. */
+  corte: Corte
+  /** URL da foto CRUA. É sobre ela que o painel posiciona o corte; null nas
+   *  fotos antigas, que subiram antes de o upload cru ser guardado. */
+  urlOriginal: string | null
   /** false nas fotos antigas, que subiram antes de o upload cru ser guardado. */
   podeReenquadrar: boolean
   /** Ficha do produto. Preço fica de fora de propósito — só sai na oferta. */
@@ -76,7 +84,7 @@ const ehDono = (d: Dono): d is { fornecedorId: string } => 'fornecedorId' in d
 // Literal único de propósito: o supabase-js só infere o tipo da linha quando a
 // string do select é literal — concatenar quebra a inferência e derruba o tsc.
 const CAMPOS =
-  'id, path, legenda, ordem, destaque, largura, altura, path_original, path_upload, enquadramento, nome, tipo, pedido_minimo, prazo_dias, tamanhos, tecido, cores, tecnicas, observacoes'
+  'id, path, legenda, ordem, destaque, largura, altura, path_original, path_upload, enquadramento, foco_x, foco_y, zoom, nome, tipo, pedido_minimo, prazo_dias, tamanhos, tecido, cores, tecnicas, observacoes'
 
 type LinhaPortfolio = {
   id: string
@@ -89,6 +97,9 @@ type LinhaPortfolio = {
   path_original?: string | null
   path_upload?: string | null
   enquadramento?: string | null
+  foco_x?: number | null
+  foco_y?: number | null
+  zoom?: number | null
   nome?: string | null
   tipo?: string | null
   pedido_minimo?: number | null
@@ -111,6 +122,14 @@ function paraItem(r: LinhaPortfolio): PortfolioItem {
     altura: r.altura,
     fundoRemovido: Boolean(r.path_original),
     enquadramento: enquadramentoValido(r.enquadramento),
+    // Se a foto nunca passou pelo corte livre, o corte equivalente vem da
+    // âncora antiga — assim o painel abre mostrando o enquadramento que a
+    // pessoa está vendo publicado, não um padrão qualquer.
+    corte:
+      r.foco_x === null || r.foco_x === undefined
+        ? corteDoEnquadramento(enquadramentoValido(r.enquadramento))
+        : corteValido({ x: r.foco_x, y: r.foco_y, zoom: r.zoom }),
+    urlOriginal: r.path_upload ? urlPublica(r.path_upload) : null,
     // Sem recorte de fundo pendurado: o reenquadramento parte do upload cru e
     // desfaria o recorte sem avisar. Melhor exigir "voltar foto original".
     podeReenquadrar: Boolean(r.path_upload) && !r.path_original,
@@ -563,7 +582,8 @@ export async function getOutrosDoFornecedor(
 // ─────────────────────── Reenquadramento ───────────────────────
 
 /**
- * Recorta a foto de novo, a partir do upload cru, com outra âncora.
+ * Recorta a foto de novo a partir do upload cru, com a janela que o painel
+ * posicionou (x, y, zoom).
  *
  * Só funciona em foto que tem `path_upload` — as que subiram antes de 04/09/2026
  * não guardaram o cru e precisam de novo upload. O caminho publicado é sempre um
@@ -573,8 +593,9 @@ export async function getOutrosDoFornecedor(
 export async function reenquadrar(
   dono: Dono,
   itemId: string,
-  posicao: Enquadramento,
+  corteBruto: Corte,
 ): Promise<{ ok: true; item: PortfolioItem } | { ok: false; motivo: string }> {
+  const corte = corteValido(corteBruto)
   let leitura = supabaseAdmin
     .from('portfolio_fornecedores')
     .select('id, fornecedor_id, path, path_original, path_upload')
@@ -596,7 +617,7 @@ export async function reenquadrar(
 
   let normalizada
   try {
-    normalizada = await normalizarFotoPortfolio(Buffer.from(await baixado.arrayBuffer()), posicao)
+    normalizada = await normalizarFotoPortfolio(Buffer.from(await baixado.arrayBuffer()), corte)
   } catch {
     return { ok: false, motivo: 'não consegui reprocessar essa foto' }
   }
@@ -613,7 +634,12 @@ export async function reenquadrar(
     .from('portfolio_fornecedores')
     .update({
       path: novoPath,
-      enquadramento: posicao,
+      foco_x: corte.x,
+      foco_y: corte.y,
+      zoom: corte.zoom,
+      // `enquadramento` vira só um resumo legível do corte novo: alguém lendo a
+      // tabela ainda consegue dizer "essa está ancorada no topo".
+      enquadramento: corte.y <= 25 ? 'topo' : corte.y >= 75 ? 'base' : 'centro',
       largura: normalizada.largura,
       altura: normalizada.altura,
     })

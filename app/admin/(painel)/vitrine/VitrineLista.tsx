@@ -25,14 +25,8 @@
 import Image from 'next/image'
 import { useState } from 'react'
 import FichaProdutoModal from '@/app/fornecedor/painel/portfolio/FichaProdutoModal'
+import AjusteFotoModal from '@/app/components/AjusteFotoModal'
 import type { PortfolioItem } from '@/app/lib/portfolio-fornecedor'
-import type { Enquadramento } from '@/app/lib/portfolio-normalizar'
-
-const ENQUADRAMENTOS: { valor: Enquadramento; label: string; titulo: string }[] = [
-  { valor: 'topo', label: 'Cima', titulo: 'Mantém o topo da foto (padrão)' },
-  { valor: 'centro', label: 'Meio', titulo: 'Mantém o meio da foto' },
-  { valor: 'base', label: 'Baixo', titulo: 'Mantém a parte de baixo da foto' },
-]
 
 export type ItemVitrine = PortfolioItem & {
   fornecedorId: string
@@ -61,6 +55,7 @@ export default function VitrineLista({
   const [filtro, setFiltro] = useState<Filtro>('todas')
   const [salvando, setSalvando] = useState<string | null>(null)
   const [editando, setEditando] = useState<ItemVitrine | null>(null)
+  const [ajustando, setAjustando] = useState<ItemVitrine | null>(null)
   // id da foto em processamento: trava só aquele card, não a página inteira —
   // o recorte leva segundos e a curadoria é feita em lote.
   const [imagemOcupada, setImagemOcupada] = useState<string | null>(null)
@@ -95,29 +90,6 @@ export default function VitrineLista({
   // então trocar o objeto inteiro é o que faz a miniatura atualizar na hora.
   function aplicarNoItem(id: string, salvo: PortfolioItem) {
     setItens((atual) => atual.map((i) => (i.id === id ? { ...i, ...salvo } : i)))
-  }
-
-  async function mudarEnquadramento(item: ItemVitrine, posicao: Enquadramento) {
-    if (item.enquadramento === posicao) return
-    setErroImagem(null)
-    setImagemOcupada(item.id)
-    try {
-      const r = await fetch(`/api/admin/vitrine/${item.id}/enquadramento`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ enquadramento: posicao }),
-      })
-      const json = await r.json()
-      if (!r.ok) {
-        setErroImagem(json?.error ?? 'não consegui mudar o enquadramento')
-        return
-      }
-      aplicarNoItem(item.id, json as PortfolioItem)
-    } catch {
-      setErroImagem('falha de conexão ao mudar o enquadramento')
-    } finally {
-      setImagemOcupada(null)
-    }
   }
 
   async function alternarFundo(item: ItemVitrine) {
@@ -224,31 +196,13 @@ export default function VitrineLista({
                 </button>
 
                 {item.podeReenquadrar && (
-                  <div
-                    className="mt-1.5 flex rounded-lg border border-gray-200 overflow-hidden"
-                    role="group"
-                    aria-label="Enquadramento da foto"
+                  <button
+                    type="button"
+                    onClick={() => setAjustando(item)}
+                    className="mt-1.5 w-full text-xs font-medium px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:border-gray-400 hover:text-gray-900 transition-colors"
                   >
-                    {ENQUADRAMENTOS.map((op) => (
-                      <button
-                        key={op.valor}
-                        type="button"
-                        title={op.titulo}
-                        onClick={() => mudarEnquadramento(item, op.valor)}
-                        disabled={imagemOcupada === item.id}
-                        aria-pressed={item.enquadramento === op.valor}
-                        className={`flex-1 text-xs font-medium py-2 transition-colors disabled:opacity-60 ${
-                          item.enquadramento === op.valor
-                            ? 'bg-gray-900 text-white'
-                            : 'text-gray-600 hover:bg-gray-100'
-                        }`}
-                      >
-                        {imagemOcupada === item.id && item.enquadramento !== op.valor
-                          ? '…'
-                          : op.label}
-                      </button>
-                    ))}
-                  </div>
+                    Ajustar enquadramento
+                  </button>
                 )}
 
                 {recorteDisponivel && (
@@ -269,6 +223,18 @@ export default function VitrineLista({
             </li>
           ))}
         </ul>
+      )}
+
+      {ajustando && (
+        <AjusteFotoModal
+          foto={ajustando}
+          endpoint={`/api/admin/vitrine/${ajustando.id}/enquadramento`}
+          aoFechar={() => setAjustando(null)}
+          aoSalvar={(salvo) => {
+            aplicarNoItem(ajustando.id, salvo)
+            setAjustando(null)
+          }}
+        />
       )}
 
       {editando && (

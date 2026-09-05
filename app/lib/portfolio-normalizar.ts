@@ -12,34 +12,39 @@
 // e de Instagram: mostra a peça inteira no corpo sem cortar cabeça/barra, e
 // ocupa bem a tela do celular, que é de onde vem a maioria dos acessos.
 //
-// ENQUADRAMENTO (revisto em 04/09/2026): o corte é DETERMINÍSTICO, ancorado no
-// topo por padrão. A versão anterior usava `sharp.strategy.attention`, que
-// escolhe a região de maior interesse visual — numa foto de modelo isso trava
-// no rosto e corta a cabeça, e o pior é que o resultado muda de foto pra foto:
-// impossível de explicar pro fornecedor e impossível de corrigir sem sorte.
-// Roupa se fotografa de cima pra baixo; cortar a barra é normal, cortar a
-// cabeça não. Quem quiser outro corte escolhe centro ou base no painel.
+// ENQUADRAMENTO (04/09/2026): o corte é DETERMINÍSTICO. A versão original usava
+// `sharp.strategy.attention`, que escolhe a região de maior interesse visual —
+// numa foto de modelo isso trava no rosto e corta a cabeça, e o resultado muda
+// de foto pra foto: impossível de explicar pro fornecedor e impossível de
+// corrigir sem sorte.
+//
+// CORTE LIVRE (05/09/2026): as três âncoras (topo/centro/base) resolviam o
+// "cortou a cabeça" e mais nada — peça fora do eixo, foto tirada de lado ou
+// peça pequena num quadro grande continuavam sem solução, e não havia zoom.
+// Agora a janela de corte anda nos dois eixos (`x`, `y` de 0 a 100) e aperta
+// (`zoom`). O padrão continua sendo o topo, porque roupa se fotografa de cima
+// pra baixo: cortar a barra é normal, cortar a cabeça não.
+//
+// A conta aqui é a MESMA que o preview no navegador faz com a imagem crua
+// (AjusteFotoModal). Se as duas divergirem, o fornecedor posiciona uma coisa e
+// recebe outra — por isso a fórmula está escrita nos dois lugares com os
+// mesmos nomes.
 // ============================================================================
 
 import sharp from 'sharp'
+import { corteValido, CORTE_PADRAO, type Corte } from './portfolio-corte'
+
+// Reexporta pra quem já importava daqui. O tipo e as constantes moram em
+// portfolio-corte.ts porque o editor do painel (client component) precisa
+// deles — e importar ESTE arquivo no navegador arrastaria o sharp junto.
+export { corteValido, corteDoEnquadramento, CORTE_PADRAO, ZOOM_MAX } from './portfolio-corte'
+export type { Corte } from './portfolio-corte'
+export { ENQUADRAMENTOS, enquadramentoValido } from './portfolio-enquadramento'
+export type { Enquadramento } from './portfolio-enquadramento'
 
 export const PORTFOLIO_LARGURA = 1080
 export const PORTFOLIO_ALTURA = 1350 // 4:5 retrato
 
-/** De onde o corte 4:5 parte. É o que o fornecedor escolhe no painel. */
-export type Enquadramento = 'topo' | 'centro' | 'base'
-
-export const ENQUADRAMENTOS: Enquadramento[] = ['topo', 'centro', 'base']
-
-export function enquadramentoValido(v: unknown): Enquadramento {
-  return ENQUADRAMENTOS.includes(v as Enquadramento) ? (v as Enquadramento) : 'topo'
-}
-
-const GRAVIDADE: Record<Enquadramento, string> = {
-  topo: 'north',
-  centro: 'centre',
-  base: 'south',
-}
 
 export type ImagemNormalizada = {
   buffer: Buffer
@@ -59,15 +64,36 @@ export type ImagemNormalizada = {
  */
 export async function normalizarFotoPortfolio(
   entrada: Buffer,
-  enquadramento: Enquadramento = 'topo',
+  corte: Corte = CORTE_PADRAO,
 ): Promise<ImagemNormalizada> {
-  const buffer = await sharp(entrada, { failOn: 'none' })
-    .rotate() // respeita o EXIF do celular; sem isso, foto de iPhone vem deitada
-    .resize(PORTFOLIO_LARGURA, PORTFOLIO_ALTURA, {
-      fit: 'cover',
-      position: GRAVIDADE[enquadramento],
-      withoutEnlargement: false,
+  const { x, y, zoom } = corteValido(corte)
+
+  // rotate() antes de qualquer conta: sem ele a foto de iPhone vem deitada e a
+  // janela de corte seria calculada sobre as dimensões erradas.
+  const base = sharp(entrada, { failOn: 'none' }).rotate()
+  const meta = await base.metadata()
+  const L = meta.width ?? 0
+  const A = meta.height ?? 0
+
+  let recortada = base
+  if (L > 0 && A > 0) {
+    // escala = quanto a foto precisa crescer pra COBRIR o quadro 4:5; o zoom
+    // multiplica isso, e a janela em pixels da origem encolhe na mesma medida.
+    const escala = Math.max(PORTFOLIO_LARGURA / L, PORTFOLIO_ALTURA / A) * zoom
+    const janelaL = Math.min(L, Math.max(1, Math.round(PORTFOLIO_LARGURA / escala)))
+    const janelaA = Math.min(A, Math.max(1, Math.round(PORTFOLIO_ALTURA / escala)))
+    recortada = base.extract({
+      left: Math.round((L - janelaL) * (x / 100)),
+      top: Math.round((A - janelaA) * (y / 100)),
+      width: janelaL,
+      height: janelaA,
     })
+  }
+
+  const buffer = await recortada
+    // A janela já sai na proporção certa (a menos de 1px de arredondamento);
+    // o cover aqui só acerta esse resto.
+    .resize(PORTFOLIO_LARGURA, PORTFOLIO_ALTURA, { fit: 'cover', withoutEnlargement: false })
     .flatten({ background: { r: 255, g: 255, b: 255 } }) // PNG com transparência
     .jpeg({ quality: 82, progressive: true, mozjpeg: true })
     .toBuffer()

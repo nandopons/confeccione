@@ -9,7 +9,12 @@
 import { revalidatePath } from 'next/cache'
 import { eAdminLogado } from '@/app/lib/admin-auth'
 import { reenquadrar } from '@/app/lib/portfolio-fornecedor'
-import { ENQUADRAMENTOS, type Enquadramento } from '@/app/lib/portfolio-normalizar'
+import {
+  corteDoEnquadramento,
+  corteValido,
+  enquadramentoValido,
+  ENQUADRAMENTOS,
+} from '@/app/lib/portfolio-normalizar'
 import { registrarAudit } from '@/app/lib/audit'
 
 export const maxDuration = 30 // download + sharp + upload
@@ -20,13 +25,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   const body = await req.json().catch(() => null)
-  const posicao = body?.enquadramento
-  if (!ENQUADRAMENTOS.includes(posicao)) {
-    return Response.json({ error: 'enquadramento inválido' }, { status: 400 })
-  }
+  const corte = ENQUADRAMENTOS.includes(body?.enquadramento)
+    ? corteDoEnquadramento(enquadramentoValido(body.enquadramento))
+    : corteValido(body)
 
   const { id } = await ctx.params
-  const r = await reenquadrar({ admin: true }, id, posicao as Enquadramento)
+  const r = await reenquadrar({ admin: true }, id, corte)
   if (!r.ok) return Response.json({ error: r.motivo }, { status: 400 })
 
   await registrarAudit({
@@ -34,7 +38,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     acao: 'produto.reenquadrado_pelo_admin',
     entidade_tipo: 'portfolio_fornecedores',
     entidade_id: id,
-    mudancas: { enquadramento: posicao },
+    mudancas: { corte: { de: null, para: corte } },
   })
 
   // A foto pode estar em destaque na home; o path mudou, então a home ISR

@@ -13,18 +13,10 @@
 import Image from "next/image";
 import { useRef, useState } from "react";
 import type { PortfolioItem } from "@/app/lib/portfolio-fornecedor";
-import type { Enquadramento } from "@/app/lib/portfolio-normalizar";
 import FichaProdutoModal from "./FichaProdutoModal";
+import AjusteFotoModal from "@/app/components/AjusteFotoModal";
 
 const MAX_FOTOS = 24;
-
-// Rótulo do que o corte PRESERVA, não da âncora técnica. "Topo" não diz nada
-// pra quem só quer que a peça apareça inteira.
-const ENQUADRAMENTO_ROTULO: { valor: Enquadramento; label: string; titulo: string }[] = [
-  { valor: "topo", label: "Cima", titulo: "Mantém o topo da foto (padrão)" },
-  { valor: "centro", label: "Meio", titulo: "Mantém o meio da foto" },
-  { valor: "base", label: "Baixo", titulo: "Mantém a parte de baixo da foto" },
-];
 
 export default function PortfolioFornecedor({
   inicial,
@@ -38,32 +30,9 @@ export default function PortfolioFornecedor({
   const [erro, setErro] = useState<string | null>(null);
   // id da foto em recorte: trava só aquele card, não a página inteira.
   const [recortando, setRecortando] = useState<string | null>(null);
-  const [reenquadrando, setReenquadrando] = useState<string | null>(null);
   const [editando, setEditando] = useState<PortfolioItem | null>(null);
+  const [ajustando, setAjustando] = useState<PortfolioItem | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  async function mudarEnquadramento(foto: PortfolioItem, posicao: Enquadramento) {
-    if (foto.enquadramento === posicao) return;
-    setErro(null);
-    setReenquadrando(foto.id);
-    try {
-      const r = await fetch(`/api/fornecedor/painel/portfolio/${foto.id}/enquadramento`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ enquadramento: posicao }),
-      });
-      const json = await r.json();
-      if (!r.ok) {
-        setErro(json?.error ?? "não consegui mudar o enquadramento");
-        return;
-      }
-      setFotos((atual) => atual.map((f) => (f.id === foto.id ? (json as PortfolioItem) : f)));
-    } catch {
-      setErro("falha de conexão ao mudar o enquadramento");
-    } finally {
-      setReenquadrando(null);
-    }
-  }
 
   async function alternarFundo(foto: PortfolioItem) {
     setErro(null);
@@ -208,29 +177,13 @@ export default function PortfolioFornecedor({
                 </button>
 
                 {f.podeReenquadrar && (
-                  <div
-                    className="flex bg-white/95 rounded-lg shadow-sm overflow-hidden"
-                    role="group"
-                    aria-label="Enquadramento da foto"
+                  <button
+                    type="button"
+                    onClick={() => setAjustando(f)}
+                    className="bg-white/95 hover:bg-white text-gray-900 text-[11px] font-medium py-1.5 rounded-lg shadow-sm transition-colors"
                   >
-                    {ENQUADRAMENTO_ROTULO.map((op) => (
-                      <button
-                        key={op.valor}
-                        type="button"
-                        title={op.titulo}
-                        onClick={() => mudarEnquadramento(f, op.valor)}
-                        disabled={reenquadrando === f.id}
-                        aria-pressed={f.enquadramento === op.valor}
-                        className={`flex-1 text-[11px] font-medium py-1.5 transition-colors disabled:opacity-60 ${
-                          f.enquadramento === op.valor
-                            ? "bg-gray-900 text-white"
-                            : "text-gray-700 hover:bg-gray-100"
-                        }`}
-                      >
-                        {reenquadrando === f.id && f.enquadramento !== op.valor ? "…" : op.label}
-                      </button>
-                    ))}
-                  </div>
+                    Ajustar enquadramento
+                  </button>
                 )}
 
                 {recorteDisponivel && (
@@ -258,6 +211,18 @@ export default function PortfolioFornecedor({
             />
           ))}
         </ul>
+      )}
+
+      {ajustando && (
+        <AjusteFotoModal
+          foto={ajustando}
+          endpoint={`/api/fornecedor/painel/portfolio/${ajustando.id}/enquadramento`}
+          aoFechar={() => setAjustando(null)}
+          aoSalvar={(salvo) => {
+            setFotos((atual) => atual.map((f) => (f.id === salvo.id ? salvo : f)));
+            setAjustando(null);
+          }}
+        />
       )}
 
       {editando && (
