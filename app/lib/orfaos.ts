@@ -309,7 +309,7 @@ export async function matchingRetroativo(
   // 1. Carregar fornecedor com colunas necessárias pro filtro
   const { data: fornecedorRaw, error: fErr } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('id, status, tipos_produto, pedido_minimo, raio_atendimento, estado')
+    .select('id, status, tipos_produto, pecas, pedido_minimo, raio_atendimento, estado')
     .eq('id', fornecedorId)
     .single()
 
@@ -323,6 +323,7 @@ export async function matchingRetroativo(
     id: string
     status: string
     tipos_produto: string[]
+    pecas: string[] | null
     pedido_minimo: number
     raio_atendimento: string
     estado: string
@@ -351,7 +352,7 @@ export async function matchingRetroativo(
   const pedidoIds = orfaos.map((o) => o.pedido_id)
   const { data: pedidosRaw, error: pErr } = await supabaseAdmin
     .from('pedidos')
-    .select('id, tipo, quantidade, estado, status, fornecedor_aceito_id')
+    .select('id, tipo, peca, quantidade, estado, status, fornecedor_aceito_id')
     .in('id', pedidoIds)
 
   if (pErr) {
@@ -363,6 +364,7 @@ export async function matchingRetroativo(
   type PedidoRow = {
     id: string
     tipo: string
+    peca: string | null
     quantidade: number | null
     estado: string
     status: string

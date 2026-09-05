@@ -5,23 +5,14 @@ import SiteHeader from "@/app/components/SiteHeader";
 import SiteFooter from "@/app/components/SiteFooter";
 import SelectModal from "@/app/components/SelectModal";
 import { formatarCpfCnpj, validarCpfCnpj, apenasDigitos } from "@/app/lib/cpf-cnpj";
+import { PECAS_PRINCIPAIS, PECAS_EXTRAS } from "@/app/lib/pecas";
 
-const tiposProdutoPrincipais = [
-  { id: "interclasse",   icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
-  { id: "private_label", icon: "✂️", title: "Private Label",        sub: "Marca própria e coleções" },
-  { id: "fitness",       icon: "💪", title: "Fitness",              sub: "Academia, corrida, yoga" },
-  { id: "moda_praia",    icon: "🏖️", title: "Moda Praia",           sub: "Biquínis, sungas, saídas de praia" },
-  { id: "moda_intima",   icon: "🩱", title: "Moda Íntima",          sub: "Lingerie, pijamas, sleepwear" },
-];
-
-const tiposProdutoExtras = [
-  { id: "padrao_esportivo", icon: "⚽", title: "Padrão Esportivo",     sub: "Futebol, vôlei, com nome nas costas" },
-  { id: "fardamento",       icon: "🏢", title: "Fardamento",           sub: "Uniformes corporativos" },
-  { id: "inverno",          icon: "🧥", title: "Inverno",              sub: "Casacos, jaquetas, moletons" },
-  { id: "roupas_uv",        icon: "☀️", title: "Roupas UV",            sub: "Proteção solar, esportes ao ar livre" },
-  { id: "bones",            icon: "🧢", title: "Bonés",                sub: "Bonés bordados, customizados" },
-  { id: "bolsas",           icon: "👜", title: "Bolsas e Acessórios",  sub: "Mochilas, ecobags, acessórios" },
-];
+// PEÇAS, não categorias (05/09/2026). O fornecedor descreve o que faz do jeito
+// dele — "produzimos vestidos, camisas, blusas, top, calças e saias" — e é a
+// mesma lista que o cliente escolhe na home. Vocabulário único nas duas pontas;
+// é o que permite refinar o match. Ver app/lib/pecas.ts.
+const tiposProdutoPrincipais = PECAS_PRINCIPAIS.map((p) => ({ id: p.id, icon: p.icon, title: p.label, sub: p.sub }));
+const tiposProdutoExtras = PECAS_EXTRAS.map((p) => ({ id: p.id, icon: p.icon, title: p.label, sub: p.sub }));
 
 const ufs = ["AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT","PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO"];
 
@@ -92,7 +83,10 @@ export default function CadastroFornecedor() {
           nome,
           whatsapp,
           email,
-          tipos_produto: tiposSel,
+          // `pecas` é o dado novo; `tipos_produto` vai junto, derivado, pra
+          // este cadastro continuar visível pro matching antigo enquanto a
+          // migração não termina.
+          pecas: tiposSel,
           descricao_livre: descricao,
           pedido_minimo: pedidoMinimo,
           estado,

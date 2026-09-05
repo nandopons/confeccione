@@ -10,14 +10,18 @@
 //     no pior. Para liberar isso, o caminho é confirmar o novo número por
 //     código antes de gravar.
 //   cpf_cnpj — documento; muda com conferência.
-//   tipos_produto — vai deixar de ser lista fixa quando o matching passar a ser
-//     por peça; abrir agora seria tela pra editar campo que está de saída.
 //   status — pausar/reativar tem fluxo próprio, com motivo.
+//
+// tipos_produto DEIXOU de ser editável à mão: agora é derivado das peças
+// (legadoDasPecas). Quem manda é `pecas` — o fornecedor marca o que costura e o
+// matching lê disso. Manter os dois editáveis separadamente era garantir que um
+// dia divergissem.
 // ============================================================================
 
 import { getFornecedorAtual } from '@/app/lib/auth-server'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { registrarAudit, diffMudancas } from '@/app/lib/audit'
+import { legadoDasPecas, pecaValida } from '@/app/lib/pecas'
 
 const RAIOS_VALIDOS = new Set(['cidade', 'estado', 'regiao', 'nacional'])
 
@@ -67,6 +71,23 @@ export async function PATCH(req: Request) {
     )
   }
 
+  // Peças: campo opcional no corpo. Ausente = não mexe (evita que um cliente
+  // antigo do formulário zere o que o fornecedor já tinha marcado).
+  let pecas: string[] | null = null
+  if (b.pecas !== undefined) {
+    if (!Array.isArray(b.pecas)) {
+      return Response.json({ error: 'peças inválidas' }, { status: 400 })
+    }
+    const limpas = [...new Set(b.pecas.filter(pecaValida))]
+    if (limpas.length === 0) {
+      return Response.json(
+        { error: 'marque pelo menos uma peça que você produz' },
+        { status: 400 },
+      )
+    }
+    pecas = limpas
+  }
+
   let pedidoMinimo: number | null = null
   if (b.pedido_minimo !== null && b.pedido_minimo !== undefined && b.pedido_minimo !== '') {
     const n = Math.round(Number(b.pedido_minimo))
@@ -78,23 +99,29 @@ export async function PATCH(req: Request) {
 
   const { data: antes } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('nome, cidade, estado, raio_atendimento, pedido_minimo')
+    .select('nome, cidade, estado, raio_atendimento, pedido_minimo, pecas, tipos_produto')
     .eq('id', fornecedor.id)
     .maybeSingle()
 
-  const novos = {
+  const novos: Record<string, unknown> = {
     nome,
     cidade,
     estado,
     raio_atendimento: raio,
     pedido_minimo: pedidoMinimo,
   }
+  if (pecas) {
+    novos.pecas = pecas
+    // Ponte: o matching ainda cai em tipos_produto quando o pedido é antigo
+    // (sem peça). Derivar aqui mantém os dois lados dizendo a mesma coisa.
+    novos.tipos_produto = legadoDasPecas(pecas)
+  }
 
   const { data, error } = await supabaseAdmin
     .from('leads_fornecedores')
     .update(novos)
     .eq('id', fornecedor.id)
-    .select('nome, cidade, estado, raio_atendimento, pedido_minimo')
+    .select('nome, cidade, estado, raio_atendimento, pedido_minimo, pecas, tipos_produto')
     .single()
 
   if (error || !data) {

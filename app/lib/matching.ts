@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { temCreditoDisponivel, planoEfetivo, type Plano } from './planos'
+import { legadoDasPecas } from './pecas'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,6 +10,8 @@ const supabase = createClient(
 export type Pedido = {
   id: string
   tipo: string
+  /** Peça escolhida pelo cliente (app/lib/pecas.ts). Null nos pedidos antigos. */
+  peca?: string | null
   quantidade: number | null
   prazo: string
   estado: string
@@ -25,6 +28,8 @@ export type Fornecedor = {
   whatsapp: string
   email: string | null
   tipos_produto: string[]
+  /** Peças que a confecção produz. Vazio nos cadastros ainda não migrados. */
+  pecas?: string[] | null
   pedido_minimo: number
   estado: string
   raio_atendimento: string
@@ -49,11 +54,42 @@ export type ResultadoMatching = {
  *  significam fornecedor existe mas não quer receber leads agora. */
 export const STATUS_FORNECEDOR_ATIVO = 'ativo' as const
 
+/**
+ * O fornecedor produz o que o pedido pede? (05/09/2026)
+ *
+ * Três situações convivem enquanto a migração de categoria → peça acontece:
+ *
+ *   1. os dois já falam PEÇA  → compara peça com peça. É o caso bom, e o único
+ *      que responde "essa confecção faz polo?".
+ *   2. o pedido tem peça, o fornecedor ainda não  → traduz a peça pras
+ *      categorias antigas equivalentes e olha `tipos_produto`. Sem isso, o
+ *      primeiro pedido no vocabulário novo não acharia nenhum dos 41
+ *      cadastros existentes.
+ *   3. o pedido é antigo, sem peça  → segue na categoria, como sempre foi.
+ */
+export function produzOQuePedem(
+  fornecedor: { tipos_produto?: string[] | null; pecas?: string[] | null },
+  pedido: { tipo: string; peca?: string | null },
+): boolean {
+  const pecasFornecedor = fornecedor.pecas ?? []
+  const tipos = fornecedor.tipos_produto ?? []
+
+  if (pedido.peca) {
+    if (pecasFornecedor.length > 0) return pecasFornecedor.includes(pedido.peca)
+    // Fornecedor ainda não migrado: aceita se atende alguma categoria que a
+    // peça cobre.
+    return legadoDasPecas([pedido.peca]).some((cat) => tipos.includes(cat))
+  }
+
+  return tipos.includes(pedido.tipo)
+}
+
 /** Regra pura: o fornecedor atende este pedido? Sem I/O, sem queries.
  *
- *  Fonte única conceitual da regra de compatibilidade. A query SQL em
- *  buscarFornecedorCompativel espelha esta lógica pra eficiência.
- *  Ao alterar a regra aqui, alterar lá também (e vice-versa).
+ *  Fonte única da regra de compatibilidade — inclusive pra
+ *  buscarFornecedorCompativel, que usa a query SQL só pra estreitar o
+ *  candidato e chama produzOQuePedem pra decidir. Mudou aqui, mudou no
+ *  sistema todo.
  *
  *  NÃO considera exclusões dinâmicas (ofertas em andamento, gatilhos
  *  expirados, crédito) — essas são responsabilidade da função de busca. */
@@ -61,13 +97,12 @@ export function fornecedorAtendePedido(
   fornecedor: Pick<
     Fornecedor,
     'status' | 'tipos_produto' | 'pedido_minimo' | 'raio_atendimento' | 'estado'
-  >,
-  pedido: Pick<Pedido, 'tipo' | 'quantidade' | 'estado'>
+  > & { pecas?: string[] | null },
+  pedido: Pick<Pedido, 'tipo' | 'quantidade' | 'estado'> & { peca?: string | null },
 ): boolean {
   if (fornecedor.status !== STATUS_FORNECEDOR_ATIVO) return false
 
-  // Espelha .contains() / @> em SQL. Defensivo contra null caso o schema mude.
-  if (!fornecedor.tipos_produto?.includes(pedido.tipo)) return false
+  if (!produzOQuePedem(fornecedor, pedido)) return false
 
   // pedido_minimo só vale se quantidade foi informada.
   if (pedido.quantidade !== null && pedido.quantidade < fornecedor.pedido_minimo) {
@@ -145,10 +180,23 @@ export async function buscarFornecedorCompativel(
     .select('*')
     .eq('status', STATUS_FORNECEDOR_ATIVO)
     .eq('aprovacao_status', 'aprovado')
-    .contains('tipos_produto', [pedido.tipo])
-    .or(
-      `raio_atendimento.eq.nacional,and(raio_atendimento.in.(estado,regiao),estado.eq.${pedido.estado})`
-    )
+
+  // Filtro de produto: a query traz um SUPERCONJUNTO e produzOQuePedem
+  // (regra pura, logo abaixo) decide. Fazer o desempate "tem peça? ignora
+  // categoria" em SQL exigiria um OR aninhado difícil de manter — e a regra
+  // ficaria escrita em dois lugares, que é justamente o que dá divergência.
+  if (pedido.peca) {
+    const legado = legadoDasPecas([pedido.peca])
+    const condicoes = [`pecas.cs.{${pedido.peca}}`]
+    if (legado.length > 0) condicoes.push(`tipos_produto.ov.{${legado.join(',')}}`)
+    q = q.or(condicoes.join(','))
+  } else {
+    q = q.contains('tipos_produto', [pedido.tipo])
+  }
+
+  q = q.or(
+    `raio_atendimento.eq.nacional,and(raio_atendimento.in.(estado,regiao),estado.eq.${pedido.estado})`
+  )
 
   if (excluidos.length > 0) {
     q = q.not('id', 'in', `(${excluidos.join(',')})`)
@@ -168,7 +216,10 @@ export async function buscarFornecedorCompativel(
     return null
   }
 
-  const candidatos = (data ?? []) as Fornecedor[]
+  // Aplica a regra pura sobre o superconjunto que a query trouxe.
+  const candidatos = ((data ?? []) as Fornecedor[]).filter((f) =>
+    produzOQuePedem(f, pedido)
+  )
   if (candidatos.length === 0) return null
 
   // ============================================================

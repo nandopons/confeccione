@@ -4,13 +4,17 @@
 // ============================================================================
 // Bloco editável dos dados do fornecedor (05/09/2026).
 //
-// Só os campos que o fornecedor pode mudar sozinho: nome, cidade, UF, raio e
-// pedido mínimo. WhatsApp, e-mail, CPF/CNPJ e tipos de produto continuam no
-// suporte — o motivo de cada um está na rota PATCH.
+// Só os campos que o fornecedor pode mudar sozinho: nome, cidade, UF, raio,
+// pedido mínimo e AS PEÇAS que ele produz. WhatsApp, e-mail e CPF/CNPJ
+// continuam no suporte — o motivo de cada um está na rota PATCH.
+//
+// As peças são o campo que mais muda a vida dele: é literalmente a lista que o
+// matching consulta pra decidir se um pedido de polo chega até aqui.
 // ============================================================================
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { PECAS_PRINCIPAIS, PECAS_EXTRAS } from "@/app/lib/pecas";
 
 const RAIOS = [
   { valor: "cidade", label: "Apenas minha cidade" },
@@ -30,6 +34,7 @@ export type DadosEditaveis = {
   estado: string | null;
   raio_atendimento: string | null;
   pedido_minimo: number | null;
+  pecas: string[];
 };
 
 export default function EditarAtendimento({ inicial }: { inicial: DadosEditaveis }) {
@@ -41,6 +46,10 @@ export default function EditarAtendimento({ inicial }: { inicial: DadosEditaveis
   const [raio, setRaio] = useState(inicial.raio_atendimento ?? "nacional");
   const [minimo, setMinimo] = useState(
     inicial.pedido_minimo !== null ? String(inicial.pedido_minimo) : "",
+  );
+  const [pecas, setPecas] = useState<string[]>(inicial.pecas ?? []);
+  const [verExtras, setVerExtras] = useState(
+    (inicial.pecas ?? []).some((p) => PECAS_EXTRAS.some((e) => e.id === p)),
   );
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -60,6 +69,7 @@ export default function EditarAtendimento({ inicial }: { inicial: DadosEditaveis
           estado,
           raio_atendimento: raio,
           pedido_minimo: minimo,
+          pecas,
         }),
       });
       const json = await r.json();
@@ -149,9 +159,47 @@ export default function EditarAtendimento({ inicial }: { inicial: DadosEditaveis
         />
       </label>
 
+      <div className="sm:col-span-2">
+        <span className={rotulo}>O que você produz</span>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {(verExtras ? [...PECAS_PRINCIPAIS, ...PECAS_EXTRAS] : PECAS_PRINCIPAIS).map((p) => {
+            const marcada = pecas.includes(p.id);
+            return (
+              <button
+                type="button"
+                key={p.id}
+                onClick={() =>
+                  setPecas((atual) =>
+                    marcada ? atual.filter((x) => x !== p.id) : [...atual, p.id],
+                  )
+                }
+                className={`text-left border rounded-xl px-3 py-2.5 text-sm transition-colors ${
+                  marcada
+                    ? "border-[#1D9E75] bg-[#E1F5EE] text-[#0F6E56]"
+                    : "border-gray-200 text-gray-700 hover:border-gray-300"
+                }`}
+              >
+                <span className="mr-1.5">{p.icon}</span>
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+        {!verExtras && (
+          <button
+            type="button"
+            onClick={() => setVerExtras(true)}
+            className="mt-2 text-sm text-[#0F6E56] hover:underline"
+          >
+            Ver mais peças
+          </button>
+        )}
+      </div>
+
       <p className="sm:col-span-2 text-xs text-gray-400 leading-relaxed">
-        Esses dados definem quais pedidos chegam pra você. Pedido mínimo alto demais
-        deixa passar produção pequena; raio muito estreito tira você dos pedidos de fora.
+        Esses dados definem quais pedidos chegam pra você. Marque só o que você
+        realmente costura: marcar tudo enche a sua caixa de pedido que você vai
+        recusar, e recusa demais tira você da frente da fila.
       </p>
 
       {erro && (

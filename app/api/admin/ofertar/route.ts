@@ -39,7 +39,9 @@ import { dispararOfertaParaFornecedor } from '@/app/lib/ofertas'
 import {
   STATUS_FORNECEDOR_ATIVO,
   fornecedorAtendePedido,
+  produzOQuePedem,
 } from '@/app/lib/matching'
+import { pecaLabel } from '@/app/lib/pecas'
 
 type Body = {
   pedidoId?: unknown
@@ -50,6 +52,7 @@ type Body = {
 type PedidoRow = {
   id: string
   tipo: string
+  peca: string | null
   quantidade: number | null
   estado: string
   status: string
@@ -61,6 +64,7 @@ type FornecedorRow = {
   nome: string
   status: string
   tipos_produto: string[]
+  pecas: string[] | null
   pedido_minimo: number
   raio_atendimento: string
   estado: string
@@ -97,13 +101,13 @@ export async function POST(req: NextRequest) {
   const [pedidoRes, fornecedorRes] = await Promise.all([
     supabaseAdmin
       .from('pedidos')
-      .select('id, tipo, quantidade, estado, status, fornecedor_aceito_id')
+      .select('id, tipo, peca, quantidade, estado, status, fornecedor_aceito_id')
       .eq('id', pedidoId)
       .maybeSingle<PedidoRow>(),
     supabaseAdmin
       .from('leads_fornecedores')
       .select(
-        'id, nome, status, tipos_produto, pedido_minimo, raio_atendimento, estado'
+        'id, nome, status, tipos_produto, pecas, pedido_minimo, raio_atendimento, estado'
       )
       .eq('id', fornecedorId)
       .maybeSingle<FornecedorRow>(),
@@ -164,8 +168,9 @@ export async function POST(req: NextRequest) {
     if (!fornecedorAtendePedido(fornecedor, pedido)) {
       // Mensagem específica de qual critério falhou pra UX do admin
       const motivos: string[] = []
-      if (!fornecedor.tipos_produto?.includes(pedido.tipo)) {
-        motivos.push(`fornecedor não atende tipo '${pedido.tipo}'`)
+      if (!produzOQuePedem(fornecedor, pedido)) {
+        const alvo = pedido.peca ? pecaLabel(pedido.peca) : pedido.tipo
+        motivos.push(`fornecedor não produz '${alvo}'`)
       }
       if (
         pedido.quantidade !== null &&

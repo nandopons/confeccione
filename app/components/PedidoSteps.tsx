@@ -30,22 +30,15 @@
 import { useEffect, useRef, useState } from "react";
 import AlinharCliente from "@/app/alinhar/[id]/AlinharCliente";
 import { atribuicao } from "@/app/lib/rastreio";
+import { PECAS_PRINCIPAIS, PECAS_EXTRAS } from "@/app/lib/pecas";
 
-const nichosPrincipais = [
-  { id: "interclasse",   icon: "👕", title: "Interclasse / Evento", sub: "Camisas e uniformes em grupo" },
-  { id: "private_label", icon: "✂️", title: "Private Label",        sub: "Marca própria e coleções" },
-  { id: "fitness",       icon: "💪", title: "Fitness",              sub: "Academia, corrida, yoga" },
-  { id: "moda_praia",    icon: "🏖️", title: "Moda Praia",           sub: "Biquínis, sungas, saídas de praia" },
-  { id: "moda_intima",   icon: "🩱", title: "Moda Íntima",          sub: "Lingerie, pijamas, sleepwear" },
-];
-const nichosExtras = [
-  { id: "padrao_esportivo", icon: "⚽", title: "Padrão Esportivo",     sub: "Futebol, vôlei, com nome nas costas" },
-  { id: "fardamento",       icon: "🏢", title: "Fardamento",           sub: "Uniformes corporativos" },
-  { id: "inverno",          icon: "🧥", title: "Inverno",              sub: "Casacos, jaquetas, moletons" },
-  { id: "roupas_uv",        icon: "☀️", title: "Roupas UV",            sub: "Proteção solar, esportes ao ar livre" },
-  { id: "bones",            icon: "🧢", title: "Bonés",                sub: "Bonés bordados, customizados" },
-  { id: "brindes",          icon: "🎁", title: "Brindes / Gráfica",    sub: "Canecas, crachás, copos, chaveiros" },
-];
+// PEÇA, não categoria (05/09/2026). O cliente escolhia a ocasião ("Private
+// Label", "Interclasse") e o fornecedor cadastrava a mesma ocasião — dois
+// rótulos vagos que davam match sem dizer se a confecção sabe fazer aquela
+// peça. Agora as duas pontas falam a mesma língua: vestido, camisa, calça.
+// Ver app/lib/pecas.ts.
+const nichosPrincipais = PECAS_PRINCIPAIS.map((p) => ({ id: p.id, icon: p.icon, title: p.label, sub: p.sub }));
+const nichosExtras = PECAS_EXTRAS.map((p) => ({ id: p.id, icon: p.icon, title: p.label, sub: p.sub }));
 const nichosTodos = [...nichosPrincipais, ...nichosExtras];
 function cepFmt(v: string): string { const d = (v || "").replace(/\D/g, ""); return d.length === 8 ? `${d.slice(0,5)}-${d.slice(5)}` : (v || ""); }
 
@@ -206,7 +199,11 @@ export default function PedidoSteps() {
         body: JSON.stringify({
           linhas: [linha],
           contato,
-          observacoes: `Categoria: ${nichoTitle}`,
+          // `peca` é o id do catálogo — é por ela que o matching passa a
+          // procurar quem produz. `categoria` continua indo com o rótulo
+          // legível, que é o que aparece no resumo e nos e-mails.
+          peca: tipo,
+          observacoes: `Peça: ${nichoTitle}`,
           atribuicao: atribuicao(),
         }),
       });

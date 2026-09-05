@@ -14,6 +14,7 @@ import {
   linkWhatsAppSuporte,
 } from "@/app/lib/contatos";
 import EditarAtendimento from "./EditarAtendimento";
+import { pecaLabel } from "@/app/lib/pecas";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -148,7 +149,7 @@ export default async function PaginaDados() {
   const { data: fornecedor } = await supabase
     .from("leads_fornecedores")
     .select(
-      "id, nome, whatsapp, email, cpf_cnpj, tipos_produto, pedido_minimo, estado, cidade, raio_atendimento, status, aprovacao_status"
+      "id, nome, whatsapp, email, cpf_cnpj, tipos_produto, pecas, pedido_minimo, estado, cidade, raio_atendimento, status, aprovacao_status"
     )
     .eq("id", sessao.id)
     .single();
@@ -167,6 +168,7 @@ export default async function PaginaDados() {
 
   const status = labelStatus(fornecedor.status, fornecedor.aprovacao_status);
   const tiposProduto: string[] = fornecedor.tipos_produto || [];
+  const pecas: string[] = fornecedor.pecas || [];
 
   return (
     <section className="px-5 md:px-8 pt-8 pb-12 max-w-4xl mx-auto">
@@ -177,6 +179,20 @@ export default async function PaginaDados() {
         </p>
       </div>
 
+      {pecas.length === 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 mb-4">
+          <p className="text-sm text-amber-900 font-medium mb-1">
+            Confirme as peças que você produz
+          </p>
+          <p className="text-xs text-amber-800 leading-relaxed">
+            Mudamos a forma de distribuir os pedidos: agora vai por peça
+            (camisa, vestido, moletom) em vez de categoria. Até você marcar as
+            suas, seguimos usando o cadastro antigo — funciona, mas chega menos
+            pedido certo. Toque em “Editar meus dados”.
+          </p>
+        </div>
+      )}
+
       <EditarAtendimento
         inicial={{
           nome: fornecedor.nome,
@@ -184,6 +200,7 @@ export default async function PaginaDados() {
           estado: fornecedor.estado,
           raio_atendimento: fornecedor.raio_atendimento,
           pedido_minimo: fornecedor.pedido_minimo,
+          pecas,
         }}
       />
 
@@ -204,13 +221,26 @@ export default async function PaginaDados() {
         <Linha label="Estado">{fornecedor.estado || "—"}</Linha>
         <Linha label="Cidade">{fornecedor.cidade || "—"}</Linha>
         <Linha label="Raio">{labelRaio(fornecedor.raio_atendimento)}</Linha>
-        <Linha label="Tipos">
-          {tiposProduto.length > 0 ? (
+        <Linha label="Peças">
+          {pecas.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {pecas.map((p) => (
+                <span
+                  key={p}
+                  className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2.5 py-1 rounded-full"
+                >
+                  {pecaLabel(p)}
+                </span>
+              ))}
+            </div>
+          ) : tiposProduto.length > 0 ? (
+            // Cadastro antigo, ainda sem peça: mostra as categorias legadas pra
+            // ele não achar que o perfil está vazio, e o botão acima migra.
             <div className="flex flex-wrap gap-1.5">
               {tiposProduto.map((tipo) => (
                 <span
                   key={tipo}
-                  className="bg-[#E1F5EE] text-[#0F6E56] text-xs font-medium px-2.5 py-1 rounded-full"
+                  className="bg-gray-100 text-gray-600 text-xs font-medium px-2.5 py-1 rounded-full"
                 >
                   {labelTipoProduto(tipo)}
                 </span>
@@ -258,12 +288,12 @@ export default async function PaginaDados() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm text-gray-900 font-medium mb-1">
-              Precisa alterar WhatsApp, e-mail ou os tipos de produto?
+              Precisa alterar WhatsApp, e-mail ou CPF/CNPJ?
             </p>
             <p className="text-xs text-gray-500 leading-relaxed">
               WhatsApp e e-mail são por onde chega o seu código de acesso, então a
-              troca é feita com a gente pra ninguém ficar sem entrar na conta. Tipos
-              de produto, CPF/CNPJ e pausar a conta também: fale no WhatsApp{" "}
+              troca é feita com a gente pra ninguém ficar sem entrar na conta.
+              CPF/CNPJ e pausar a conta também: fale no WhatsApp{" "}
               <a
                 href={linkWhatsAppSuporte("Olá! Preciso alterar dados do meu cadastro.")}
                 target="_blank"

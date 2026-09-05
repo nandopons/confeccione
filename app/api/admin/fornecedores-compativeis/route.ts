@@ -25,6 +25,7 @@ type FornecedorRow = {
   estado: string
   status: string
   tipos_produto: string[]
+  pecas: string[] | null
   pedido_minimo: number
   raio_atendimento: string
 }
@@ -32,6 +33,7 @@ type FornecedorRow = {
 type PedidoRow = {
   id: string
   tipo: string
+  peca: string | null
   quantidade: number | null
   estado: string
   status: string
@@ -53,7 +55,7 @@ export async function GET(req: NextRequest) {
   // 1. Carrega pedido
   const { data: pedido } = await supabaseAdmin
     .from('pedidos')
-    .select('id, tipo, quantidade, estado, status')
+    .select('id, tipo, peca, quantidade, estado, status')
     .eq('id', pedidoId)
     .maybeSingle<PedidoRow>()
 
@@ -65,7 +67,7 @@ export async function GET(req: NextRequest) {
   const { data: fornecedoresRaw, error: fErr } = await supabaseAdmin
     .from('leads_fornecedores')
     .select(
-      'id, nome, estado, status, tipos_produto, pedido_minimo, raio_atendimento'
+      'id, nome, estado, status, tipos_produto, pecas, pedido_minimo, raio_atendimento'
     )
     .eq('status', STATUS_FORNECEDOR_ATIVO)
     .eq('aprovacao_status', 'aprovado')

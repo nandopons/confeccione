@@ -13,6 +13,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getContaAtual } from '@/app/lib/cliente-auth'
 import { normalizarWhatsApp } from '@/app/lib/phone'
+import { pecaValida } from '@/app/lib/pecas'
 
 export const runtime = 'nodejs'
 
@@ -72,6 +73,8 @@ const AtribuicaoSchema = z
 const BodySchema = z.object({
   linhas: z.array(LinhaSchema),
   contato: ContatoSchema,
+  /** id do catálogo de peças (app/lib/pecas.ts) — o que o matching usa. */
+  peca: z.string().max(40).nullable().optional(),
   observacoes: z.string().nullable().optional(),
   conversa: z.array(ConversaItemSchema).max(600).optional(),
   atribuicao: AtribuicaoSchema,
@@ -143,7 +146,13 @@ export async function POST(req: Request) {
 
   const categoriaPedido =
     linhasValidas.find((l) => l.categoria)?.categoria ??
-    (parsed.data.observacoes ? (parsed.data.observacoes.match(/Categoria:\s*(.+)/)?.[1]?.trim() || null) : null)
+    (parsed.data.observacoes
+      ? parsed.data.observacoes.match(/(?:Categoria|Peça):\s*(.+)/)?.[1]?.trim() || null
+      : null)
+
+  // A peça só entra se existir no catálogo: id inventado no corpo da request
+  // viraria pedido que nenhum fornecedor casa, e ninguém perceberia.
+  const peca = pecaValida(parsed.data.peca) ? parsed.data.peca : null
 
   // Atribuição: é ela que responde "quais dos pedidos da semana o Ads trouxe".
   const atr = parsed.data.atribuicao
@@ -158,6 +167,7 @@ export async function POST(req: Request) {
       utm_campaign: corta(atr?.utm_campaign, 160),
       referrer: corta(atr?.referrer, 300),
       categoria: categoriaPedido ?? null,
+      peca,
       nome: contato.nome,
       telefone: contato.telefone ? normalizarWhatsApp(contato.telefone) : null,
       email: contato.email,

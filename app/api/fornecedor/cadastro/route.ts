@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse, after } from 'next/server'
 import { normalizarWhatsApp } from '@/app/lib/phone'
+import { legadoDasPecas, pecaValida } from '@/app/lib/pecas'
 import { enviarMensagem } from '@/app/lib/zapi'
 import { emailBoasVindasFornecedor } from '@/app/lib/email'
 import { validarCpfCnpj, apenasDigitos } from '@/app/lib/cpf-cnpj'
@@ -16,6 +17,7 @@ export async function POST(req: Request) {
     nome,
     whatsapp,
     email,
+    pecas: pecasRecebidas,
     tipos_produto,
     descricao_livre,
     pedido_minimo,
@@ -26,6 +28,12 @@ export async function POST(req: Request) {
   } = await req.json()
 
   const numero = normalizarWhatsApp(whatsapp)
+
+  // O cadastro passou a mandar PEÇAS (app/lib/pecas.ts). `tipos_produto` é
+  // derivado delas e continua gravado: é por ele que o matching antigo enxerga
+  // este fornecedor enquanto a migração dos 41 cadastros não termina.
+  const pecas = Array.isArray(pecasRecebidas) ? pecasRecebidas.filter(pecaValida) : []
+  const tiposDerivados = pecas.length > 0 ? legadoDasPecas(pecas) : tipos_produto
 
   // Validação do CPF/CNPJ — obrigatório a partir desta migração.
   // Fornecedores existentes pré-migração podem ter cpf_cnpj = NULL no banco
@@ -55,7 +63,8 @@ export async function POST(req: Request) {
     nome,
     whatsapp: numero,
     email,
-    tipos_produto,
+    pecas,
+    tipos_produto: tiposDerivados,
     descricao_livre: descricao_livre || null,
     pedido_minimo,
     estado,
