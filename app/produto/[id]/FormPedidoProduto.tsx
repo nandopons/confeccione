@@ -7,6 +7,17 @@
 // Formulário curto de propósito: quantidade, tamanhos, personalização e
 // contato. Tudo que der pra combinar depois fica pro alinhamento — cada campo
 // a mais aqui é um pedido a menos.
+//
+// MOBILE (05/09/2026) — é de onde vem a maior parte do tráfego, e o formulário
+// tinha sido desenhado no desktop:
+//   - campo com fonte menor que 16px faz o iOS DAR ZOOM ao focar, e o cliente
+//     perde o enquadramento da página a cada campo. Daí `text-base sm:text-sm`.
+//   - o botão era uma pílula estreita à esquerda com o aviso ao lado; no
+//     celular vira largura total, e o aviso desce pra baixo.
+//   - `autoComplete` em nome/telefone/e-mail: no celular preencher isso na mão
+//     é o passo mais caro do formulário inteiro.
+//   - dois títulos curtos quebram a coluna única de 12 campos em duas partes
+//     com sentido, em vez de uma lista sem fim.
 // ============================================================================
 
 import { useRef, useState } from "react";
@@ -127,13 +138,19 @@ export default function FormPedidoProduto({
     );
   }
 
+  // text-base no celular (16px) = sem zoom automático do iOS ao focar.
   const campo =
-    "w-full border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75]";
+    "w-full border border-gray-200 rounded-xl px-3.5 py-3 sm:py-2.5 text-base sm:text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75] focus:ring-2 focus:ring-[#1D9E75]/15";
+  const rotulo = "text-gray-700 text-xs font-medium block mb-1.5";
+  const secao =
+    "sm:col-span-2 text-[11px] uppercase tracking-wider text-gray-400 font-semibold pt-2 first:pt-0";
 
   return (
     <form onSubmit={enviar} className="grid sm:grid-cols-2 gap-3 max-w-2xl">
+      <p className={secao}>O que você precisa</p>
+
       <label className="block">
-        <span className="text-gray-700 text-xs font-medium block mb-1.5">
+        <span className={rotulo}>
           Quantidade de peças{pedidoMinimo ? ` (mínimo ${pedidoMinimo})` : ""}
         </span>
         <input
@@ -148,14 +165,12 @@ export default function FormPedidoProduto({
       </label>
 
       <label className="block">
-        <span className="text-gray-700 text-xs font-medium block mb-1.5">Tamanhos</span>
+        <span className={rotulo}>Tamanhos</span>
         <input name="tamanhos" type="text" placeholder="Ex.: 20 P, 40 M, 30 G" className={campo} />
       </label>
 
       <label className="block sm:col-span-2">
-        <span className="text-gray-700 text-xs font-medium block mb-1.5">
-          Cor e personalização
-        </span>
+        <span className={rotulo}>Cor e personalização</span>
         <textarea
           name="detalhes"
           rows={3}
@@ -168,7 +183,7 @@ export default function FormPedidoProduto({
           consegue mandar o logo/estampa antes do orçamento. Sem isso a
           confecção orça no escuro e a conversa volta pro WhatsApp. */}
       <div className="sm:col-span-2">
-        <span className="text-gray-700 text-xs font-medium block mb-1.5">
+        <span className={rotulo}>
           Arte, logo ou referência <span className="text-gray-400 font-normal">(opcional)</span>
         </span>
         <div className="flex flex-wrap items-center gap-2">
@@ -197,8 +212,12 @@ export default function FormPedidoProduto({
               {lendoArte ? "…" : "+"}
             </button>
           )}
-          <span className="text-gray-400 text-xs">JPG ou PNG, até {MAX_ARQUIVOS} arquivos.</span>
         </div>
+        {/* Abaixo, não ao lado: no celular a legenda ao lado do botão empurrava
+            o "+" pra um canto e virava duas linhas soltas. */}
+        <p className="text-gray-400 text-xs mt-2">
+          JPG ou PNG, até {MAX_ARQUIVOS} arquivos.
+        </p>
         <input
           ref={arquivoRef}
           type="file"
@@ -209,30 +228,58 @@ export default function FormPedidoProduto({
         />
       </div>
 
+      <p className={secao}>Como falamos com você</p>
+
       <label className="block">
-        <span className="text-gray-700 text-xs font-medium block mb-1.5">Seu nome</span>
-        <input name="nome" type="text" required maxLength={80} className={campo} />
+        <span className={rotulo}>Seu nome</span>
+        <input
+          name="nome"
+          type="text"
+          required
+          maxLength={80}
+          autoComplete="name"
+          className={campo}
+        />
       </label>
 
       <label className="block">
-        <span className="text-gray-700 text-xs font-medium block mb-1.5">WhatsApp</span>
+        <span className={rotulo}>WhatsApp</span>
         <input
           name="telefone"
           type="tel"
+          inputMode="tel"
           required
+          autoComplete="tel"
           placeholder="(81) 99999-9999"
           className={campo}
         />
       </label>
 
       <label className="block">
-        <span className="text-gray-700 text-xs font-medium block mb-1.5">E-mail</span>
-        <input name="email" type="email" required maxLength={120} className={campo} />
+        <span className={rotulo}>E-mail</span>
+        <input
+          name="email"
+          type="email"
+          inputMode="email"
+          required
+          maxLength={120}
+          autoComplete="email"
+          autoCapitalize="none"
+          spellCheck={false}
+          className={campo}
+        />
       </label>
 
       <label className="block">
-        <span className="text-gray-700 text-xs font-medium block mb-1.5">Cidade / UF</span>
-        <input name="cidade" type="text" placeholder="Recife/PE" maxLength={80} className={campo} />
+        <span className={rotulo}>Cidade / UF</span>
+        <input
+          name="cidade"
+          type="text"
+          placeholder="Recife/PE"
+          maxLength={80}
+          autoComplete="address-level2"
+          className={campo}
+        />
       </label>
 
       {erro && (
@@ -241,15 +288,20 @@ export default function FormPedidoProduto({
         </p>
       )}
 
-      <div className="sm:col-span-2 flex items-center gap-3 mt-1">
+      {/* No celular: botão de largura total e o aviso embaixo. A pílula estreita
+          com o texto ao lado é desenho de desktop — no telefone ela ficava
+          pequena num canto, do tamanho de um link. */}
+      <div className="sm:col-span-2 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mt-2">
         <button
           type="submit"
           disabled={enviando}
-          className="bg-[#1D9E75] hover:bg-[#0F6E56] disabled:bg-gray-300 text-white text-sm font-medium px-6 py-3 rounded-full transition-colors"
+          className="w-full sm:w-auto bg-[#1D9E75] hover:bg-[#0F6E56] active:bg-[#0F6E56] disabled:bg-gray-300 text-white text-base sm:text-sm font-medium px-6 py-3.5 sm:py-3 rounded-full transition-colors"
         >
           {enviando ? "Enviando…" : "Enviar pedido →"}
         </button>
-        <span className="text-gray-400 text-xs">Sem compromisso. Você recebe o orçamento antes.</span>
+        <span className="text-gray-400 text-xs text-center sm:text-left">
+          Sem compromisso. Você recebe o orçamento antes.
+        </span>
       </div>
     </form>
   );
