@@ -75,6 +75,10 @@ const BodySchema = z.object({
   contato: ContatoSchema,
   /** id do catálogo de peças (app/lib/pecas.ts) — o que o matching usa. */
   peca: z.string().max(40).nullable().optional(),
+  /** Todas as peças marcadas. `peca` é a primeira delas. */
+  pecas: z.array(z.string().max(40)).max(24).optional(),
+  /** O que o cliente escreveu quando o catálogo não tinha a peça dele. */
+  peca_outro: z.string().max(300).nullable().optional(),
   observacoes: z.string().nullable().optional(),
   conversa: z.array(ConversaItemSchema).max(600).optional(),
   atribuicao: AtribuicaoSchema,
@@ -150,9 +154,17 @@ export async function POST(req: Request) {
       ? parsed.data.observacoes.match(/(?:Categoria|Peça):\s*(.+)/)?.[1]?.trim() || null
       : null)
 
-  // A peça só entra se existir no catálogo: id inventado no corpo da request
+  // Só entram ids que existem no catálogo: id inventado no corpo da request
   // viraria pedido que nenhum fornecedor casa, e ninguém perceberia.
-  const peca = pecaValida(parsed.data.peca) ? parsed.data.peca : null
+  const pecas = [...new Set((parsed.data.pecas ?? []).filter(pecaValida))]
+  const peca = pecaValida(parsed.data.peca)
+    ? parsed.data.peca
+    : (pecas[0] ?? null)
+
+  // Texto livre: guardado como veio (só aparado). É o material bruto pra
+  // decidir quais peças faltam no catálogo — normalizar aqui perderia
+  // exatamente a palavra que o cliente usou, que é o dado.
+  const pecaOutro = corta(parsed.data.peca_outro, 300)
 
   // Atribuição: é ela que responde "quais dos pedidos da semana o Ads trouxe".
   const atr = parsed.data.atribuicao
@@ -168,6 +180,8 @@ export async function POST(req: Request) {
       referrer: corta(atr?.referrer, 300),
       categoria: categoriaPedido ?? null,
       peca,
+      pecas,
+      peca_outro: pecaOutro,
       nome: contato.nome,
       telefone: contato.telefone ? normalizarWhatsApp(contato.telefone) : null,
       email: contato.email,

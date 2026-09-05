@@ -78,14 +78,21 @@ export async function PATCH(req: Request) {
     if (!Array.isArray(b.pecas)) {
       return Response.json({ error: 'peças inválidas' }, { status: 400 })
     }
-    const limpas = [...new Set(b.pecas.filter(pecaValida))]
-    if (limpas.length === 0) {
-      return Response.json(
-        { error: 'marque pelo menos uma peça que você produz' },
-        { status: 400 },
-      )
-    }
-    pecas = limpas
+    pecas = [...new Set(b.pecas.filter(pecaValida))]
+  }
+
+  // Texto livre: só entra se veio no corpo, e vai como a pessoa escreveu.
+  const pecasOutro =
+    b.pecas_outro === undefined ? undefined : texto(b.pecas_outro, 300)
+
+  // Nenhuma peça marcada E nenhum texto livre = perfil que não casa com
+  // pedido nenhum. Aceitar isso seria deixar a confecção sair da rede sem
+  // saber. Só uma das duas coisas já basta: o texto livre vira peça nova.
+  if (pecas && pecas.length === 0 && !pecasOutro) {
+    return Response.json(
+      { error: 'marque as peças que você produz, ou descreva em “outras”' },
+      { status: 400 },
+    )
   }
 
   let pedidoMinimo: number | null = null
@@ -99,7 +106,7 @@ export async function PATCH(req: Request) {
 
   const { data: antes } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('nome, cidade, estado, raio_atendimento, pedido_minimo, pecas, tipos_produto')
+    .select('nome, cidade, estado, raio_atendimento, pedido_minimo, pecas, pecas_outro, tipos_produto')
     .eq('id', fornecedor.id)
     .maybeSingle()
 
@@ -110,18 +117,23 @@ export async function PATCH(req: Request) {
     raio_atendimento: raio,
     pedido_minimo: pedidoMinimo,
   }
+  if (pecasOutro !== undefined) novos.pecas_outro = pecasOutro
   if (pecas) {
     novos.pecas = pecas
     // Ponte: o matching ainda cai em tipos_produto quando o pedido é antigo
     // (sem peça). Derivar aqui mantém os dois lados dizendo a mesma coisa.
-    novos.tipos_produto = legadoDasPecas(pecas)
+    //
+    // Só sobrescreve com peça marcada: quem salvou apenas o texto livre não
+    // pode ter tipos_produto zerado — seria sair do matching antigo também, e
+    // aí a confecção não recebe nada até a peça nova existir no catálogo.
+    if (pecas.length > 0) novos.tipos_produto = legadoDasPecas(pecas)
   }
 
   const { data, error } = await supabaseAdmin
     .from('leads_fornecedores')
     .update(novos)
     .eq('id', fornecedor.id)
-    .select('nome, cidade, estado, raio_atendimento, pedido_minimo, pecas, tipos_produto')
+    .select('nome, cidade, estado, raio_atendimento, pedido_minimo, pecas, pecas_outro, tipos_produto')
     .single()
 
   if (error || !data) {

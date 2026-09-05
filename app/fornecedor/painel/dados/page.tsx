@@ -149,7 +149,7 @@ export default async function PaginaDados() {
   const { data: fornecedor } = await supabase
     .from("leads_fornecedores")
     .select(
-      "id, nome, whatsapp, email, cpf_cnpj, tipos_produto, pecas, pedido_minimo, estado, cidade, raio_atendimento, status, aprovacao_status"
+      "id, nome, whatsapp, email, cpf_cnpj, tipos_produto, pecas, pecas_outro, pedido_minimo, estado, cidade, raio_atendimento, status, aprovacao_status"
     )
     .eq("id", sessao.id)
     .single();
@@ -201,6 +201,7 @@ export default async function PaginaDados() {
           raio_atendimento: fornecedor.raio_atendimento,
           pedido_minimo: fornecedor.pedido_minimo,
           pecas,
+          pecas_outro: fornecedor.pecas_outro,
         }}
       />
 
@@ -250,6 +251,9 @@ export default async function PaginaDados() {
             "—"
           )}
         </Linha>
+        {fornecedor.pecas_outro && (
+          <Linha label="Outras">{fornecedor.pecas_outro}</Linha>
+        )}
         <Linha label="Pedido mínimo">
           {fornecedor.pedido_minimo
             ? `${fornecedor.pedido_minimo} ${fornecedor.pedido_minimo === 1 ? "peça" : "peças"}`

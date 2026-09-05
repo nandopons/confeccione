@@ -10,6 +10,7 @@ import { notificarPedidoRecebido } from '@/app/lib/whatsapp-notify'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
 import { loginComEmailUrl } from '@/app/lib/url'
 import { primeiroNome } from '@/app/lib/nome'
+import { pecaValida } from '@/app/lib/pecas'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,6 +26,17 @@ export async function POST(req: Request) {
   const conta = (await getContaAtual()) ?? (await getContaSessao(req))
 
   const tipo = body.tipo
+  // Peça e texto livre são opcionais aqui: este formulário ainda nasce da
+  // categoria. Passam adiante pra este caminho não ficar cego ao vocabulário
+  // novo — o matching prefere a peça quando ela existe.
+  const pecas = Array.isArray(body.pecas)
+    ? [...new Set(body.pecas.filter(pecaValida))]
+    : []
+  const peca = pecaValida(body.peca) ? body.peca : (pecas[0] ?? null)
+  const pecaOutro =
+    typeof body.peca_outro === 'string' && body.peca_outro.trim()
+      ? body.peca_outro.trim().slice(0, 300)
+      : null
   const quantidade = body.quantidade
   const prazo = body.prazo
   const estado = body.estado
@@ -84,6 +96,9 @@ export async function POST(req: Request) {
     .from('pedidos')
     .insert({
       tipo,
+      peca,
+      pecas,
+      peca_outro: pecaOutro,
       quantidade,
       prazo,
       estado,

@@ -32,6 +32,11 @@ export default function CadastroFornecedor() {
   const [enviando, setEnviando]       = useState(false);
   const [erroEnvio, setErroEnvio]     = useState<string | null>(null);
   const [showExtras, setShowExtras]   = useState(false);
+  // Texto livre pro que não está no catálogo. O catálogo é a nossa aposta sobre
+  // o mercado; sem campo aberto, a confecção que faz algo fora dele marca a
+  // peça mais ou menos parecida (e passa a receber pedido errado) ou não marca
+  // nada. Aqui a lacuna vira dado em /admin/pecas-faltando.
+  const [pecasOutro, setPecasOutro]   = useState("");
 
   function toggleTipo(id: string) {
     setTiposSel(prev =>
@@ -61,7 +66,7 @@ export default function CadastroFornecedor() {
   }, [tiposSel]);
 
   const step1Valid = nome.trim().length > 0 && whatsapp.replace(/\D/g, "").length >= 10 && email.includes("@");
-  const step2Valid = tiposSel.length > 0 && pedidoMinimo >= 1;
+  const step2Valid = (tiposSel.length > 0 || pecasOutro.trim().length > 0) && pedidoMinimo >= 1;
   const step3Valid =
     estado !== "" &&
     raio !== "" &&
@@ -87,6 +92,7 @@ export default function CadastroFornecedor() {
           // este cadastro continuar visível pro matching antigo enquanto a
           // migração não termina.
           pecas: tiposSel,
+          pecas_outro: pecasOutro,
           descricao_livre: descricao,
           pedido_minimo: pedidoMinimo,
           estado,
@@ -209,6 +215,24 @@ export default function CadastroFornecedor() {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="mb-5">
+                <label htmlFor="pecas-outro" className="text-sm font-medium text-gray-700 mb-1 block">
+                  Produz alguma peça que não está na lista?
+                </label>
+                <p className="text-xs text-gray-500 mb-2">
+                  Escreva do seu jeito. A gente lê tudo — é assim que peça nova entra na lista.
+                </p>
+                <textarea
+                  id="pecas-outro"
+                  rows={2}
+                  maxLength={300}
+                  value={pecasOutro}
+                  onChange={e => setPecasOutro(e.target.value.slice(0, 300))}
+                  placeholder="Ex.: capa de almofada, toalha de mesa sob medida, cortina…"
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-800 resize-none focus:outline-none focus:border-[#1D9E75] focus:ring-2 focus:ring-[#1D9E75]/20"
+                />
               </div>
 
               <div className="mb-5">

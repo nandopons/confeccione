@@ -179,6 +179,17 @@ const SECOES: Secao[] = [
         ),
       },
       {
+        // O retorno do campo "Outros" das duas pontas. Fica em Operação porque
+        // é decisão de catálogo, não de venda.
+        href: '/admin/pecas-faltando',
+        label: 'Peças faltando',
+        icone: (
+          <Ico
+            d="M12 8v5M12 16.5h.01M10.3 3.9L2.6 17a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"
+          />
+        ),
+      },
+      {
         href: '/admin/precos',
         label: 'Preços',
         icone: (

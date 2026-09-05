@@ -10,8 +10,10 @@ const supabase = createClient(
 export type Pedido = {
   id: string
   tipo: string
-  /** Peça escolhida pelo cliente (app/lib/pecas.ts). Null nos pedidos antigos. */
+  /** Primeira peça escolhida (app/lib/pecas.ts). Null nos pedidos antigos. */
   peca?: string | null
+  /** Todas as peças do pedido. `peca` é a primeira delas. */
+  pecas?: string[] | null
   quantidade: number | null
   prazo: string
   estado: string
@@ -54,34 +56,65 @@ export type ResultadoMatching = {
  *  significam fornecedor existe mas não quer receber leads agora. */
 export const STATUS_FORNECEDOR_ATIVO = 'ativo' as const
 
+/** As peças que o pedido pede, em uma lista só.
+ *
+ *  `pecas` é o conjunto (o cliente pode marcar camiseta + moletom); `peca` é a
+ *  primeira, mantida porque o resto do sistema já lê essa coluna. Pedidos
+ *  antigos não têm nenhuma das duas. */
+export function pecasDoPedido(pedido: {
+  peca?: string | null
+  pecas?: string[] | null
+}): string[] {
+  if (pedido.pecas && pedido.pecas.length > 0) return pedido.pecas
+  return pedido.peca ? [pedido.peca] : []
+}
+
 /**
- * O fornecedor produz o que o pedido pede? (05/09/2026)
+ * Quantas das peças do pedido essa confecção cobre? (05/09/2026)
  *
  * Três situações convivem enquanto a migração de categoria → peça acontece:
  *
  *   1. os dois já falam PEÇA  → compara peça com peça. É o caso bom, e o único
  *      que responde "essa confecção faz polo?".
- *   2. o pedido tem peça, o fornecedor ainda não  → traduz a peça pras
+ *   2. o pedido tem peça, o fornecedor ainda não  → traduz as peças pras
  *      categorias antigas equivalentes e olha `tipos_produto`. Sem isso, o
  *      primeiro pedido no vocabulário novo não acharia nenhum dos 41
- *      cadastros existentes.
+ *      cadastros existentes. A cobertura vira 1 (ou 0): categoria não tem
+ *      resolução pra dizer quantas peças a confecção faz.
  *   3. o pedido é antigo, sem peça  → segue na categoria, como sempre foi.
+ */
+export function coberturaDoPedido(
+  fornecedor: { tipos_produto?: string[] | null; pecas?: string[] | null },
+  pedido: { tipo: string; peca?: string | null; pecas?: string[] | null },
+): number {
+  const pecasFornecedor = fornecedor.pecas ?? []
+  const tipos = fornecedor.tipos_produto ?? []
+  const pedidas = pecasDoPedido(pedido)
+
+  if (pedidas.length > 0) {
+    if (pecasFornecedor.length > 0) {
+      return pedidas.filter((p) => pecasFornecedor.includes(p)).length
+    }
+    const legado = legadoDasPecas(pedidas)
+    return legado.some((cat) => tipos.includes(cat)) ? 1 : 0
+  }
+
+  return tipos.includes(pedido.tipo) ? 1 : 0
+}
+
+/**
+ * O fornecedor produz o que o pedido pede?
+ *
+ * Basta cobrir UMA das peças. Exigir o pedido inteiro deixaria sem fornecedor
+ * quem pediu camiseta + boné só porque ninguém faz as duas coisas — e o pedido
+ * é divisível: o resto vai pra outra confecção. Quem cobre mais peças ganha a
+ * frente da fila em buscarFornecedorCompativel.
  */
 export function produzOQuePedem(
   fornecedor: { tipos_produto?: string[] | null; pecas?: string[] | null },
-  pedido: { tipo: string; peca?: string | null },
+  pedido: { tipo: string; peca?: string | null; pecas?: string[] | null },
 ): boolean {
-  const pecasFornecedor = fornecedor.pecas ?? []
-  const tipos = fornecedor.tipos_produto ?? []
-
-  if (pedido.peca) {
-    if (pecasFornecedor.length > 0) return pecasFornecedor.includes(pedido.peca)
-    // Fornecedor ainda não migrado: aceita se atende alguma categoria que a
-    // peça cobre.
-    return legadoDasPecas([pedido.peca]).some((cat) => tipos.includes(cat))
-  }
-
-  return tipos.includes(pedido.tipo)
+  return coberturaDoPedido(fornecedor, pedido) > 0
 }
 
 /** Regra pura: o fornecedor atende este pedido? Sem I/O, sem queries.
@@ -98,7 +131,10 @@ export function fornecedorAtendePedido(
     Fornecedor,
     'status' | 'tipos_produto' | 'pedido_minimo' | 'raio_atendimento' | 'estado'
   > & { pecas?: string[] | null },
-  pedido: Pick<Pedido, 'tipo' | 'quantidade' | 'estado'> & { peca?: string | null },
+  pedido: Pick<Pedido, 'tipo' | 'quantidade' | 'estado'> & {
+    peca?: string | null
+    pecas?: string[] | null
+  },
 ): boolean {
   if (fornecedor.status !== STATUS_FORNECEDOR_ATIVO) return false
 
@@ -185,9 +221,10 @@ export async function buscarFornecedorCompativel(
   // (regra pura, logo abaixo) decide. Fazer o desempate "tem peça? ignora
   // categoria" em SQL exigiria um OR aninhado difícil de manter — e a regra
   // ficaria escrita em dois lugares, que é justamente o que dá divergência.
-  if (pedido.peca) {
-    const legado = legadoDasPecas([pedido.peca])
-    const condicoes = [`pecas.cs.{${pedido.peca}}`]
+  const pedidas = pecasDoPedido(pedido)
+  if (pedidas.length > 0) {
+    const legado = legadoDasPecas(pedidas)
+    const condicoes = [`pecas.ov.{${pedidas.join(',')}}`]
     if (legado.length > 0) condicoes.push(`tipos_produto.ov.{${legado.join(',')}}`)
     q = q.or(condicoes.join(','))
   } else {
@@ -216,10 +253,16 @@ export async function buscarFornecedorCompativel(
     return null
   }
 
-  // Aplica a regra pura sobre o superconjunto que a query trouxe.
-  const candidatos = ((data ?? []) as Fornecedor[]).filter((f) =>
-    produzOQuePedem(f, pedido)
-  )
+  // Aplica a regra pura sobre o superconjunto que a query trouxe, e ordena por
+  // COBERTURA: num pedido de camiseta + moletom, quem faz os dois atende antes
+  // de quem faz um. O desempate continua sendo ultimo_lead_em (a ordem que veio
+  // do banco), que é o rodízio — cobertura não pode virar monopólio de quem
+  // marcou peça demais.
+  const candidatos = ((data ?? []) as Fornecedor[])
+    .map((f) => ({ f, cobertura: coberturaDoPedido(f, pedido) }))
+    .filter((c) => c.cobertura > 0)
+    .sort((a, b) => b.cobertura - a.cobertura)
+    .map((c) => c.f)
   if (candidatos.length === 0) return null
 
   // ============================================================

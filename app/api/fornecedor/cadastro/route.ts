@@ -18,6 +18,7 @@ export async function POST(req: Request) {
     whatsapp,
     email,
     pecas: pecasRecebidas,
+    pecas_outro,
     tipos_produto,
     descricao_livre,
     pedido_minimo,
@@ -64,6 +65,13 @@ export async function POST(req: Request) {
     whatsapp: numero,
     email,
     pecas,
+    // Texto livre, guardado como veio: é o material bruto pra saber que peça
+    // falta no catálogo. Normalizar aqui perderia a palavra que a confecção
+    // usou, que é justamente o dado.
+    pecas_outro:
+      typeof pecas_outro === 'string' && pecas_outro.trim()
+        ? pecas_outro.trim().slice(0, 300)
+        : null,
     tipos_produto: tiposDerivados,
     descricao_livre: descricao_livre || null,
     pedido_minimo,

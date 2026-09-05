@@ -35,6 +35,7 @@ export type DadosEditaveis = {
   raio_atendimento: string | null;
   pedido_minimo: number | null;
   pecas: string[];
+  pecas_outro: string | null;
 };
 
 export default function EditarAtendimento({ inicial }: { inicial: DadosEditaveis }) {
@@ -51,6 +52,7 @@ export default function EditarAtendimento({ inicial }: { inicial: DadosEditaveis
   const [verExtras, setVerExtras] = useState(
     (inicial.pecas ?? []).some((p) => PECAS_EXTRAS.some((e) => e.id === p)),
   );
+  const [outro, setOutro] = useState(inicial.pecas_outro ?? "");
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
@@ -70,6 +72,7 @@ export default function EditarAtendimento({ inicial }: { inicial: DadosEditaveis
           raio_atendimento: raio,
           pedido_minimo: minimo,
           pecas,
+          pecas_outro: outro,
         }),
       });
       const json = await r.json();
@@ -195,6 +198,21 @@ export default function EditarAtendimento({ inicial }: { inicial: DadosEditaveis
           </button>
         )}
       </div>
+
+      <label className="block sm:col-span-2">
+        <span className={rotulo}>Produz alguma peça que não está na lista?</span>
+        <textarea
+          rows={2}
+          maxLength={300}
+          value={outro}
+          onChange={(e) => setOutro(e.target.value.slice(0, 300))}
+          placeholder="Ex.: capa de almofada, toalha de mesa sob medida, cortina…"
+          className={campo + " resize-none"}
+        />
+        <span className="block text-xs text-gray-400 mt-1">
+          A gente lê tudo — é assim que peça nova entra na lista.
+        </span>
+      </label>
 
       <p className="sm:col-span-2 text-xs text-gray-400 leading-relaxed">
         Esses dados definem quais pedidos chegam pra você. Marque só o que você

@@ -156,6 +156,41 @@ export async function salvarFichaProduto(
   return paraItem(data as LinhaPortfolio)
 }
 
+/**
+ * Mesma ficha, salva pelo ADMIN (05/09/2026).
+ *
+ * Existe separada de salvarFichaProduto porque a diferença é justamente o
+ * `.eq('fornecedor_id')`: a do fornecedor precisa dele como trava de dono, e
+ * aqui ele atrapalharia — o suporte edita a ficha de qualquer confecção, que é
+ * o motivo desta função existir. Manter a trava opcional em uma função só era
+ * transformar um esquecimento de argumento em vazamento de escrita entre
+ * fornecedores.
+ */
+export async function salvarFichaProdutoAdmin(
+  itemId: string,
+  ficha: FichaProduto,
+): Promise<PortfolioItem | null> {
+  const { data, error } = await supabaseAdmin
+    .from('portfolio_fornecedores')
+    .update({
+      nome: texto(ficha.nome, 80),
+      tipo: texto(ficha.tipo, 40),
+      pedido_minimo: inteiro(ficha.pedidoMinimo, 1, 100000),
+      prazo_dias: inteiro(ficha.prazoDias, 1, 365),
+      tamanhos: texto(ficha.tamanhos, 120),
+      tecido: texto(ficha.tecido, 160),
+      cores: texto(ficha.cores, 160),
+      tecnicas: texto(ficha.tecnicas, 160),
+      observacoes: texto(ficha.observacoes, 400),
+    })
+    .eq('id', itemId)
+    .select(CAMPOS)
+    .single()
+
+  if (error || !data) return null
+  return paraItem(data as LinhaPortfolio)
+}
+
 /** Extensão a partir do mime do upload; só pra dar nome ao objeto no bucket. */
 function extensaoDoMime(mime: string): string {
   if (mime.includes('png')) return 'png'

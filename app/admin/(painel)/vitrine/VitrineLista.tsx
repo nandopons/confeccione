@@ -8,19 +8,21 @@
 // Decisão do Fernando (03/09/2026): a home é curada, não é feed automático. O
 // custo é este clique; o ganho é que a primeira dobra do site nunca fica refém
 // da foto que um fornecedor resolveu mandar.
+//
+// 05/09/2026 — o admin também EDITA a ficha daqui ("às vezes preciso dar algum
+// suporte ao fornecedor"). Sem ficha, a foto não vira página de produto e não
+// recebe pedido direto: o gargalo era a confecção não preencher, e o suporte
+// não ter como destravar. Mesmo formulário do painel do fornecedor, rota
+// auditada — ver /api/admin/vitrine/ficha.
 // ============================================================================
 
 import Image from 'next/image'
 import { useState } from 'react'
+import FichaProdutoModal from '@/app/fornecedor/painel/portfolio/FichaProdutoModal'
+import type { PortfolioItem } from '@/app/lib/portfolio-fornecedor'
 
-export type ItemVitrine = {
-  id: string
-  url: string
-  legenda: string | null
-  nome: string | null
-  destaque: boolean
-  largura: number | null
-  altura: number | null
+export type ItemVitrine = PortfolioItem & {
+  fornecedorId: string
   fornecedorNome: string | null
   fornecedorCidade: string | null
   fornecedorUf: string | null
@@ -39,6 +41,7 @@ export default function VitrineLista({ inicial }: { inicial: ItemVitrine[] }) {
   const [itens, setItens] = useState(inicial)
   const [filtro, setFiltro] = useState<Filtro>('todas')
   const [salvando, setSalvando] = useState<string | null>(null)
+  const [editando, setEditando] = useState<ItemVitrine | null>(null)
 
   const visiveis = itens.filter((i) =>
     filtro === 'todas' ? true : filtro === 'destaque' ? i.destaque : !i.destaque,
@@ -133,10 +136,35 @@ export default function VitrineLista({ inicial }: { inicial: ItemVitrine[] }) {
                 >
                   {item.destaque ? 'Tirar da home' : 'Destacar na home'}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setEditando(item)}
+                  className="mt-1.5 w-full text-xs font-medium px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:border-gray-400 hover:text-gray-900 transition-colors"
+                >
+                  {item.nome ? 'Editar ficha' : 'Preencher ficha'}
+                </button>
               </div>
             </li>
           ))}
         </ul>
+      )}
+
+      {editando && (
+        <FichaProdutoModal
+          foto={editando}
+          titulo="Ficha do produto (suporte)"
+          aviso={`Você está editando a ficha de ${
+            editando.fornecedorNome ?? 'um fornecedor'
+          }. A alteração fica registrada no log com o seu nome, e ela aparece no painel dele.`}
+          endpoint="/api/admin/vitrine/ficha"
+          aoFechar={() => setEditando(null)}
+          aoSalvar={(salvo) => {
+            setItens((atual) =>
+              atual.map((i) => (i.id === salvo.id ? { ...i, ...salvo } : i)),
+            )
+            setEditando(null)
+          }}
+        />
       )}
     </>
   )

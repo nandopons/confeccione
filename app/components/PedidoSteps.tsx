@@ -27,7 +27,7 @@
 // A linha vai daqui com `total: null` de propósito — não é "zero peças", é
 // "ainda não perguntamos". Quem preenche é o chat.
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import AlinharCliente from "@/app/alinhar/[id]/AlinharCliente";
 import { atribuicao } from "@/app/lib/rastreio";
 import { PECAS_PRINCIPAIS, PECAS_EXTRAS } from "@/app/lib/pecas";
@@ -55,7 +55,11 @@ function telFmt(digitos: string): string {
 
 export default function PedidoSteps() {
   const [step, setStep] = useState(0);
-  const [tipo, setTipo] = useState("");
+  // MÚLTIPLAS PEÇAS — 05/09/2026. Quem manda produzir raramente quer só uma
+  // coisa: a marca que pede camiseta pede moletom junto. Forçar escolha única
+  // fazia o cliente abrir um pedido por peça, ou jogar o resto em observação,
+  // onde o matching não enxerga.
+  const [pecasSel, setPecasSel] = useState<string[]>([]);
   const [estado, setEstado] = useState("");
   const [cep, setCep] = useState("");
   const [numero, setNumero] = useState("");
@@ -70,7 +74,13 @@ export default function PedidoSteps() {
   const [email, setEmail] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [showExtras, setShowExtras] = useState(false);
+  const [verTodas, setVerTodas] = useState(false);
+  // "Não achei minha peça": texto livre. O catálogo é uma aposta nossa sobre o
+  // que o mercado pede; sem esse campo, o que ficou de fora some em silêncio —
+  // o cliente marca a peça mais ou menos parecida (e o match erra) ou fecha a
+  // aba. Aqui a lacuna vira dado em /admin/pecas-faltando.
+  const [outroAberto, setOutroAberto] = useState(false);
+  const [pecaOutro, setPecaOutro] = useState("");
   // Preenchido quando o pedido é criado (fim do passo 3). É o que liga o passo 4.
   const [pedidoId, setPedidoId] = useState<string | null>(null);
   const [contaExistente, setContaExistente] = useState(false);
@@ -96,36 +106,32 @@ export default function PedidoSteps() {
     }
   }
 
-  useEffect(() => {
-    if (tipo && nichosExtras.some((n) => n.id === tipo)) setShowExtras(true);
-  }, [tipo]);
-
-  // AVANÇO AUTOMÁTICO NO PASSO 1 — 31/08/2026.
-  // Escolher a categoria era um clique; sair do passo 1 era outro, no
-  // "Continuar →" lá embaixo. Como o passo só tem essa pergunta, o segundo
-  // clique não decide nada — só cobra do cliente uma viagem até o rodapé
-  // depois de ele já ter respondido. Agora o card leva junto.
-  //
-  // Os ~180ms existem pra ele VER a borda verde antes da tela trocar: sem a
-  // pausa a categoria pisca e a transição parece um clique errado, e não uma
-  // escolha aceita.
-  //
-  // O "Continuar →" continua no rodapé porque quem volta pro passo 1 (pelo
-  // "← Voltar" ou pelos círculos) chega com a categoria já escolhida e
-  // precisa de um caminho pra frente sem ter que trocar de card.
-  const avancoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (avancoRef.current) clearTimeout(avancoRef.current); }, []);
-
-  function escolherNicho(id: string) {
+  // O AVANÇO AUTOMÁTICO DO PASSO 1 SAIU — 05/09/2026.
+  // Ele existia porque o passo tinha uma pergunta de resposta única: clicou,
+  // respondeu, o segundo clique no "Continuar →" não decidia nada. Com marcação
+  // múltipla isso se inverte — sair da tela no primeiro clique impede
+  // exatamente o que a mudança veio permitir, marcar a segunda peça. Agora quem
+  // diz que terminou é o cliente, no "Continuar →".
+  function alternarPeca(id: string) {
     setErro(null);
-    setTipo(id);
-    if (avancoRef.current) clearTimeout(avancoRef.current);
-    avancoRef.current = setTimeout(() => setStep(1), 180);
+    setPecasSel((atual) =>
+      atual.includes(id) ? atual.filter((p) => p !== id) : [...atual, id],
+    );
   }
+
+  // Rótulo legível do que foi pedido — "Camisetas e t-shirts + Moletons" ou o
+  // texto que o cliente escreveu. É o que sai no resumo, no e-mail e no chat.
+  const rotuloPecas = [
+    ...pecasSel.map((id) => nichosTodos.find((n) => n.id === id)?.title ?? id),
+    ...(pecaOutro.trim() ? [pecaOutro.trim()] : []),
+  ].join(" + ");
 
   function avancarParaDetalhes() {
     setErro(null);
-    if (!tipo) { setErro("Escolha uma categoria pra continuar"); return; }
+    if (pecasSel.length === 0 && !pecaOutro.trim()) {
+      setErro("Marque pelo menos uma peça, ou descreva o que você precisa em “Não achei minha peça”");
+      return;
+    }
     setStep(1);
   }
 
@@ -164,7 +170,7 @@ export default function PedidoSteps() {
     if (!email.trim()) faltando.push("e-mail");
     if (faltando.length > 0) { setErro(`Preencha: ${faltando.join(", ")}`); return; }
 
-    const nichoTitle = nichosTodos.find((n) => n.id === tipo)?.title ?? tipo;
+    const outro = pecaOutro.trim();
     const linha = {
       modelo: null as string | null,
       cor: "a definir",
@@ -175,7 +181,7 @@ export default function PedidoSteps() {
       tamanhos: [] as { tamanho: string; qtd: number | null }[],
       estampas: [] as { posicao: string; tamanho: string }[],
       estampado: null as boolean | null,
-      categoria: nichoTitle as string | null,
+      categoria: rotuloPecas as string | null,
       descricao: null,
     };
     const contato = {
@@ -199,11 +205,17 @@ export default function PedidoSteps() {
         body: JSON.stringify({
           linhas: [linha],
           contato,
-          // `peca` é o id do catálogo — é por ela que o matching passa a
-          // procurar quem produz. `categoria` continua indo com o rótulo
-          // legível, que é o que aparece no resumo e nos e-mails.
-          peca: tipo,
-          observacoes: `Peça: ${nichoTitle}`,
+          // `pecas` é o conjunto que o cliente marcou e `peca` a primeira
+          // delas — o matching lê o conjunto, e o resto do sistema, que já lia
+          // a coluna singular, continua funcionando sem saber da mudança.
+          // `categoria` segue com o rótulo legível, que é o que aparece no
+          // resumo e nos e-mails.
+          pecas: pecasSel,
+          peca: pecasSel[0] ?? null,
+          // Vai junto mesmo quando há peça do catálogo: "queria polo, mas de
+          // tecido X" é justamente o tipo de coisa que refina o catálogo.
+          peca_outro: outro || null,
+          observacoes: `Peça: ${rotuloPecas}`,
           atribuicao: atribuicao(),
         }),
       });
@@ -283,48 +295,101 @@ export default function PedidoSteps() {
         {step === 0 && (
           <>
             <p className="text-gray-900 font-medium mb-1">O que você precisa produzir?</p>
-            <p className="text-gray-500 text-sm mb-5">Escolha o tipo de pedido mais próximo da sua necessidade.</p>
-            <div className="overflow-hidden mb-0">
-              <div className={`flex transition-transform duration-300 ease-out ${showExtras ? "-translate-x-full" : "translate-x-0"}`}>
-                <div className="flex-shrink-0 w-full">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
-                    {nichosPrincipais.map((n) => (
-                      <button key={n.id} onClick={() => escolherNicho(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-300 hover:border-[#1D9E75]"}`}>
-                        <span className="text-2xl shrink-0 sm:mb-2" aria-hidden="true">{n.icon}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-gray-900 leading-tight">{n.title}</div>
-                          <div className="text-xs text-gray-500 mt-0.5 leading-snug">{n.sub}</div>
-                        </div>
-                      </button>
-                    ))}
-                    <button type="button" onClick={() => setShowExtras(true)} className="text-left border-2 border-gray-300 hover:border-[#1D9E75] rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all">
-                      <span className="text-2xl shrink-0 sm:mb-2">➕</span>
-                      <div className="flex-1 min-w-0 flex items-center justify-between gap-2">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900 leading-tight">Outros</div>
-                          <div className="text-xs text-gray-500 mt-0.5 leading-snug">Mais categorias</div>
-                        </div>
-                        <span className="text-gray-500 text-lg shrink-0">›</span>
-                      </div>
+            <p className="text-gray-500 text-sm mb-4">
+              Marque tudo que fizer parte do pedido — pode ser mais de uma peça.
+            </p>
+
+            {/* Lista em linha única, não grade de cards: com marcação múltipla o
+                cliente precisa varrer a lista e conferir o que já marcou, e
+                cartão largo lado a lado obriga a ler em zigue-zague. Seis por
+                vez (era o catálogo inteiro de uma vez) — a primeira dobra
+                deixou de ser um paredão de 13 opções. */}
+            <ul className="space-y-2">
+              {(verTodas ? nichosTodos : nichosPrincipais.slice(0, 6)).map((n) => {
+                const marcada = pecasSel.includes(n.id);
+                return (
+                  <li key={n.id}>
+                    <button
+                      type="button"
+                      onClick={() => alternarPeca(n.id)}
+                      aria-pressed={marcada}
+                      className={`w-full text-left border-2 rounded-xl p-3 flex items-center gap-3 transition-all ${marcada ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-200 hover:border-[#1D9E75]"}`}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center text-white text-xs ${marcada ? "bg-[#1D9E75] border-[#1D9E75]" : "border-gray-300"}`}
+                      >
+                        {marcada ? "✓" : ""}
+                      </span>
+                      <span className="text-xl shrink-0" aria-hidden="true">{n.icon}</span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-medium text-gray-900 leading-tight">{n.title}</span>
+                        <span className="block text-xs text-gray-500 mt-0.5 leading-snug truncate">{n.sub}</span>
+                      </span>
                     </button>
-                  </div>
-                </div>
-                <div className="flex-shrink-0 w-full">
-                  <button type="button" onClick={() => setShowExtras(false)} className="text-xs text-gray-500 hover:text-gray-800 mb-3 inline-flex items-center gap-1">← Voltar</button>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
-                    {nichosExtras.map((n) => (
-                      <button key={n.id} onClick={() => escolherNicho(n.id)} className={`text-left border-2 rounded-xl p-3 sm:p-4 flex items-center sm:flex-col sm:items-start gap-3 sm:gap-0 transition-all ${tipo === n.id ? "border-[#1D9E75] bg-[#E1F5EE]" : "border-gray-300 hover:border-[#1D9E75]"}`}>
-                        <span className="text-2xl shrink-0 sm:mb-2" aria-hidden="true">{n.icon}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium text-gray-900 leading-tight">{n.title}</div>
-                          <div className="text-xs text-gray-500 mt-0.5 leading-snug">{n.sub}</div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {!verTodas && (
+              <button
+                type="button"
+                onClick={() => setVerTodas(true)}
+                className="mt-3 w-full border-2 border-dashed border-gray-300 hover:border-[#1D9E75] rounded-xl p-3 text-sm font-medium text-gray-700 transition-colors"
+              >
+                Ver todas as peças ({nichosTodos.length - 6} a mais)
+              </button>
+            )}
+
+            {!outroAberto ? (
+              <button
+                type="button"
+                onClick={() => setOutroAberto(true)}
+                className="mt-2 w-full border-2 border-dashed border-gray-300 hover:border-[#1D9E75] rounded-xl p-3 flex items-center gap-3 text-left transition-colors"
+              >
+                <span className="text-xl shrink-0" aria-hidden="true">✍️</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-medium text-gray-900 leading-tight">Não achei minha peça</span>
+                  <span className="block text-xs text-gray-500 mt-0.5 leading-snug">Escreva o que você precisa</span>
+                </span>
+              </button>
+            ) : (
+              <div className="mt-2 border-2 border-[#1D9E75] bg-[#E1F5EE] rounded-xl p-3 sm:p-4">
+                <label htmlFor="peca-outro" className="block text-sm font-medium text-gray-900 mb-1">
+                  O que mais você precisa produzir?
+                </label>
+                <p className="text-xs text-gray-600 mb-2 leading-snug">
+                  Escreva com as suas palavras. A gente lê tudo — é assim que peça
+                  nova entra na lista.
+                </p>
+                <textarea
+                  id="peca-outro"
+                  value={pecaOutro}
+                  onChange={(e) => { setPecaOutro(e.target.value.slice(0, 300)); setErro(null); }}
+                  rows={2}
+                  maxLength={300}
+                  autoFocus
+                  placeholder="Ex.: capa de almofada estampada, toalha de mesa sob medida…"
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:border-[#1D9E75]"
+                />
+                <button
+                  type="button"
+                  onClick={() => { setOutroAberto(false); setPecaOutro(""); }}
+                  className="mt-2 text-sm text-gray-600 hover:text-gray-900"
+                >
+                  Remover
+                </button>
               </div>
-            </div>
+            )}
+
+            {(pecasSel.length > 0 || pecaOutro.trim()) && (
+              <p className="mt-4 text-xs text-gray-500">
+                {pecasSel.length + (pecaOutro.trim() ? 1 : 0)} item
+                {pecasSel.length + (pecaOutro.trim() ? 1 : 0) === 1 ? "" : "s"} no pedido.
+                Toque em Continuar quando terminar.
+              </p>
+            )}
           </>
         )}
 
@@ -397,7 +462,7 @@ export default function PedidoSteps() {
             <div className="bg-gray-50 rounded-xl p-3 mb-4 text-sm">
               <p className="text-xs text-gray-500 font-medium mb-3">Resumo do pedido</p>
               <div className="space-y-2">
-                <div className="flex justify-between text-gray-600"><span>Categoria</span><span>{nichosTodos.find((n) => n.id === tipo)?.title}</span></div>
+                <div className="flex justify-between gap-4 text-gray-600"><span className="shrink-0">{pecasSel.length > 1 ? "Peças" : "Peça"}</span><span className="text-right">{rotuloPecas || "—"}</span></div>
                 {(cepInfo || cep) && (
                   <div className="flex justify-between gap-4 text-gray-600"><span>Entrega</span><span className="text-right">{[cepInfo, numero ? `nº ${numero}` : "", complemento].filter(Boolean).join(" · ") || `CEP ${cepFmt(cep)}`}</span></div>
                 )}
@@ -417,7 +482,7 @@ export default function PedidoSteps() {
             <AlinharCliente
               embutido
               pedidoId={pedidoId}
-              categoria={nichosTodos.find((n) => n.id === tipo)?.title ?? null}
+              categoria={rotuloPecas || null}
               // Zero de propósito: a home não pergunta mais quantidade, e o chat
               // trata 0 como "ainda não perguntamos" (não como zero peças).
               totalPecas={0}

@@ -7,6 +7,10 @@
 //
 // Preço não está aqui de propósito — o valor sai na resposta ao pedido, como no
 // resto do marketplace.
+//
+// O MESMO formulário serve o admin (05/09/2026): /admin/vitrine passa outro
+// `endpoint` e a ficha vai pela rota auditada de suporte. Duas telas iguais
+// divergem em uma semana — o campo novo entra em uma e some na outra.
 // ============================================================================
 
 import { useState } from "react";
@@ -17,10 +21,18 @@ export default function FichaProdutoModal({
   foto,
   aoFechar,
   aoSalvar,
+  endpoint,
+  titulo = "Ficha do produto",
+  aviso,
 }: {
   foto: PortfolioItem;
   aoFechar: () => void;
   aoSalvar: (item: PortfolioItem) => void;
+  /** Rota que grava. Default: a do próprio fornecedor. */
+  endpoint?: string;
+  titulo?: string;
+  /** Linha de contexto no topo — o admin precisa saber de quem é a ficha. */
+  aviso?: string;
 }) {
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -30,6 +42,7 @@ export default function FichaProdutoModal({
     setErro(null);
     const fd = new FormData(e.currentTarget);
     const corpo = {
+      id: foto.id,
       nome: String(fd.get("nome") ?? ""),
       tipo: String(fd.get("tipo") ?? ""),
       pedidoMinimo: fd.get("pedidoMinimo") ? Number(fd.get("pedidoMinimo")) : null,
@@ -43,7 +56,7 @@ export default function FichaProdutoModal({
 
     setSalvando(true);
     try {
-      const r = await fetch(`/api/fornecedor/painel/portfolio/${foto.id}`, {
+      const r = await fetch(endpoint ?? `/api/fornecedor/painel/portfolio/${foto.id}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(corpo),
@@ -76,7 +89,7 @@ export default function FichaProdutoModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 sticky top-0 bg-white">
-          <h2 className="text-gray-900 font-medium">Ficha do produto</h2>
+          <h2 className="text-gray-900 font-medium">{titulo}</h2>
           <button
             type="button"
             onClick={aoFechar}
@@ -86,6 +99,10 @@ export default function FichaProdutoModal({
             ×
           </button>
         </div>
+
+        {aviso && (
+          <p className="px-5 pt-4 text-xs text-gray-500 leading-relaxed">{aviso}</p>
+        )}
 
         <form onSubmit={enviar} className="p-5 grid sm:grid-cols-2 gap-3">
           <label className="block sm:col-span-2">
