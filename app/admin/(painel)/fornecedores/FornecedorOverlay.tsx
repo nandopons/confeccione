@@ -195,6 +195,7 @@ export default function FornecedorOverlay({
             <ColunaMetricas
               fornecedor={detalhes.fornecedor}
               metricas={detalhes.metricas}
+              aoSalvar={carregarDetalhes}
             />
 
             {/* DIREITA — Ofertas */}
@@ -207,16 +208,235 @@ export default function FornecedorOverlay({
 }
 
 // ============================================================================
+// EDIÇÃO — o que o PATCH da API aceita (nome, whatsapp, email, cidade, estado,
+// tipos_produto, raio_atendimento, pedido_minimo). Status fica de fora: pausar
+// e reativar têm rota própria, com motivo e auditoria.
+//
+// As verticais são o campo que mais importa: é `tipos_produto` que decide se o
+// fornecedor entra no matching de um pedido. Por isso vêm como caixas, não como
+// texto livre — digitar "bones" em vez de "bones" (com acento no lugar errado)
+// tirava o fornecedor da fila sem ninguém perceber.
+// ============================================================================
+
+const RAIOS = [
+  { valor: 'cidade', label: 'Cidade' },
+  { valor: 'estado', label: 'Estado' },
+  { valor: 'regiao', label: 'Região' },
+  { valor: 'nacional', label: 'Nacional' },
+]
+
+const UFS = [
+  'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR',
+  'PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO',
+]
+
+function FormEdicaoFornecedor({
+  fornecedor,
+  onCancelar,
+  onSalvo,
+}: {
+  fornecedor: FornecedorFull
+  onCancelar: () => void
+  onSalvo: () => void
+}) {
+  const [nome, setNome] = useState(fornecedor.nome ?? '')
+  const [whatsapp, setWhatsapp] = useState(fornecedor.whatsapp ?? '')
+  const [email, setEmail] = useState(fornecedor.email ?? '')
+  const [cidade, setCidade] = useState(fornecedor.cidade ?? '')
+  const [estado, setEstado] = useState(fornecedor.estado ?? '')
+  const [raio, setRaio] = useState(fornecedor.raio_atendimento ?? 'nacional')
+  const [minimo, setMinimo] = useState(
+    fornecedor.pedido_minimo !== null ? String(fornecedor.pedido_minimo) : '',
+  )
+  const [tipos, setTipos] = useState<string[]>(fornecedor.tipos_produto ?? [])
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+
+  function alternarTipo(valor: string) {
+    setTipos((atual) =>
+      atual.includes(valor) ? atual.filter((t) => t !== valor) : [...atual, valor],
+    )
+  }
+
+  async function salvar(e: React.FormEvent) {
+    e.preventDefault()
+    setErro(null)
+
+    const digitos = whatsapp.replace(/\D/g, '')
+    if (digitos.length < 10) {
+      setErro('WhatsApp precisa ter DDD + número.')
+      return
+    }
+    if (email.trim() && !email.includes('@')) {
+      setErro('E-mail inválido.')
+      return
+    }
+
+    setSalvando(true)
+    try {
+      const r = await fetch(`/api/admin/fornecedores/${fornecedor.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          nome: nome.trim() || null,
+          whatsapp: digitos,
+          email: email.trim() || null,
+          cidade: cidade.trim() || null,
+          estado: estado.trim() || null,
+          tipos_produto: tipos,
+          raio_atendimento: raio,
+          pedido_minimo: minimo.trim() ? Number(minimo) : null,
+        }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        throw new Error(j.erro || `HTTP ${r.status}`)
+      }
+      onSalvo()
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Erro ao salvar')
+    } finally {
+      setSalvando(false)
+    }
+  }
+
+  const campo =
+    'w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-gray-900'
+  const rotulo = 'block text-xs font-medium text-gray-600 mb-1'
+
+  return (
+    <form onSubmit={salvar} className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold text-gray-900">Editar fornecedor</h3>
+        <button
+          type="button"
+          onClick={onCancelar}
+          className="text-sm text-gray-500 hover:text-gray-900"
+        >
+          Cancelar
+        </button>
+      </div>
+
+      <div>
+        <label className={rotulo}>Nome</label>
+        <input value={nome} onChange={(e) => setNome(e.target.value)} className={campo} maxLength={120} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={rotulo}>WhatsApp</label>
+          <input
+            value={whatsapp}
+            onChange={(e) => setWhatsapp(e.target.value)}
+            className={campo}
+            placeholder="5581999999999"
+          />
+        </div>
+        <div>
+          <label className={rotulo}>E-mail</label>
+          <input value={email} onChange={(e) => setEmail(e.target.value)} className={campo} maxLength={120} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-[2fr_1fr] gap-3">
+        <div>
+          <label className={rotulo}>Cidade</label>
+          <input value={cidade} onChange={(e) => setCidade(e.target.value)} className={campo} maxLength={80} />
+        </div>
+        <div>
+          <label className={rotulo}>UF</label>
+          <select value={estado} onChange={(e) => setEstado(e.target.value)} className={campo}>
+            <option value="">—</option>
+            {UFS.map((uf) => (
+              <option key={uf} value={uf}>{uf}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className={rotulo}>Raio de atendimento</label>
+          <select value={raio} onChange={(e) => setRaio(e.target.value)} className={campo}>
+            {RAIOS.map((r) => (
+              <option key={r.valor} value={r.valor}>{r.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className={rotulo}>Pedido mínimo (peças)</label>
+          <input
+            type="number"
+            min={1}
+            value={minimo}
+            onChange={(e) => setMinimo(e.target.value)}
+            className={campo}
+            placeholder="sem mínimo"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className={rotulo}>Verticais que atende</label>
+        <div className="grid grid-cols-2 gap-1.5 border border-gray-200 rounded-md p-3 max-h-52 overflow-y-auto">
+          {Object.entries(tipoLabel).map(([valor, label]) => (
+            <label key={valor} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={tipos.includes(valor)}
+                onChange={() => alternarTipo(valor)}
+                className="rounded border-gray-300"
+              />
+              {label}
+            </label>
+          ))}
+        </div>
+        {tipos.length === 0 && (
+          <p className="text-xs text-amber-600 mt-1.5">
+            Sem nenhuma vertical marcada ele não entra em nenhum matching.
+          </p>
+        )}
+      </div>
+
+      {erro && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-2.5 text-sm text-red-800">{erro}</div>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={salvando}
+          className="bg-gray-900 hover:bg-black disabled:bg-gray-300 text-white text-sm font-medium px-4 py-2 rounded-md transition-colors"
+        >
+          {salvando ? 'Salvando…' : 'Salvar alterações'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancelar}
+          className="text-sm text-gray-600 hover:text-gray-900 px-4 py-2"
+        >
+          Cancelar
+        </button>
+      </div>
+    </form>
+  )
+}
+
+// ============================================================================
 // ESQUERDA — Métricas
 // ============================================================================
 
 function ColunaMetricas({
   fornecedor,
   metricas,
+  aoSalvar,
 }: {
   fornecedor: FornecedorFull
   metricas: Metricas
+  aoSalvar: () => void
 }) {
+  const [editando, setEditando] = useState(false)
   const taxaAceite =
     metricas.ofertas_aceitas + metricas.ofertas_recusadas > 0
       ? metricas.ofertas_aceitas /
@@ -225,6 +445,21 @@ function ColunaMetricas({
   const local = fornecedor.cidade
     ? `${fornecedor.cidade}${fornecedor.estado ? ` / ${fornecedor.estado}` : ''}`
     : (fornecedor.estado ?? '—')
+
+  if (editando) {
+    return (
+      <div className="border-r border-gray-200 overflow-y-auto p-6">
+        <FormEdicaoFornecedor
+          fornecedor={fornecedor}
+          onCancelar={() => setEditando(false)}
+          onSalvo={() => {
+            setEditando(false)
+            aoSalvar()
+          }}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="border-r border-gray-200 overflow-y-auto p-6 space-y-4">
@@ -235,6 +470,13 @@ function ColunaMetricas({
           </h3>
           <BadgePlano plano={fornecedor.plano} />
           <BadgeStatusFornecedor status={fornecedor.status} />
+          <button
+            type="button"
+            onClick={() => setEditando(true)}
+            className="ml-auto text-xs font-medium text-gray-600 hover:text-gray-900 border border-gray-300 hover:border-gray-500 rounded-md px-2.5 py-1 transition-colors"
+          >
+            Editar dados
+          </button>
         </div>
         <div className="mt-1 text-sm text-gray-600">
           {fornecedor.whatsapp}
