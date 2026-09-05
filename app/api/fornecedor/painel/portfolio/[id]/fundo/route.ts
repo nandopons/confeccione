@@ -11,7 +11,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   if (!fornecedor) return Response.json({ error: 'não autenticado' }, { status: 401 })
 
   const { id } = await ctx.params
-  const r = await aplicarFundoPadrao(fornecedor.id, id)
+  const r = await aplicarFundoPadrao({ fornecedorId: fornecedor.id }, id)
   if (!r.ok) return Response.json({ error: r.motivo }, { status: 400 })
   revalidatePath('/') // o path mudou; a home em ISR apontaria pro objeto antigo
   return Response.json(r.item)
@@ -22,7 +22,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   if (!fornecedor) return Response.json({ error: 'não autenticado' }, { status: 401 })
 
   const { id } = await ctx.params
-  const r = await desfazerFundoPadrao(fornecedor.id, id)
+  const r = await desfazerFundoPadrao({ fornecedorId: fornecedor.id }, id)
   if (!r.ok) return Response.json({ error: r.motivo }, { status: 400 })
   revalidatePath('/')
   return Response.json(r.item)

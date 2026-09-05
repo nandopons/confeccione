@@ -15,7 +15,6 @@
 
 import { useState } from "react";
 import type { PortfolioItem } from "@/app/lib/portfolio-fornecedor";
-import { tipoLabel } from "@/app/lib/ofertas-labels";
 
 export default function FichaProdutoModal({
   foto,
@@ -44,7 +43,10 @@ export default function FichaProdutoModal({
     const corpo = {
       id: foto.id,
       nome: String(fd.get("nome") ?? ""),
-      tipo: String(fd.get("tipo") ?? ""),
+      // `tipo` (segmento) saiu do formulário: era a categoria antiga, jargão de
+      // quem produz. Vai o valor que já estava gravado, pra edição de ficha não
+      // apagar o dado de quem preencheu antes.
+      tipo: foto.tipo ?? "",
       pedidoMinimo: fd.get("pedidoMinimo") ? Number(fd.get("pedidoMinimo")) : null,
       prazoDias: fd.get("prazoDias") ? Number(fd.get("prazoDias")) : null,
       tamanhos: String(fd.get("tamanhos") ?? ""),
@@ -118,18 +120,6 @@ export default function FichaProdutoModal({
             <span className="text-gray-400 text-[11px] mt-1 block">
               É esse nome que aparece na home e vira a página do produto.
             </span>
-          </label>
-
-          <label className="block">
-            <span className={rotulo}>Segmento</span>
-            <select name="tipo" defaultValue={foto.tipo ?? ""} className={campo}>
-              <option value="">Não informar</option>
-              {Object.entries(tipoLabel).map(([valor, label]) => (
-                <option key={valor} value={valor}>
-                  {label}
-                </option>
-              ))}
-            </select>
           </label>
 
           <label className="block">

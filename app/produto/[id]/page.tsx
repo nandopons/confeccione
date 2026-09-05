@@ -17,7 +17,6 @@ import { notFound } from "next/navigation";
 import SiteHeader from "@/app/components/SiteHeader";
 import SiteFooter from "@/app/components/SiteFooter";
 import { getOutrosDoFornecedor, getProdutoPublico } from "@/app/lib/portfolio-fornecedor";
-import { tipoLabel } from "@/app/lib/ofertas-labels";
 import { SITE_URL } from "@/app/lib/url";
 import FormPedidoProduto from "./FormPedidoProduto";
 
@@ -79,7 +78,9 @@ export default async function ProdutoPage({ params }: Props) {
     name: p.nome,
     image: p.url,
     description: [p.tecido, p.cores, p.tecnicas].filter(Boolean).join(" · ") || p.nome,
-    category: p.tipo ? tipoLabel[p.tipo] ?? p.tipo : undefined,
+    // O JSON-LD continua declarando a categoria: ela é sinal pro buscador,
+    // que entende taxonomia, e não ocupa espaço na página.
+    category: p.tipo ?? undefined,
     brand: { "@type": "Organization", name: "Confeccione" },
     manufacturer: p.fornecedorNome
       ? { "@type": "Organization", name: p.fornecedorNome }
@@ -116,12 +117,10 @@ export default async function ProdutoPage({ params }: Props) {
             />
           </div>
 
+          {/* Sem etiqueta de categoria acima do título (05/09/2026). "Private
+              Label" é jargão de quem produz, não de quem compra, e dizia menos
+              sobre a peça do que a própria foto e o nome logo abaixo. */}
           <div>
-            {p.tipo && (
-              <span className="inline-block text-[11px] font-medium text-[#0F6E56] bg-[#E1F5EE] px-2.5 py-1 rounded-full mb-3">
-                {tipoLabel[p.tipo] ?? p.tipo}
-              </span>
-            )}
             <h1 className="text-gray-900 text-2xl md:text-3xl font-medium leading-tight">
               {p.nome}
             </h1>

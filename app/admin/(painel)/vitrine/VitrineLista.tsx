@@ -14,12 +14,25 @@
 // recebe pedido direto: o gargalo era a confecção não preencher, e o suporte
 // não ter como destravar. Mesmo formulário do painel do fornecedor, rota
 // auditada — ver /api/admin/vitrine/ficha.
+//
+// E ajusta a IMAGEM: enquadramento e recorte de fundo. São as mesmas funções do
+// painel do fornecedor (`Dono = { admin: true }`), porque quem decide o que
+// abre a home é a curadoria — esperar a confecção entrar no painel dela pra
+// arrumar um enquadramento ruim é esperar por algo que não acontece. A foto
+// original nunca é apagada, então nada aqui é irreversível.
 // ============================================================================
 
 import Image from 'next/image'
 import { useState } from 'react'
 import FichaProdutoModal from '@/app/fornecedor/painel/portfolio/FichaProdutoModal'
 import type { PortfolioItem } from '@/app/lib/portfolio-fornecedor'
+import type { Enquadramento } from '@/app/lib/portfolio-normalizar'
+
+const ENQUADRAMENTOS: { valor: Enquadramento; label: string; titulo: string }[] = [
+  { valor: 'topo', label: 'Cima', titulo: 'Mantém o topo da foto (padrão)' },
+  { valor: 'centro', label: 'Meio', titulo: 'Mantém o meio da foto' },
+  { valor: 'base', label: 'Baixo', titulo: 'Mantém a parte de baixo da foto' },
+]
 
 export type ItemVitrine = PortfolioItem & {
   fornecedorId: string
@@ -37,11 +50,21 @@ const ROTULO: Record<Filtro, string> = {
   destaque: 'Na home',
 }
 
-export default function VitrineLista({ inicial }: { inicial: ItemVitrine[] }) {
+export default function VitrineLista({
+  inicial,
+  recorteDisponivel,
+}: {
+  inicial: ItemVitrine[]
+  recorteDisponivel: boolean
+}) {
   const [itens, setItens] = useState(inicial)
   const [filtro, setFiltro] = useState<Filtro>('todas')
   const [salvando, setSalvando] = useState<string | null>(null)
   const [editando, setEditando] = useState<ItemVitrine | null>(null)
+  // id da foto em processamento: trava só aquele card, não a página inteira —
+  // o recorte leva segundos e a curadoria é feita em lote.
+  const [imagemOcupada, setImagemOcupada] = useState<string | null>(null)
+  const [erroImagem, setErroImagem] = useState<string | null>(null)
 
   const visiveis = itens.filter((i) =>
     filtro === 'todas' ? true : filtro === 'destaque' ? i.destaque : !i.destaque,
@@ -67,8 +90,64 @@ export default function VitrineLista({ inicial }: { inicial: ItemVitrine[] }) {
     }
   }
 
+  // Aplica no item o que a rota devolveu. O `url` muda a cada operação (path
+  // novo no storage, de propósito, pra furar o cache do CDN e do next/image),
+  // então trocar o objeto inteiro é o que faz a miniatura atualizar na hora.
+  function aplicarNoItem(id: string, salvo: PortfolioItem) {
+    setItens((atual) => atual.map((i) => (i.id === id ? { ...i, ...salvo } : i)))
+  }
+
+  async function mudarEnquadramento(item: ItemVitrine, posicao: Enquadramento) {
+    if (item.enquadramento === posicao) return
+    setErroImagem(null)
+    setImagemOcupada(item.id)
+    try {
+      const r = await fetch(`/api/admin/vitrine/${item.id}/enquadramento`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enquadramento: posicao }),
+      })
+      const json = await r.json()
+      if (!r.ok) {
+        setErroImagem(json?.error ?? 'não consegui mudar o enquadramento')
+        return
+      }
+      aplicarNoItem(item.id, json as PortfolioItem)
+    } catch {
+      setErroImagem('falha de conexão ao mudar o enquadramento')
+    } finally {
+      setImagemOcupada(null)
+    }
+  }
+
+  async function alternarFundo(item: ItemVitrine) {
+    setErroImagem(null)
+    setImagemOcupada(item.id)
+    try {
+      const r = await fetch(`/api/admin/vitrine/${item.id}/fundo`, {
+        method: item.fundoRemovido ? 'DELETE' : 'POST',
+      })
+      const json = await r.json()
+      if (!r.ok) {
+        setErroImagem(json?.error ?? 'não consegui aplicar o fundo padrão')
+        return
+      }
+      aplicarNoItem(item.id, json as PortfolioItem)
+    } catch {
+      setErroImagem('falha de conexão ao aplicar o fundo')
+    } finally {
+      setImagemOcupada(null)
+    }
+  }
+
   return (
     <>
+      {erroImagem && (
+        <p className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5">
+          {erroImagem}
+        </p>
+      )}
+
       <div className="flex flex-wrap items-center gap-2 mb-5">
         {(Object.keys(ROTULO) as Filtro[]).map((f) => (
           <button
@@ -143,6 +222,49 @@ export default function VitrineLista({ inicial }: { inicial: ItemVitrine[] }) {
                 >
                   {item.nome ? 'Editar ficha' : 'Preencher ficha'}
                 </button>
+
+                {item.podeReenquadrar && (
+                  <div
+                    className="mt-1.5 flex rounded-lg border border-gray-200 overflow-hidden"
+                    role="group"
+                    aria-label="Enquadramento da foto"
+                  >
+                    {ENQUADRAMENTOS.map((op) => (
+                      <button
+                        key={op.valor}
+                        type="button"
+                        title={op.titulo}
+                        onClick={() => mudarEnquadramento(item, op.valor)}
+                        disabled={imagemOcupada === item.id}
+                        aria-pressed={item.enquadramento === op.valor}
+                        className={`flex-1 text-xs font-medium py-2 transition-colors disabled:opacity-60 ${
+                          item.enquadramento === op.valor
+                            ? 'bg-gray-900 text-white'
+                            : 'text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        {imagemOcupada === item.id && item.enquadramento !== op.valor
+                          ? '…'
+                          : op.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {recorteDisponivel && (
+                  <button
+                    type="button"
+                    onClick={() => alternarFundo(item)}
+                    disabled={imagemOcupada === item.id}
+                    className="mt-1.5 w-full text-xs font-medium px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:border-gray-400 hover:text-gray-900 transition-colors disabled:opacity-60"
+                  >
+                    {imagemOcupada === item.id
+                      ? 'Processando…'
+                      : item.fundoRemovido
+                        ? 'Voltar foto original'
+                        : 'Isolar em fundo claro'}
+                  </button>
+                )}
               </div>
             </li>
           ))}

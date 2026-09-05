@@ -2,6 +2,7 @@
 import { redirect } from 'next/navigation'
 import { eAdminLogado } from '@/app/lib/admin-auth'
 import { listarParaCuradoria } from '@/app/lib/portfolio-fornecedor'
+import { provedorFundoConfigurado } from '@/app/lib/remover-fundo'
 import VitrineLista, { type ItemVitrine } from './VitrineLista'
 
 export const dynamic = 'force-dynamic'
@@ -10,6 +11,9 @@ export default async function VitrinePage() {
   if (!(await eAdminLogado())) redirect('/admin/login')
 
   const itens = await listarParaCuradoria('todas')
+  // Sem provedor configurado o botão de recorte não aparece — melhor do que um
+  // botão que sempre falha.
+  const recorteDisponivel = provedorFundoConfigurado() !== null
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -18,7 +22,10 @@ export default async function VitrinePage() {
         Fotos que os fornecedores subiram no portfólio deles. O que você marcar como destaque
         entra no carrossel da página inicial — o resto fica só na oferta que o cliente recebe.
       </p>
-      <VitrineLista inicial={itens as unknown as ItemVitrine[]} />
+      <VitrineLista
+        inicial={itens as unknown as ItemVitrine[]}
+        recorteDisponivel={recorteDisponivel}
+      />
     </div>
   )
 }

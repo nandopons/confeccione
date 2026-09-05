@@ -61,6 +61,18 @@ export type FichaProduto = {
   observacoes?: string | null
 }
 
+/**
+ * Quem está mexendo na foto.
+ *
+ * Não é um `fornecedorId?: string` opcional de propósito: com opcional, esquecer
+ * o argumento desliga a trava de dono em silêncio e uma confecção passa a editar
+ * a foto de outra. Aqui o admin precisa DIZER que é admin, e o compilador cobra
+ * a escolha em todo call-site.
+ */
+export type Dono = { fornecedorId: string } | { admin: true }
+
+const ehDono = (d: Dono): d is { fornecedorId: string } => 'fornecedorId' in d
+
 // Literal único de propósito: o supabase-js só infere o tipo da linha quando a
 // string do select é literal — concatenar quebra a inferência e derruba o tsc.
 const CAMPOS =
@@ -559,16 +571,16 @@ export async function getOutrosDoFornecedor(
  * CDN e do next/image, e o fornecedor veria "não mudou nada".
  */
 export async function reenquadrar(
-  fornecedorId: string,
+  dono: Dono,
   itemId: string,
   posicao: Enquadramento,
 ): Promise<{ ok: true; item: PortfolioItem } | { ok: false; motivo: string }> {
-  const { data: linha } = await supabaseAdmin
+  let leitura = supabaseAdmin
     .from('portfolio_fornecedores')
-    .select('id, path, path_original, path_upload')
+    .select('id, fornecedor_id, path, path_original, path_upload')
     .eq('id', itemId)
-    .eq('fornecedor_id', fornecedorId)
-    .maybeSingle<{ id: string; path: string; path_original: string | null; path_upload: string | null }>()
+  if (ehDono(dono)) leitura = leitura.eq('fornecedor_id', dono.fornecedorId)
+  const { data: linha } = await leitura.maybeSingle<{ id: string; fornecedor_id: string; path: string; path_original: string | null; path_upload: string | null }>()
   if (!linha) return { ok: false, motivo: 'foto não encontrada' }
   if (linha.path_original) {
     return { ok: false, motivo: 'volte a foto original antes de mudar o enquadramento' }
@@ -589,7 +601,9 @@ export async function reenquadrar(
     return { ok: false, motivo: 'não consegui reprocessar essa foto' }
   }
 
-  const novoPath = `${fornecedorId}/${randomUUID()}.${normalizada.extensao}`
+  // O prefixo é sempre o DONO da foto, não quem clicou: foto editada pelo admin
+  // que fosse pro prefixo do admin sairia da pasta da confecção.
+  const novoPath = `${linha.fornecedor_id}/${randomUUID()}.${normalizada.extensao}`
   const { error: errUp } = await supabaseAdmin.storage
     .from(BUCKET_PORTFOLIO)
     .upload(novoPath, normalizada.buffer, { contentType: normalizada.mime, upsert: false })
@@ -604,7 +618,6 @@ export async function reenquadrar(
       altura: normalizada.altura,
     })
     .eq('id', itemId)
-    .eq('fornecedor_id', fornecedorId)
     .select(CAMPOS)
     .single()
 
@@ -627,15 +640,15 @@ export async function reenquadrar(
  * o fornecedor ficaria preso a um resultado ruim.
  */
 export async function aplicarFundoPadrao(
-  fornecedorId: string,
+  dono: Dono,
   itemId: string,
 ): Promise<{ ok: true; item: PortfolioItem } | { ok: false; motivo: string }> {
-  const { data: linha } = await supabaseAdmin
+  let leitura = supabaseAdmin
     .from('portfolio_fornecedores')
-    .select('id, path, path_original')
+    .select('id, fornecedor_id, path, path_original')
     .eq('id', itemId)
-    .eq('fornecedor_id', fornecedorId)
-    .maybeSingle<{ id: string; path: string; path_original: string | null }>()
+  if (ehDono(dono)) leitura = leitura.eq('fornecedor_id', dono.fornecedorId)
+  const { data: linha } = await leitura.maybeSingle<{ id: string; fornecedor_id: string; path: string; path_original: string | null }>()
   if (!linha) return { ok: false, motivo: 'foto não encontrada' }
 
   // Sempre parte da foto ORIGINAL, nunca de um recorte anterior: reaplicar sobre
@@ -658,7 +671,7 @@ export async function aplicarFundoPadrao(
     return { ok: false, motivo: 'não consegui montar a foto no fundo padrão' }
   }
 
-  const novoPath = `${fornecedorId}/${randomUUID()}.${composta.extensao}`
+  const novoPath = `${linha.fornecedor_id}/${randomUUID()}.${composta.extensao}`
   const { error: errUp } = await supabaseAdmin.storage
     .from(BUCKET_PORTFOLIO)
     .upload(novoPath, composta.buffer, { contentType: composta.mime, upsert: false })
@@ -677,7 +690,6 @@ export async function aplicarFundoPadrao(
       altura: composta.altura,
     })
     .eq('id', itemId)
-    .eq('fornecedor_id', fornecedorId)
     .select(CAMPOS)
     .single()
 
@@ -696,15 +708,15 @@ export async function aplicarFundoPadrao(
 
 /** Desfaz o recorte: volta a foto como o fornecedor mandou. */
 export async function desfazerFundoPadrao(
-  fornecedorId: string,
+  dono: Dono,
   itemId: string,
 ): Promise<{ ok: true; item: PortfolioItem } | { ok: false; motivo: string }> {
-  const { data: linha } = await supabaseAdmin
+  let leitura = supabaseAdmin
     .from('portfolio_fornecedores')
     .select('id, path, path_original')
     .eq('id', itemId)
-    .eq('fornecedor_id', fornecedorId)
-    .maybeSingle<{ id: string; path: string; path_original: string | null }>()
+  if (ehDono(dono)) leitura = leitura.eq('fornecedor_id', dono.fornecedorId)
+  const { data: linha } = await leitura.maybeSingle<{ id: string; path: string; path_original: string | null }>()
   if (!linha?.path_original) return { ok: false, motivo: 'essa foto não tem versão original' }
 
   const recortado = linha.path
@@ -712,7 +724,6 @@ export async function desfazerFundoPadrao(
     .from('portfolio_fornecedores')
     .update({ path: linha.path_original, path_original: null, fundo_removido_em: null })
     .eq('id', itemId)
-    .eq('fornecedor_id', fornecedorId)
     .select(CAMPOS)
     .single()
 

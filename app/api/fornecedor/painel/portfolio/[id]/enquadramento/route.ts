@@ -18,7 +18,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   const { id } = await ctx.params
-  const r = await reenquadrar(fornecedor.id, id, posicao as Enquadramento)
+  const r = await reenquadrar({ fornecedorId: fornecedor.id }, id, posicao as Enquadramento)
   if (!r.ok) return Response.json({ error: r.motivo }, { status: 400 })
 
   // A foto pode estar em destaque na home; o path mudou, então a home ISR
