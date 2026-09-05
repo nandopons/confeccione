@@ -40,7 +40,7 @@ export default async function PortfolioPage() {
             Se o corte não ficou bom, passe o dedo (ou o mouse) na foto e use{" "}
             <strong>Cima / Meio / Baixo</strong> para escolher que parte da imagem fica no quadro.
           </li>
-          <li>Depois de enviar, use &quot;Isolar em fundo claro&quot; pra deixar a peça no padrão da vitrine. Funciona melhor com a peça inteira; em close de detalhe, confira antes de manter.</li>
+          <li>Depois de enviar, use &quot;Remover fundo&quot; pra deixar a peça no fundo padrão da vitrine. Funciona melhor com a peça inteira; em close de detalhe, confira antes de manter — dá pra voltar ao original a qualquer momento.</li>
         </ul>
       </div>
     </section>

@@ -43,12 +43,12 @@ export default function PortfolioFornecedor({
       });
       const json = await r.json();
       if (!r.ok) {
-        setErro(json?.error ?? "não consegui aplicar o fundo padrão");
+        setErro(json?.error ?? "não consegui remover o fundo");
         return;
       }
       setFotos((atual) => atual.map((f) => (f.id === foto.id ? (json as PortfolioItem) : f)));
     } catch {
-      setErro("falha de conexão ao aplicar o fundo");
+      setErro("falha de conexão ao remover o fundo");
     } finally {
       setRecortando(null);
     }
@@ -196,8 +196,8 @@ export default function PortfolioFornecedor({
                     {recortando === f.id
                       ? "Processando…"
                       : f.fundoRemovido
-                        ? "Voltar foto original"
-                        : "Isolar em fundo claro"}
+                        ? "Voltar ao original"
+                        : "Remover fundo"}
                   </button>
                 )}
               </div>

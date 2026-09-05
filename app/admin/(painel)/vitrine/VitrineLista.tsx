@@ -101,12 +101,12 @@ export default function VitrineLista({
       })
       const json = await r.json()
       if (!r.ok) {
-        setErroImagem(json?.error ?? 'não consegui aplicar o fundo padrão')
+        setErroImagem(json?.error ?? 'não consegui remover o fundo')
         return
       }
       aplicarNoItem(item.id, json as PortfolioItem)
     } catch {
-      setErroImagem('falha de conexão ao aplicar o fundo')
+      setErroImagem('falha de conexão ao remover o fundo')
     } finally {
       setImagemOcupada(null)
     }
@@ -215,8 +215,8 @@ export default function VitrineLista({
                     {imagemOcupada === item.id
                       ? 'Processando…'
                       : item.fundoRemovido
-                        ? 'Voltar foto original'
-                        : 'Isolar em fundo claro'}
+                        ? 'Voltar ao original'
+                        : 'Remover fundo'}
                   </button>
                 )}
               </div>
