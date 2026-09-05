@@ -13,6 +13,7 @@ import {
   WHATSAPP_SUPORTE_FORMATADO,
   linkWhatsAppSuporte,
 } from "@/app/lib/contatos";
+import EditarAtendimento from "./EditarAtendimento";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -176,6 +177,16 @@ export default async function PaginaDados() {
         </p>
       </div>
 
+      <EditarAtendimento
+        inicial={{
+          nome: fornecedor.nome,
+          cidade: fornecedor.cidade,
+          estado: fornecedor.estado,
+          raio_atendimento: fornecedor.raio_atendimento,
+          pedido_minimo: fornecedor.pedido_minimo,
+        }}
+      />
+
       {/* Card 1 — Identificação */}
       <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-4">
         <h2 className="text-gray-900 text-base font-medium mb-2">
@@ -247,11 +258,12 @@ export default async function PaginaDados() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm text-gray-900 font-medium mb-1">
-              Precisa alterar algum dado?
+              Precisa alterar WhatsApp, e-mail ou os tipos de produto?
             </p>
             <p className="text-xs text-gray-500 leading-relaxed">
-              Pra mudar nome, tipos de produto, raio ou pausar a conta, fale com
-              a gente no WhatsApp{" "}
+              WhatsApp e e-mail são por onde chega o seu código de acesso, então a
+              troca é feita com a gente pra ninguém ficar sem entrar na conta. Tipos
+              de produto, CPF/CNPJ e pausar a conta também: fale no WhatsApp{" "}
               <a
                 href={linkWhatsAppSuporte("Olá! Preciso alterar dados do meu cadastro.")}
                 target="_blank"
@@ -260,7 +272,7 @@ export default async function PaginaDados() {
               >
                 {WHATSAPP_SUPORTE_FORMATADO}
               </a>
-              . A edição direta na tela vai chegar nas próximas atualizações.
+              .
             </p>
           </div>
         </div>
