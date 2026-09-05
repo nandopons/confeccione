@@ -4,7 +4,10 @@
  * Query string:
  *   ?status=ativo|pausado|todos     default: todos
  *   ?busca=texto                    busca em nome/cidade (ilike)
- *   ?vertical=fitness               filtro em tipos_produto (contains)
+ *   ?peca=camisa_polo               filtro por PEÇA (app/lib/pecas.ts) — casa
+ *                                   `pecas` ou, pra quem não migrou, as
+ *                                   categorias legadas equivalentes
+ *   ?vertical=fitness               legado: filtro direto em tipos_produto
  *   ?ordem=nome|pedido_minimo|ultimo_lead_em|cidade|plano  default: ultimo_lead_em
  *   ?dir=asc|desc                   default: desc
  *   ?pagina=1                       default: 1
@@ -16,6 +19,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
+import { condicaoPecaSupabase, pecaValida } from '@/app/lib/pecas'
 
 const ORDEM_PERMITIDA = new Set([
   'nome',
@@ -35,6 +39,7 @@ export async function GET(req: NextRequest) {
   const status = url.searchParams.get('status') ?? 'todos'
   const busca = url.searchParams.get('busca')?.trim() ?? ''
   const vertical = url.searchParams.get('vertical')?.trim() ?? ''
+  const peca = url.searchParams.get('peca')?.trim() ?? ''
   const ordem = url.searchParams.get('ordem') ?? 'ultimo_lead_em'
   const dir = url.searchParams.get('dir') === 'asc' ? 'asc' : 'desc'
   const pagina = Math.max(1, Number(url.searchParams.get('pagina')) || 1)
@@ -53,7 +58,7 @@ export async function GET(req: NextRequest) {
   let q = supabaseAdmin
     .from('leads_fornecedores')
     .select(
-      'id, nome, whatsapp, email, cidade, estado, tipos_produto, ' +
+      'id, nome, whatsapp, email, cidade, estado, tipos_produto, pecas, pecas_outro, ' +
         'raio_atendimento, pedido_minimo, plano, status, pausado_em, ' +
         'motivo_pausa, ultimo_lead_em, criado_em, atualizado_em',
       { count: 'exact' },
@@ -68,7 +73,9 @@ export async function GET(req: NextRequest) {
     q = q.or(`nome.ilike.%${esc}%,cidade.ilike.%${esc}%`)
   }
 
-  if (vertical) {
+  if (peca && pecaValida(peca)) {
+    q = q.or(condicaoPecaSupabase(peca))
+  } else if (vertical) {
     q = q.contains('tipos_produto', [vertical])
   }
 

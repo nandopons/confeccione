@@ -8,7 +8,8 @@
  *   - ultima_oferta_em: max(enviada_em)
  *   - perdeu_para_outro: pedidos ofertados onde outro fornecedor foi aceito
  *
- * PATCH whitelist: nome, whatsapp, email, cidade, estado, tipos_produto,
+ * PATCH whitelist: nome, whatsapp, email, cidade, estado, pecas (tipos_produto
+ * é derivado delas), pecas_outro,
  *                  raio_atendimento, pedido_minimo
  * Status NÃO é editável aqui — usar /pausar e /reativar.
  */
@@ -16,6 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
+import { legadoDasPecas, pecaValida } from '@/app/lib/pecas'
 import { registrarAudit, diffMudancas } from '@/app/lib/audit'
 
 const CAMPOS_EDITAVEIS = [
@@ -24,7 +26,8 @@ const CAMPOS_EDITAVEIS = [
   'email',
   'cidade',
   'estado',
-  'tipos_produto',
+  'pecas',
+  'pecas_outro',
   'raio_atendimento',
   'pedido_minimo',
 ] as const
@@ -177,14 +180,21 @@ export async function PATCH(
       )
     }
   }
-  if ('tipos_produto' in atualizacao) {
-    const v = atualizacao.tipos_produto
+  if ('pecas' in atualizacao) {
+    const v = atualizacao.pecas
     if (!Array.isArray(v) || v.some((x) => typeof x !== 'string')) {
       return NextResponse.json(
-        { erro: 'tipos_produto deve ser array de strings' },
+        { erro: 'pecas deve ser array de strings' },
         { status: 400 },
       )
     }
+    const limpas = [...new Set(v.filter(pecaValida))]
+    atualizacao.pecas = limpas
+    // tipos_produto não é mais editável à mão: é derivado das peças, senão os
+    // dois divergem e o fornecedor fica visível por um caminho e invisível pelo
+    // outro. Só sobrescreve quando há peça marcada — zerar tiraria da ponte
+    // quem ainda não migrou.
+    if (limpas.length > 0) atualizacao.tipos_produto = legadoDasPecas(limpas)
   }
 
   const { data: antes, error: errBefore } = await supabaseAdmin

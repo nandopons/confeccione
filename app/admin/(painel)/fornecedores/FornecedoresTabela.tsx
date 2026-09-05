@@ -14,22 +14,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ColunaContato } from '../ColunaContato'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
+import { PECAS_PRINCIPAIS, PECAS_EXTRAS, pecaLabel } from '@/app/lib/pecas'
 import { BadgePlano, BadgeStatusFornecedor } from './_helpers'
 import { calcularDiasInatividade, formatarUltimaOferta } from './_format'
 import FornecedorOverlay from './FornecedorOverlay'
 
-// Mesmas 9 verticais do banco, em ordem alfabética
-const VERTICAIS = [
-  'bolsas',
-  'bones',
-  'fardamento',
-  'fitness',
-  'interclasse',
-  'moda_intima',
-  'padrao_esportivo',
-  'private_label',
-  'roupas_uv',
-] as const
+// A coluna que era "Verticais" virou PEÇAS (05/09/2026).
+//
+// A vertical é ocasião de compra e o cadastro médio marcava sete delas: a
+// célula abria um paredão de dez chips que empurrava a linha pra três alturas e
+// não respondia a pergunta que o admin faz olhando a tabela ("essa confecção
+// faz polo?"). Agora mostra no máximo três peças e conta o resto; o detalhe
+// completo está no overlay, a um clique.
+const CHIPS_VISIVEIS = 3
 
 type Status = 'ativo' | 'pausado' | 'todos'
 type Ordem = 'nome' | 'pedido_minimo' | 'ultimo_lead_em' | 'cidade' | 'plano'
@@ -43,6 +40,8 @@ interface Fornecedor {
   cidade: string | null
   estado: string | null
   tipos_produto: string[] | null
+  pecas: string[] | null
+  pecas_outro: string | null
   raio_atendimento: string | null
   pedido_minimo: number | null
   plano: 'free' | 'starter' | 'pro'
@@ -71,7 +70,7 @@ export default function FornecedoresTabela() {
   const [status, setStatus] = useState<Status>('todos')
   const [busca, setBusca] = useState('')
   const [buscaDebounced, setBuscaDebounced] = useState('')
-  const [vertical, setVertical] = useState('')
+  const [peca, setPeca] = useState('')
   const [ordem, setOrdem] = useState<Ordem>('ultimo_lead_em')
   const [dir, setDir] = useState<Dir>('desc')
 
@@ -92,12 +91,12 @@ export default function FornecedoresTabela() {
     const p = new URLSearchParams()
     if (status !== 'todos') p.set('status', status)
     if (buscaDebounced) p.set('busca', buscaDebounced)
-    if (vertical) p.set('vertical', vertical)
+    if (peca) p.set('peca', peca)
     p.set('ordem', ordem)
     p.set('dir', dir)
     p.set('por_pagina', '200') // sem paginação visual nesta sprint
     return p.toString()
-  }, [status, buscaDebounced, vertical, ordem, dir])
+  }, [status, buscaDebounced, peca, ordem, dir])
 
   const carregar = useCallback(async () => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- chamada de event/effect que dispara loading state
@@ -176,11 +175,11 @@ export default function FornecedoresTabela() {
     window.location.href = `/api/admin/fornecedores/exportar?${qs}`
   }
 
-  const temFiltro = status !== 'todos' || busca !== '' || vertical !== ''
+  const temFiltro = status !== 'todos' || busca !== '' || peca !== ''
   const limparFiltros = () => {
     setStatus('todos')
     setBusca('')
-    setVertical('')
+    setPeca('')
   }
 
   return (
@@ -214,18 +213,30 @@ export default function FornecedoresTabela() {
           className="rounded-md border border-gray-200 px-3 py-1.5 text-sm min-w-[240px]"
         />
 
-        {/* Vertical */}
+        {/* Peça. O filtro usa a MESMA ponte do matching (condicaoPecaSupabase):
+            quem já migrou casa por `pecas`, quem não migrou pelas categorias
+            equivalentes. Filtro de admin que discorda do matching faz a tela
+            mostrar um conjunto e o sistema ofertar pra outro. */}
         <select
-          value={vertical}
-          onChange={(e) => setVertical(e.target.value)}
+          value={peca}
+          onChange={(e) => setPeca(e.target.value)}
           className="rounded-md border border-gray-200 px-3 py-1.5 text-sm bg-white"
         >
-          <option value="">Todas verticais</option>
-          {VERTICAIS.map((v) => (
-            <option key={v} value={v}>
-              {tipoLabel[v] ?? v.replace(/_/g, ' ')}
-            </option>
-          ))}
+          <option value="">Todas as peças</option>
+          <optgroup label="Mais pedidas">
+            {PECAS_PRINCIPAIS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Outras">
+            {PECAS_EXTRAS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </optgroup>
         </select>
 
         {temFiltro && (
@@ -304,7 +315,7 @@ export default function FornecedoresTabela() {
                 >
                   Local
                 </Th>
-                <Th>Verticais</Th>
+                <Th>Peças</Th>
                 <Th
                   onClick={() => toggleOrdem('pedido_minimo')}
                   ativo={ordem === 'pedido_minimo'}
@@ -415,17 +426,8 @@ function Linha({
         <BadgePlano plano={fornecedor.plano} />
       </td>
       <td className="px-3 py-2.5 text-gray-700">{local}</td>
-      <td className="px-3 py-2.5">
-        <div className="flex flex-wrap gap-1">
-          {(fornecedor.tipos_produto ?? []).map((v) => (
-            <span
-              key={v}
-              className="text-xs px-1.5 py-0.5 bg-gray-100 rounded text-gray-700 whitespace-nowrap"
-            >
-              {tipoLabel[v] ?? v}
-            </span>
-          ))}
-        </div>
+      <td className="px-3 py-2.5 align-top">
+        <ColunaPecas fornecedor={fornecedor} />
       </td>
       <td className="px-3 py-2.5 whitespace-nowrap text-gray-700">
         {fornecedor.pedido_minimo ?? '—'}
@@ -497,6 +499,73 @@ function Linha({
         )}
       </td>
     </tr>
+  )
+}
+
+/**
+ * Peças da confecção, resumidas.
+ *
+ * Três estados, e a diferença entre eles é informação de operação:
+ *   - já migrou  → chips verdes com o nome da peça. É o que o matching lê.
+ *   - não migrou → chips cinza com a categoria antiga, e a palavra "legado".
+ *     O admin precisa VER quem ainda não confirmou, senão a migração some.
+ *   - nada       → o cadastro não casa com pedido nenhum. Vermelho, porque é
+ *     um fornecedor invisível pro sistema.
+ */
+function ColunaPecas({ fornecedor }: { fornecedor: Fornecedor }) {
+  const pecas = fornecedor.pecas ?? []
+  const legado = fornecedor.tipos_produto ?? []
+  const migrado = pecas.length > 0
+
+  const lista = migrado ? pecas : legado
+  const rotulo = (id: string) => (migrado ? pecaLabel(id) : (tipoLabel[id] ?? id))
+  const visiveis = lista.slice(0, CHIPS_VISIVEIS)
+  const resto = lista.length - visiveis.length
+
+  if (lista.length === 0 && !fornecedor.pecas_outro) {
+    return (
+      <span className="text-xs text-red-600" title="Não casa com nenhum pedido">
+        sem peça
+      </span>
+    )
+  }
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1 max-w-[280px]"
+      title={lista.map(rotulo).join(', ')}
+    >
+      {visiveis.map((id) => (
+        <span
+          key={id}
+          className={
+            'text-xs px-1.5 py-0.5 rounded whitespace-nowrap ' +
+            (migrado ? 'bg-[#E1F5EE] text-[#0F6E56]' : 'bg-gray-100 text-gray-600')
+          }
+        >
+          {rotulo(id)}
+        </span>
+      ))}
+      {resto > 0 && (
+        <span className="text-xs text-gray-400 whitespace-nowrap">+{resto}</span>
+      )}
+      {!migrado && lista.length > 0 && (
+        <span
+          className="text-[10px] uppercase tracking-wide text-amber-600"
+          title="Cadastro ainda no vocabulário antigo — entra no matching pela ponte de categoria"
+        >
+          legado
+        </span>
+      )}
+      {fornecedor.pecas_outro && (
+        <span
+          className="text-xs text-gray-400 italic truncate max-w-[140px]"
+          title={fornecedor.pecas_outro}
+        >
+          “{fornecedor.pecas_outro}”
+        </span>
+      )}
+    </div>
   )
 }
 

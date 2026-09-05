@@ -97,3 +97,18 @@ export function pecasDoLegado(categoria: string | null | undefined): string[] {
   if (!categoria) return []
   return PECAS.filter((p) => p.legado.includes(categoria)).map((p) => p.id)
 }
+
+/**
+ * Condição `.or()` do PostgREST pra "atende esta peça".
+ *
+ * Mesma ponte de sempre: quem já tem `pecas` casa pelo array novo; quem não
+ * migrou casa pelas categorias legadas equivalentes. Vive aqui, e não copiada
+ * em cada rota, porque filtro de admin que discorda do matching faz a tela
+ * mostrar um conjunto de fornecedores e o sistema ofertar pra outro.
+ */
+export function condicaoPecaSupabase(peca: string): string {
+  const legado = legadoDasPecas([peca])
+  const condicoes = [`pecas.cs.{${peca}}`]
+  if (legado.length > 0) condicoes.push(`tipos_produto.ov.{${legado.join(',')}}`)
+  return condicoes.join(',')
+}

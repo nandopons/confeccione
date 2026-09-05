@@ -19,6 +19,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
+import { PECAS_PRINCIPAIS, PECAS_EXTRAS, pecaLabel } from '@/app/lib/pecas'
 import { BadgePlano, BadgeStatusFornecedor } from './_helpers'
 import { formatarDataRelativa, formatarDuracao } from './_format'
 
@@ -30,6 +31,8 @@ interface FornecedorFull {
   cidade: string | null
   estado: string | null
   tipos_produto: string[] | null
+  pecas: string[] | null
+  pecas_outro: string | null
   raio_atendimento: string | null
   pedido_minimo: number | null
   plano: string
@@ -209,13 +212,14 @@ export default function FornecedorOverlay({
 
 // ============================================================================
 // EDIÇÃO — o que o PATCH da API aceita (nome, whatsapp, email, cidade, estado,
-// tipos_produto, raio_atendimento, pedido_minimo). Status fica de fora: pausar
-// e reativar têm rota própria, com motivo e auditoria.
+// pecas, pecas_outro, raio_atendimento, pedido_minimo). Status fica de fora:
+// pausar e reativar têm rota própria, com motivo e auditoria.
 //
-// As verticais são o campo que mais importa: é `tipos_produto` que decide se o
-// fornecedor entra no matching de um pedido. Por isso vêm como caixas, não como
-// texto livre — digitar "bones" em vez de "bones" (com acento no lugar errado)
-// tirava o fornecedor da fila sem ninguém perceber.
+// As PEÇAS são o campo que mais importa: é por elas que o fornecedor entra no
+// matching de um pedido. Vêm como caixas, não como texto livre — id digitado
+// errado tirava o fornecedor da fila sem ninguém perceber. `tipos_produto`
+// saiu da tela: virou derivado das peças na própria rota, porque dois campos
+// editáveis dizendo a mesma coisa divergem.
 // ============================================================================
 
 const RAIOS = [
@@ -248,12 +252,13 @@ function FormEdicaoFornecedor({
   const [minimo, setMinimo] = useState(
     fornecedor.pedido_minimo !== null ? String(fornecedor.pedido_minimo) : '',
   )
-  const [tipos, setTipos] = useState<string[]>(fornecedor.tipos_produto ?? [])
+  const [pecas, setPecas] = useState<string[]>(fornecedor.pecas ?? [])
+  const [pecasOutro, setPecasOutro] = useState(fornecedor.pecas_outro ?? '')
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
-  function alternarTipo(valor: string) {
-    setTipos((atual) =>
+  function alternarPeca(valor: string) {
+    setPecas((atual) =>
       atual.includes(valor) ? atual.filter((t) => t !== valor) : [...atual, valor],
     )
   }
@@ -284,7 +289,8 @@ function FormEdicaoFornecedor({
           email: email.trim() || null,
           cidade: cidade.trim() || null,
           estado: estado.trim() || null,
-          tipos_produto: tipos,
+          pecas,
+          pecas_outro: pecasOutro.trim() || null,
           raio_atendimento: raio,
           pedido_minimo: minimo.trim() ? Number(minimo) : null,
         }),
@@ -378,25 +384,72 @@ function FormEdicaoFornecedor({
       </div>
 
       <div>
-        <label className={rotulo}>Verticais que atende</label>
-        <div className="grid grid-cols-2 gap-1.5 border border-gray-200 rounded-md p-3 max-h-52 overflow-y-auto">
-          {Object.entries(tipoLabel).map(([valor, label]) => (
-            <label key={valor} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={tipos.includes(valor)}
-                onChange={() => alternarTipo(valor)}
-                className="rounded border-gray-300"
-              />
-              {label}
-            </label>
-          ))}
+        <label className={rotulo}>Peças que produz</label>
+        <div className="border border-gray-200 rounded-md p-3 max-h-64 overflow-y-auto space-y-3">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">
+              Mais pedidas
+            </p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {PECAS_PRINCIPAIS.map((p) => (
+                <label key={p.id} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pecas.includes(p.id)}
+                    onChange={() => alternarPeca(p.id)}
+                    className="rounded border-gray-300"
+                  />
+                  {p.label}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-gray-400 mb-1.5">
+              Outras
+            </p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {PECAS_EXTRAS.map((p) => (
+                <label key={p.id} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pecas.includes(p.id)}
+                    onChange={() => alternarPeca(p.id)}
+                    className="rounded border-gray-300"
+                  />
+                  {p.label}
+                </label>
+              ))}
+            </div>
+          </div>
         </div>
-        {tipos.length === 0 && (
+
+        {pecas.length === 0 && (fornecedor.tipos_produto?.length ?? 0) > 0 && (
           <p className="text-xs text-amber-600 mt-1.5">
-            Sem nenhuma vertical marcada ele não entra em nenhum matching.
+            Cadastro ainda no vocabulário antigo (
+            {fornecedor.tipos_produto!.map((v) => tipoLabel[v] ?? v).join(', ')}).
+            Marcar as peças aqui migra ele.
           </p>
         )}
+        {pecas.length === 0 && (fornecedor.tipos_produto?.length ?? 0) === 0 && (
+          <p className="text-xs text-red-600 mt-1.5">
+            Sem nenhuma peça marcada ele não entra em nenhum matching.
+          </p>
+        )}
+
+        <label className="block mt-3">
+          <span className={rotulo}>Produz algo fora do catálogo?</span>
+          <input
+            value={pecasOutro}
+            onChange={(e) => setPecasOutro(e.target.value.slice(0, 300))}
+            maxLength={300}
+            placeholder="Ex.: capa de almofada, toalha de mesa sob medida"
+            className={campo}
+          />
+          <span className="text-[11px] text-gray-400 mt-1 block">
+            Aparece em Peças faltando — é de onde saem as peças novas do catálogo.
+          </span>
+        </label>
       </div>
 
       {erro && (
@@ -490,22 +543,39 @@ function ColunaMetricas({
         )}
       </div>
 
-      {/* Verticais */}
-      {fornecedor.tipos_produto && fornecedor.tipos_produto.length > 0 && (
+      {/* Peças. Verde = migrado (o matching lê daqui). Cinza = categoria antiga,
+          ainda entrando pela ponte. */}
+      {((fornecedor.pecas?.length ?? 0) > 0 ||
+        (fornecedor.tipos_produto?.length ?? 0) > 0 ||
+        fornecedor.pecas_outro) && (
         <div>
           <div className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-1.5">
-            Verticais
+            {(fornecedor.pecas?.length ?? 0) > 0 ? 'Peças' : 'Verticais (legado)'}
           </div>
           <div className="flex flex-wrap gap-1">
-            {fornecedor.tipos_produto.map((v) => (
-              <span
-                key={v}
-                className="text-xs px-1.5 py-0.5 bg-gray-100 rounded text-gray-700 whitespace-nowrap"
-              >
-                {tipoLabel[v] ?? v}
-              </span>
-            ))}
+            {(fornecedor.pecas?.length ?? 0) > 0
+              ? fornecedor.pecas!.map((v) => (
+                  <span
+                    key={v}
+                    className="text-xs px-1.5 py-0.5 bg-[#E1F5EE] rounded text-[#0F6E56] whitespace-nowrap"
+                  >
+                    {pecaLabel(v)}
+                  </span>
+                ))
+              : (fornecedor.tipos_produto ?? []).map((v) => (
+                  <span
+                    key={v}
+                    className="text-xs px-1.5 py-0.5 bg-gray-100 rounded text-gray-600 whitespace-nowrap"
+                  >
+                    {tipoLabel[v] ?? v}
+                  </span>
+                ))}
           </div>
+          {fornecedor.pecas_outro && (
+            <p className="text-xs text-gray-500 italic mt-1.5">
+              Fora do catálogo: “{fornecedor.pecas_outro}”
+            </p>
+          )}
         </div>
       )}
 

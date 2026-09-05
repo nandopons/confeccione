@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { registrarAudit } from '@/app/lib/audit'
+import { condicaoPecaSupabase, pecaValida } from '@/app/lib/pecas'
 
 const LIMITE = 5000
 
@@ -21,12 +22,13 @@ export async function GET(req: NextRequest) {
   const status = url.searchParams.get('status') ?? 'todos'
   const busca = url.searchParams.get('busca')?.trim() ?? ''
   const vertical = url.searchParams.get('vertical')?.trim() ?? ''
+  const peca = url.searchParams.get('peca')?.trim() ?? ''
 
   let q = supabaseAdmin
     .from('leads_fornecedores')
     .select(
       'nome, whatsapp, email, cidade, estado, plano, status, ' +
-        'tipos_produto, raio_atendimento, pedido_minimo, ' +
+        'pecas, pecas_outro, tipos_produto, raio_atendimento, pedido_minimo, ' +
         'ultimo_lead_em, criado_em, motivo_pausa',
     )
     .limit(LIMITE)
@@ -36,7 +38,10 @@ export async function GET(req: NextRequest) {
     const esc = busca.replace(/[,%_]/g, ' ')
     q = q.or(`nome.ilike.%${esc}%,cidade.ilike.%${esc}%`)
   }
-  if (vertical) q = q.contains('tipos_produto', [vertical])
+  // O mesmo filtro da tela: exportar um recorte diferente do que está na tela
+  // é como uma planilha vira decisão errada.
+  if (peca && pecaValida(peca)) q = q.or(condicaoPecaSupabase(peca))
+  else if (vertical) q = q.contains('tipos_produto', [vertical])
 
   q = q.order('nome', { ascending: true, nullsFirst: false })
 
@@ -56,6 +61,8 @@ export async function GET(req: NextRequest) {
     'estado',
     'plano',
     'status',
+    'pecas',
+    'pecas_outro',
     'tipos_produto',
     'raio_atendimento',
     'pedido_minimo',
@@ -81,7 +88,7 @@ export async function GET(req: NextRequest) {
     entidade_id: null,
     mudancas: null,
     metadata: {
-      filtros: { status, busca, vertical },
+      filtros: { status, busca, peca, vertical },
       total_exportado: linhas.length,
       truncado: linhas.length >= LIMITE,
       user_agent: req.headers.get('user-agent') ?? null,
