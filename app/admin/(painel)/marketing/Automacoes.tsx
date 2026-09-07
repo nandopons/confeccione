@@ -64,6 +64,11 @@ const GATILHOS: Array<{ id: Gatilho; label: string; ajuda: string }> = [
     ajuda: 'Captado ou completo há 30 dias sem nenhum contato, há X dias nessa situação. Objetivo: reengajar.',
   },
   {
+    id: 'etapa_em_negociacao',
+    label: 'Em negociação com o fornecedor',
+    ajuda: 'Fornecedor aceitou há X dias e o orçamento ainda não saiu. Com 3 dias: perguntar ao cliente se a conversa deu certo (D-9).',
+  },
+  {
     id: 'etapa_sem_fornecedor',
     label: 'Pedido sem fornecedor',
     ajuda: 'Confirmado há X dias sem fornecedor aceito. Mensagem pro cliente: "estamos buscando" — a captação é por dentro.',

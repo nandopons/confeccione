@@ -20,6 +20,7 @@ export const GATILHO = z.enum([
   'etapa_sem_resposta',
   'etapa_orcamento_vencido',
   'etapa_inativo',
+  'etapa_em_negociacao',
 ])
 
 export const TEMPLATE_PARAMS = z.object({

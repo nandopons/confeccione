@@ -45,6 +45,7 @@ export type Gatilho =
   | 'etapa_sem_resposta'
   | 'etapa_orcamento_vencido'
   | 'etapa_inativo'
+  | 'etapa_em_negociacao'
 
 /** Gatilhos por etapa → a etapa da view que o pedido precisa estar. */
 export const ETAPA_DO_GATILHO: Partial<Record<Gatilho, string>> = {
@@ -54,6 +55,7 @@ export const ETAPA_DO_GATILHO: Partial<Record<Gatilho, string>> = {
   etapa_sem_resposta: 'sem_resposta',
   etapa_orcamento_vencido: 'orcamento_vencido',
   etapa_inativo: 'inativo',
+  etapa_em_negociacao: 'em_negociacao',
 }
 export type StatusAutomacao = 'rascunho' | 'ativa' | 'pausada'
 
@@ -70,6 +72,7 @@ export const GATILHO_LABEL: Record<Gatilho, string> = {
   etapa_sem_resposta: 'Orçamento sem resposta do cliente',
   etapa_orcamento_vencido: 'Orçamento vencido (21 dias)',
   etapa_inativo: 'Pedido inativo (30 dias sem toque)',
+  etapa_em_negociacao: 'Em negociação com o fornecedor',
 }
 
 /** Como o número de dias do gatilho deve ser lido na tela. */
@@ -84,6 +87,7 @@ export const GATILHO_AJUDA: Record<Gatilho, string> = {
   etapa_sem_resposta: 'Entra quem recebeu orçamento e está há X dias sem responder. Sai quando responde, paga ou vence.',
   etapa_orcamento_vencido: 'Entra quem tem orçamento há mais de 21 dias sem pagar, há X dias nessa situação. Sai quando paga ou é encerrado.',
   etapa_inativo: 'Entra quem está captado ou completo há 30 dias sem nenhum toque, há X dias nessa situação. Sai quando mexe no pedido.',
+  etapa_em_negociacao: 'Entra quem tem fornecedor aceito há X dias sem orçamento (D-9: aos 3 dias, perguntar se a conversa deu certo). Sai quando o orçamento é definido.',
 }
 
 export type PassoAutomacao = {
