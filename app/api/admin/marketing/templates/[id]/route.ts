@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { atualizarTemplate, excluirTemplate, obterTemplate } from '@/app/lib/templates-marketing'
 import { TemplatePatchSchema } from '@/app/lib/marketing-schemas'
+import { normalizarBlocos } from '@/app/lib/email-blocos'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -16,7 +17,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const parsed = TemplatePatchSchema.safeParse(await req.json().catch(() => null))
   if (!parsed.success) return NextResponse.json({ erro: 'Dados inválidos' }, { status: 400 })
   try {
-    await atualizarTemplate(id, parsed.data)
+    await atualizarTemplate(id, { ...parsed.data, blocos: parsed.data.blocos && normalizarBlocos(parsed.data.blocos) })
     return NextResponse.json({ ok: true, template: await obterTemplate(id) })
   } catch (e) {
     return NextResponse.json({ erro: e instanceof Error ? e.message : 'Falha ao salvar' }, { status: 400 })

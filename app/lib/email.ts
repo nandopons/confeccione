@@ -943,10 +943,36 @@ function corpoMarketingHtml(texto: string): string {
     .join('')
 }
 
+/**
+ * Envelope dos e-mails de marketing montados por blocos. Diferente do
+ * `layout()` transacional: sem o cabeçalho azul da Confeccione, porque o
+ * template traz a própria logo no primeiro bloco — dois cabeçalhos seguidos
+ * ficam péssimos.
+ */
+function layoutMarketing(conteudo: string, preheader: string): string {
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Confeccione</title></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${preheader}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f5f5f5;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background:#ffffff;border-radius:12px;">
+        <tr><td style="padding:32px;">${conteudo}</td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`
+}
+
 export async function enviarEmailMarketing(params: {
   para: string
   assunto: string
+  /** Texto puro: vira o corpo `text` e, sem `html`, também o HTML em parágrafos. */
   corpo: string
+  /** HTML já renderizado (e-mail montado por blocos). Quando vem, manda esse. */
+  html?: string
   leadId: string
 }): Promise<{ ok: boolean; erro?: string }> {
   const apiKey = process.env.RESEND_API_KEY
@@ -954,11 +980,11 @@ export async function enviarEmailMarketing(params: {
   if (!params.para.includes('@')) return { ok: false, erro: 'e-mail inválido' }
 
   const desc = linkDescadastro(params.leadId)
-  const conteudo =
-    corpoMarketingHtml(params.corpo) +
+  const rodape =
     `<p style="margin:24px 0 0;font-size:12px;color:#9ca3af;">` +
     `Você recebe este e-mail porque se cadastrou ou pediu orçamento na Confeccione. ` +
     `<a href="${desc}" style="color:#9ca3af;text-decoration:underline;">Descadastrar</a>.</p>`
+  const conteudo = (params.html ?? corpoMarketingHtml(params.corpo)) + rodape
 
   try {
     const resp = await fetch(RESEND_ENDPOINT, {
@@ -969,7 +995,7 @@ export async function enviarEmailMarketing(params: {
         to: [params.para],
         reply_to: REPLY_TO,
         subject: params.assunto,
-        html: layout(conteudo, params.assunto),
+        html: params.html ? layoutMarketing(conteudo, params.assunto) : layout(conteudo, params.assunto),
         text: `${params.corpo}\n\n---\nDescadastrar: ${desc}`,
         headers: { 'List-Unsubscribe': `<${desc}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
       }),
