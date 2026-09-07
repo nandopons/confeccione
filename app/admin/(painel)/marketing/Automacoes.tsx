@@ -129,6 +129,16 @@ function doFluxo(a: Automacao): Rascunho {
   }
 }
 
+type Detalhe = {
+  regras: string[]
+  entrariam: Array<{ leadId: string; nome: string | null; telefone: string | null; email: string | null; etapa: string | null; diasNaEtapa: number | null; alcancavel: boolean }>
+  totalEntrariam: number
+  receberiamAgora: Array<{ leadId: string; nome: string | null; passoOrdem: number; enviados: number }>
+  totalReceberiamAgora: number
+  aguardando: number
+  janelaAbertaAgora: boolean
+}
+
 export default function Automacoes({
   iniciais,
   estatisticasIniciais,
@@ -143,6 +153,24 @@ export default function Automacoes({
   const [editor, setEditor] = useState<Rascunho | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [ocupado, setOcupado] = useState<string | null>(null)
+  // Detalhe do fluxo (D-10): regras e quem entra na próxima rodada — só quando clica.
+  const [aberto, setAberto] = useState<string | null>(null)
+  const [detalhes, setDetalhes] = useState<Record<string, Detalhe | 'carregando' | 'erro'>>({})
+
+  async function abrirDetalhe(a: Automacao) {
+    if (aberto === a.id) { setAberto(null); return }
+    setAberto(a.id)
+    if (detalhes[a.id] && detalhes[a.id] !== 'erro') return
+    setDetalhes((d) => ({ ...d, [a.id]: 'carregando' }))
+    try {
+      const r = await fetch(`/api/admin/marketing/automacoes/${a.id}/detalhe`, { cache: 'no-store' })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.erro || 'Falha')
+      setDetalhes((d) => ({ ...d, [a.id]: j.detalhe as Detalhe }))
+    } catch {
+      setDetalhes((d) => ({ ...d, [a.id]: 'erro' }))
+    }
+  }
 
   async function recarregar() {
     const r = await fetch('/api/admin/marketing/automacoes')
@@ -278,6 +306,9 @@ export default function Automacoes({
                     >
                       {ocupado === a.id ? 'Rodando…' : 'Rodar agora'}
                     </button>
+                    <button type="button" onClick={() => void abrirDetalhe(a)} className="text-xs text-[#0F6E56] underline">
+                      {aberto === a.id ? 'fechar detalhes' : 'regras e quem recebe'}
+                    </button>
                     <button type="button" onClick={() => setEditor(doFluxo(a))} className="text-xs text-[#0F6E56] underline">
                       editar
                     </button>
@@ -286,6 +317,65 @@ export default function Automacoes({
                     </button>
                   </div>
                 </div>
+
+                {aberto === a.id && (
+                  <div className="mt-3 border-t border-gray-100 pt-3 grid gap-4 md:grid-cols-2">
+                    {detalhes[a.id] === 'carregando' || !detalhes[a.id] ? (
+                      <p className="text-xs text-gray-400">Calculando quem entraria…</p>
+                    ) : detalhes[a.id] === 'erro' ? (
+                      <p className="text-xs text-red-500">Não deu pra calcular a prévia agora.</p>
+                    ) : (
+                      (() => {
+                        const d = detalhes[a.id] as Detalhe
+                        return (
+                          <>
+                            <div>
+                              <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1.5">Regras deste fluxo</p>
+                              <ol className="space-y-1 text-xs text-gray-700 list-decimal pl-4">
+                                {d.regras.map((r, i) => <li key={i}>{r}</li>)}
+                              </ol>
+                              <p className="text-[11px] text-gray-400 mt-2">
+                                {d.janelaAbertaAgora ? 'Dentro da janela de envio agora.' : 'Fora da janela de envio agora — nada sai até abrir.'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1.5">
+                                Próxima rodada: {d.totalEntrariam} {d.totalEntrariam === 1 ? 'pessoa entraria' : 'pessoas entrariam'}
+                                {d.totalReceberiamAgora > 0 ? ` · ${d.totalReceberiamAgora} já dentro com mensagem vencida` : ''}
+                                {d.aguardando > 0 ? ` · ${d.aguardando} esperando o próximo passo` : ''}
+                              </p>
+                              {d.entrariam.length === 0 && d.receberiamAgora.length === 0 ? (
+                                <p className="text-xs text-gray-400">Ninguém se encaixa no gatilho neste momento.</p>
+                              ) : (
+                                <ul className="space-y-1 text-xs text-gray-700 max-h-64 overflow-auto pr-1">
+                                  {d.receberiamAgora.map((r) => (
+                                    <li key={'r' + r.leadId} className="flex items-center gap-2">
+                                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">recebe agora</span>
+                                      <span>{r.nome ?? 'Sem nome'}</span>
+                                      <span className="text-gray-400">passo {r.passoOrdem + 1} · {r.enviados} já enviados</span>
+                                    </li>
+                                  ))}
+                                  {d.entrariam.map((e) => (
+                                    <li key={'e' + e.leadId} className="flex items-center gap-2">
+                                      <span className={'text-[10px] font-medium px-1.5 py-0.5 rounded ' + (e.alcancavel ? 'bg-[#E1F5EE] text-[#0F6E56]' : 'bg-gray-100 text-gray-400')}>
+                                        {e.alcancavel ? 'entra' : 'sem contato pro canal'}
+                                      </span>
+                                      <span>{e.nome ?? 'Sem nome'}</span>
+                                      {e.etapa && <span className="text-gray-400">{e.etapa}{e.diasNaEtapa != null ? ` · ${e.diasNaEtapa} d` : ''}</span>}
+                                    </li>
+                                  ))}
+                                  {d.totalEntrariam > d.entrariam.length && (
+                                    <li className="text-gray-400">… e mais {d.totalEntrariam - d.entrariam.length}.</li>
+                                  )}
+                                </ul>
+                              )}
+                            </div>
+                          </>
+                        )
+                      })()
+                    )}
+                  </div>
+                )}
               </div>
             )
           })}
