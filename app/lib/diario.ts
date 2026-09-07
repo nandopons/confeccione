@@ -473,6 +473,8 @@ export type ConversaSemResposta = {
   ultima_entrada_em: string
   horas_esperando: number
   preview: string | null
+  /** O Luigi respondeu mas chamou gente (preço, reclamação, fora do pedido) e ninguém assumiu ainda. */
+  luigi_chamou: boolean
 }
 
 /** Mensagens recebidas há mais de N horas sem nenhuma resposta nossa depois
@@ -496,12 +498,27 @@ export async function conversasSemResposta(horas = 2): Promise<ConversaSemRespos
   const pendentes = [...ultima.values()].filter(
     (m) => m.direcao === 'entrada' && new Date(m.criado_em).getTime() < limite
   )
-  if (pendentes.length === 0) return []
 
+  // Conversas em que o Luigi chamou gente: a última mensagem é dele, então
+  // não caem no filtro acima — entram aqui, contando da hora da chamada.
+  const { data: escaladas } = await supabaseAdmin
+    .from('wa_conversas')
+    .select('id, luigi_escalado_em')
+    .not('luigi_escalado_em', 'is', null)
+    .limit(200)
+  const luigiChamou = new Set<string>()
+  const escaladaEm = new Map<string, string>()
+  for (const c of (escaladas ?? []) as Array<{ id: string; luigi_escalado_em: string }>) {
+    luigiChamou.add(c.id)
+    if (!pendentes.some((m) => m.conversa_id === c.id)) escaladaEm.set(c.id, c.luigi_escalado_em)
+  }
+  if (pendentes.length === 0 && escaladaEm.size === 0) return []
+
+  const ids = [...new Set([...pendentes.map((m) => m.conversa_id), ...escaladaEm.keys()])]
   const { data: convs } = await supabaseAdmin
     .from('wa_conversas')
     .select('id, preview, contato:wa_contatos(nome, wa_id, cliente_id, fornecedor_id)')
-    .in('id', pendentes.map((m) => m.conversa_id))
+    .in('id', ids)
 
   type C = {
     id: string
@@ -510,21 +527,25 @@ export async function conversasSemResposta(horas = 2): Promise<ConversaSemRespos
   }
   const porId = new Map(((convs ?? []) as unknown as C[]).map((c) => [c.id, c]))
 
-  return pendentes
-    .map<ConversaSemResposta>((m) => {
-      const c = porId.get(m.conversa_id)
-      const ct = c?.contato ?? null
-      return {
-        conversa_id: m.conversa_id,
-        contato: ct?.nome ?? null,
-        wa_id: ct?.wa_id ?? null,
-        vinculo: ct?.fornecedor_id ? 'fornecedor' : ct?.cliente_id ? 'cliente' : null,
-        ultima_entrada_em: m.criado_em,
-        horas_esperando: Math.round((Date.now() - new Date(m.criado_em).getTime()) / 3600_000),
-        preview: (m.corpo ?? c?.preview ?? null)?.slice(0, 160) ?? null,
-      }
-    })
-    .sort((a, b) => b.horas_esperando - a.horas_esperando)
+  const montar = (conversaId: string, desde: string, corpo: string | null, luigiChamou: boolean): ConversaSemResposta => {
+    const c = porId.get(conversaId)
+    const ct = c?.contato ?? null
+    return {
+      conversa_id: conversaId,
+      contato: ct?.nome ?? null,
+      wa_id: ct?.wa_id ?? null,
+      vinculo: ct?.fornecedor_id ? 'fornecedor' : ct?.cliente_id ? 'cliente' : null,
+      ultima_entrada_em: desde,
+      horas_esperando: Math.round((Date.now() - new Date(desde).getTime()) / 3600_000),
+      preview: (corpo ?? c?.preview ?? null)?.slice(0, 160) ?? null,
+      luigi_chamou: luigiChamou,
+    }
+  }
+
+  return [
+    ...pendentes.map((m) => montar(m.conversa_id, m.criado_em, m.corpo, luigiChamou.has(m.conversa_id))),
+    ...[...escaladaEm.entries()].map(([id, em]) => montar(id, em, null, true)),
+  ].sort((a, b) => b.horas_esperando - a.horas_esperando)
 }
 
 export type PedidoSemFornecedor = {

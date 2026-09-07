@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { marcarComoLida } from '@/app/lib/whatsapp-cloud'
+import { sugestaoPendente } from '@/app/lib/luigi'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   let query = supabaseAdmin
     .from('wa_mensagens')
-    .select('id, wamid, direcao, tipo, corpo, midia_path, midia_mime, midia_nome, status, erro, template_nome, criado_em')
+    .select('id, wamid, direcao, tipo, corpo, midia_path, midia_mime, midia_nome, status, erro, template_nome, autor, criado_em')
     .eq('conversa_id', id)
     .order('criado_em', { ascending: true })
     .limit(500)
@@ -82,5 +83,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (novaEntrada?.wamid) await marcarComoLida(novaEntrada.wamid)
   }
 
-  return NextResponse.json({ mensagens: resposta, statuses })
+  // Sugestão do Luigi (modo sugere) pendente nesta conversa: vai junto com o
+  // polling, então o card aparece no composer segundos depois de ele pensar.
+  const sugestao = await sugestaoPendente(id).catch(() => null)
+
+  return NextResponse.json({ mensagens: resposta, statuses, luigi: { sugestao } })
 }

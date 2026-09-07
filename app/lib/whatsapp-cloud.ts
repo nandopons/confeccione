@@ -21,6 +21,8 @@
 import { visualizadorPedidoUrl } from './url'
 
 const GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v23.0'
+// Só pra teste local com um mock da Graph API; em produção fica vazio.
+const GRAPH_BASE = process.env.WHATSAPP_GRAPH_BASE || 'https://graph.facebook.com'
 
 function credenciais() {
   return {
@@ -31,7 +33,7 @@ function credenciais() {
 }
 
 function urlGraph(path: string): string {
-  return `https://graph.facebook.com/${GRAPH_VERSION}/${path}`
+  return `${GRAPH_BASE}/${GRAPH_VERSION}/${path}`
 }
 
 /** Normaliza telefone pro formato wa_id da Meta: só dígitos, com DDI 55. */
