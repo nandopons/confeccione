@@ -7,7 +7,8 @@ import { formatarWhatsappBR } from './format'
 import { loginComEmailUrl, painelClientePedidoUrl } from './url'
 import { emailTextoLuigi } from './email-luigi'
 
-const RESEND_ENDPOINT = 'https://api.resend.com/emails'
+// Só pra teste local com um mock do Resend; em produção fica vazio.
+const RESEND_ENDPOINT = process.env.RESEND_ENDPOINT || 'https://api.resend.com/emails'
 const FROM = 'Confeccione <contato@confeccione.com.br>'
 const REPLY_TO = 'contato@confeccione.com.br'
 const SITE_URL = 'https://www.confeccione.com.br'
@@ -917,6 +918,43 @@ export async function emailLinkColeta(params: {
     text: `Link de coleta de tamanhos do modelo ${params.modelo || ''}: ${params.link}`,
     attachments: params.pdfBase64 ? [{ filename: 'coleta-tamanhos-confeccione.pdf', content: params.pdfBase64 }] : undefined,
   })
+}
+
+// ─── Sondagem de produção (captação puxada pelo pedido) ────────
+// E-mail frio pra uma confecção encontrada na web: "vocês produzem X em
+// lote de N?", com o resumo do pedido em PDF (sem os dados do cliente) e o
+// link de saída no rodapé. Sai no envelope do Luigi. Devolve ok/erro pra
+// captacao_fornecedores registrar o que aconteceu.
+
+export async function emailSondagemProducao(params: {
+  para: string
+  assunto: string
+  /** Texto puro no estilo das réguas (vira o e-mail do Luigi). */
+  corpo: string
+  anexo: { nome: string; base64: string } | null
+}): Promise<{ ok: boolean; erro?: string }> {
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) return { ok: false, erro: 'RESEND_API_KEY ausente' }
+  if (!params.para.includes('@')) return { ok: false, erro: 'e-mail inválido' }
+  try {
+    const resp = await fetch(RESEND_ENDPOINT, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: FROM,
+        to: [params.para],
+        reply_to: REPLY_TO,
+        subject: params.assunto,
+        html: emailTextoLuigi(params.corpo, params.assunto, null),
+        text: params.corpo,
+        ...(params.anexo ? { attachments: [{ filename: params.anexo.nome, content: params.anexo.base64 }] } : {}),
+      }),
+    })
+    if (!resp.ok) return { ok: false, erro: `Resend ${resp.status}: ${(await resp.text()).slice(0, 200)}` }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, erro: err instanceof Error ? err.message : 'falha no envio' }
+  }
 }
 
 // ─── E-mail de marketing (campanhas) ───────────────────────────

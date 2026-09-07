@@ -51,6 +51,7 @@ const URL_RE = /https?:\/\/[^\s<]+/
 /** Rótulo do botão pela intenção da frase que acompanha o link. */
 function rotuloDoBotao(frase: string): string {
   const f = frase.toLowerCase()
+  if (/\bcadastr/.test(f)) return 'Fazer meu cadastro'
   if (/\bmontar\b/.test(f)) return 'Montar meu pedido'
   if (/\bcompletar\b/.test(f)) return 'Completar meu pedido'
   if (/\bconfirmar\b/.test(f)) return 'Confirmar meu pedido'
@@ -92,6 +93,8 @@ function assinatura(): string {
 
 const SAUDACAO_RE = /^(oi|olá|ola|bom dia|boa tarde|boa noite|prazer)\b/i
 const ASSINATURA_RE = /^[—–-]?\s*luigi\s*,?\s*(da\s+)?confeccione\.?$/i
+/** Frase de saída ("pra não receber mais…"): fica como texto miúdo com link, nunca vira botão. */
+const OPT_OUT_RE = /n[aã]o (receber|quer(o|em)? mais)|descadastr|sair da lista/i
 
 /** O texto da régua vira o miolo do e-mail (sem envelope). */
 export function renderTextoLuigi(corpo: string): string {
@@ -112,6 +115,12 @@ export function renderTextoLuigi(corpo: string): string {
       return
     }
     const m = par.match(URL_RE)
+    if (m && OPT_OUT_RE.test(par)) {
+      const href = urlSegura(m[0])
+      const antes = par.replace(m[0], '').replace(/\s*:\s*$/, ':').trim()
+      partes.push(paragrafo(`${inline(antes)} <a href="${href}" style="color:${MUDO};text-decoration:underline;">clique aqui</a>.`, `font-size:13px;color:${MUDO};`))
+      return
+    }
     if (m) {
       const url = m[0]
       const frase = par.replace(url, '').replace(/\s*:\s*$/, '').replace(/\s{2,}/g, ' ').trim()

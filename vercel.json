@@ -31,6 +31,10 @@
     {
       "path": "/api/cron/reuniao-tarde",
       "schedule": "30 20 * * *"
+    },
+    {
+      "path": "/api/cron/captacao-pedidos",
+      "schedule": "0 12,18 * * 1-5"
     }
   ]
 }
