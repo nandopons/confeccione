@@ -83,11 +83,16 @@ export type NovaDecisao = {
   documento?: string | null
   reuniao_id?: string | null
   decidido_em?: string | null
-  origem: 'admin' | 'mcp'
+  origem: OrigemRegistro
 }
 
-export const TIPOS_REUNIAO = ['segunda', 'sexta', 'mensal', 'sessao'] as const
+// 'manha' e 'tarde' são as reuniões diárias pelo WhatsApp (07:00 e 17:30,
+// decisão D-7); 'segunda' segue sendo a reunião de placar.
+export const TIPOS_REUNIAO = ['segunda', 'sexta', 'mensal', 'sessao', 'manha', 'tarde'] as const
 export type TipoReuniao = (typeof TIPOS_REUNIAO)[number]
+
+/** Quem escreveu no diário: tela do admin, servidor MCP, agente no WhatsApp ou cron. */
+export type OrigemRegistro = 'admin' | 'mcp' | 'whatsapp' | 'cron'
 
 export type Pendencia = {
   descricao: string
@@ -119,7 +124,7 @@ export type NovaReuniao = {
   pendencias?: Pendencia[]
   placar_id?: string | null
   realizada_em?: string | null
-  origem: 'admin' | 'mcp'
+  origem: OrigemRegistro
 }
 
 const COLUNAS_DECISAO =
@@ -143,7 +148,7 @@ export async function calcularPlacar(referencia?: Date): Promise<Placar> {
 /** Tira a foto da semana. Regravar a mesma semana substitui a foto anterior —
  *  a segunda-feira de manhã é a foto "oficial"; as outras são rascunho. */
 export async function gravarPlacar(
-  origem: 'admin' | 'mcp' | 'cron',
+  origem: OrigemRegistro,
   observacoes?: string | null
 ): Promise<PlacarGravado> {
   const indicadores = await calcularPlacar()
@@ -315,6 +320,42 @@ export function normalizarPendencias(p: Pendencia[] | null | undefined): Pendenc
       prazo: x.prazo || null,
       feita: Boolean(x.feita),
     }))
+}
+
+export type PendenciaConcluida = { reuniao_id: string; reuniao: string; descricao: string }
+
+/** Marca como feita toda pendência aberta (das últimas atas) cuja descrição
+ *  contém o trecho informado. Devolve o que marcou — vazio se nada bateu. */
+export async function concluirPendencia(trecho: string, opts: { reuniaoId?: string | null; limite?: number } = {}): Promise<PendenciaConcluida[]> {
+  const termo = trecho.trim().toLowerCase()
+  if (termo.length < 3) return []
+
+  let q = supabaseAdmin
+    .from('reunioes')
+    .select('id, titulo, pendencias')
+    .order('realizada_em', { ascending: false })
+    .limit(Math.min(Math.max(opts.limite ?? 12, 1), 50))
+  if (opts.reuniaoId) q = q.eq('id', opts.reuniaoId)
+  const { data, error } = await q
+  if (error) throw new Error(`concluir pendência: ${error.message}`)
+
+  const concluidas: PendenciaConcluida[] = []
+  for (const r of (data ?? []) as Array<{ id: string; titulo: string; pendencias: Pendencia[] | null }>) {
+    const lista = normalizarPendencias(r.pendencias)
+    let mudou = false
+    for (const p of lista) {
+      if (!p.feita && p.descricao.toLowerCase().includes(termo)) {
+        p.feita = true
+        mudou = true
+        concluidas.push({ reuniao_id: r.id, reuniao: r.titulo, descricao: p.descricao })
+      }
+    }
+    if (mudou) {
+      const { error: upErr } = await supabaseAdmin.from('reunioes').update({ pendencias: lista }).eq('id', r.id)
+      if (upErr) throw new Error(`concluir pendência (gravar): ${upErr.message}`)
+    }
+  }
+  return concluidas
 }
 
 // ─── Filas (o que vira alerta) ──────────────────────────────────────────────

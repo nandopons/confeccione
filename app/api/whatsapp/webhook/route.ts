@@ -19,13 +19,16 @@
 // ============================================================================
 
 import crypto from 'crypto'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { baixarMidia, lerPayloadFeedbackNeg, QUICK_REPLY_ATENDENTE } from '@/app/lib/whatsapp-cloud'
 import { responderFeedbackNegociacao, responderPedidoAtendente } from '@/app/lib/whatsapp-notify'
+import { ehNumeroGestao, responderGestao } from '@/app/lib/gestao-whatsapp'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+// O agente de gestão roda em after(), depois do 200 pra Meta, e pode levar
+// dezenas de segundos consultando o diário — o limite cobre isso.
+export const maxDuration = 120
 
 // ---------------------------------------------------------------------------
 // GET — verificação do endpoint
@@ -288,26 +291,33 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
 
   const criadoEm = msg.timestamp ? new Date(Number(msg.timestamp) * 1000).toISOString() : new Date().toISOString()
 
-  const { error: insErr } = await supabaseAdmin.from('wa_mensagens').upsert(
-    {
-      conversa_id: conversaId,
-      wamid: msg.id,
-      direcao: 'entrada',
-      tipo,
-      corpo,
-      midia_path: midiaPath,
-      midia_mime: midiaMime,
-      midia_nome: midiaNome,
-      status: 'recebido',
-      payload: msg as unknown as Record<string, unknown>,
-      criado_em: criadoEm,
-    },
-    { onConflict: 'wamid', ignoreDuplicates: true }
-  )
+  const { data: inserida, error: insErr } = await supabaseAdmin
+    .from('wa_mensagens')
+    .upsert(
+      {
+        conversa_id: conversaId,
+        wamid: msg.id,
+        direcao: 'entrada',
+        tipo,
+        corpo,
+        midia_path: midiaPath,
+        midia_mime: midiaMime,
+        midia_nome: midiaNome,
+        status: 'recebido',
+        payload: msg as unknown as Record<string, unknown>,
+        criado_em: criadoEm,
+      },
+      { onConflict: 'wamid', ignoreDuplicates: true }
+    )
+    .select('id')
   if (insErr) {
     console.error('[wa-webhook] insert mensagem falhou', { wamid: msg.id, insErr })
     return
   }
+  // A Meta reentrega eventos quando a resposta demora: com o wamid já no
+  // banco, nada abaixo pode rodar de novo (contador de não lidas, respostas
+  // automáticas, agente de gestão).
+  if (!inserida || inserida.length === 0) return
 
   // Atualiza a conversa (preview, janela 24h, contador de não lidas)
   const { data: conv } = await supabaseAdmin.from('wa_conversas').select('nao_lidas').eq('id', conversaId).single()
@@ -332,6 +342,16 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
   const tituloBotao = (msg.button?.text ?? msg.interactive?.button_reply?.title ?? '').trim().toLowerCase()
   if (tituloBotao === QUICK_REPLY_ATENDENTE.toLowerCase()) {
     await responderPedidoAtendente(waId, nomePerfil ?? null)
+  }
+
+  // Reunião de gestão (D-7): mensagem do Fernando pro número oficial vira
+  // conversa com o agente. Roda depois do 200 pra Meta não reentregar.
+  if (ehNumeroGestao(waId)) {
+    after(() =>
+      responderGestao({ conversaId, waId, nome: nomePerfil ?? null, wamid: msg.id, criadoEm, tipo, corpo }).catch((err) =>
+        console.error('[wa-webhook] agente de gestão falhou', { err })
+      )
+    )
   }
 }
 

@@ -327,7 +327,7 @@ export async function notificarOfertaFornecedor(params: {
  * regra da Meta. Na dúvida (contato/conversa inexistentes, erro de consulta),
  * retorna false: template sempre entrega; texto livre fora da janela nunca.
  */
-async function janela24hAberta(waId: string): Promise<boolean> {
+export async function janela24hAberta(waId: string): Promise<boolean> {
   try {
     const { data: contato } = await supabaseAdmin.from('wa_contatos').select('id').eq('wa_id', waId).maybeSingle()
     if (!contato?.id) return false
@@ -537,7 +537,7 @@ export async function avisoOficial(params: {
  * (wa_mensagens + preview da conversa). Failure-soft: erro aqui nunca
  * desfaz um envio que já aconteceu.
  */
-async function registrarSaidaInbox(
+export async function registrarSaidaInbox(
   waId: string,
   nome: string | null,
   wamid: string | undefined,
