@@ -557,9 +557,16 @@ function lugarEntrega(perfil: PerfilBusca): string {
   return [perfil.cidade, perfil.uf].filter(Boolean).join('/') || 'Brasil'
 }
 
-export function textoSondagemWhatsApp(perfil: PerfilBusca, nomeConfeccao: string | null): string {
-  const oi = nomeConfeccao ? `Oi, ${nomeConfeccao}.` : 'Oi.'
-  return `${oi} Aqui é o Luigi, da Confeccione, em Recife. Temos um pedido de ${perfil.descricao} pra entregar em ${lugarEntrega(perfil)}${perfil.prazoDias ? `, prazo de ${perfil.prazoDias} dias` : ''}. Vocês produzem esse tipo de peça nessa quantidade? Se sim, respondo aqui com o resumo em PDF.`
+/**
+ * Abertura fria pelo WhatsApp — de propósito só "tirar uma dúvida" (ideia do
+ * Fernando, 08/09): o template curto passa melhor na Meta e puxa resposta; o
+ * pedido, o PDF e o convite pro cadastro vêm em texto livre, pelo Luigi,
+ * quando a confecção responde. Tem que bater com o corpo do template
+ * `sondagem_producao` ({{1}} = nome da confecção).
+ */
+export function textoSondagemWhatsApp(nomeConfeccao: string | null): string {
+  const oi = nomeConfeccao ? `Oi, ${nomeConfeccao}, tudo bem?` : 'Oi, tudo bem?'
+  return `${oi} Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês.`
 }
 
 export function assuntoSondagem(perfil: PerfilBusca): string {
@@ -646,17 +653,10 @@ export async function enviarSondagem(id: string, c: { nome: string | null; email
       erros.push('whatsapp: template de sondagem não configurado (WHATSAPP_TEMPLATE_SONDAGEM)')
     } else {
       const r = await enviarTemplate(c.whatsapp, TEMPLATE_SONDAGEM, 'pt_BR', [
-        {
-          type: 'body',
-          parameters: [
-            { type: 'text', text: (c.nome || 'pessoal').slice(0, 60) },
-            { type: 'text', text: perfil.descricao.slice(0, 120) },
-            { type: 'text', text: lugarEntrega(perfil).slice(0, 60) },
-          ],
-        },
+        { type: 'body', parameters: [{ type: 'text', text: (c.nome || 'pessoal').slice(0, 60) }] },
       ])
       whatsapp = r.ok
-      if (r.ok) await registrarSaidaInbox(c.whatsapp, c.nome, r.wamid, textoSondagemWhatsApp(perfil, c.nome), TEMPLATE_SONDAGEM, 'luigi')
+      if (r.ok) await registrarSaidaInbox(c.whatsapp, c.nome, r.wamid, textoSondagemWhatsApp(c.nome), TEMPLATE_SONDAGEM, 'luigi')
       else erros.push(`whatsapp: ${r.erro}`)
     }
   }
@@ -880,7 +880,7 @@ function promptCandidato(cand: CandidatoLinha, perfil: PerfilBusca | null, pdfJa
   const pedido = perfil
     ? `${perfil.descricao}, entrega em ${lugarEntrega(perfil)}${perfil.prazoDias ? `, prazo desejado de ${perfil.prazoDias} dias` : ''}. Peças: ${perfil.modelos.join(', ')}.${perfil.materiais.length ? ` Materiais: ${perfil.materiais.join(', ')}.` : ''}`
     : 'pedido não encontrado (o Fernando resolve)'
-  return `Você é o Luigi, da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções de todo o Brasil (sede em Recife). Está falando pelo WhatsApp oficial com uma CONFECÇÃO que a gente abordou por causa de um pedido sem fornecedor. Você já se apresentou na primeira mensagem; não se apresente de novo.
+  return `Você é o Luigi, da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções de todo o Brasil (sede em Recife). Está falando pelo WhatsApp oficial com uma CONFECÇÃO que a gente abordou por causa de um pedido sem fornecedor. A abertura foi só "Oi, tudo bem? Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês." — então, quando ela responder ("oi", "pode falar", "quem é?"), a sua PRIMEIRA mensagem é a dúvida em si, natural e direta: temos um pedido de X pra entregar em Y, vocês produzem esse tipo de peça nessa quantidade? Não se apresente de novo (o nome já foi dito), não repita a dúvida depois. Se perguntarem o que é a Confeccione: em uma linha, marketplace que traz pedidos de roupa pra confecções, com pagamento garantido e sem custo pra entrar — a plataforma só ganha comissão quando o pedido fecha.
 
 CONFECÇÃO: ${cand.nome ?? 'sem nome'}${[cand.cidade, cand.uf].filter(Boolean).length ? ` (${[cand.cidade, cand.uf].filter(Boolean).join('/')})` : ''}. Resposta registrada até agora: ${cand.resposta ?? 'nenhuma'}.
 
@@ -889,7 +889,7 @@ ${pdfJaEnviado ? 'O resumo em PDF já foi enviado nesta conversa.' : 'O resumo e
 
 COMO FUNCIONA PRA CONFECÇÃO: ela se cadastra na plataforma (${URL_CADASTRO_FORNECEDOR}, cinco minutos), a Confeccione aprova o cadastro e oferece o pedido; ela aceita, monta o orçamento pela plataforma e negocia com o cliente por lá; o cliente paga à Confeccione, o pagamento fica retido e é repassado depois da entrega. A Confeccione fica com uma comissão sobre o valor fechado. Não passamos o contato do cliente antes disso.
 
-O QUE FAZER: se ela disser que produz (sim, faz, consegue, manda os detalhes) → registrar_resposta interessado, mandar o PDF se ainda não foi, e dizer o próximo passo em uma linha (cadastro pelo link; depois de aprovado o pedido chega pra ela lá). Pergunte, uma coisa por vez, o que ajuda a fechar: prazo que conseguem e valor aproximado por peça. Se disser que não produz esse tipo de peça → registrar_resposta nao_produz e agradeça em uma linha; se não quiser agora ou não tem capacidade → registrar_resposta depois; se não quiser receber mais mensagens → registrar_resposta opt_out e confirme que não mandamos mais. Se perguntarem valor do cliente, contato do cliente, condições que não estão aqui, ou reclamarem → chamar_humano e diga que alguém da equipe continua. Não negocie preço, não prometa volume, não invente número.
+O QUE FAZER, nesta ordem e uma etapa por mensagem: (1) explicar a dúvida (o pedido) e perguntar se produzem; (2) se ela disser que produz (sim, faz, consegue, manda os detalhes) → registrar_resposta interessado e mandar o PDF com enviar_pdf_pedido, dizendo que ali está o resumo sem os dados do cliente; (3) puxar o que ajuda a fechar, uma pergunta por vez: prazo que conseguem e valor aproximado por peça; (4) só então induzir o cadastro, explicando o porquê em uma linha (é pela plataforma que o pedido chega pra ela, com o orçamento, a negociação e o pagamento garantido) e mandando o link. Não mande o link do cadastro antes de ela demonstrar interesse. Pergunte, uma coisa por vez, o que ajuda a fechar: prazo que conseguem e valor aproximado por peça. Se disser que não produz esse tipo de peça → registrar_resposta nao_produz e agradeça em uma linha; se não quiser agora ou não tem capacidade → registrar_resposta depois; se não quiser receber mais mensagens → registrar_resposta opt_out e confirme que não mandamos mais. Se perguntarem valor do cliente, contato do cliente, condições que não estão aqui, ou reclamarem → chamar_humano e diga que alguém da equipe continua. Não negocie preço, não prometa volume, não invente número.
 
 ESTILO: WhatsApp, 1 a 4 linhas, sem emoji, sem markdown, sem lista, sem botão, uma pergunta por vez, português direto de gente da equipe. Se perguntarem se você é robô, diga que é o assistente da equipe e que uma pessoa assume quando quiser.`
 }
