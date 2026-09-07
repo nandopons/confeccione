@@ -15,6 +15,9 @@
 -- sem cookie e sem token, então URL assinada não serviria.
 -- ============================================================================
 
+-- ATENÇÃO: a coluna se chama formato_email, e NÃO formato, porque `formato`
+-- já existia nesta tabela com outro significado (o formato da peça de mala
+-- direta: panfleto/catálogo/carta). Não reaproveitar aquele nome.
 alter table public.templates_marketing
   add column if not exists formato_email text not null default 'texto',
   add column if not exists blocos jsonb not null default '[]';
