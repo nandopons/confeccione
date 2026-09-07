@@ -16,10 +16,14 @@
 //   registrar_decisao / buscar_decisoes / atualizar_decisao
 //   registrar_reuniao / buscar_reunioes
 //   resumo_gestao                       → tudo que a reunião de segunda precisa
+//   templates_whatsapp                  → status dos templates na WABA
+//   criar_template_whatsapp             → submete template pra aprovação da
+//                                         Meta (configuração, exige confirmar)
 //
 // O QUE NÃO EXPÕE, de propósito: enviar mensagem, cobrar, mexer em pedido,
 // dinheiro. Ação com efeito externo entra em versão futura, uma por vez, com
-// confirmação explícita (nível N1 do mapa de autonomia).
+// confirmação explícita (nível N1 do mapa de autonomia). Criar template não
+// manda nada pra ninguém — é catálogo; por isso entrou na v1.1 (07/09).
 //
 // TRANSPORTE: Streamable HTTP em modo stateless (sem sessão, resposta JSON),
 // via WebStandardStreamableHTTPServerTransport da SDK oficial — cada POST
@@ -56,6 +60,7 @@ import {
   TEMAS_DECISAO,
   TIPOS_REUNIAO,
 } from '@/app/lib/diario'
+import { consultarTemplatesWhatsApp, criarTemplateWhatsApp } from '@/app/lib/whatsapp-templates'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -308,6 +313,51 @@ function criarServidor(): McpServer {
       annotations: SOMENTE_LEITURA,
     },
     async () => texto(await resumoGestao())
+  )
+
+  server.registerTool(
+    'templates_whatsapp',
+    {
+      title: 'Templates do WhatsApp na WABA',
+      description:
+        'Lista os templates de mensagem da WABA da Confeccione com status (APPROVED, PENDING, REJECTED e motivo), categoria e ' +
+        'corpo. Use pra saber quais aberturas estão aprovadas antes de propor um disparo, ou pra acompanhar uma submissão.',
+      inputSchema: {
+        nomes: z.array(z.string().min(3).max(512)).max(50).optional().describe('Filtra por nome exato (opcional).'),
+      },
+      annotations: SOMENTE_LEITURA,
+    },
+    async ({ nomes }) => {
+      const r = await consultarTemplatesWhatsApp(nomes)
+      return r.ok ? texto(r.templates) : erro(`Não deu pra consultar a WABA: ${r.erro}`)
+    }
+  )
+
+  server.registerTool(
+    'criar_template_whatsapp',
+    {
+      title: 'Submeter template do WhatsApp pra aprovação',
+      description:
+        'Submete um template de mensagem à Meta (WABA da Confeccione). É configuração de catálogo: não envia mensagem a ' +
+        'ninguém. Corpo com {{1}}, {{2}}… e um exemplo por variável. UTILITY precisa referir uma transação do cliente ' +
+        '(pedido, orçamento); a Meta pode reclassificar pra MARKETING. Só chame com confirmar=true depois de o Fernando ' +
+        'aprovar o texto nesta conversa.',
+      inputSchema: {
+        nome: z.string().min(3).max(512).describe('snake_case, ex.: duvida_pedido_manha'),
+        categoria: z.enum(['UTILITY', 'MARKETING']),
+        corpo: z.string().min(10).max(1024).describe('Texto com {{1}}, {{2}}… Sem emoji.'),
+        exemplos: z.array(z.string().min(1).max(200)).max(10).optional().describe('Um exemplo por variável, na ordem.'),
+        rodape: z.string().max(60).optional(),
+        permitir_troca_categoria: z.boolean().optional().describe('Padrão true.'),
+        confirmar: z.boolean().describe('Precisa ser true — o Fernando aprovou o texto.'),
+      },
+      annotations: REGISTRO,
+    },
+    async ({ nome, categoria, corpo, exemplos, rodape, permitir_troca_categoria, confirmar }) => {
+      if (!confirmar) return erro('Submissão não confirmada: peça a aprovação do texto e chame de novo com confirmar=true.')
+      const r = await criarTemplateWhatsApp({ nome, categoria, corpo, exemplos, rodape, permitirTrocaCategoria: permitir_troca_categoria })
+      return r.ok ? texto(r) : erro(`A Meta recusou a submissão de ${nome}: ${r.erro}`)
+    }
   )
 
   return server
