@@ -10,10 +10,17 @@
 // Janela de 24h: contada a partir da última mensagem RECEBIDA do contato.
 // Dentro → texto/mídia livres (conversa de serviço, grátis).
 // Fora   → só template aprovado (a UI troca o composer pelo seletor).
+//
+// Luigi (08/09/2026): o seletor no topo da lista escolhe o modo do agente de
+// atendimento — desligado, sugere (a resposta aparece pronta no composer, com
+// Usar / Descartar) ou responde sozinho (as bolhas dele levam a etiqueta
+// "Luigi"; quando ele chama gente, a conversa ganha a marca "Luigi chamou
+// você" até alguém responder por aqui).
 // ============================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type Diagnostico, diaCurto, estadoDoEnvio } from '@/app/lib/wa-saude'
+import { MODO_LUIGI_AJUDA, MODO_LUIGI_LABEL, MODOS_LUIGI, type ModoLuigi, type SugestaoLuigi } from '@/app/lib/luigi-catalogo'
 
 type Contato = {
   id: string
@@ -30,6 +37,8 @@ type Conversa = {
   arquivada: boolean
   ultima_mensagem_em: string | null
   ultima_msg_contato_em: string | null
+  /** O Luigi chamou gente e ninguém respondeu ainda. */
+  luigi_escalado_em?: string | null
   contato: Contato
 }
 
@@ -45,6 +54,8 @@ type Mensagem = {
   status: string
   erro: string | null
   template_nome: string | null
+  /** null = gente (ou sistema); 'luigi' | 'gestao' = agente. */
+  autor?: string | null
   criado_em: string
 }
 
@@ -448,6 +459,9 @@ export function WhatsAppInbox({
   const [rapidasAberto, setRapidasAberto] = useState(false)
   const [saude, setSaude] = useState<Diagnostico | null>(null)
   const [avisoFechado, setAvisoFechado] = useState(false)
+  const [modoLuigi, setModoLuigi] = useState<ModoLuigi | null>(null)
+  const [trocandoModo, setTrocandoModo] = useState(false)
+  const [sugestao, setSugestao] = useState<SugestaoLuigi | null>(null)
   // 0 até montar: no primeiro render (servidor e cliente) o relógio precisa
   // dar o mesmo resultado, senão a hidratação reclama.
   const [agora, setAgora] = useState(0)
@@ -544,6 +558,57 @@ export function WhatsAppInbox({
     }
   }, [])
 
+  // ------------------------------------------------------------------ Luigi
+  useEffect(() => {
+    let vivo = true
+    fetch('/api/admin/whatsapp/luigi', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((d: { modo?: ModoLuigi } | null) => {
+        if (vivo && d?.modo) setModoLuigi(d.modo)
+      })
+      .catch(() => { /* seletor fica sem valor; o inbox segue */ })
+    return () => {
+      vivo = false
+    }
+  }, [])
+
+  async function trocarModoLuigi(modo: ModoLuigi) {
+    if (trocandoModo) return
+    const anterior = modoLuigi
+    setModoLuigi(modo)
+    setTrocandoModo(true)
+    try {
+      const res = await fetch('/api/admin/whatsapp/luigi', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modo }),
+      })
+      if (!res.ok) {
+        setModoLuigi(anterior)
+        const data = await res.json().catch(() => null)
+        setErro(data?.erro ?? 'Não deu pra trocar o modo do Luigi')
+      }
+    } catch {
+      setModoLuigi(anterior)
+    } finally {
+      setTrocandoModo(false)
+    }
+  }
+
+  async function resolverSugestao(acao: 'usar' | 'descartar') {
+    if (!sugestao || !ativaId) return
+    const atual = sugestao
+    setSugestao(null)
+    if (acao === 'usar') setTexto(atual.texto)
+    try {
+      await fetch('/api/admin/whatsapp/luigi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sugestaoId: atual.id, conversaId: ativaId, acao }),
+      })
+    } catch { /* o próximo envio fecha a sugestão de qualquer jeito */ }
+  }
+
   // ---------------------------------------------------------------- thread
   const carregarMensagens = useCallback(async (conversaId: string, after?: string) => {
     try {
@@ -552,6 +617,9 @@ export function WhatsAppInbox({
       if (!res.ok || ativaIdRef.current !== conversaId) return
       const data = await res.json()
       const novas: Mensagem[] = data.mensagens ?? []
+      // Sugestão do Luigi (modo sugere) vem junto: null quando não há.
+      const s: SugestaoLuigi | null = data.luigi?.sugestao ?? null
+      setSugestao((prev) => (prev?.id === s?.id ? prev : s))
       if (after) {
         // `statuses` traz o estado atual das últimas mensagens — é por ele que
         // o ✓✓ de uma bolha que já está na tela muda sozinho.
@@ -583,6 +651,7 @@ export function WhatsAppInbox({
   useEffect(() => {
     if (!ativaId) return
     setMensagens([])
+    setSugestao(null)
     setCarregandoThread(true)
     setErro(null)
     carregarMensagens(ativaId).finally(() => setCarregandoThread(false))
@@ -761,6 +830,30 @@ export function WhatsAppInbox({
             <h1 className="text-[17px] font-semibold text-neutral-900">WhatsApp</h1>
             <p className="text-[12px] text-neutral-500 mb-3">Atendimento oficial (Cloud API)</p>
 
+            <div
+              className={
+                'mb-3 rounded-lg border px-3 py-2 ' +
+                (modoLuigi === 'responde' ? 'border-[#1D9E75]/40 bg-[#E1F5EE]/60' : modoLuigi === 'sugere' ? 'border-sky-200 bg-sky-50' : 'border-neutral-200 bg-neutral-50')
+              }
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-[12px] font-semibold text-neutral-800">Luigi</span>
+                <select
+                  value={modoLuigi ?? ''}
+                  disabled={modoLuigi === null || trocandoModo}
+                  onChange={(e) => trocarModoLuigi(e.target.value as ModoLuigi)}
+                  className="flex-1 rounded-md border border-neutral-200 bg-white px-2 py-1 text-[12.5px] text-neutral-900 outline-none focus:border-[#1D9E75] disabled:opacity-60"
+                  aria-label="Modo do Luigi"
+                >
+                  {modoLuigi === null && <option value="">…</option>}
+                  {MODOS_LUIGI.map((m) => (
+                    <option key={m} value={m}>{MODO_LUIGI_LABEL[m]}</option>
+                  ))}
+                </select>
+              </div>
+              {modoLuigi && <p className="mt-1.5 text-[11.5px] leading-snug text-neutral-600">{MODO_LUIGI_AJUDA[modoLuigi]}</p>}
+            </div>
+
             {saude && !saude.recibosOk && !avisoFechado && (
               <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
                 <div className="flex items-start gap-2">
@@ -847,6 +940,9 @@ export function WhatsAppInbox({
                         {c.contato.fornecedor_id && (
                           <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-violet-50 text-violet-700">Fornecedor</span>
                         )}
+                        {c.luigi_escalado_em && (
+                          <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">Luigi chamou você</span>
+                        )}
                       </div>
                     </button>
                   </li>
@@ -875,6 +971,11 @@ export function WhatsAppInbox({
                   </p>
                   <p className="text-[12px] text-neutral-500">{formatarTelefone(ativa.contato.wa_id)}</p>
                 </div>
+                {ativa.luigi_escalado_em && (
+                  <span className="hidden sm:inline text-[11px] font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-800" title="O Luigi passou esta conversa pra você. Some quando você responder.">
+                    Luigi chamou você
+                  </span>
+                )}
                 <span
                   className={
                     'text-[11px] font-medium px-2 py-1 rounded-full ' +
@@ -914,6 +1015,11 @@ export function WhatsAppInbox({
                               (saida ? 'bg-[#d9fdd3] text-neutral-900' : 'bg-white text-neutral-900')
                             }
                           >
+                            {saida && m.autor && (
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-[#0F6E56] mb-0.5">
+                                {m.autor === 'luigi' ? 'Luigi' : m.autor === 'gestao' ? 'Agente de gestão' : m.autor}
+                              </p>
+                            )}
                             <CorpoMensagem m={m} />
                             <div className="flex items-center justify-end gap-1 mt-0.5 -mb-0.5">
                               {m.erro && <span className="text-[11px] text-red-500 mr-1">{m.erro}</span>}
@@ -952,6 +1058,34 @@ export function WhatsAppInbox({
                   </div>
                 ) : (
                   <>
+                    {sugestao && (
+                      <div className="mb-2 rounded-xl border border-sky-200 bg-sky-50 px-3.5 py-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-sky-800">Luigi sugere</p>
+                          <span className="text-[11px] text-sky-700">{horaCurta(sugestao.criado_em)}</span>
+                        </div>
+                        <p className="mt-1.5 whitespace-pre-wrap text-[13.5px] text-neutral-900">{sugestao.texto}</p>
+                        {sugestao.escalado && (
+                          <p className="mt-2 rounded-lg bg-amber-100 px-2.5 py-1.5 text-[12px] text-amber-900">
+                            Luigi acha que isso é pra você{sugestao.motivo_escalada ? `: ${sugestao.motivo_escalada}` : ''}.
+                          </p>
+                        )}
+                        <div className="mt-2.5 flex gap-2">
+                          <button
+                            onClick={() => resolverSugestao('usar')}
+                            className="rounded-lg bg-[#1D9E75] px-3.5 py-1.5 text-[12.5px] font-semibold text-white hover:brightness-95"
+                          >
+                            Usar
+                          </button>
+                          <button
+                            onClick={() => resolverSugestao('descartar')}
+                            className="rounded-lg border border-neutral-200 bg-white px-3.5 py-1.5 text-[12.5px] font-medium text-neutral-700 hover:bg-neutral-50"
+                          >
+                            Descartar
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     {anexo && (
                       <div className="mb-2 flex items-center gap-2 rounded-lg bg-neutral-50 border border-neutral-200 px-3 py-2 text-[12.5px]">
                         <span aria-hidden>📎</span>

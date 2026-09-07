@@ -537,12 +537,18 @@ export async function avisoOficial(params: {
  * (wa_mensagens + preview da conversa). Failure-soft: erro aqui nunca
  * desfaz um envio que já aconteceu.
  */
+export type AutorSaida = 'luigi' | 'gestao'
+
+const PREFIXO_PREVIEW: Record<AutorSaida, string> = { luigi: 'Luigi', gestao: 'Agente' }
+
 export async function registrarSaidaInbox(
   waId: string,
   nome: string | null,
   wamid: string | undefined,
   corpo: string,
-  templateNome: string | null
+  templateNome: string | null,
+  /** Quem escreveu, quando não foi gente: aparece como etiqueta na bolha do inbox. */
+  autor: AutorSaida | null = null
 ): Promise<void> {
   try {
     const conversaId = await garantirConversa(waId, nome)
@@ -556,11 +562,12 @@ export async function registrarSaidaInbox(
       corpo,
       status: 'enviando',
       template_nome: templateNome,
+      autor,
       criado_em: agora,
     })
     await supabaseAdmin
       .from('wa_conversas')
-      .update({ preview: `Você: ${corpo.slice(0, 110)}`, ultima_mensagem_em: agora })
+      .update({ preview: `${autor ? PREFIXO_PREVIEW[autor] : 'Você'}: ${corpo.slice(0, 110)}`, ultima_mensagem_em: agora })
       .eq('id', conversaId)
   } catch (err) {
     console.error('[wa-notify] registro inbox saída falhou', { err })

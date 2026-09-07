@@ -24,10 +24,11 @@ import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { baixarMidia, lerPayloadFeedbackNeg, QUICK_REPLY_ATENDENTE } from '@/app/lib/whatsapp-cloud'
 import { responderFeedbackNegociacao, responderPedidoAtendente } from '@/app/lib/whatsapp-notify'
 import { ehNumeroGestao, responderGestao } from '@/app/lib/gestao-whatsapp'
+import { responderCliente } from '@/app/lib/luigi'
 
 export const dynamic = 'force-dynamic'
-// O agente de gestão roda em after(), depois do 200 pra Meta, e pode levar
-// dezenas de segundos consultando o diário — o limite cobre isso.
+// Os agentes (gestão e Luigi) rodam em after(), depois do 200 pra Meta, e
+// podem levar dezenas de segundos consultando o banco — o limite cobre isso.
 export const maxDuration = 120
 
 // ---------------------------------------------------------------------------
@@ -340,17 +341,33 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
   }
   // "Falar com atendente" (quick reply dos lembretes): confirma que alguém responde.
   const tituloBotao = (msg.button?.text ?? msg.interactive?.button_reply?.title ?? '').trim().toLowerCase()
-  if (tituloBotao === QUICK_REPLY_ATENDENTE.toLowerCase()) {
+  const pediuAtendente = tituloBotao === QUICK_REPLY_ATENDENTE.toLowerCase()
+  if (pediuAtendente) {
     await responderPedidoAtendente(waId, nomePerfil ?? null)
   }
 
+  // Agentes rodam depois do 200 pra Meta não reentregar.
   // Reunião de gestão (D-7): mensagem do Fernando pro número oficial vira
-  // conversa com o agente. Roda depois do 200 pra Meta não reentregar.
+  // conversa com o agente. Todo o resto é cliente (ou fornecedor, que o Luigi
+  // deixa pra gente): o Luigi decide sozinho pelo modo ligado no inbox.
   if (ehNumeroGestao(waId)) {
     after(() =>
       responderGestao({ conversaId, waId, nome: nomePerfil ?? null, wamid: msg.id, criadoEm, tipo, corpo }).catch((err) =>
         console.error('[wa-webhook] agente de gestão falhou', { err })
       )
+    )
+  } else {
+    after(() =>
+      responderCliente({
+        conversaId,
+        waId,
+        nome: nomePerfil ?? null,
+        wamid: msg.id,
+        criadoEm,
+        tipo,
+        corpo,
+        jaTratada: Boolean(feedback) || pediuAtendente,
+      }).catch((err) => console.error('[wa-webhook] Luigi falhou', { err }))
     )
   }
 }

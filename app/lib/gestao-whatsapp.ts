@@ -157,7 +157,7 @@ export async function enviarParaGestor(
     for (const parte of partes) {
       const r = await enviarTexto(waId, parte)
       if (!r.ok) return { ok: false, erro: r.erro }
-      await registrarSaidaInbox(waId, null, r.wamid, parte, null)
+      await registrarSaidaInbox(waId, null, r.wamid, parte, null, 'gestao')
       ultimo = { ok: true, wamid: r.wamid, template: null }
     }
     return ultimo
@@ -179,7 +179,8 @@ export async function enviarParaGestor(
     null,
     r.wamid,
     `Fernando, a pauta da reunião das ${abertura.hora} está pronta: ${resumo}. Responde aqui pra começarmos.`,
-    TEMPLATE_REUNIAO_GESTAO
+    TEMPLATE_REUNIAO_GESTAO,
+    'gestao'
   )
   return { ok: true, wamid: r.wamid, template: TEMPLATE_REUNIAO_GESTAO }
 }
@@ -453,6 +454,8 @@ FONTE DE VERDADE: o diário de bordo, pelas ferramentas. Nunca invente número �
 
 O QUE VOCÊ PODE: ler placar, filas, funil por etapa, decisões e atas; registrar decisão, ata, pendência concluída, foto do placar, motivo de parada de um pedido; e ENCERRAR um pedido como perdido quando o Fernando decidir (D-8) — sempre com motivo, e só depois de ele confirmar nesta conversa qual pedido e qual motivo (confirme em uma linha antes de chamar encerrar_pedido). O QUE VOCÊ NÃO PODE: mandar mensagem a cliente ou fornecedor, cobrar, mudar oferta ou orçamento, gastar dinheiro. Se ele pedir algo assim, diga em uma linha o que faria e que a execução é dele ou do Cowork (Claude no computador), e registre como pendência.
 
+LUIGI: o agente de atendimento responde os clientes no WhatsApp oficial sozinho (modo escolhido no topo do inbox: desligado, sugere, responde). Quando ele chama gente (preço, reclamação, fora do pedido), a conversa aparece em conversas_sem_resposta com luigi_chamou=true e o Fernando recebe "Luigi chamou você: …" nesta conversa. Quem responde ao cliente é o Fernando, pelo inbox — você só aponta.
+
 ETAPAS DO PEDIDO (D-8, calculadas no banco): captado (contato sem peça completa) → pedido_completo (não clicou em Buscar fornecedor) → buscando_fornecedor → sem_fornecedor (24 h, alerta) → em_negociacao (aos 3 dias, perguntar ao cliente se a conversa deu certo) → orcamento_atrasado (7 dias, alerta) → aguardando_pagamento → sem_resposta (3 dias, alerta) → orcamento_vencido (21 dias) → pago → em_producao → pronto → entregue → finalizado; inativo (30 dias sem toque); encerrado (perdido, com motivo) e cancelado. Use funil_etapas pra foto e pedidos_por_etapa pra nomes.
 
 REGISTRO: só grave decisão quando o Fernando decidir de forma explícita ("vamos fazer X", "decidido", "fica assim"); se houver dúvida, confirme em uma linha antes. No fim da reunião (ele diz "fechamos", "é isso", "pode registrar" ou pede a ata) grave a ata com registrar_reuniao (tipo manha ou tarde conforme a hora; sessao fora delas) com resumo curto e pendências com dono e prazo, e marque com concluir_pendencia o que ele disser que fez.
@@ -636,7 +639,7 @@ export async function responderGestao(params: {
   if (!temTexto) {
     const aviso = 'Por enquanto só leio texto. Me manda escrito?'
     const r = await enviarTexto(waId, aviso)
-    if (r.ok) await registrarSaidaInbox(waId, params.nome, r.wamid, aviso, null)
+    if (r.ok) await registrarSaidaInbox(waId, params.nome, r.wamid, aviso, null, 'gestao')
     await gravarLog({ ...base, resposta: aviso, ferramentas: [], rodadas: 0, tokens_entrada: 0, tokens_saida: 0, duracao_ms: Date.now() - inicio, enviado: r.ok, erro: r.ok ? null : r.erro })
     return
   }
@@ -690,7 +693,7 @@ export async function responderGestao(params: {
         break
       }
       enviado = true
-      await registrarSaidaInbox(waId, params.nome, envio.wamid, parte, null)
+      await registrarSaidaInbox(waId, params.nome, envio.wamid, parte, null, 'gestao')
     }
 
     await gravarLog({
@@ -709,7 +712,7 @@ export async function responderGestao(params: {
     console.error('[gestao-wa] responderGestao falhou', { erro })
     const aviso = 'Não consegui responder agora (erro interno). Tenta de novo em um minuto.'
     const r = await enviarTexto(waId, aviso)
-    if (r.ok) await registrarSaidaInbox(waId, params.nome, r.wamid, aviso, null)
+    if (r.ok) await registrarSaidaInbox(waId, params.nome, r.wamid, aviso, null, 'gestao')
     await gravarLog({ ...base, resposta: null, ferramentas: [], rodadas: 0, tokens_entrada: 0, tokens_saida: 0, duracao_ms: Date.now() - inicio, enviado: false, erro })
   }
 }

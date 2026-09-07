@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   let query = supabaseAdmin
     .from('wa_conversas')
     .select(
-      `id, preview, nao_lidas, arquivada, ultima_mensagem_em, ultima_msg_contato_em,
+      `id, preview, nao_lidas, arquivada, ultima_mensagem_em, ultima_msg_contato_em, luigi_escalado_em,
        contato:wa_contatos!inner (id, wa_id, nome, cliente_id, fornecedor_id)`
     )
     .order('ultima_mensagem_em', { ascending: false, nullsFirst: false })

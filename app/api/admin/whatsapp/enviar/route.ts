@@ -28,6 +28,7 @@ import {
   type EnvioResultado,
   type MidiaTipo,
 } from '@/app/lib/whatsapp-cloud'
+import { humanoRespondeu } from '@/app/lib/luigi'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -120,6 +121,10 @@ async function registrarSaida(params: {
     .from('wa_conversas')
     .update({ preview: `Você: ${preview}`, ultima_mensagem_em: agora })
     .eq('id', conversaId)
+
+  // Gente respondeu: a escalada do Luigi está atendida e a sugestão
+  // pendente (se ainda houver) foi superada.
+  if (resultado.ok) await humanoRespondeu(conversaId)
 
   return msg?.id as string | undefined
 }
