@@ -201,6 +201,23 @@ const SECOES: Secao[] = [
       },
     ],
   },
+  {
+    titulo: 'Gestão',
+    itens: [
+      {
+        // Placar semanal, decisões e atas — a memória de gestão. Mesma lib que
+        // alimenta o servidor MCP (/api/mcp): o que se lê aqui é o que o
+        // assistente lê antes de uma reunião.
+        href: '/admin/diario',
+        label: 'Diário de bordo',
+        icone: (
+          <Ico
+            d="M4 4h12l4 4v12H4z M8 4v4h8 M8 13h8M8 17h5"
+          />
+        ),
+      },
+    ],
+  },
 ]
 
 const LogoMarca = (
