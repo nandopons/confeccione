@@ -19,6 +19,12 @@
 //   templates_whatsapp                  → status dos templates na WABA
 //   criar_template_whatsapp             → submete template pra aprovação da
 //                                         Meta (configuração, exige confirmar)
+//   enviar_pauta_gestao                 → pauta da reunião pro WhatsApp do
+//                                         gestor (D-7, exige confirmar)
+//   funil_etapas / pedidos_por_etapa    → a etapa de cada pedido (D-8)
+//   registrar_motivo_parada             → por que o cliente parou
+//   encerrar_pedido                     → perdido, com motivo (D-8, exige
+//                                         confirmar; pago não se encerra)
 //
 // O QUE NÃO EXPÕE, de propósito: enviar mensagem, cobrar, mexer em pedido,
 // dinheiro. Ação com efeito externo entra em versão futura, uma por vez, com
@@ -62,6 +68,15 @@ import {
 } from '@/app/lib/diario'
 import { consultarTemplatesWhatsApp, criarTemplateWhatsApp } from '@/app/lib/whatsapp-templates'
 import { enviarPauta, numerosGestao } from '@/app/lib/gestao-whatsapp'
+import {
+  acharPedido,
+  contagemPorEtapa,
+  encerrarPedido,
+  ETAPAS,
+  MOTIVOS_ENCERRAMENTO,
+  pedidosPorEtapa,
+  registrarMotivoParada,
+} from '@/app/lib/etapas-pedido'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -103,7 +118,7 @@ const DataISO = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'use AAAA-MM-DD')
 
 function criarServidor(): McpServer {
-  const server = new McpServer({ name: 'confeccione', version: '1.0.0' })
+  const server = new McpServer({ name: 'confeccione', version: '1.2.0' })
 
   server.registerTool(
     'ler_placar',
@@ -358,6 +373,105 @@ function criarServidor(): McpServer {
       if (!confirmar) return erro('Submissão não confirmada: peça a aprovação do texto e chame de novo com confirmar=true.')
       const r = await criarTemplateWhatsApp({ nome, categoria, corpo, exemplos, rodape, permitirTrocaCategoria: permitir_troca_categoria })
       return r.ok ? texto(r) : erro(`A Meta recusou a submissão de ${nome}: ${r.erro}`)
+    }
+  )
+
+  server.registerTool(
+    'funil_etapas',
+    {
+      title: 'Funil: pedidos por etapa',
+      description:
+        'Quantos pedidos do site estão em cada etapa (view pedidos_assistente_etapas, D-8): captado, pedido_completo, inativo, ' +
+        'buscando_fornecedor, sem_fornecedor, em_negociacao, orcamento_atrasado, aguardando_pagamento, sem_resposta, ' +
+        'orcamento_vencido, pago, em_producao, pronto, entregue, finalizado, encerrado, cancelado — com o valor somado.',
+      inputSchema: {},
+      annotations: SOMENTE_LEITURA,
+    },
+    async () => texto(await contagemPorEtapa())
+  )
+
+  server.registerTool(
+    'pedidos_por_etapa',
+    {
+      title: 'Pedidos numa etapa',
+      description:
+        'Lista os pedidos que estão na(s) etapa(s) pedida(s), do mais tempo parado pro mais recente: nome, telefone, valor, ' +
+        'desde quando está na etapa, última mensagem do cliente, motivo de parada. Use pra montar régua, fila ou cobrança.',
+      inputSchema: {
+        etapas: z.array(z.enum(ETAPAS)).min(1).max(6),
+        limite: z.number().int().min(1).max(200).optional().describe('Padrão 50.'),
+      },
+      annotations: SOMENTE_LEITURA,
+    },
+    async ({ etapas, limite }) => {
+      const lista = await pedidosPorEtapa(etapas, limite ?? 50)
+      return texto(
+        lista.map((p) => ({
+          id: p.id,
+          codigo: p.codigo,
+          nome: p.nome,
+          telefone: p.telefone,
+          email: p.email,
+          uf: p.uf,
+          etapa: p.etapa,
+          desde: p.desde,
+          valor_centavos: p.valor_centavos,
+          ultimo_contato_cliente_em: p.ultimo_contato_cliente_em,
+          motivo_parada: p.motivo_parada,
+          ofertas_no_ar: p.ofertas_no_ar,
+          ofertas_recusadas: p.ofertas_recusadas,
+          peca_completa: p.peca_completa,
+        }))
+      )
+    }
+  )
+
+  server.registerTool(
+    'registrar_motivo_parada',
+    {
+      title: 'Registrar por que o cliente parou',
+      description:
+        'Grava, no pedido, o motivo pelo qual o cliente não avançou (esperando data, achou caro, não gostou do fornecedor…), ' +
+        'sem encerrar: o pedido continua aberto e o motivo vira número no placar. Referência = código (2026090…), número ou id.',
+      inputSchema: {
+        pedido: z.string().min(3).max(60).describe('Código, número ou id do pedido.'),
+        motivo: z.string().min(3).max(500),
+      },
+      annotations: REGISTRO,
+    },
+    async ({ pedido, motivo }) => {
+      const p = await acharPedido(pedido)
+      if (!p) return erro(`Pedido "${pedido}" não encontrado.`)
+      const r = await registrarMotivoParada(p.id, motivo)
+      return texto({ id: r.id, codigo: r.codigo, nome: r.nome, etapa: r.etapa, motivo_parada: r.motivo_parada })
+    }
+  )
+
+  server.registerTool(
+    'encerrar_pedido',
+    {
+      title: 'Encerrar pedido como perdido',
+      description:
+        'Dá o pedido como perdido, com motivo (achou_caro, data, atendimento, sumiu, outro). Só por decisão do Fernando nesta ' +
+        'conversa (D-8): chame com confirmar=true depois de ele confirmar. Pedido pago não se encerra. Dá pra reabrir pelo admin.',
+      inputSchema: {
+        pedido: z.string().min(3).max(60).describe('Código, número ou id do pedido.'),
+        motivo: z.enum(MOTIVOS_ENCERRAMENTO),
+        observacao: z.string().max(500).optional(),
+        confirmar: z.boolean().describe('Precisa ser true — o Fernando confirmou.'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    async ({ pedido, motivo, observacao, confirmar }) => {
+      if (!confirmar) return erro('Encerramento não confirmado: confirme com o Fernando e chame de novo com confirmar=true.')
+      const p = await acharPedido(pedido)
+      if (!p) return erro(`Pedido "${pedido}" não encontrado.`)
+      try {
+        const r = await encerrarPedido(p.id, motivo, 'mcp', observacao ?? null)
+        return texto({ id: r.id, codigo: r.codigo, nome: r.nome, etapa: r.etapa, encerrado_motivo: r.encerrado_motivo })
+      } catch (e) {
+        return erro(e instanceof Error ? e.message : String(e))
+      }
     }
   )
 

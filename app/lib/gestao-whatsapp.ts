@@ -12,11 +12,13 @@
 //      conversa vira contexto, o Claude consulta o diário pelas ferramentas
 //      abaixo, responde curto e a resposta sai pela Cloud API.
 //
-// O que o agente pode fazer aqui: LER (placar, filas, decisões, atas) e
-// REGISTRAR (decisão, ata, pendência feita, foto do placar). O que ele NÃO
-// pode: mandar mensagem a cliente ou fornecedor, cobrar, mexer em pedido —
-// não existe ferramenta pra isso, de propósito (níveis de autonomia, seção 3
-// do sistema operacional). Só responde a números da allowlist.
+// O que o agente pode fazer aqui: LER (placar, filas, funil por etapa,
+// decisões, atas) e REGISTRAR (decisão, ata, pendência feita, foto do placar,
+// motivo de parada) — e, por decisão explícita do Fernando na conversa,
+// ENCERRAR um pedido como perdido com motivo (D-8). O que ele NÃO pode: mandar
+// mensagem a cliente ou fornecedor, cobrar, mudar oferta ou orçamento — não
+// existe ferramenta pra isso, de propósito (níveis de autonomia, seção 3 do
+// sistema operacional). Só responde a números da allowlist.
 //
 // Cada resposta fica em gestao_whatsapp_log (mensagem, resposta, ferramentas,
 // tokens, erro): é o que permite treinar o agente lendo onde ele errou.
@@ -42,6 +44,18 @@ import {
   type Pendencia,
   type TipoReuniao,
 } from './diario'
+import {
+  acharPedido,
+  contagemPorEtapa,
+  encerrarPedido,
+  ETAPAS,
+  INFO_ETAPA,
+  MOTIVOS_ENCERRAMENTO,
+  pedidosPorEtapa,
+  registrarMotivoParada,
+  type Etapa,
+  type MotivoEncerramento,
+} from './etapas-pedido'
 
 const MODELO = 'claude-sonnet-4-6'
 const MAX_RODADAS = 6
@@ -270,6 +284,50 @@ const FERRAMENTAS: Anthropic.Messages.Tool[] = [
     description: 'Tira a foto da semana (placar_semanal). Use na reunião de segunda ou quando o Fernando pedir; regravar substitui a foto da semana.',
     input_schema: { type: 'object', properties: { observacoes: { type: 'string' } } },
   },
+  {
+    name: 'funil_etapas',
+    description:
+      'Quantos pedidos do site estão em cada etapa (captado, pedido_completo, inativo, buscando_fornecedor, sem_fornecedor, ' +
+      'em_negociacao, orcamento_atrasado, aguardando_pagamento, sem_resposta, orcamento_vencido, pago, em_producao, pronto, ' +
+      'entregue, finalizado, encerrado, cancelado) com valor somado. A foto do funil.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'pedidos_por_etapa',
+    description: 'Lista os pedidos numa ou mais etapas, do mais tempo parado pro mais recente: nome, telefone, valor, desde quando, última mensagem do cliente, motivo de parada.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        etapas: { type: 'array', items: { type: 'string', enum: [...ETAPAS] }, minItems: 1, maxItems: 6 },
+        limite: { type: 'integer', minimum: 1, maximum: 100 },
+      },
+      required: ['etapas'],
+    },
+  },
+  {
+    name: 'registrar_motivo_parada',
+    description: 'Grava no pedido por que o cliente parou (esperando data, achou caro, não gostou do fornecedor…) sem encerrar. Referência = código, número ou id do pedido.',
+    input_schema: {
+      type: 'object',
+      properties: { pedido: { type: 'string' }, motivo: { type: 'string', minLength: 3, maxLength: 500 } },
+      required: ['pedido', 'motivo'],
+    },
+  },
+  {
+    name: 'encerrar_pedido',
+    description:
+      'Dá o pedido como perdido, com motivo (achou_caro, data, atendimento, sumiu, outro). SÓ depois de o Fernando confirmar ' +
+      'explicitamente nesta conversa qual pedido e qual motivo. Pedido pago não se encerra. Dá pra reabrir no admin.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pedido: { type: 'string', description: 'Código (2026090…), número ou id.' },
+        motivo: { type: 'string', enum: [...MOTIVOS_ENCERRAMENTO] },
+        observacao: { type: 'string', maxLength: 500 },
+      },
+      required: ['pedido', 'motivo'],
+    },
+  },
 ]
 
 type Entrada = Record<string, unknown>
@@ -341,6 +399,44 @@ async function executarFerramenta(nome: string, entrada: Entrada): Promise<unkno
       const p = await gravarPlacar('whatsapp', str(entrada.observacoes) ?? null)
       return { id: p.id, semana_inicio: p.semana_inicio, gerado_em: p.gerado_em }
     }
+    case 'funil_etapas':
+      return (await contagemPorEtapa()).map((f) => ({ ...f, label: INFO_ETAPA[f.etapa].label, valor: reais(f.valor_centavos) }))
+    case 'pedidos_por_etapa': {
+      const etapas = (Array.isArray(entrada.etapas) ? entrada.etapas : []).filter((e): e is Etapa => (ETAPAS as readonly string[]).includes(String(e)))
+      if (etapas.length === 0) throw new Error('informe ao menos uma etapa válida')
+      const lista = await pedidosPorEtapa(etapas, num(entrada.limite) ?? 30)
+      return lista.map((p) => ({
+        codigo: p.codigo,
+        nome: p.nome,
+        telefone: p.telefone,
+        uf: p.uf,
+        etapa: p.etapa,
+        desde: p.desde,
+        valor: p.valor_centavos != null ? reais(p.valor_centavos) : null,
+        ultimo_contato_cliente_em: p.ultimo_contato_cliente_em,
+        motivo_parada: p.motivo_parada,
+        ofertas_no_ar: p.ofertas_no_ar,
+        ofertas_recusadas: p.ofertas_recusadas,
+      }))
+    }
+    case 'registrar_motivo_parada': {
+      const ref = str(entrada.pedido)
+      const motivo = str(entrada.motivo)
+      if (!ref || !motivo) throw new Error('pedido e motivo são obrigatórios')
+      const p = await acharPedido(ref)
+      if (!p) throw new Error(`pedido "${ref}" não encontrado`)
+      const r = await registrarMotivoParada(p.id, motivo)
+      return { codigo: r.codigo, nome: r.nome, etapa: r.etapa, motivo_parada: r.motivo_parada }
+    }
+    case 'encerrar_pedido': {
+      const ref = str(entrada.pedido)
+      const motivo = str(entrada.motivo) as MotivoEncerramento | undefined
+      if (!ref || !motivo || !(MOTIVOS_ENCERRAMENTO as readonly string[]).includes(motivo)) throw new Error('pedido e motivo válido são obrigatórios')
+      const p = await acharPedido(ref)
+      if (!p) throw new Error(`pedido "${ref}" não encontrado`)
+      const r = await encerrarPedido(p.id, motivo, 'gestor_whatsapp', str(entrada.observacao) ?? null)
+      return { codigo: r.codigo, nome: r.nome, etapa: r.etapa, encerrado_motivo: r.encerrado_motivo }
+    }
     default:
       throw new Error(`ferramenta desconhecida: ${nome}`)
   }
@@ -355,11 +451,13 @@ RITUAL (decisão D-7): duas reuniões por dia por esta conversa. 07:00 — fila 
 
 FONTE DE VERDADE: o diário de bordo, pelas ferramentas. Nunca invente número — se não consultou, consulte. Na primeira mensagem de uma reunião chame resumo_gestao. Se a sua última mensagem foi só o aviso de que a pauta está pronta, a primeira resposta é a pauta completa. Consulte buscar_decisoes antes de propor algo que pode já ter sido decidido.
 
-O QUE VOCÊ PODE: ler placar, filas, decisões e atas; registrar decisão, ata, pendência concluída e foto do placar. O QUE VOCÊ NÃO PODE: mandar mensagem a cliente ou fornecedor, cobrar, mexer em pedido, gastar dinheiro. Se ele pedir algo assim, diga em uma linha o que faria e que a execução é dele ou do Cowork (Claude no computador), e registre como pendência.
+O QUE VOCÊ PODE: ler placar, filas, funil por etapa, decisões e atas; registrar decisão, ata, pendência concluída, foto do placar, motivo de parada de um pedido; e ENCERRAR um pedido como perdido quando o Fernando decidir (D-8) — sempre com motivo, e só depois de ele confirmar nesta conversa qual pedido e qual motivo (confirme em uma linha antes de chamar encerrar_pedido). O QUE VOCÊ NÃO PODE: mandar mensagem a cliente ou fornecedor, cobrar, mudar oferta ou orçamento, gastar dinheiro. Se ele pedir algo assim, diga em uma linha o que faria e que a execução é dele ou do Cowork (Claude no computador), e registre como pendência.
+
+ETAPAS DO PEDIDO (D-8, calculadas no banco): captado (contato sem peça completa) → pedido_completo (não clicou em Buscar fornecedor) → buscando_fornecedor → sem_fornecedor (24 h, alerta) → em_negociacao → orcamento_atrasado (48 h, alerta) → aguardando_pagamento → sem_resposta (3 dias, alerta) → orcamento_vencido (21 dias) → pago → em_producao → pronto → entregue → finalizado; inativo (30 dias sem toque); encerrado (perdido, com motivo) e cancelado. Use funil_etapas pra foto e pedidos_por_etapa pra nomes.
 
 REGISTRO: só grave decisão quando o Fernando decidir de forma explícita ("vamos fazer X", "decidido", "fica assim"); se houver dúvida, confirme em uma linha antes. No fim da reunião (ele diz "fechamos", "é isso", "pode registrar" ou pede a ata) grave a ata com registrar_reuniao (tipo manha ou tarde conforme a hora; sessao fora delas) com resumo curto e pendências com dono e prazo, e marque com concluir_pendencia o que ele disser que fez.
 
-DECISÕES VIGENTES (detalhes em buscar_decisoes): D-1 WhatsApp só pela API oficial da Meta (Z-API desligada). D-2 sem SaaS de IA por cima do sistema: controle próprio, placar semanal, agentes por função com nível de autonomia. D-3 e-mail no motor próprio via Resend. D-4 MCP no lugar de iPaaS. D-5 memória de gestão no Supabase (placar, decisões, atas). D-6 mensagens de recuperação e cobrança no WhatsApp curtas, sem emoji, sem botão, pelo agente Luigi. D-7 esta reunião, 2x por dia.
+DECISÕES VIGENTES (detalhes em buscar_decisoes): D-1 WhatsApp só pela API oficial da Meta (Z-API desligada). D-2 sem SaaS de IA por cima do sistema: controle próprio, placar semanal, agentes por função com nível de autonomia. D-3 e-mail no motor próprio via Resend. D-4 MCP no lugar de iPaaS. D-5 memória de gestão no Supabase (placar, decisões, atas). D-6 mensagens de recuperação e cobrança no WhatsApp curtas, sem emoji, sem botão, pelo agente Luigi. D-7 esta reunião, 2x por dia. D-8 etapa única do pedido calculada no banco, prazos 24 h / 48 h / 3 d / 21 d / 30 d, encerrar só com motivo e por decisão dele.
 
 ESTILO: WhatsApp. Curto — de 2 a 8 linhas na maior parte das vezes; a pauta pode ter até 12. Português direto, sem preâmbulo, sem elogio, sem emoji. Sem markdown: nada de #, tabelas ou **; no máximo *negrito* em um número importante e linhas começando com "-". Valores em reais no formato brasileiro (R$ 1.234,56). Uma pergunta por vez. Quando não souber, diga. Quando a resposta for uma lista de pessoas ou pedidos, traga nome, valor e há quanto tempo. Termine a pauta com a pergunta do que ele quer atacar primeiro.`
 }

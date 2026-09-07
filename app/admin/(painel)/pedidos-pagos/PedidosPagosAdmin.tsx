@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
+import { INFO_ETAPA, MOTIVO_LABEL, MOTIVOS_ENCERRAMENTO, ehEtapa, type Etapa, type GrupoEtapa, type MotivoEncerramento } from '@/app/lib/etapas-pedido-catalogo'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 type Estampa = { posicao?: string | null; tamanho?: string | null }
@@ -40,6 +41,13 @@ type Pedido = {
   email?: string | null
   prazo_dias?: number | null
   atualizado_em?: string | null
+  // Etapa calculada no banco (view pedidos_assistente_etapas, D-8).
+  etapa?: Etapa | null
+  grupo?: GrupoEtapa | null
+  alerta?: boolean
+  desde?: string | null
+  encerrado_motivo?: MotivoEncerramento | null
+  motivo_parada?: string | null
   linhas: Linha[]
   ofertas: Oferta[]
 }
@@ -100,33 +108,58 @@ const STATUS_COR: Record<Oferta['status'], string> = {
   cancelada: 'bg-gray-100 text-gray-500',
 }
 
-type FiltroChip = 'todos' | 'ofertar' | 'oferta' | 'aceitos' | 'pagos' | 'finalizados' | 'incompletos' | 'cancelados'
+type FiltroChip = 'todos' | 'alertas' | 'entrada' | 'ofertar' | 'negociacao' | 'pagamento' | 'producao' | 'finalizados' | 'perdidos'
 const FILTROS: { id: FiltroChip; label: string }[] = [
   { id: 'todos', label: 'Todos' },
-  { id: 'ofertar', label: 'Para ofertar' },
-  { id: 'oferta', label: 'Em oferta' },
-  { id: 'aceitos', label: 'Aceitos' },
-  { id: 'pagos', label: 'Pagos' },
+  { id: 'alertas', label: '⚠ Alertas' },
+  { id: 'entrada', label: 'Entrada (captado, completo, inativo)' },
+  { id: 'ofertar', label: 'Fornecedor (ofertar)' },
+  { id: 'negociacao', label: 'Negociação' },
+  { id: 'pagamento', label: 'Pagamento' },
+  { id: 'producao', label: 'Produção' },
   { id: 'finalizados', label: 'Finalizados' },
-  { id: 'incompletos', label: 'Incompletos' },
-  { id: 'cancelados', label: 'Cancelados' },
+  { id: 'perdidos', label: 'Perdidos' },
 ]
 
+// A etapa vem do banco; o filtro só agrupa. Sem etapa (view indisponível),
+// cai no comportamento antigo por status.
 function casaFiltro(p: Pedido, f: FiltroChip): boolean {
-  const temAceita = p.ofertas.some((o) => o.status === 'aceita')
-  const temOfertada = p.ofertas.some((o) => o.status === 'ofertada')
-  const pago = p.pagamento_status === 'pago'
+  if (f === 'todos') return true
+  const e = p.etapa
+  if (!e) {
+    const temAceita = p.ofertas.some((o) => o.status === 'aceita')
+    const pago = p.pagamento_status === 'pago'
+    switch (f) {
+      case 'ofertar': return !p.orcamento_status && !temAceita && !pago && p.status !== 'cancelado'
+      case 'negociacao': return temAceita && !p.orcamento_status
+      case 'pagamento': return p.orcamento_status === 'definido' && !pago
+      case 'producao': return pago && !p.finalizado_em
+      case 'finalizados': return p.finalizado_em != null
+      case 'perdidos': return p.status === 'cancelado'
+      default: return false
+    }
+  }
   switch (f) {
-    case 'todos': return true
-    case 'ofertar': return !p.orcamento_status && !temAceita && !pago && p.status !== 'cancelado'
-    case 'oferta': return temOfertada
-    case 'aceitos': return temAceita
-    case 'pagos': return pago
-    case 'finalizados': return p.finalizado_em != null
-    case 'incompletos': return p.status !== 'completo' && p.status !== 'cancelado'
-    case 'cancelados': return p.status === 'cancelado'
+    case 'alertas': return Boolean(p.alerta)
+    case 'entrada': return p.grupo === 'entrada'
+    case 'ofertar': return p.grupo === 'fornecedor'
+    case 'negociacao': return p.grupo === 'negociacao'
+    case 'pagamento': return p.grupo === 'pagamento'
+    case 'producao': return p.grupo === 'producao'
+    case 'finalizados': return e === 'finalizado'
+    case 'perdidos': return p.grupo === 'perdido'
     default: return true
   }
+}
+
+function diasDesde(iso: string | null | undefined): number | null {
+  if (!iso) return null
+  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400_000))
+}
+
+/** Etapas em que faz sentido dar o pedido como perdido (nunca pago/fechado). */
+function podeEncerrar(e: Etapa | null | undefined): boolean {
+  return Boolean(e) && !['pago', 'em_producao', 'pronto', 'entregue', 'finalizado', 'encerrado', 'cancelado'].includes(e as string)
 }
 
 export default function PedidosPagosAdmin() {
@@ -148,6 +181,10 @@ export default function PedidosPagosAdmin() {
   const [entregaEdit, setEntregaEdit] = useState<string | null>(null)
   const [entregaForm, setEntregaForm] = useState<{ cep: string; numero: string; complemento: string }>({ cep: '', numero: '', complemento: '' })
   const [salvandoEntrega, setSalvandoEntrega] = useState(false)
+  // Encerrar (perdido) / motivo de parada — D-8
+  const [encerrando, setEncerrando] = useState<string | null>(null)
+  const [encForm, setEncForm] = useState<{ motivo: MotivoEncerramento; observacao: string }>({ motivo: 'sumiu', observacao: '' })
+  const [salvandoEnc, setSalvandoEnc] = useState(false)
   // Deep-link ?pedido=<id> (vindo do popup do Funil): traz o card pro TOPO da
   // lista, já expandido e destacado (scroll programático não é confiável aqui).
   const [fixado, setFixado] = useState<string | null>(null)
@@ -282,6 +319,70 @@ export default function PedidosPagosAdmin() {
     }
   }
 
+  async function encerrar(pedidoId: string) {
+    setSalvandoEnc(true)
+    setAviso(null)
+    try {
+      const r = await fetch('/api/admin/pedidos-pagos/encerrar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pedidoId, motivo: encForm.motivo, observacao: encForm.observacao || undefined }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.erro || 'Falha ao encerrar')
+      setAviso(`Pedido encerrado (${MOTIVO_LABEL[encForm.motivo].toLowerCase()}).`)
+      setEncerrando(null)
+      setEncForm({ motivo: 'sumiu', observacao: '' })
+      await carregar()
+    } catch (e) {
+      setAviso(e instanceof Error ? e.message : 'Erro')
+    } finally {
+      setSalvandoEnc(false)
+    }
+  }
+
+  async function reabrirEncerrado(pedidoId: string) {
+    if (!confirm('Reabrir este pedido? Ele volta pra etapa que tinha antes de ser encerrado.')) return
+    setAviso(null)
+    try {
+      const r = await fetch('/api/admin/pedidos-pagos/encerrar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pedidoId, desfazer: true }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.erro || 'Falha ao reabrir')
+      setAviso('Pedido reaberto.')
+      await carregar()
+    } catch (e) {
+      setAviso(e instanceof Error ? e.message : 'Erro')
+    }
+  }
+
+  async function salvarMotivoParada(pedidoId: string) {
+    const motivo = encForm.observacao.trim()
+    if (motivo.length < 3) { setAviso('Escreve o motivo em poucas palavras.'); return }
+    setSalvandoEnc(true)
+    setAviso(null)
+    try {
+      const r = await fetch('/api/admin/pedidos-pagos/motivo-parada', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pedidoId, motivo }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.erro || 'Falha ao registrar')
+      setAviso('Motivo registrado — o pedido continua aberto.')
+      setEncerrando(null)
+      setEncForm({ motivo: 'sumiu', observacao: '' })
+      await carregar()
+    } catch (e) {
+      setAviso(e instanceof Error ? e.message : 'Erro')
+    } finally {
+      setSalvandoEnc(false)
+    }
+  }
+
   async function abrir(id: string) {
     if (aberto === id) { setAberto(null); return }
     setAberto(id)
@@ -413,9 +514,22 @@ export default function PedidosPagosAdmin() {
                   {p.prazo_dias ? <div className="text-sm text-[#0F6E56]">⏱️ Prazo: {p.prazo_dias} dias (a partir do pagamento)</div> : null}
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  <span className={'text-xs px-2 py-1 rounded-full ' + (p.status === 'cancelado' ? 'bg-red-100 text-red-800 font-medium' : p.finalizado_em ? 'bg-[#0E1814] text-white' : p.pagamento_status === 'pago' ? 'bg-green-100 text-green-800' : p.orcamento_status === 'definido' ? 'bg-amber-100 text-amber-800' : p.orcamento_status === 'aguardando_fornecedor' ? 'bg-blue-100 text-blue-800' : p.status !== 'completo' ? 'bg-gray-100 text-gray-500' : 'bg-gray-100 text-gray-600')}>
-                    {p.status === 'cancelado' ? 'Cancelado pelo cliente' : p.finalizado_em ? '✅ Finalizado' : p.pagamento_status === 'pago' ? 'Pago' : p.orcamento_status === 'definido' ? 'Orçamento enviado' : p.orcamento_status === 'aguardando_fornecedor' ? 'Com fornecedor' : p.status !== 'completo' ? 'Incompleto' : 'Aguardando oferta'}
-                  </span>
+                  {ehEtapa(p.etapa) ? (
+                    <span className={'text-xs px-2 py-1 rounded-full ' + INFO_ETAPA[p.etapa].cor + (p.alerta ? ' font-semibold' : '')} title={INFO_ETAPA[p.etapa].descricao}>
+                      {p.alerta ? '⚠ ' : ''}{INFO_ETAPA[p.etapa].label}
+                      {diasDesde(p.desde) != null && diasDesde(p.desde)! > 0 ? ` · ${diasDesde(p.desde)} d` : ''}
+                    </span>
+                  ) : (
+                    <span className={'text-xs px-2 py-1 rounded-full ' + (p.status === 'cancelado' ? 'bg-red-100 text-red-800 font-medium' : p.finalizado_em ? 'bg-[#0E1814] text-white' : p.pagamento_status === 'pago' ? 'bg-green-100 text-green-800' : p.orcamento_status === 'definido' ? 'bg-amber-100 text-amber-800' : p.orcamento_status === 'aguardando_fornecedor' ? 'bg-blue-100 text-blue-800' : p.status !== 'completo' ? 'bg-gray-100 text-gray-500' : 'bg-gray-100 text-gray-600')}>
+                      {p.status === 'cancelado' ? 'Cancelado pelo cliente' : p.finalizado_em ? '✅ Finalizado' : p.pagamento_status === 'pago' ? 'Pago' : p.orcamento_status === 'definido' ? 'Orçamento enviado' : p.orcamento_status === 'aguardando_fornecedor' ? 'Com fornecedor' : p.status !== 'completo' ? 'Incompleto' : 'Aguardando oferta'}
+                    </span>
+                  )}
+                  {p.encerrado_motivo && (
+                    <span className="text-xs text-red-700">Perdido: {MOTIVO_LABEL[p.encerrado_motivo] ?? p.encerrado_motivo}</span>
+                  )}
+                  {p.motivo_parada && !p.encerrado_motivo && (
+                    <span className="text-xs text-gray-500 max-w-[16rem] text-right" title={p.motivo_parada}>Motivo: {p.motivo_parada}</span>
+                  )}
                   {aceita && (
                     <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">
                       Aceito por {aceita.fornecedor_nome || 'fornecedor'}
@@ -451,6 +565,19 @@ export default function PedidosPagosAdmin() {
                     {reabrindo === p.id ? 'Reabrindo…' : 'Reabrir e ofertar novamente'}
                   </button>
                 )}
+                {podeEncerrar(p.etapa) && (
+                  <button
+                    onClick={() => { setEncerrando((cur) => (cur === p.id ? null : p.id)); setEncForm({ motivo: 'sumiu', observacao: p.motivo_parada ?? '' }) }}
+                    className="text-sm px-3 py-1.5 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50"
+                  >
+                    {encerrando === p.id ? 'Fechar' : 'Motivo / encerrar…'}
+                  </button>
+                )}
+                {p.etapa === 'encerrado' && (
+                  <button onClick={() => reabrirEncerrado(p.id)} className="text-sm px-3 py-1.5 rounded-md border border-amber-300 text-amber-700 hover:bg-amber-50">
+                    Reabrir pedido encerrado
+                  </button>
+                )}
                 <button onClick={() => abrirEntrega(p)} className={'text-sm px-3 py-1.5 rounded-md border ' + (p.cep ? 'border-gray-200 text-gray-700 hover:bg-gray-50' : 'border-[#1D9E75]/40 text-[#0F6E56] hover:bg-[#E1F5EE]/60')}>
                   {p.cep ? '📍 Editar entrega' : '📍 Lançar CEP/endereço'}
                 </button>
@@ -473,6 +600,32 @@ export default function PedidosPagosAdmin() {
                   </button>
                 )}
               </div>
+              {encerrando === p.id && (
+                <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                  <div className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Por que o cliente parou?</div>
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      value={encForm.observacao}
+                      onChange={(e) => setEncForm((d) => ({ ...d, observacao: e.target.value.slice(0, 500) }))}
+                      placeholder="Em poucas palavras: esperando data, achou caro, não gostou do fornecedor…"
+                      className="flex-1 min-w-[220px] border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900"
+                    />
+                    <button onClick={() => void salvarMotivoParada(p.id)} disabled={salvandoEnc} className="text-sm px-3 py-1.5 rounded-md border border-gray-300 text-gray-700 hover:bg-white disabled:opacity-50">
+                      Só registrar o motivo
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 mt-2">
+                    <select value={encForm.motivo} onChange={(e) => setEncForm((d) => ({ ...d, motivo: e.target.value as MotivoEncerramento }))} className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-900">
+                      {MOTIVOS_ENCERRAMENTO.map((m) => <option key={m} value={m}>{MOTIVO_LABEL[m]}</option>)}
+                    </select>
+                    <button onClick={() => void encerrar(p.id)} disabled={salvandoEnc} className="text-sm px-3 py-1.5 rounded-md bg-red-700 text-white hover:bg-red-800 disabled:opacity-50">
+                      {salvandoEnc ? 'Salvando…' : 'Encerrar como perdido'}
+                    </button>
+                    <button onClick={() => setEncerrando(null)} className="text-sm text-gray-500 hover:text-gray-700 px-2">Cancelar</button>
+                    <span className="text-[11px] text-gray-400">Encerrar tira o pedido das filas e das réguas; dá pra reabrir.</span>
+                  </div>
+                </div>
+              )}
               {entregaEdit === p.id && (
                 <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
                   <div className="flex flex-wrap gap-2">

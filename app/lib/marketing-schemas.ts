@@ -7,7 +7,20 @@ import { z } from 'zod'
 
 export const CANAL_TEMPLATE = z.enum(['email', 'whatsapp', 'mala_direta'])
 export const FORMATO_PECA = z.enum(['panfleto', 'catalogo', 'carta', 'cartao_postal', 'brinde'])
-export const GATILHO = z.enum(['lead_novo', 'pedido_parado', 'pos_compra', 'lead_frio'])
+export const GATILHO = z.enum([
+  'lead_novo',
+  'pedido_parado',
+  'pos_compra',
+  'lead_frio',
+  // Por etapa do pedido (view pedidos_assistente_etapas, D-8): entra quem está
+  // na etapa há X dias; sai quando o pedido muda de etapa.
+  'etapa_captado',
+  'etapa_pedido_completo',
+  'etapa_sem_fornecedor',
+  'etapa_sem_resposta',
+  'etapa_orcamento_vencido',
+  'etapa_inativo',
+])
 
 export const TEMPLATE_PARAMS = z.object({
   corpo: z.array(z.string().max(300)).max(5),
