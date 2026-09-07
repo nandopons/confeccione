@@ -11,7 +11,7 @@
 // É daqui que a aba Automação puxa o conteúdo de cada passo do fluxo.
 // ============================================================================
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { CanalEnvio } from '@/app/lib/envio-marketing'
 import type { FormatoPeca, StatusTemplate, TemplateMarketing } from '@/app/lib/templates-marketing'
 import type { Bloco } from '@/app/lib/email-blocos'
@@ -254,6 +254,86 @@ export default function Templates({ iniciais }: { iniciais: TemplateMarketing[] 
 // Editor
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Prévia do template "só texto": o e-mail inteiro do Luigi, saído do mesmo
+ * renderizador do envio (email-luigi.ts) — saudação, botão no lugar do
+ * link, assinatura. Com "Enviar teste" pra ver no seu próprio e-mail.
+ */
+function PreviaTexto({ corpo, assunto }: { corpo: string; assunto: string }) {
+  const [html, setHtml] = useState('')
+  const [carregando, setCarregando] = useState(false)
+  const [teste, setTeste] = useState('')
+  const [msg, setMsg] = useState<string | null>(null)
+  const [enviando, setEnviando] = useState(false)
+
+  const previa = useCallback(async (c: string, a: string) => {
+    setCarregando(true)
+    try {
+      const r = await fetch('/api/admin/marketing/templates/previa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ corpo: c, assunto: a }),
+      })
+      const j = await r.json()
+      if (r.ok) setHtml(j.html as string)
+    } catch {
+      /* a prévia fica como estava */
+    } finally {
+      setCarregando(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const t = setTimeout(() => void previa(corpo, assunto), 400)
+    return () => clearTimeout(t)
+  }, [corpo, assunto, previa])
+
+  async function enviarTeste() {
+    if (!teste.includes('@')) return
+    setEnviando(true)
+    setMsg(null)
+    try {
+      const r = await fetch('/api/admin/marketing/templates/previa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ corpo, assunto, para: teste }),
+      })
+      const j = await r.json()
+      setMsg(r.ok ? `E-mail de teste enviado pra ${teste}.` : (j.erro as string))
+    } catch {
+      setMsg('Não deu pra enviar o teste.')
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+        Prévia {carregando && <span className="text-gray-300">· atualizando</span>}
+      </p>
+      <div className="border border-gray-200 rounded-lg overflow-hidden bg-[#F3F4F1]">
+        <iframe title="Prévia do e-mail" srcDoc={html} className="w-full h-[520px] border-0" sandbox="" />
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <input value={teste} onChange={(e) => setTeste(e.target.value)} placeholder="seu@email.com" className={CAMPO + ' flex-1 min-w-[160px]'} />
+        <button
+          type="button"
+          onClick={() => void enviarTeste()}
+          disabled={enviando || !teste.includes('@')}
+          className="border border-gray-200 hover:bg-gray-50 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50 whitespace-nowrap"
+        >
+          {enviando ? 'Enviando…' : 'Enviar teste'}
+        </button>
+      </div>
+      {msg && <p className="text-xs text-[#0F6E56] bg-[#E1F5EE] border border-[#1D9E75]/20 rounded-lg px-3 py-2">{msg}</p>}
+      <p className="text-[11px] text-gray-400">
+        O texto vira o e-mail do Luigi sozinho: a saudação fica em destaque, o parágrafo com <code className="bg-gray-100 px-1 rounded">#link</code> vira um botão verde e a linha final &quot;Luigi, da Confeccione&quot; vira a assinatura. O que você vê aqui é o que o lead recebe.
+      </p>
+    </div>
+  )
+}
+
 function ModalTemplate({
   template,
   canalPadrao,
@@ -339,9 +419,10 @@ function ModalTemplate({
 
   const titulo = template ? 'Editar template' : `Novo template de ${SUBABAS.find((s) => s.canal === canal)!.label}`
   const editorAberto = canal === 'email' && formatoEmail === 'blocos'
+  const previaTexto = canal === 'email' && formatoEmail === 'texto'
 
   return (
-    <Modal titulo={titulo} onFechar={onFechar} largo={editorAberto}>
+    <Modal titulo={titulo} onFechar={onFechar} largo={editorAberto || previaTexto}>
       <div className="space-y-3">
         <div className="grid sm:grid-cols-2 gap-3">
           <label className="text-xs text-gray-500">
@@ -446,24 +527,26 @@ function ModalTemplate({
         )}
 
         {!editorAberto && (
-        <label className="text-xs text-gray-500 block">
-          {canal === 'mala_direta'
-            ? 'Texto da peça / observações pra gráfica'
-            : canal === 'whatsapp' && oficial
-              ? 'Cópia do texto do template (guardada no histórico do lead)'
-              : 'Mensagem'}
-          <textarea value={corpo} onChange={(e) => setCorpo(e.target.value)} rows={7} className={CAMPO + ' resize-y'} />
-        </label>
-        )}
-
-        {!editorAberto && (
-        <p className="text-[11px] text-gray-400">
-          Marcadores: <code className="bg-gray-100 px-1 rounded">#nome</code> (primeiro nome),{' '}
-          <code className="bg-gray-100 px-1 rounded">#empresa</code>,{' '}
-          <code className="bg-gray-100 px-1 rounded">#cidade</code>,{' '}
-          <code className="bg-gray-100 px-1 rounded">#link</code> (pedido do lead no visualizador) e{' '}
-          <code className="bg-gray-100 px-1 rounded">#pedido</code> (só o id, pro botão de URL do template).
-        </p>
+        <div className={previaTexto ? 'grid lg:grid-cols-2 gap-4' : ''}>
+          <div className="space-y-2">
+            <label className="text-xs text-gray-500 block">
+              {canal === 'mala_direta'
+                ? 'Texto da peça / observações pra gráfica'
+                : canal === 'whatsapp' && oficial
+                  ? 'Cópia do texto do template (guardada no histórico do lead)'
+                  : 'Mensagem'}
+              <textarea value={corpo} onChange={(e) => setCorpo(e.target.value)} rows={previaTexto ? 16 : 7} className={CAMPO + ' resize-y'} />
+            </label>
+            <p className="text-[11px] text-gray-400">
+              Marcadores: <code className="bg-gray-100 px-1 rounded">#nome</code> (primeiro nome),{' '}
+              <code className="bg-gray-100 px-1 rounded">#empresa</code>,{' '}
+              <code className="bg-gray-100 px-1 rounded">#cidade</code>,{' '}
+              <code className="bg-gray-100 px-1 rounded">#link</code> (pedido do lead no visualizador) e{' '}
+              <code className="bg-gray-100 px-1 rounded">#pedido</code> (só o id, pro botão de URL do template).
+            </p>
+          </div>
+          {previaTexto && <PreviaTexto corpo={corpo} assunto={assunto} />}
+        </div>
         )}
 
         {erro && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{erro}</p>}

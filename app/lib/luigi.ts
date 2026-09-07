@@ -53,6 +53,7 @@ import {
 import { visualizadorPedidoUrl } from './url'
 import { FAQ_HOME } from '@/app/components/SegmentosEFaq'
 import { ehModoLuigi, type ModoLuigi, type SugestaoLuigi } from './luigi-catalogo'
+import { candidatoPeloWaId, responderCandidato } from './captacao-pedido'
 
 export * from './luigi-catalogo'
 
@@ -629,14 +630,28 @@ async function gravarLog(l: Log): Promise<string | null> {
  * Fernando no WhatsApp (fora dela, a marca no inbox e a pauta cobrem).
  */
 async function escalar(conversaId: string, contato: { nome: string | null; waId: string }, motivo: string, modo: ModoLuigi): Promise<void> {
+  await marcarEscalada(conversaId)
+  if (modo !== 'responde') return
+  const quem = contato.nome ? `${contato.nome} (${contato.waId})` : contato.waId
+  await avisarGestor(`Luigi chamou você: ${quem} — ${motivo}. Responde pelo inbox (/admin/whatsapp).`)
+}
+
+/** Marca a conversa com "Luigi chamou você" no inbox (some quando alguém responde por lá). */
+export async function marcarEscalada(conversaId: string): Promise<void> {
   try {
     await supabaseAdmin.from('wa_conversas').update({ luigi_escalado_em: new Date().toISOString() }).eq('id', conversaId)
   } catch (err) {
     console.error('[luigi] marcar escalada falhou', { err })
   }
-  if (modo !== 'responde') return
-  const quem = contato.nome ? `${contato.nome} (${contato.waId})` : contato.waId
-  const aviso = `Luigi chamou você: ${quem} — ${motivo}. Responde pelo inbox (/admin/whatsapp).`
+}
+
+/**
+ * Manda um aviso curto pro WhatsApp do gestor, só se a janela de 24 h com ele
+ * estiver aberta (fora dela, a marca no inbox e a pauta cobrem). Devolve se
+ * algum aviso saiu.
+ */
+export async function avisarGestor(aviso: string): Promise<boolean> {
+  let enviou = false
   for (const numero of numerosGestao()) {
     try {
       // O wa_id que a Meta usa pro gestor pode diferir do número da env (o 9º
@@ -645,13 +660,17 @@ async function escalar(conversaId: string, contato: { nome: string | null; waId:
       for (const gestor of await waIdsDoContato(numero)) {
         if (!(await janela24hAberta(gestor))) continue
         const r = await enviarTexto(gestor, aviso)
-        if (r.ok) await registrarSaidaInbox(gestor, null, r.wamid, aviso, null, 'luigi')
+        if (r.ok) {
+          enviou = true
+          await registrarSaidaInbox(gestor, null, r.wamid, aviso, null, 'luigi')
+        }
         break
       }
     } catch (err) {
       console.error('[luigi] aviso ao gestor falhou', { err })
     }
   }
+  return enviou
 }
 
 /** wa_ids gravados em wa_contatos pros mesmos 8 dígitos finais (o número da env primeiro). */
@@ -728,6 +747,16 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     if (params.jaTratada) return
     if (ehNumeroGestao(waId)) return
     if (['reaction', 'sticker', 'contacts', 'location', 'unknown'].includes(params.tipo)) return
+
+    // Confecção que a captação puxada pelo pedido abordou: é o agente de
+    // captação quem conversa (modo próprio em agentes_config), não o Luigi
+    // de cliente — a pessoa não tem pedido, tem uma sondagem pra responder.
+    const candidato = await candidatoPeloWaId(waId)
+    if (candidato) {
+      await dormir(ESPERA_MENSAGEM_SEGUINTE_MS)
+      await responderCandidato({ conversaId: params.conversaId, waId, nome: params.nome, wamid: params.wamid, corpo: params.corpo, candidato })
+      return
+    }
 
     const modo = await modoLuigi()
     if (modo === 'desligado') return

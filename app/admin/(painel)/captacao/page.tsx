@@ -9,6 +9,7 @@
 // - Tabela: status de cada contato na cadência
 
 import { useEffect, useState } from 'react'
+import CaptacaoPorPedido from './CaptacaoPorPedido'
 
 const SEGMENTOS = [
   { id: 'moda_praia', nome: 'Moda Praia' },
@@ -28,6 +29,7 @@ const STATUS_LABEL: Record<string, string> = {
   convertido: 'Cadastrado ✓',
   esgotado: 'Cadência encerrada',
   pausado: 'Pausado',
+  sugerido: 'Achado pela busca (a abordar)',
   erro: 'Erro',
 }
 
@@ -139,6 +141,10 @@ export default function CaptacaoPage() {
         Convide fornecedores garimpados a se cadastrar. Convite na hora, follow-ups
         automáticos (dias 5, 12 e 21).
       </p>
+
+      <CaptacaoPorPedido />
+
+      <h2 className="text-[17px] font-semibold text-gray-900 mb-3">Convite manual</h2>
 
       {/* seletor de modo */}
       <div className="flex gap-2 mb-4">

@@ -5,8 +5,10 @@
 
 import { formatarWhatsappBR } from './format'
 import { loginComEmailUrl, painelClientePedidoUrl } from './url'
+import { emailTextoLuigi } from './email-luigi'
 
-const RESEND_ENDPOINT = 'https://api.resend.com/emails'
+// Só pra teste local com um mock do Resend; em produção fica vazio.
+const RESEND_ENDPOINT = process.env.RESEND_ENDPOINT || 'https://api.resend.com/emails'
 const FROM = 'Confeccione <contato@confeccione.com.br>'
 const REPLY_TO = 'contato@confeccione.com.br'
 const SITE_URL = 'https://www.confeccione.com.br'
@@ -918,6 +920,43 @@ export async function emailLinkColeta(params: {
   })
 }
 
+// ─── Sondagem de produção (captação puxada pelo pedido) ────────
+// E-mail frio pra uma confecção encontrada na web: "vocês produzem X em
+// lote de N?", com o resumo do pedido em PDF (sem os dados do cliente) e o
+// link de saída no rodapé. Sai no envelope do Luigi. Devolve ok/erro pra
+// captacao_fornecedores registrar o que aconteceu.
+
+export async function emailSondagemProducao(params: {
+  para: string
+  assunto: string
+  /** Texto puro no estilo das réguas (vira o e-mail do Luigi). */
+  corpo: string
+  anexo: { nome: string; base64: string } | null
+}): Promise<{ ok: boolean; erro?: string }> {
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) return { ok: false, erro: 'RESEND_API_KEY ausente' }
+  if (!params.para.includes('@')) return { ok: false, erro: 'e-mail inválido' }
+  try {
+    const resp = await fetch(RESEND_ENDPOINT, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: FROM,
+        to: [params.para],
+        reply_to: REPLY_TO,
+        subject: params.assunto,
+        html: emailTextoLuigi(params.corpo, params.assunto, null),
+        text: params.corpo,
+        ...(params.anexo ? { attachments: [{ filename: params.anexo.nome, content: params.anexo.base64 }] } : {}),
+      }),
+    })
+    if (!resp.ok) return { ok: false, erro: `Resend ${resp.status}: ${(await resp.text()).slice(0, 200)}` }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, erro: err instanceof Error ? err.message : 'falha no envio' }
+  }
+}
+
 // ─── E-mail de marketing (campanhas) ───────────────────────────
 // Diferente dos e-mails transacionais acima: vai pra lista, então SEMPRE
 // carrega link de descadastro no rodapé e devolve ok/erro pra fila da
@@ -925,22 +964,6 @@ export async function emailLinkColeta(params: {
 
 export function linkDescadastro(leadId: string): string {
   return `${SITE_URL}/api/marketing/descadastrar?lead=${leadId}`
-}
-
-/** Converte o texto simples da campanha em HTML (parágrafos + links). */
-function corpoMarketingHtml(texto: string): string {
-  return texto
-    .split(/\n{2,}/)
-    .map((par) => {
-      const html = escapeHtml(par.trim())
-        .replace(/\n/g, '<br>')
-        .replace(
-          /(https?:\/\/[^\s<]+)/g,
-          '<a href="$1" style="color:#2563eb;text-decoration:none;">$1</a>'
-        )
-      return `<p style="margin:0 0 14px;">${html}</p>`
-    })
-    .join('')
 }
 
 /**
@@ -984,7 +1007,9 @@ export async function enviarEmailMarketing(params: {
     `<p style="margin:24px 0 0;font-size:12px;color:#9ca3af;">` +
     `Você recebe este e-mail porque se cadastrou ou pediu orçamento na Confeccione. ` +
     `<a href="${desc}" style="color:#9ca3af;text-decoration:underline;">Descadastrar</a>.</p>`
-  const conteudo = (params.html ?? corpoMarketingHtml(params.corpo)) + rodape
+  // Blocos: o template traz a própria diagramação. Texto: vira o e-mail do
+  // Luigi (email-luigi.ts) — saudação, botão no lugar do link, assinatura.
+  const html = params.html ? layoutMarketing(params.html + rodape, params.assunto) : emailTextoLuigi(params.corpo, params.assunto, desc)
 
   try {
     const resp = await fetch(RESEND_ENDPOINT, {
@@ -995,7 +1020,7 @@ export async function enviarEmailMarketing(params: {
         to: [params.para],
         reply_to: REPLY_TO,
         subject: params.assunto,
-        html: params.html ? layoutMarketing(conteudo, params.assunto) : layout(conteudo, params.assunto),
+        html,
         text: `${params.corpo}\n\n---\nDescadastrar: ${desc}`,
         headers: { 'List-Unsubscribe': `<${desc}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
       }),
