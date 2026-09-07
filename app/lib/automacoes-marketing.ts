@@ -398,6 +398,111 @@ function continuaElegivel(l: Lead, pedidos: Map<string, InfoPedido>, gatilho: Ga
 }
 
 // ─────────────────────────────────────────────────────────────
+// Detalhe (D-10): regras em texto e o que o fluxo faria agora, sem mandar nada
+// ─────────────────────────────────────────────────────────────
+
+export type DetalheAutomacao = {
+  /** Regras em texto, na ordem em que o motor aplica. */
+  regras: string[]
+  /** Quem entraria no fluxo na próxima rodada (ainda não inscrito). */
+  entrariam: Array<{ leadId: string; nome: string | null; telefone: string | null; email: string | null; etapa: string | null; diasNaEtapa: number | null; alcancavel: boolean }>
+  totalEntrariam: number
+  /** Quem já está dentro e tem passo vencido — receberia mensagem na próxima rodada. */
+  receberiamAgora: Array<{ leadId: string; nome: string | null; passoOrdem: number; enviados: number }>
+  totalReceberiamAgora: number
+  /** Quem está dentro esperando o próximo passo. */
+  aguardando: number
+  janelaAbertaAgora: boolean
+}
+
+export async function detalheAutomacao(id: string): Promise<DetalheAutomacao | null> {
+  const a = await obterAutomacao(id)
+  if (!a) return null
+
+  const [leads, pedidos] = await Promise.all([
+    listarLeadsCompleto({ ...a.publico, incluirOptOut: false }),
+    mapaDePedidos(),
+  ])
+  const candidatos = leadsDoGatilho(leads, pedidos, a, Date.now())
+
+  const dentro = new Map<string, { passo_ordem: number; enviados: number; status: string; proximo_em: string | null }>()
+  const { data: execs } = await supabaseAdmin
+    .from('automacao_execucoes')
+    .select('lead_id, passo_ordem, enviados, status, proximo_em')
+    .eq('automacao_id', a.id)
+    .limit(5000)
+  for (const e of (execs ?? []) as Array<{ lead_id: string; passo_ordem: number; enviados: number; status: string; proximo_em: string | null }>) {
+    dentro.set(e.lead_id, e)
+  }
+
+  const passosAtivos = a.passos.filter((p) => p.ativo && p.templateId)
+  const primeiroCanal = passosAtivos[0]?.templateId ? (await obterTemplate(passosAtivos[0].templateId))?.canal ?? null : null
+
+  const novos = candidatos.filter((l) => !dentro.has(l.id))
+  const entrariam = novos.slice(0, 40).map((l) => {
+    const p = l.pedidoId ? pedidos.get(l.pedidoId) : undefined
+    return {
+      leadId: l.id,
+      nome: l.nome,
+      telefone: l.telefone,
+      email: l.email,
+      etapa: p?.etapa ?? null,
+      diasNaEtapa: p ? Math.floor((Date.now() - p.desdeMs) / 86400_000) : null,
+      alcancavel: primeiroCanal ? leadAlcancavel(l, primeiroCanal) : true,
+    }
+  })
+
+  const agoraIso = new Date().toISOString()
+  const porId = new Map(leads.map((l) => [l.id, l]))
+  const vencidos: DetalheAutomacao['receberiamAgora'] = []
+  let aguardando = 0
+  for (const [leadId, e] of dentro) {
+    if (e.status !== 'ativa') continue
+    if (e.proximo_em && e.proximo_em <= agoraIso) {
+      const l = porId.get(leadId)
+      vencidos.push({ leadId, nome: l?.nome ?? null, passoOrdem: e.passo_ordem, enviados: e.enviados })
+    } else {
+      aguardando++
+    }
+  }
+
+  const etapa = ETAPA_DO_GATILHO[a.gatilho]
+  const regras: string[] = [
+    `Gatilho: ${GATILHO_LABEL[a.gatilho]} — ${GATILHO_AJUDA[a.gatilho].replace('X dias', `${a.gatilhoDias} ${a.gatilhoDias === 1 ? 'dia' : 'dias'}`)}`,
+    etapa
+      ? `Sai do fluxo quando o pedido deixa a etapa "${etapa}" (paga, avança, é encerrado) ou o lead se descadastra.`
+      : 'Sai do fluxo quando compra, vira cliente ou se descadastra.',
+    `Público: ${descreverPublico(a.publico)}.`,
+    `Janela de envio: ${a.horaInicio}h às ${a.horaFim}h (Recife); o robô roda de hora em hora e manda no máximo ${MAX_POR_RODADA} por rodada.`,
+    `Teto: ${a.maxToques} ${a.maxToques === 1 ? 'toque' : 'toques'} por pessoa neste fluxo; ninguém entra duas vezes.`,
+    `Passos: ${passosAtivos.length === 0 ? 'nenhum com template — não roda' : passosAtivos.map((p) => `${p.esperaDias === 0 ? 'na hora' : `+${p.esperaDias} d`}`).join(' → ')}.`,
+    'Só manda com o canal do passo disponível (WhatsApp precisa de telefone; e-mail, de e-mail).',
+  ]
+
+  const hora = horaEmRecife()
+  return {
+    regras,
+    entrariam,
+    totalEntrariam: novos.length,
+    receberiamAgora: vencidos.slice(0, 40),
+    totalReceberiamAgora: vencidos.length,
+    aguardando,
+    janelaAbertaAgora: hora >= a.horaInicio && hora < a.horaFim,
+  }
+}
+
+function descreverPublico(p: FiltroLeads): string {
+  const partes: string[] = []
+  if (p.uf) partes.push(`UF ${p.uf}`)
+  if (p.origem && p.origem !== 'todas') partes.push(`origem ${p.origem}`)
+  if (p.status && p.status !== 'todos') partes.push(`status ${p.status}`)
+  if (p.tag) partes.push(`tag ${p.tag}`)
+  if (p.canal && p.canal !== 'todos') partes.push(`com ${p.canal}`)
+  if (p.busca) partes.push(`busca "${p.busca}"`)
+  return partes.length ? partes.join(', ') : 'toda a base (sem descadastrados)'
+}
+
+// ─────────────────────────────────────────────────────────────
 // Rodada
 // ─────────────────────────────────────────────────────────────
 
