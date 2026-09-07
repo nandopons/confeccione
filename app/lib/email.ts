@@ -917,3 +917,66 @@ export async function emailLinkColeta(params: {
     attachments: params.pdfBase64 ? [{ filename: 'coleta-tamanhos-confeccione.pdf', content: params.pdfBase64 }] : undefined,
   })
 }
+
+// ─── E-mail de marketing (campanhas) ───────────────────────────
+// Diferente dos e-mails transacionais acima: vai pra lista, então SEMPRE
+// carrega link de descadastro no rodapé e devolve ok/erro pra fila da
+// campanha saber o que reenviar.
+
+export function linkDescadastro(leadId: string): string {
+  return `${SITE_URL}/api/marketing/descadastrar?lead=${leadId}`
+}
+
+/** Converte o texto simples da campanha em HTML (parágrafos + links). */
+function corpoMarketingHtml(texto: string): string {
+  return texto
+    .split(/\n{2,}/)
+    .map((par) => {
+      const html = escapeHtml(par.trim())
+        .replace(/\n/g, '<br>')
+        .replace(
+          /(https?:\/\/[^\s<]+)/g,
+          '<a href="$1" style="color:#2563eb;text-decoration:none;">$1</a>'
+        )
+      return `<p style="margin:0 0 14px;">${html}</p>`
+    })
+    .join('')
+}
+
+export async function enviarEmailMarketing(params: {
+  para: string
+  assunto: string
+  corpo: string
+  leadId: string
+}): Promise<{ ok: boolean; erro?: string }> {
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) return { ok: false, erro: 'RESEND_API_KEY ausente' }
+  if (!params.para.includes('@')) return { ok: false, erro: 'e-mail inválido' }
+
+  const desc = linkDescadastro(params.leadId)
+  const conteudo =
+    corpoMarketingHtml(params.corpo) +
+    `<p style="margin:24px 0 0;font-size:12px;color:#9ca3af;">` +
+    `Você recebe este e-mail porque se cadastrou ou pediu orçamento na Confeccione. ` +
+    `<a href="${desc}" style="color:#9ca3af;text-decoration:underline;">Descadastrar</a>.</p>`
+
+  try {
+    const resp = await fetch(RESEND_ENDPOINT, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: FROM,
+        to: [params.para],
+        reply_to: REPLY_TO,
+        subject: params.assunto,
+        html: layout(conteudo, params.assunto),
+        text: `${params.corpo}\n\n---\nDescadastrar: ${desc}`,
+        headers: { 'List-Unsubscribe': `<${desc}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+      }),
+    })
+    if (!resp.ok) return { ok: false, erro: `Resend ${resp.status}: ${(await resp.text()).slice(0, 200)}` }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, erro: err instanceof Error ? err.message : 'falha no envio' }
+  }
+}
