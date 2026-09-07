@@ -13,16 +13,16 @@
       "schedule": "0 6 * * *"
     },
     {
-      "path": "/api/cron/nutricao",
-      "schedule": "0 13 * * *"
-    },
-    {
       "path": "/api/cron/melhorenvio-renovar",
       "schedule": "30 7 * * *"
     },
     {
       "path": "/api/cron/campanhas",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/automacoes",
+      "schedule": "0 * * * *"
     }
   ]
 }

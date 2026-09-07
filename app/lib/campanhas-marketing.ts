@@ -18,9 +18,7 @@
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
-import { enviarMensagem } from './zapi'
-import { enviarTemplate, normalizarWaId } from './whatsapp-cloud'
-import { enviarEmailMarketing } from './email'
+import { aplicarPlaceholders, enviarConteudo, leadAlcancavel } from './envio-marketing'
 import {
   listarLeadsCompleto,
   obterLead,
@@ -101,33 +99,17 @@ function daLinha(r: CampanhaRow): Campanha {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Placeholders
-// ─────────────────────────────────────────────────────────────
+// Placeholders (#nome, #empresa, #cidade, #link) e o envio unitário moram em
+// envio-marketing.ts — compartilhados com o motor de automação.
+export { aplicarPlaceholders }
 
-/**
- * Troca #nome (primeiro nome), #empresa, #cidade e #link pelos dados do lead.
- * Sem nome, o "#nome" some junto com a vírgula/espaço que sobraria.
- */
-export function aplicarPlaceholders(texto: string, lead: Lead, link?: string): string {
-  const primeiro = (lead.nome ?? '').trim().split(/\s+/)[0] ?? ''
-  let out = texto
-  out = primeiro
-    ? out.split('#nome').join(primeiro)
-    : out.replace(/ ?,? ?#nome/g, '').replace(/ {2,}/g, ' ')
-  out = out.split('#empresa').join(lead.empresa ?? '')
-  out = out.split('#cidade').join(lead.cidade ?? '')
-  if (link) out = out.split('#link').join(link)
-  return out.trim()
-}
-
-/** O canal exige WhatsApp ou e-mail? Serve pro filtro e pra pular o lead. */
+/** O canal da campanha pede WhatsApp ou e-mail? */
 export function canalDoLead(canal: CanalCampanha): 'whatsapp' | 'email' {
   return canal === 'email' ? 'email' : 'whatsapp'
 }
 
 function leadAtendeCanal(lead: Lead, canal: CanalCampanha): boolean {
-  return canalDoLead(canal) === 'email' ? !!lead.email : !!lead.telefone
+  return leadAlcancavel(lead, canal === 'email' ? 'email' : 'whatsapp')
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -354,44 +336,20 @@ async function registrarContatoCampanha(c: Campanha, lead: Lead, mensagem: strin
   })
 }
 
-/** Envio unitário — é aqui que cada canal encosta na API dele. */
+/** Envio unitário — delega pro motor compartilhado de envio. */
 async function enviarParaLead(c: Campanha, lead: Lead): Promise<{ ok: boolean; mensagem: string; erro?: string }> {
-  const corpo = aplicarPlaceholders(c.mensagem, lead)
-
-  if (c.canal === 'email') {
-    const assunto = aplicarPlaceholders(c.assunto ?? c.nome, lead)
-    const r = await enviarEmailMarketing({ para: lead.email!, assunto, corpo, leadId: lead.id })
-    return { ok: r.ok, mensagem: `${assunto}\n\n${corpo}`, erro: r.erro }
-  }
-
-  if (c.canal === 'whatsapp_zapi') {
-    try {
-      const ok = await enviarMensagem(lead.telefone!, corpo)
-      return { ok, mensagem: corpo, erro: ok ? undefined : 'Z-API recusou o envio' }
-    } catch (e) {
-      return { ok: false, mensagem: corpo, erro: e instanceof Error ? e.message : 'falha Z-API' }
-    }
-  }
-
-  // whatsapp_template — template aprovado na Meta.
-  if (!c.template) return { ok: false, mensagem: corpo, erro: 'campanha sem template definido' }
-  const params = c.templateParams.corpo.map((p) => ({ type: 'text', text: aplicarPlaceholders(p, lead) || '-' }))
-  const components: unknown[] = []
-  if (params.length) components.push({ type: 'body', parameters: params })
-  if (c.templateParams.botaoUrl) {
-    components.push({
-      type: 'button',
-      sub_type: 'url',
-      index: 0,
-      parameters: [{ type: 'text', text: aplicarPlaceholders(c.templateParams.botaoUrl, lead) }],
-    })
-  }
-  try {
-    const r = await enviarTemplate(normalizarWaId(lead.telefone!), c.template, 'pt_BR', components)
-    return { ok: r.ok, mensagem: corpo || `[template ${c.template}]`, erro: r.ok ? undefined : 'Meta recusou o envio' }
-  } catch (e) {
-    return { ok: false, mensagem: corpo, erro: e instanceof Error ? e.message : 'falha Meta' }
-  }
+  const r = await enviarConteudo(
+    {
+      canal: c.canal === 'email' ? 'email' : 'whatsapp',
+      assunto: c.assunto ?? c.nome,
+      mensagem: c.mensagem,
+      templateMeta: c.canal === 'whatsapp_template' ? c.template : null,
+      templateParams: c.templateParams,
+      usaTemplateOficial: c.canal === 'whatsapp_template',
+    },
+    lead
+  )
+  return { ok: r.ok, mensagem: r.mensagem, erro: r.erro }
 }
 
 /** Campanhas agendadas cuja hora chegou — usado pelo cron. */

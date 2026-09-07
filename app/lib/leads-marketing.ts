@@ -28,6 +28,11 @@ export type Lead = {
   email: string | null
   cidade: string | null
   uf: string | null
+  cep: string | null
+  logradouro: string | null
+  numero: string | null
+  complemento: string | null
+  bairro: string | null
   origem: OrigemLead
   tags: string[]
   observacao: string | null
@@ -47,6 +52,11 @@ type LeadRow = {
   email: string | null
   cidade: string | null
   uf: string | null
+  cep: string | null
+  logradouro: string | null
+  numero: string | null
+  complemento: string | null
+  bairro: string | null
   origem: OrigemLead
   tags: string[] | null
   observacao: string | null
@@ -59,7 +69,7 @@ type LeadRow = {
 }
 
 const COLUNAS =
-  'id, nome, empresa, telefone, email, cidade, uf, origem, tags, observacao, status, opt_out, pedido_id, ultimo_contato_em, toques, criado_em'
+  'id, nome, empresa, telefone, email, cidade, uf, cep, logradouro, numero, complemento, bairro, origem, tags, observacao, status, opt_out, pedido_id, ultimo_contato_em, toques, criado_em'
 
 function daLinha(r: LeadRow): Lead {
   return {
@@ -70,6 +80,11 @@ function daLinha(r: LeadRow): Lead {
     email: r.email,
     cidade: r.cidade,
     uf: r.uf,
+    cep: r.cep,
+    logradouro: r.logradouro,
+    numero: r.numero,
+    complemento: r.complemento,
+    bairro: r.bairro,
     origem: r.origem,
     tags: r.tags ?? [],
     observacao: r.observacao,
@@ -128,7 +143,7 @@ export type FiltroLeads = {
   origem?: OrigemLead | 'todas'
   status?: StatusLead | 'todos'
   tag?: string
-  canal?: 'todos' | 'whatsapp' | 'email'
+  canal?: 'todos' | 'whatsapp' | 'email' | 'endereco'
   incluirOptOut?: boolean
 }
 
@@ -148,6 +163,7 @@ export async function listarLeads(
   if (filtro.tag) q = q.contains('tags', [filtro.tag])
   if (filtro.canal === 'whatsapp') q = q.not('telefone_norm', 'is', null)
   if (filtro.canal === 'email') q = q.not('email_norm', 'is', null)
+  if (filtro.canal === 'endereco') q = q.not('cep', 'is', null)
 
   const busca = (filtro.busca ?? '').trim()
   if (busca) {
@@ -227,6 +243,11 @@ export type DadosLead = {
   email?: string | null
   cidade?: string | null
   uf?: string | null
+  cep?: string | null
+  logradouro?: string | null
+  numero?: string | null
+  complemento?: string | null
+  bairro?: string | null
   tags?: string[]
   observacao?: string | null
   status?: StatusLead
@@ -260,6 +281,11 @@ export async function upsertLead(d: DadosLead): Promise<ResultadoUpsert> {
   preenche('empresa', limpo(d.empresa))
   preenche('cidade', limpo(d.cidade))
   preenche('uf', normalizarUf(d.uf))
+  preenche('cep', limpo(d.cep))
+  preenche('logradouro', limpo(d.logradouro))
+  preenche('numero', limpo(d.numero))
+  preenche('complemento', limpo(d.complemento))
+  preenche('bairro', limpo(d.bairro))
   preenche('observacao', limpo(d.observacao))
   preenche('pedido_id', d.pedidoId)
   preenche('conta_id', d.contaId)
@@ -325,6 +351,9 @@ export async function atualizarLead(id: string, d: DadosLead): Promise<{ ok: boo
   if (d.empresa !== undefined) campos.empresa = limpo(d.empresa)
   if (d.cidade !== undefined) campos.cidade = limpo(d.cidade)
   if (d.uf !== undefined) campos.uf = normalizarUf(d.uf)
+  for (const c of ['cep', 'logradouro', 'numero', 'complemento', 'bairro'] as const) {
+    if (d[c] !== undefined) campos[c] = limpo(d[c])
+  }
   if (d.observacao !== undefined) campos.observacao = limpo(d.observacao)
   if (d.tags !== undefined) campos.tags = d.tags
   if (d.status !== undefined) campos.status = d.status
@@ -508,13 +537,21 @@ export function lerCsv(texto: string): { cabecalho: string[]; linhas: string[][]
   return { cabecalho, linhas: naoVazias }
 }
 
-export type CampoLead = 'nome' | 'empresa' | 'telefone' | 'email' | 'cidade' | 'uf' | 'observacao' | 'ignorar'
+export type CampoLead =
+  | 'nome' | 'empresa' | 'telefone' | 'email'
+  | 'cep' | 'logradouro' | 'numero' | 'complemento' | 'bairro'
+  | 'cidade' | 'uf' | 'observacao' | 'ignorar'
 
 export const CAMPOS_LEAD: Array<{ campo: CampoLead; label: string }> = [
   { campo: 'nome', label: 'Nome' },
   { campo: 'empresa', label: 'Empresa' },
   { campo: 'telefone', label: 'WhatsApp / telefone' },
   { campo: 'email', label: 'E-mail' },
+  { campo: 'cep', label: 'CEP' },
+  { campo: 'logradouro', label: 'Rua / logradouro' },
+  { campo: 'numero', label: 'Número' },
+  { campo: 'complemento', label: 'Complemento' },
+  { campo: 'bairro', label: 'Bairro' },
   { campo: 'cidade', label: 'Cidade' },
   { campo: 'uf', label: 'UF' },
   { campo: 'observacao', label: 'Observação' },
@@ -528,6 +565,11 @@ export function sugerirMapeamento(cabecalho: string[]): CampoLead[] {
     [/mail/i, 'email'],
     [/empres|raz[aã]o|fantasia|loja|marca/i, 'empresa'],
     [/nome|cliente|respons/i, 'nome'],
+    [/cep|c[oó]digo postal/i, 'cep'],
+    [/logradouro|endere[cç]o|^rua|^av/i, 'logradouro'],
+    [/^n[uú]m|^n[oº]$/i, 'numero'],
+    [/complem/i, 'complemento'],
+    [/bairro/i, 'bairro'],
     [/cidade|munic/i, 'cidade'],
     [/^uf$|estado/i, 'uf'],
     [/obs|nota|coment/i, 'observacao'],
@@ -538,7 +580,11 @@ export function sugerirMapeamento(cabecalho: string[]): CampoLead[] {
   })
 }
 
-export type LinhaImport = { nome?: string; empresa?: string; telefone?: string; email?: string; cidade?: string; uf?: string; observacao?: string }
+export type LinhaImport = {
+  nome?: string; empresa?: string; telefone?: string; email?: string
+  cep?: string; logradouro?: string; numero?: string; complemento?: string; bairro?: string
+  cidade?: string; uf?: string; observacao?: string
+}
 
 /** Aplica o mapeamento coluna→campo nas linhas cruas do CSV. */
 export function aplicarMapeamento(linhas: string[][], mapa: CampoLead[]): LinhaImport[] {
@@ -632,13 +678,18 @@ export function leadsParaCsv(leads: Lead[]): string {
     return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
   }
   const linhas = [
-    ['nome', 'empresa', 'whatsapp', 'email', 'cidade', 'uf', 'origem', 'status', 'tags', 'toques', 'ultimo_contato', 'criado_em'].join(';'),
+    ['nome', 'empresa', 'whatsapp', 'email', 'cep', 'logradouro', 'numero', 'complemento', 'bairro', 'cidade', 'uf', 'origem', 'status', 'tags', 'toques', 'ultimo_contato', 'criado_em'].join(';'),
     ...leads.map((l) =>
       [
         esc(l.nome),
         esc(l.empresa),
         esc(l.telefone),
         esc(l.email),
+        esc(l.cep),
+        esc(l.logradouro),
+        esc(l.numero),
+        esc(l.complemento),
+        esc(l.bairro),
         esc(l.cidade),
         esc(l.uf),
         esc(l.origem),

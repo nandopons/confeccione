@@ -7,13 +7,13 @@ import { useMemo, useState } from 'react'
 import type { DadosMarketing, FaseLead } from '@/app/lib/marketing'
 import type { Campanha } from '@/app/lib/campanhas-marketing'
 import type { Lead, ResumoBaseLeads } from '@/app/lib/leads-marketing'
+import type { Automacao, EstatisticaFluxo } from '@/app/lib/automacoes-marketing'
+import type { TemplateMarketing } from '@/app/lib/templates-marketing'
 import BaseLeads from './BaseLeads'
 import Campanhas from './Campanhas'
-import type {
-  ConfigNutricao,
-  ContatoMarketing,
-  ResumoContatos,
-} from '@/app/lib/marketing-contatos'
+import Templates from './Templates'
+import Automacoes from './Automacoes'
+import type { ContatoMarketing, ResumoContatos } from '@/app/lib/marketing-contatos'
 
 const FASE_BADGE: Record<FaseLead, { label: string; cls: string }> = {
   montado: { label: 'Pedido montado', cls: 'bg-gray-100 text-gray-700' },
@@ -46,32 +46,37 @@ function telBR(s: string | null): string {
   return s
 }
 
-type Aba = 'visao' | 'base' | 'campanhas' | 'nutricao' | 'chat'
+type Aba = 'visao' | 'base' | 'templates' | 'automacao' | 'campanhas' | 'chat'
 
 const ABAS: Array<{ id: Aba; label: string }> = [
   { id: 'visao', label: 'Visão geral' },
   { id: 'base', label: 'Base de leads' },
+  { id: 'templates', label: 'Templates' },
+  { id: 'automacao', label: 'Automação' },
   { id: 'campanhas', label: 'Campanhas' },
-  { id: 'nutricao', label: 'Nutrição automática' },
   { id: 'chat', label: 'Pedidos do chat' },
 ]
 
 export default function MarketingAdmin({
   dados,
-  config,
   contatos,
   resumoBase,
   leadsIniciais,
   campanhas,
   segmentos,
+  templates,
+  automacoes,
+  estatisticasFluxos,
 }: {
   dados: DadosMarketing
-  config: ConfigNutricao
   contatos: ResumoContatos
   resumoBase: ResumoBaseLeads
   leadsIniciais: { leads: Lead[]; total: number }
   campanhas: Campanha[]
   segmentos: Array<{ id: string; nome: string; filtro: Record<string, unknown> }>
+  templates: TemplateMarketing[]
+  automacoes: Automacao[]
+  estatisticasFluxos: Record<string, EstatisticaFluxo>
 }) {
   const { kpis, funil, leads } = dados
   const [aba, setAba] = useState<Aba>('visao')
@@ -80,13 +85,6 @@ export default function MarketingAdmin({
   const [agindo, setAgindo] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [toques, setToques] = useState<ResumoContatos>(contatos)
-
-  // ── nutrição ──
-  const [nAtiva, setNAtiva] = useState(config.ativa)
-  const [nDias, setNDias] = useState(config.diasParado)
-  const [nMax, setNMax] = useState(config.maxToques)
-  const [nOcupada, setNOcupada] = useState(false)
-  const [nMsg, setNMsg] = useState<string | null>(null)
 
   // ── histórico ──
   const [histLead, setHistLead] = useState<{ id: string; nome: string | null } | null>(null)
@@ -126,53 +124,6 @@ export default function MarketingAdmin({
       setMsg(e instanceof Error ? e.message : 'Erro ao enviar.')
     } finally {
       setAgindo(null)
-    }
-  }
-
-  async function salvarNutricao() {
-    if (nOcupada) return
-    setNOcupada(true)
-    setNMsg(null)
-    try {
-      const r = await fetch('/api/admin/marketing/nutricao', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ acao: 'salvar', ativa: nAtiva, diasParado: nDias, maxToques: nMax }),
-      })
-      const j = await r.json()
-      if (!r.ok) throw new Error(j.erro || 'Falha ao salvar')
-      setNMsg(nAtiva ? 'Salvo — nutrição LIGADA (roda todo dia às 10h).' : 'Salvo — nutrição desligada.')
-    } catch (e) {
-      setNMsg(e instanceof Error ? e.message : 'Erro ao salvar.')
-    } finally {
-      setNOcupada(false)
-    }
-  }
-
-  async function rodarNutricaoAgora() {
-    if (nOcupada) return
-    if (!window.confirm('Rodar a nutrição agora? Vai mandar WhatsApp pros leads parados elegíveis.')) return
-    setNOcupada(true)
-    setNMsg(null)
-    try {
-      const r = await fetch('/api/admin/marketing/nutricao', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ acao: 'executar' }),
-      })
-      const j = await r.json()
-      if (!r.ok) throw new Error(j.erro || 'Falha ao executar')
-      const res = j.resultado as { candidatos: number; enviados: number; restantes: number; erros: number }
-      setNMsg(
-        res.candidatos === 0
-          ? 'Nenhum lead elegível agora (travas anti-spam respeitadas).'
-          : `Enviadas ${res.enviados} de ${res.candidatos} elegíveis${res.erros ? ` · ${res.erros} falhas` : ''}${res.restantes ? ` · ${res.restantes} ficam pra próxima rodada` : ''}.`
-      )
-      if (res.enviados > 0) setTimeout(() => window.location.reload(), 2500)
-    } catch (e) {
-      setNMsg(e instanceof Error ? e.message : 'Erro ao executar.')
-    } finally {
-      setNOcupada(false)
     }
   }
 
@@ -274,82 +225,13 @@ export default function MarketingAdmin({
 
       {aba === 'base' && <BaseLeads resumo={resumoBase} inicial={leadsIniciais} />}
 
-      {aba === 'campanhas' && <Campanhas campanhasIniciais={campanhas} segmentosIniciais={segmentos} />}
+      {aba === 'templates' && <Templates iniciais={templates} />}
 
-      {aba === 'nutricao' && (
-      <div className="max-w-2xl">
-        {/* Nutrição automática */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <div className="flex items-center justify-between gap-3 mb-1">
-            <p className="text-sm font-semibold text-gray-900">Nutrição automática</p>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={nAtiva}
-              onClick={() => setNAtiva((v) => !v)}
-              className={
-                'relative w-11 h-6 rounded-full transition-colors shrink-0 ' +
-                (nAtiva ? 'bg-[#1D9E75]' : 'bg-gray-300')
-              }
-            >
-              <span
-                className={
-                  'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ' +
-                  (nAtiva ? 'left-[22px]' : 'left-0.5')
-                }
-              />
-            </button>
-          </div>
-          <p className="text-xs text-gray-500 mb-4">
-            Roda todo dia às 10h e manda a mensagem simples de reativação pra quem parou. Travas: só não-pagos com WhatsApp, parado há {nDias}+ dias, máx. {nMax} {nMax === 1 ? 'toque' : 'toques'} por lead (espaçados), até 15 envios por rodada.
-          </p>
-
-          <div className="flex items-end gap-3 flex-wrap">
-            <label className="text-xs text-gray-600">
-              Parado há (dias)
-              <input
-                type="number"
-                min={1}
-                max={60}
-                value={nDias}
-                onChange={(e) => setNDias(Math.max(1, Math.min(60, Number(e.target.value) || 1)))}
-                className="block mt-1 w-24 border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-[#1D9E75]"
-              />
-            </label>
-            <label className="text-xs text-gray-600">
-              Máx. toques/lead
-              <input
-                type="number"
-                min={1}
-                max={5}
-                value={nMax}
-                onChange={(e) => setNMax(Math.max(1, Math.min(5, Number(e.target.value) || 1)))}
-                className="block mt-1 w-24 border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-[#1D9E75]"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() => void salvarNutricao()}
-              disabled={nOcupada}
-              className="bg-[#1D9E75] hover:bg-[#178A65] text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50"
-            >
-              Salvar
-            </button>
-            <button
-              type="button"
-              onClick={() => void rodarNutricaoAgora()}
-              disabled={nOcupada}
-              className="border border-gray-200 hover:bg-gray-50 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50"
-            >
-              {nOcupada ? 'Aguarde…' : 'Rodar agora'}
-            </button>
-          </div>
-
-          {nMsg && <p className="text-xs text-[#0F6E56] bg-[#E1F5EE] border border-[#1D9E75]/20 rounded-lg px-3 py-2 mt-3">{nMsg}</p>}
-        </div>
-
-      </div>
+      {aba === 'automacao' && (
+        <Automacoes iniciais={automacoes} estatisticasIniciais={estatisticasFluxos} templates={templates} />
       )}
+
+      {aba === 'campanhas' && <Campanhas campanhasIniciais={campanhas} segmentosIniciais={segmentos} />}
 
       {/* Leads que montaram pedido no chat — reativação e histórico por pedido. */}
       {aba === 'chat' && (

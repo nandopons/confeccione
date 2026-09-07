@@ -38,7 +38,7 @@ type Filtros = {
   busca: string
   origem: 'todas' | OrigemLead
   status: 'todos' | StatusLead
-  canal: 'todos' | 'whatsapp' | 'email'
+  canal: 'todos' | 'whatsapp' | 'email' | 'endereco'
   uf: string
   optout: boolean
 }
@@ -195,7 +195,12 @@ export default function BaseLeads({
           <Select valor={filtros.status} onChange={(v) => mudaFiltro({ status: v as Filtros['status'] })}
             opcoes={[['todos', 'Todos os status'], ['lead', 'Lead'], ['cliente', 'Cliente']]} />
           <Select valor={filtros.canal} onChange={(v) => mudaFiltro({ canal: v as Filtros['canal'] })}
-            opcoes={[['todos', 'Qualquer canal'], ['whatsapp', 'Tem WhatsApp'], ['email', 'Tem e-mail']]} />
+            opcoes={[
+              ['todos', 'Qualquer canal'],
+              ['whatsapp', 'Tem WhatsApp'],
+              ['email', 'Tem e-mail'],
+              ['endereco', 'Tem endereço (mala direta)'],
+            ]} />
           <input
             value={filtros.uf}
             onChange={(e) => mudaFiltro({ uf: e.target.value.toUpperCase().slice(0, 2) })}
@@ -344,6 +349,11 @@ function ModalLead({ lead, onFechar, onSalvo }: { lead: Lead | null; onFechar: (
   const [email, setEmail] = useState(lead?.email ?? '')
   const [cidade, setCidade] = useState(lead?.cidade ?? '')
   const [uf, setUf] = useState(lead?.uf ?? '')
+  const [cep, setCep] = useState(lead?.cep ?? '')
+  const [logradouro, setLogradouro] = useState(lead?.logradouro ?? '')
+  const [numero, setNumero] = useState(lead?.numero ?? '')
+  const [complemento, setComplemento] = useState(lead?.complemento ?? '')
+  const [bairro, setBairro] = useState(lead?.bairro ?? '')
   const [observacao, setObservacao] = useState(lead?.observacao ?? '')
   const [tags, setTags] = useState((lead?.tags ?? []).join(', '))
   const [erro, setErro] = useState<string | null>(null)
@@ -359,6 +369,11 @@ function ModalLead({ lead, onFechar, onSalvo }: { lead: Lead | null; onFechar: (
       email,
       cidade,
       uf,
+      cep,
+      logradouro,
+      numero,
+      complemento,
+      bairro,
       observacao,
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 10),
     }
@@ -405,6 +420,33 @@ function ModalLead({ lead, onFechar, onSalvo }: { lead: Lead | null; onFechar: (
           UF
           <input value={uf} onChange={(e) => setUf(e.target.value.toUpperCase().slice(0, 2))} className={CAMPO} placeholder="PE" />
         </label>
+        <label className="text-xs text-gray-500 sm:col-span-2">
+          <span className="block text-[11px] uppercase tracking-wide text-gray-400 font-semibold pt-2 pb-1">
+            Endereço — só precisa pra mala direta
+          </span>
+        </label>
+        <label className="text-xs text-gray-500">
+          CEP
+          <input value={cep} onChange={(e) => setCep(e.target.value)} className={CAMPO} placeholder="50030-070" />
+        </label>
+        <label className="text-xs text-gray-500">
+          Bairro
+          <input value={bairro} onChange={(e) => setBairro(e.target.value)} className={CAMPO} placeholder="Recife Antigo" />
+        </label>
+        <label className="text-xs text-gray-500">
+          Rua / logradouro
+          <input value={logradouro} onChange={(e) => setLogradouro(e.target.value)} className={CAMPO} placeholder="Travessa do Amorim" />
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="text-xs text-gray-500">
+            Número
+            <input value={numero} onChange={(e) => setNumero(e.target.value)} className={CAMPO} placeholder="66" />
+          </label>
+          <label className="text-xs text-gray-500">
+            Complemento
+            <input value={complemento} onChange={(e) => setComplemento(e.target.value)} className={CAMPO} placeholder="Sala 12" />
+          </label>
+        </div>
         <label className="text-xs text-gray-500 sm:col-span-2">
           Tags (separadas por vírgula)
           <input value={tags} onChange={(e) => setTags(e.target.value)} className={CAMPO} placeholder="feira-2026, uniformes" />
