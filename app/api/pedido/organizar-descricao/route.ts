@@ -14,6 +14,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 import { getSegmento } from '@/app/lib/captacao-templates'
+import { registrarUsoIa } from '@/app/lib/uso-ia'
 
 export const runtime = 'nodejs'
 
@@ -71,6 +72,9 @@ export async function POST(req: Request) {
         { role: 'user', content: `${contexto}Descrição do cliente:\n${entrada}` },
       ],
     })
+
+    // Contabiliza o gasto da chamada (não bloqueia a resposta).
+    void registrarUsoIa('organizar-descricao', MODELO, resposta.usage)
 
     const texto = resposta.content
       .filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text')

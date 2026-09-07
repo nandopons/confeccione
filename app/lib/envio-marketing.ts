@@ -16,6 +16,7 @@ import { enviarMensagem } from './zapi'
 import { enviarTemplate, normalizarWaId } from './whatsapp-cloud'
 import { enviarEmailMarketing } from './email'
 import { visualizadorPedidoUrl } from './url'
+import { renderBlocosHtml, type Bloco } from './email-blocos'
 import type { Lead } from './leads-marketing'
 
 export type CanalEnvio = 'email' | 'whatsapp' | 'mala_direta'
@@ -25,6 +26,9 @@ export type ConteudoEnvio = {
   canal: CanalEnvio
   assunto?: string | null
   mensagem: string
+  /** 'blocos' → o corpo visual vem de `blocos`; `mensagem` é a versão texto. */
+  formato?: 'texto' | 'blocos'
+  blocos?: Bloco[]
   templateMeta?: string | null
   templateParams?: { corpo: string[]; botaoUrl?: string }
   usaTemplateOficial?: boolean
@@ -86,7 +90,13 @@ export async function enviarConteudo(c: ConteudoEnvio, lead: Lead): Promise<Resu
   if (c.canal === 'email') {
     if (!lead.email) return { ok: false, mensagem: corpo, erro: 'lead sem e-mail' }
     const assunto = aplicarPlaceholders(c.assunto?.trim() || 'Confeccione', lead)
-    const r = await enviarEmailMarketing({ para: lead.email, assunto, corpo, leadId: lead.id })
+    // Nos e-mails de bloco, os marcadores são trocados no HTML já renderizado —
+    // assim eles funcionam também dentro de link de botão (#link, #pedido).
+    const html =
+      c.formato === 'blocos' && c.blocos?.length
+        ? aplicarPlaceholders(renderBlocosHtml(c.blocos), lead)
+        : undefined
+    const r = await enviarEmailMarketing({ para: lead.email, assunto, corpo, html, leadId: lead.id })
     return { ok: r.ok, mensagem: `${assunto}\n\n${corpo}`, erro: r.erro }
   }
 

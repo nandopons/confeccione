@@ -22,6 +22,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { validarWhatsApp, normalizarWhatsApp } from '@/app/lib/phone'
 import { hintsTecidoTexto } from '@/app/lib/tecidos'
+import { registrarUsoIa } from '@/app/lib/uso-ia'
 
 export const runtime = 'nodejs'
 
@@ -549,6 +550,9 @@ export async function POST(req: Request) {
       system: systemBlocks,
       messages: janela.map((m) => ({ role: m.role, content: paraConteudoAnthropic(m.content) })),
     })
+
+    // Contabiliza o gasto da chamada (não bloqueia a resposta).
+    void registrarUsoIa('assistente', MODELO, resposta.usage)
     texto = textoDaResposta(resposta.content)
     if (resposta.stop_reason === 'max_tokens') {
       console.error('[pedido/assistente] resposta TRUNCADA por max_tokens — pedido grande demais pro limite atual')

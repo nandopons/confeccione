@@ -12,8 +12,12 @@
 
 import { supabaseAdmin } from './supabase-server'
 import type { CanalEnvio, ConteudoEnvio } from './envio-marketing'
+import { blocosParaTexto, pendenciaDosBlocos, type Bloco } from './email-blocos'
 
 export type StatusTemplate = 'rascunho' | 'ativo' | 'arquivado'
+/** Formato do CORPO do e-mail: texto em parágrafos ou montado no editor visual.
+ *  (Não confundir com `formato`, que é o formato da peça de mala direta.) */
+export type FormatoEmail = 'texto' | 'blocos'
 export type FormatoPeca = 'panfleto' | 'catalogo' | 'carta' | 'cartao_postal' | 'brinde'
 
 export type TemplateMarketing = {
@@ -23,6 +27,8 @@ export type TemplateMarketing = {
   descricao: string | null
   assunto: string | null
   corpo: string
+  formatoEmail: FormatoEmail
+  blocos: Bloco[]
   templateMeta: string | null
   templateParams: { corpo: string[]; botaoUrl?: string }
   usaTemplateOficial: boolean
@@ -43,6 +49,8 @@ type Row = {
   descricao: string | null
   assunto: string | null
   corpo: string
+  formato_email: FormatoEmail
+  blocos: unknown
   template_meta: string | null
   template_params: unknown
   usa_template_oficial: boolean
@@ -57,7 +65,7 @@ type Row = {
 }
 
 const COLS =
-  'id, nome, canal, descricao, assunto, corpo, template_meta, template_params, usa_template_oficial, formato, arte_url, peso_gramas, dimensoes, custo_unitario_centavos, tags, status, criado_em'
+  'id, nome, canal, descricao, assunto, corpo, formato_email, blocos, template_meta, template_params, usa_template_oficial, formato, arte_url, peso_gramas, dimensoes, custo_unitario_centavos, tags, status, criado_em'
 
 function daLinha(r: Row): TemplateMarketing {
   const p = (r.template_params ?? {}) as { corpo?: unknown; botaoUrl?: unknown }
@@ -68,6 +76,8 @@ function daLinha(r: Row): TemplateMarketing {
     descricao: r.descricao,
     assunto: r.assunto,
     corpo: r.corpo,
+    formatoEmail: r.formato_email ?? 'texto',
+    blocos: Array.isArray(r.blocos) ? (r.blocos as Bloco[]) : [],
     templateMeta: r.template_meta,
     templateParams: {
       corpo: Array.isArray(p.corpo) ? (p.corpo as string[]) : [],
@@ -103,6 +113,8 @@ export type DadosTemplate = {
   descricao?: string | null
   assunto?: string | null
   corpo?: string
+  formatoEmail?: FormatoEmail
+  blocos?: Bloco[]
   templateMeta?: string | null
   templateParams?: { corpo: string[]; botaoUrl?: string }
   usaTemplateOficial?: boolean
@@ -122,6 +134,13 @@ function paraLinha(d: Partial<DadosTemplate>): Record<string, unknown> {
   if (d.descricao !== undefined) o.descricao = d.descricao
   if (d.assunto !== undefined) o.assunto = d.assunto
   if (d.corpo !== undefined) o.corpo = d.corpo
+  if (d.formatoEmail !== undefined) o.formato_email = d.formatoEmail
+  // O corpo em texto é derivado dos blocos: serve de fallback no e-mail e é
+  // o que fica no histórico do lead.
+  if (d.blocos !== undefined) {
+    o.blocos = d.blocos
+    if (d.formatoEmail === 'blocos' || d.corpo === undefined) o.corpo = blocosParaTexto(d.blocos)
+  }
   if (d.templateMeta !== undefined) o.template_meta = d.templateMeta
   if (d.templateParams !== undefined) o.template_params = d.templateParams
   if (d.usaTemplateOficial !== undefined) o.usa_template_oficial = d.usaTemplateOficial
@@ -168,6 +187,8 @@ export function conteudoDoTemplate(t: TemplateMarketing): ConteudoEnvio {
     canal: t.canal,
     assunto: t.assunto,
     mensagem: t.corpo,
+    formato: t.formatoEmail,
+    blocos: t.blocos,
     templateMeta: t.templateMeta,
     templateParams: t.templateParams,
     usaTemplateOficial: t.usaTemplateOficial,
@@ -178,6 +199,7 @@ export function conteudoDoTemplate(t: TemplateMarketing): ConteudoEnvio {
 export function pendenciaDoTemplate(t: TemplateMarketing): string | null {
   if (t.canal === 'email') {
     if (!t.assunto?.trim()) return 'Falta o assunto do e-mail.'
+    if (t.formatoEmail === 'blocos') return pendenciaDosBlocos(t.blocos)
     if (t.corpo.trim().length < 20) return 'O corpo do e-mail está muito curto.'
     return null
   }

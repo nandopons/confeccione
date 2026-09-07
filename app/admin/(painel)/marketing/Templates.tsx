@@ -14,7 +14,9 @@
 import { useState } from 'react'
 import type { CanalEnvio } from '@/app/lib/envio-marketing'
 import type { FormatoPeca, StatusTemplate, TemplateMarketing } from '@/app/lib/templates-marketing'
+import type { Bloco } from '@/app/lib/email-blocos'
 import { Modal } from './BaseLeads'
+import EditorBlocos from './EditorBlocos'
 
 const SUBABAS: Array<{ canal: CanalEnvio; label: string; explica: string }> = [
   {
@@ -62,6 +64,12 @@ function brl(c: number | null): string {
 function pendencia(t: TemplateMarketing): string | null {
   if (t.canal === 'email') {
     if (!t.assunto?.trim()) return 'Falta o assunto'
+    if (t.formatoEmail === 'blocos') {
+      if (t.blocos.length === 0) return 'E-mail sem blocos'
+      const temTexto = t.blocos.some((b) => (b.tipo === 'texto' || b.tipo === 'titulo') && b.texto.trim())
+      if (!temTexto) return 'Falta texto — e-mail só com imagem cai em spam'
+      return null
+    }
     if (t.corpo.trim().length < 20) return 'Corpo muito curto'
     return null
   }
@@ -262,6 +270,8 @@ function ModalTemplate({
   const [descricao, setDescricao] = useState(template?.descricao ?? '')
   const [assunto, setAssunto] = useState(template?.assunto ?? '')
   const [corpo, setCorpo] = useState(template?.corpo ?? '')
+  const [formatoEmail, setFormatoEmail] = useState<'texto' | 'blocos'>(template?.formatoEmail ?? 'texto')
+  const [blocos, setBlocos] = useState<Bloco[]>(template?.blocos ?? [])
   const [oficial, setOficial] = useState(template?.usaTemplateOficial ?? true)
   const [templateMeta, setTemplateMeta] = useState(template?.templateMeta ?? '')
   const [paramCorpo, setParamCorpo] = useState((template?.templateParams.corpo ?? ['#nome']).join(' | '))
@@ -287,7 +297,7 @@ function ModalTemplate({
       descricao: descricao || null,
       corpo,
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 10),
-      ...(canal === 'email' ? { assunto: assunto || null } : {}),
+      ...(canal === 'email' ? { assunto: assunto || null, formatoEmail, blocos } : {}),
       ...(canal === 'whatsapp'
         ? {
             usaTemplateOficial: oficial,
@@ -328,9 +338,10 @@ function ModalTemplate({
   }
 
   const titulo = template ? 'Editar template' : `Novo template de ${SUBABAS.find((s) => s.canal === canal)!.label}`
+  const editorAberto = canal === 'email' && formatoEmail === 'blocos'
 
   return (
-    <Modal titulo={titulo} onFechar={onFechar}>
+    <Modal titulo={titulo} onFechar={onFechar} largo={editorAberto}>
       <div className="space-y-3">
         <div className="grid sm:grid-cols-2 gap-3">
           <label className="text-xs text-gray-500">
@@ -349,11 +360,31 @@ function ModalTemplate({
         </label>
 
         {canal === 'email' && (
-          <label className="text-xs text-gray-500 block">
-            Assunto
-            <input value={assunto} onChange={(e) => setAssunto(e.target.value)} className={CAMPO} placeholder="Prazer, #nome — a Confeccione produz sua roupa no Brasil" />
-          </label>
+          <>
+            <label className="text-xs text-gray-500 block">
+              Assunto
+              <input value={assunto} onChange={(e) => setAssunto(e.target.value)} className={CAMPO} placeholder="Prazer, #nome — a Confeccione produz sua roupa no Brasil" />
+            </label>
+
+            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+              {([['blocos', 'Montar visualmente'], ['texto', 'Só texto']] as const).map(([v, l]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setFormatoEmail(v)}
+                  className={
+                    'text-xs font-medium px-3 py-1.5 rounded-md transition-colors ' +
+                    (formatoEmail === v ? 'bg-white text-[#0F6E56] shadow-sm' : 'text-gray-500 hover:text-gray-800')
+                  }
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+          </>
         )}
+
+        {editorAberto && <EditorBlocos blocos={blocos} assunto={assunto} onChange={setBlocos} />}
 
         {canal === 'whatsapp' && (
           <div className="border border-amber-200 bg-amber-50/60 rounded-lg p-3 space-y-3">
@@ -414,6 +445,7 @@ function ModalTemplate({
           </div>
         )}
 
+        {!editorAberto && (
         <label className="text-xs text-gray-500 block">
           {canal === 'mala_direta'
             ? 'Texto da peça / observações pra gráfica'
@@ -422,7 +454,9 @@ function ModalTemplate({
               : 'Mensagem'}
           <textarea value={corpo} onChange={(e) => setCorpo(e.target.value)} rows={7} className={CAMPO + ' resize-y'} />
         </label>
+        )}
 
+        {!editorAberto && (
         <p className="text-[11px] text-gray-400">
           Marcadores: <code className="bg-gray-100 px-1 rounded">#nome</code> (primeiro nome),{' '}
           <code className="bg-gray-100 px-1 rounded">#empresa</code>,{' '}
@@ -430,6 +464,7 @@ function ModalTemplate({
           <code className="bg-gray-100 px-1 rounded">#link</code> (pedido do lead no visualizador) e{' '}
           <code className="bg-gray-100 px-1 rounded">#pedido</code> (só o id, pro botão de URL do template).
         </p>
+        )}
 
         {erro && <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{erro}</p>}
 

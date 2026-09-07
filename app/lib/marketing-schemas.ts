@@ -14,7 +14,21 @@ export const TEMPLATE_PARAMS = z.object({
   botaoUrl: z.string().max(300).optional(),
 })
 
+const BLOCO = z.object({
+  tipo: z.enum(['logo', 'titulo', 'texto', 'imagem', 'botao', 'divisor', 'espaco']),
+  texto: z.string().max(3000).optional(),
+  url: z.string().max(600).optional(),
+  alt: z.string().max(200).optional(),
+  link: z.string().max(600).optional(),
+  cor: z.string().max(9).optional(),
+  largura: z.number().int().min(20).max(600).optional(),
+  altura: z.number().int().min(2).max(120).optional(),
+  alinhamento: z.enum(['left', 'center', 'right']).optional(),
+})
+
 const camposTemplate = {
+  formatoEmail: z.enum(['texto', 'blocos']).optional(),
+  blocos: z.array(BLOCO).max(40).optional(),
   descricao: z.string().trim().max(300).nullish(),
   assunto: z.string().trim().max(150).nullish(),
   corpo: z.string().max(5000),

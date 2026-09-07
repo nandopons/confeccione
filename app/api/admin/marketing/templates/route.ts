@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { criarTemplate, listarTemplates } from '@/app/lib/templates-marketing'
 import { TemplateNovoSchema } from '@/app/lib/marketing-schemas'
+import { normalizarBlocos } from '@/app/lib/email-blocos'
 import type { CanalEnvio } from '@/app/lib/envio-marketing'
 
 export const runtime = 'nodejs'
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ erro: parsed.error.issues[0]?.message ?? 'Dados inválidos' }, { status: 400 })
   }
   try {
-    return NextResponse.json({ ok: true, template: await criarTemplate(parsed.data) })
+    return NextResponse.json({ ok: true, template: await criarTemplate({ ...parsed.data, blocos: parsed.data.blocos && normalizarBlocos(parsed.data.blocos) }) })
   } catch (e) {
     return NextResponse.json({ erro: e instanceof Error ? e.message : 'Falha ao criar' }, { status: 400 })
   }
