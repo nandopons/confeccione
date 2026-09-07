@@ -5,6 +5,10 @@
 // por lead, reativação por WhatsApp e export CSV.
 import { useMemo, useState } from 'react'
 import type { DadosMarketing, FaseLead } from '@/app/lib/marketing'
+import type { Campanha } from '@/app/lib/campanhas-marketing'
+import type { Lead, ResumoBaseLeads } from '@/app/lib/leads-marketing'
+import BaseLeads from './BaseLeads'
+import Campanhas from './Campanhas'
 import type {
   ConfigNutricao,
   ContatoMarketing,
@@ -42,23 +46,35 @@ function telBR(s: string | null): string {
   return s
 }
 
-type PreviaDisparo = {
-  total: number
-  amostra: Array<{ nome: string | null; cidade: string | null; uf: string | null }>
-  exemplo: string | null
-  cap: number
-}
+type Aba = 'visao' | 'base' | 'campanhas' | 'nutricao' | 'chat'
+
+const ABAS: Array<{ id: Aba; label: string }> = [
+  { id: 'visao', label: 'Visão geral' },
+  { id: 'base', label: 'Base de leads' },
+  { id: 'campanhas', label: 'Campanhas' },
+  { id: 'nutricao', label: 'Nutrição automática' },
+  { id: 'chat', label: 'Pedidos do chat' },
+]
 
 export default function MarketingAdmin({
   dados,
   config,
   contatos,
+  resumoBase,
+  leadsIniciais,
+  campanhas,
+  segmentos,
 }: {
   dados: DadosMarketing
   config: ConfigNutricao
   contatos: ResumoContatos
+  resumoBase: ResumoBaseLeads
+  leadsIniciais: { leads: Lead[]; total: number }
+  campanhas: Campanha[]
+  segmentos: Array<{ id: string; nome: string; filtro: Record<string, unknown> }>
 }) {
   const { kpis, funil, leads } = dados
+  const [aba, setAba] = useState<Aba>('visao')
   const [filtroFase, setFiltroFase] = useState<'todas' | FaseLead>('todas')
   const [busca, setBusca] = useState('')
   const [agindo, setAgindo] = useState<string | null>(null)
@@ -71,15 +87,6 @@ export default function MarketingAdmin({
   const [nMax, setNMax] = useState(config.maxToques)
   const [nOcupada, setNOcupada] = useState(false)
   const [nMsg, setNMsg] = useState<string | null>(null)
-
-  // ── disparo ──
-  const [dMensagem, setDMensagem] = useState('')
-  const [dFase, setDFase] = useState<'todas' | FaseLead>('todas')
-  const [dUf, setDUf] = useState('')
-  const [dBusca, setDBusca] = useState('')
-  const [dPrevia, setDPrevia] = useState<PreviaDisparo | null>(null)
-  const [dOcupado, setDOcupado] = useState(false)
-  const [dMsg, setDMsg] = useState<string | null>(null)
 
   // ── histórico ──
   const [histLead, setHistLead] = useState<{ id: string; nome: string | null } | null>(null)
@@ -169,40 +176,6 @@ export default function MarketingAdmin({
     }
   }
 
-  async function previaOuEnvio(confirmar: boolean) {
-    if (dOcupado) return
-    setDOcupado(true)
-    setDMsg(null)
-    try {
-      const r = await fetch('/api/admin/marketing/disparo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mensagem: dMensagem,
-          filtro: { fase: dFase, uf: dUf || undefined, busca: dBusca || undefined },
-          confirmar,
-        }),
-      })
-      const j = await r.json()
-      if (!r.ok) throw new Error(j.erro || 'Falha no disparo')
-      if (!confirmar) {
-        setDPrevia(j.previa as PreviaDisparo)
-        if ((j.previa as PreviaDisparo).total === 0) setDMsg('Nenhum lead com WhatsApp nesse segmento.')
-      } else {
-        const res = j.resultado as { total: number; enviados: number; erros: number; restantes: number }
-        setDPrevia(null)
-        setDMsg(
-          `Oferta enviada pra ${res.enviados} ${res.enviados === 1 ? 'lead' : 'leads'}${res.erros ? ` · ${res.erros} falhas` : ''}${res.restantes ? ` · ${res.restantes} além do limite da rodada — dispare de novo pra continuar` : ''}.`
-        )
-        if (res.enviados > 0) setTimeout(() => window.location.reload(), 2500)
-      }
-    } catch (e) {
-      setDMsg(e instanceof Error ? e.message : 'Erro no disparo.')
-    } finally {
-      setDOcupado(false)
-    }
-  }
-
   async function abrirHistorico(id: string, nome: string | null) {
     setHistLead({ id, nome })
     setHistItens(null)
@@ -219,19 +192,34 @@ export default function MarketingAdmin({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">Marketing</h1>
-          <p className="text-sm text-gray-500">Base de clientes, funil, nutrição e reativação de pedidos parados.</p>
-        </div>
-        <a
-          href="/api/admin/marketing/export"
-          className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-800 text-sm font-medium px-4 py-2 rounded-lg"
-        >
-          ⬇️ Exportar base (CSV)
-        </a>
+      <div>
+        <h1 className="text-xl font-semibold text-gray-900">Marketing</h1>
+        <p className="text-sm text-gray-500">
+          Base de leads, campanhas, nutrição automática e reativação de pedidos parados.
+        </p>
       </div>
 
+      {/* ABAS */}
+      <div className="flex gap-1 flex-wrap border-b border-gray-200">
+        {ABAS.map((a) => (
+          <button
+            key={a.id}
+            type="button"
+            onClick={() => setAba(a.id)}
+            className={
+              'text-sm font-medium px-3.5 py-2 -mb-px border-b-2 transition-colors ' +
+              (aba === a.id
+                ? 'border-[#1D9E75] text-[#0F6E56]'
+                : 'border-transparent text-gray-500 hover:text-gray-800')
+            }
+          >
+            {a.label}
+          </button>
+        ))}
+      </div>
+
+      {aba === 'visao' && (
+      <>
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="bg-white border border-gray-200 rounded-xl p-4">
@@ -281,8 +269,15 @@ export default function MarketingAdmin({
         </div>
       </div>
 
-      {/* NUTRIÇÃO + DISPARO */}
-      <div className="grid lg:grid-cols-2 gap-4 items-start">
+      </>
+      )}
+
+      {aba === 'base' && <BaseLeads resumo={resumoBase} inicial={leadsIniciais} />}
+
+      {aba === 'campanhas' && <Campanhas campanhasIniciais={campanhas} segmentosIniciais={segmentos} />}
+
+      {aba === 'nutricao' && (
+      <div className="max-w-2xl">
         {/* Nutrição automática */}
         <div className="bg-white border border-gray-200 rounded-xl p-5">
           <div className="flex items-center justify-between gap-3 mb-1">
@@ -353,96 +348,14 @@ export default function MarketingAdmin({
           {nMsg && <p className="text-xs text-[#0F6E56] bg-[#E1F5EE] border border-[#1D9E75]/20 rounded-lg px-3 py-2 mt-3">{nMsg}</p>}
         </div>
 
-        {/* Disparo em massa */}
-        <div className="bg-white border border-gray-200 rounded-xl p-5">
-          <p className="text-sm font-semibold text-gray-900 mb-1">Disparo de oferta em massa</p>
-          <p className="text-xs text-gray-500 mb-3">
-            Escreva a oferta, filtre o segmento e veja a prévia antes de confirmar. Use <code className="bg-gray-100 px-1 rounded">#nome</code> pro primeiro nome do cliente e <code className="bg-gray-100 px-1 rounded">#link</code> pro link direto do pedido dele (visualizador).
-          </p>
-
-          <textarea
-            value={dMensagem}
-            onChange={(e) => { setDMensagem(e.target.value); setDPrevia(null) }}
-            rows={3}
-            placeholder="Oi, #nome! Essa semana liberamos uma condição especial pra fechar seu pedido. Continua de onde parou: #link 😊"
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-[#1D9E75] resize-y"
-          />
-
-          <div className="flex items-center gap-2 flex-wrap mt-2">
-            <select
-              value={dFase}
-              onChange={(e) => { setDFase(e.target.value as 'todas' | FaseLead); setDPrevia(null) }}
-              className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-900 bg-white"
-            >
-              <option value="todas">Todas as fases</option>
-              <option value="montado">Pedido montado</option>
-              <option value="visualizador">Visualizador</option>
-              <option value="cobranca">Aguard. pagamento</option>
-              <option value="pago">Pago (recompra)</option>
-            </select>
-            <input
-              value={dUf}
-              onChange={(e) => { setDUf(e.target.value.toUpperCase().slice(0, 2)); setDPrevia(null) }}
-              placeholder="UF"
-              className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm w-16 text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-[#1D9E75]"
-            />
-            <input
-              value={dBusca}
-              onChange={(e) => { setDBusca(e.target.value); setDPrevia(null) }}
-              placeholder="Produto/interesse…"
-              className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm flex-1 min-w-[140px] text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-[#1D9E75]"
-            />
-            <button
-              type="button"
-              onClick={() => void previaOuEnvio(false)}
-              disabled={dOcupado || dMensagem.trim().length < 10}
-              className="border border-gray-200 hover:bg-gray-50 text-gray-700 text-sm font-medium px-4 py-1.5 rounded-lg disabled:opacity-50"
-            >
-              Pré-visualizar
-            </button>
-          </div>
-
-          {dPrevia && dPrevia.total > 0 && (
-            <div className="mt-3 border border-[#1D9E75]/30 bg-[#E1F5EE]/40 rounded-lg p-3">
-              <p className="text-xs text-gray-700">
-                Vai pra <strong>{Math.min(dPrevia.total, dPrevia.cap)}</strong> {dPrevia.total === 1 ? 'lead' : 'leads'} com WhatsApp
-                {dPrevia.total > dPrevia.cap && <> (de {dPrevia.total} — limite de {dPrevia.cap} por rodada)</>}
-                : {dPrevia.amostra.map((a) => a.nome ?? 'sem nome').join(', ')}{dPrevia.total > dPrevia.amostra.length ? '…' : ''}
-              </p>
-              {dPrevia.exemplo && (
-                <p className="text-xs text-gray-600 bg-white border border-gray-200 rounded-lg px-2.5 py-2 mt-2 whitespace-pre-wrap">
-                  {dPrevia.exemplo}
-                </p>
-              )}
-              <div className="flex gap-2 mt-2.5">
-                <button
-                  type="button"
-                  onClick={() => void previaOuEnvio(true)}
-                  disabled={dOcupado}
-                  className="bg-[#1D9E75] hover:bg-[#178A65] text-white text-sm font-medium px-4 py-1.5 rounded-lg disabled:opacity-50"
-                >
-                  {dOcupado ? 'Enviando…' : `Confirmar envio (${Math.min(dPrevia.total, dPrevia.cap)})`}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDPrevia(null)}
-                  disabled={dOcupado}
-                  className="text-sm text-gray-500 hover:text-gray-700 px-2"
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          )}
-
-          {dMsg && <p className="text-xs text-[#0F6E56] bg-[#E1F5EE] border border-[#1D9E75]/20 rounded-lg px-3 py-2 mt-3">{dMsg}</p>}
-        </div>
       </div>
+      )}
 
-      {/* BASE DE LEADS */}
+      {/* Leads que montaram pedido no chat — reativação e histórico por pedido. */}
+      {aba === 'chat' && (
       <div className="bg-white border border-gray-200 rounded-xl p-5">
         <div className="flex items-center gap-2 flex-wrap mb-4">
-          <p className="text-sm font-semibold text-gray-900 mr-auto">Base de clientes ({filtrados.length})</p>
+          <p className="text-sm font-semibold text-gray-900 mr-auto">Pedidos do chat ({filtrados.length})</p>
           <input
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
@@ -526,13 +439,7 @@ export default function MarketingAdmin({
         </div>
       </div>
 
-      {/* ROADMAP */}
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
-        <p className="text-sm font-semibold text-gray-900 mb-2">Próximos passos do Marketing 🚧</p>
-        <ul className="text-xs text-gray-500 space-y-1 list-disc pl-4">
-          <li>Integração Facebook/Instagram (públicos personalizados a partir da base)</li>
-        </ul>
-      </div>
+      )}
 
       {/* MODAL HISTÓRICO */}
       {histLead && (

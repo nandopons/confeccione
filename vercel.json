@@ -19,6 +19,10 @@
     {
       "path": "/api/cron/melhorenvio-renovar",
       "schedule": "30 7 * * *"
+    },
+    {
+      "path": "/api/cron/campanhas",
+      "schedule": "*/30 * * * *"
     }
   ]
 }
