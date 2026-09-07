@@ -72,6 +72,13 @@ const AJUDA: Record<ModoLuigi, string> = {
 
 const REGIAO: Record<string, string> = { uf: 'estado do cliente', pe: 'polo de PE', brasil: 'Brasil' }
 
+const MOTIVO_DESCARTE: Record<string, string> = {
+  ja_fornecedor: 'já é fornecedor da base',
+  ja_na_captacao: 'já está na captação',
+  pediu_para_nao_receber: 'pediu pra não receber',
+  sem_contato_util: 'sem contato útil',
+}
+
 const RESPOSTA: Record<string, { rotulo: string; cor: string }> = {
   interessado: { rotulo: 'Disse sim', cor: 'bg-emerald-50 text-emerald-700' },
   depois: { rotulo: 'Agora não', cor: 'bg-amber-50 text-amber-700' },
@@ -327,7 +334,9 @@ export default function CaptacaoPorPedido() {
                 {b.resumo && <p className="mt-1 text-xs text-gray-600">{b.resumo}</p>}
                 {b.consultas?.length > 0 && <p className="mt-1 text-xs text-gray-400">Consultas: {b.consultas.join(' · ')}</p>}
                 {b.descartados?.length > 0 && (
-                  <p className="mt-1 text-xs text-gray-400">Descartadas: {b.descartados.map((d) => `${d.nome} (${d.motivo})`).join(' · ')}</p>
+                  <p className="mt-1 text-xs text-gray-400">
+                    Descartadas: {b.descartados.map((d) => `${d.nome} (${MOTIVO_DESCARTE[d.motivo] ?? d.motivo})`).join(' · ')}
+                  </p>
                 )}
               </li>
             ))}

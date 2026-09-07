@@ -472,16 +472,66 @@ export async function descobrirCandidatos(perfil: PerfilBusca, regiao: RegiaoBus
 
 type MotivoDescarte = 'ja_fornecedor' | 'ja_na_captacao' | 'pediu_para_nao_receber' | 'sem_contato_util'
 
-async function motivoParaDescartar(c: Candidato): Promise<MotivoDescarte | null> {
+/** Fornecedor já cadastrado, do jeito que dá pra comparar com o que a busca acha. */
+type FornecedorBase = { id: string; nome: string | null; cidade: string | null; estado: string | null; whatsapp: string | null; email: string | null; instagram: string | null; site: string | null }
+
+/**
+ * A base inteira de fornecedores (é pequena) carregada uma vez por busca:
+ * comparar em memória é mais seguro que montar filtros — o Fernando pediu
+ * cuidado pra nunca abordar quem já está na base.
+ */
+async function carregarBaseFornecedores(): Promise<FornecedorBase[]> {
+  const { data } = await supabaseAdmin.from('leads_fornecedores').select('id, nome, cidade, estado, whatsapp, email, instagram, site').limit(2000)
+  return (data ?? []) as FornecedorBase[]
+}
+
+/** Nome comparável: minúsculo, sem acento, sem pontuação e sem as palavras que toda confecção tem. */
+function nomeChave(nome: string | null | undefined): string {
+  return (nome ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\b(confeccoes?|confeccao|malharia|malhas|faccao|atelie|ateliê|fabrica|industria|textil|uniformes?|ltda|me|eireli|epp|sa|e|de|da|do|dos|das)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function hostDoSite(site: string | null | undefined): string | null {
+  if (!site) return null
+  try {
+    return new URL(/^https?:\/\//i.test(site) ? site : `https://${site}`).hostname.replace(/^www\./, '').toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+/** O candidato bate com alguém da base? Por WhatsApp/telefone, e-mail, @instagram, site ou nome+cidade. */
+export function ehFornecedorDaBase(c: Candidato, base: FornecedorBase[]): boolean {
+  const last8 = (c.whatsapp ?? c.telefone ?? '').replace(/\D/g, '').slice(-8)
+  const email = c.email?.toLowerCase() ?? null
+  const insta = c.instagram?.toLowerCase() ?? null
+  const host = hostDoSite(c.site)
+  const nome = nomeChave(c.nome)
+  const cidade = (c.cidade ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+  return base.some((f) => {
+    if (last8.length === 8 && (f.whatsapp ?? '').replace(/\D/g, '').endsWith(last8)) return true
+    if (email && (f.email ?? '').toLowerCase() === email) return true
+    if (insta && f.instagram && instagramHandle(f.instagram) === insta) return true
+    if (host && hostDoSite(f.site) === host) return true
+    if (nome.length >= 4 && nomeChave(f.nome) === nome) {
+      const cidadeBase = (f.cidade ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+      // Mesmo nome e mesma cidade (ou cidade desconhecida de um dos lados): é a mesma confecção.
+      if (!cidade || !cidadeBase || cidade === cidadeBase) return true
+    }
+    return false
+  })
+}
+
+async function motivoParaDescartar(c: Candidato, base: FornecedorBase[]): Promise<MotivoDescarte | null> {
   const last8 = c.whatsapp?.slice(-8) ?? c.telefone?.slice(-8) ?? null
   if (!last8 && !c.email) return 'sem_contato_util'
-
-  if (last8 || c.email) {
-    let q = supabaseAdmin.from('leads_fornecedores').select('id').limit(1)
-    q = last8 && c.email ? q.or(`whatsapp.ilike.%${last8},email.ilike.${c.email}`) : last8 ? q.ilike('whatsapp', `%${last8}`) : q.ilike('email', c.email!)
-    const { data } = await q
-    if (data && data.length) return 'ja_fornecedor'
-  }
+  if (ehFornecedorDaBase(c, base)) return 'ja_fornecedor'
 
   {
     let q = supabaseAdmin.from('captacao_fornecedores').select('id, resposta, status').limit(3)
@@ -730,9 +780,10 @@ export async function captarParaPedido(
     busca = await descobrirCandidatos(perfil, regiao, Math.min(Math.max(cota, 5), 15))
     saida.encontrados = busca.candidatos.length
     const pdf = enviar ? await pdfSondagem(pedido.id).catch(() => null) : null
+    const base = await carregarBaseFornecedores()
     for (const c of busca.candidatos) {
       if (saida.contatados >= cota && enviar) break
-      const motivo = await motivoParaDescartar(c)
+      const motivo = await motivoParaDescartar(c, base)
       if (motivo) {
         descartados.push({ nome: c.nome, motivo })
         continue
@@ -889,7 +940,7 @@ ${pdfJaEnviado ? 'O resumo em PDF já foi enviado nesta conversa.' : 'O resumo e
 
 COMO FUNCIONA PRA CONFECÇÃO: ela se cadastra na plataforma (${URL_CADASTRO_FORNECEDOR}, cinco minutos), a Confeccione aprova o cadastro e oferece o pedido; ela aceita, monta o orçamento pela plataforma e negocia com o cliente por lá; o cliente paga à Confeccione, o pagamento fica retido e é repassado depois da entrega. A Confeccione fica com uma comissão sobre o valor fechado. Não passamos o contato do cliente antes disso.
 
-O QUE FAZER, nesta ordem e uma etapa por mensagem: (1) explicar a dúvida (o pedido) e perguntar se produzem; (2) se ela disser que produz (sim, faz, consegue, manda os detalhes) → registrar_resposta interessado e mandar o PDF com enviar_pdf_pedido, dizendo que ali está o resumo sem os dados do cliente; (3) puxar o que ajuda a fechar, uma pergunta por vez: prazo que conseguem e valor aproximado por peça; (4) só então induzir o cadastro, explicando o porquê em uma linha (é pela plataforma que o pedido chega pra ela, com o orçamento, a negociação e o pagamento garantido) e mandando o link. Não mande o link do cadastro antes de ela demonstrar interesse. Pergunte, uma coisa por vez, o que ajuda a fechar: prazo que conseguem e valor aproximado por peça. Se disser que não produz esse tipo de peça → registrar_resposta nao_produz e agradeça em uma linha; se não quiser agora ou não tem capacidade → registrar_resposta depois; se não quiser receber mais mensagens → registrar_resposta opt_out e confirme que não mandamos mais. Se perguntarem valor do cliente, contato do cliente, condições que não estão aqui, ou reclamarem → chamar_humano e diga que alguém da equipe continua. Não negocie preço, não prometa volume, não invente número.
+O QUE FAZER, nesta ordem e uma etapa por mensagem: (1) explicar a dúvida (o pedido) e perguntar se produzem; (2) se ela disser que produz (sim, faz, consegue, manda os detalhes) → registrar_resposta interessado e mandar o PDF com enviar_pdf_pedido, dizendo que ali está o resumo sem os dados do cliente; (3) puxar o que ajuda a fechar, uma pergunta por vez: prazo que conseguem e valor aproximado por peça; (4) só então induzir o cadastro, explicando o porquê em uma linha (é pela plataforma que o pedido chega pra ela, com o orçamento, a negociação e o pagamento garantido) e mandando o link. Não mande o link do cadastro antes de ela demonstrar interesse. Pergunte, uma coisa por vez, o que ajuda a fechar: prazo que conseguem e valor aproximado por peça. Se ela disser que JÁ É CADASTRADA na Confeccione → não mande o link do cadastro: registrar_resposta interessado com observação "já cadastrada", diga que vai pedir pra equipe mandar o pedido pela plataforma e chame chamar_humano. Se disser que não produz esse tipo de peça → registrar_resposta nao_produz e agradeça em uma linha; se não quiser agora ou não tem capacidade → registrar_resposta depois; se não quiser receber mais mensagens → registrar_resposta opt_out e confirme que não mandamos mais. Se perguntarem valor do cliente, contato do cliente, condições que não estão aqui, ou reclamarem → chamar_humano e diga que alguém da equipe continua. Não negocie preço, não prometa volume, não invente número.
 
 ESTILO: WhatsApp, 1 a 4 linhas, sem emoji, sem markdown, sem lista, sem botão, uma pergunta por vez, português direto de gente da equipe. Se perguntarem se você é robô, diga que é o assistente da equipe e que uma pessoa assume quando quiser.`
 }
