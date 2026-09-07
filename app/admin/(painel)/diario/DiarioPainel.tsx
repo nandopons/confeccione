@@ -39,6 +39,8 @@ const TIPOS: Array<{ v: Reuniao['tipo']; label: string }> = [
   { v: 'sexta', label: 'Sexta — fechamento' },
   { v: 'mensal', label: 'Mensal — financeiro' },
   { v: 'sessao', label: 'Sessão de trabalho' },
+  { v: 'manha', label: 'Manhã (07:00) — fila do dia' },
+  { v: 'tarde', label: 'Tarde (17:30) — fechamento do dia' },
 ]
 
 // ─── Formatação ─────────────────────────────────────────────────────────────

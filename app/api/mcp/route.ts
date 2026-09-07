@@ -61,10 +61,11 @@ import {
   TIPOS_REUNIAO,
 } from '@/app/lib/diario'
 import { consultarTemplatesWhatsApp, criarTemplateWhatsApp } from '@/app/lib/whatsapp-templates'
+import { enviarPauta, numerosGestao } from '@/app/lib/gestao-whatsapp'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+export const maxDuration = 120
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 
@@ -357,6 +358,28 @@ function criarServidor(): McpServer {
       if (!confirmar) return erro('Submissão não confirmada: peça a aprovação do texto e chame de novo com confirmar=true.')
       const r = await criarTemplateWhatsApp({ nome, categoria, corpo, exemplos, rodape, permitirTrocaCategoria: permitir_troca_categoria })
       return r.ok ? texto(r) : erro(`A Meta recusou a submissão de ${nome}: ${r.erro}`)
+    }
+  )
+
+  server.registerTool(
+    'enviar_pauta_gestao',
+    {
+      title: 'Mandar a pauta da reunião pro WhatsApp do gestor',
+      description:
+        'Monta a pauta da reunião (manha = 07:00, tarde = 17:30) a partir do diário de bordo e manda pro WhatsApp do ' +
+        'Fernando (WHATSAPP_GESTAO_NUMEROS) — é o mesmo que o cron faz nos horários. Só vai pro gestor, nunca a cliente ' +
+        'ou fornecedor. Use pra testar o fluxo ou quando ele pedir a pauta fora de hora; exige confirmar=true.',
+      inputSchema: {
+        tipo: z.enum(['manha', 'tarde']),
+        confirmar: z.boolean().describe('Precisa ser true — o Fernando pediu ou aprovou o envio.'),
+      },
+      annotations: REGISTRO,
+    },
+    async ({ tipo, confirmar }) => {
+      if (!confirmar) return erro('Envio não confirmado: chame de novo com confirmar=true.')
+      if (numerosGestao().length === 0) return erro('WHATSAPP_GESTAO_NUMEROS não configurado na Vercel — ninguém pra receber.')
+      const r = await enviarPauta(tipo)
+      return r.destinos.every((d) => d.ok) ? texto(r) : erro(`Pauta montada, mas o envio falhou: ${JSON.stringify(r.destinos)}`)
     }
   )
 
