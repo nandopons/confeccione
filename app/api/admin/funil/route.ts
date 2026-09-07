@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
+import { etapasDosPedidos } from '@/app/lib/etapas-pedido'
 
 export const dynamic = 'force-dynamic'
 
@@ -185,28 +186,53 @@ export async function GET(req: NextRequest) {
   // pela metade → buscando fornecedor → em negociação (aceite; contato
   // liberado) → aguardando pagamento (orçamento formalizado pelo fornecedor)
   // → em produção (pago no Asaas) → finalizado (entregue).
+  //
+  // Desde a D-8 a etapa vem da view pedidos_assistente_etapas — a mesma que o
+  // admin de pedidos, o placar e o agente leem. O cálculo por status abaixo
+  // fica só como reserva, se a view não responder.
   const ehPago = (p: (typeof pas)[number]) => p.pagamento_status === 'pago'
-  const pelaMetade = pas.filter((p) => p.status === 'em_visualizacao' || p.status === 'completo').map(paItem)
-  const cancelados = pas.filter((p) => p.status === 'cancelado').length
-  const finalizados = pas.filter((p) => ehPago(p) && p.finalizado_em != null).map(paItem)
-  const emProducao = pas.filter((p) => ehPago(p) && p.finalizado_em == null).map(paItem)
-  // Orçamento formalizado pelo fornecedor (orcamento_status='definido') e não pago.
-  const aguardandoPagamento = pas
-    .filter((p) => !ehPago(p) && p.status === 'confirmado' && p.orcamento_status === 'definido')
-    .map(paItem)
+  const etapas = await etapasDosPedidos(pas.map((p) => p.id)).catch((err) => {
+    console.error('[admin/funil] etapas indisponíveis, usando status', { err })
+    return new Map<string, never>()
+  })
+  const etapaDe = (p: (typeof pas)[number]) => etapas.get(p.id)
+  const usaEtapas = etapas.size > 0
+
+  const pelaMetade = (usaEtapas
+    ? pas.filter((p) => etapaDe(p)?.grupo === 'entrada')
+    : pas.filter((p) => p.status === 'em_visualizacao' || p.status === 'completo')
+  ).map(paItem)
+  const cancelados = usaEtapas
+    ? pas.filter((p) => etapaDe(p)?.grupo === 'perdido').length
+    : pas.filter((p) => p.status === 'cancelado').length
+  const finalizados = (usaEtapas
+    ? pas.filter((p) => etapaDe(p)?.etapa === 'finalizado')
+    : pas.filter((p) => ehPago(p) && p.finalizado_em != null)
+  ).map(paItem)
+  const emProducao = (usaEtapas
+    ? pas.filter((p) => etapaDe(p)?.grupo === 'producao')
+    : pas.filter((p) => ehPago(p) && p.finalizado_em == null)
+  ).map(paItem)
+  // Orçamento formalizado pelo fornecedor e não pago. Com etapas, o orçamento
+  // vencido (> 21 d) fica fora — não é receita próxima.
+  const aguardandoLista = usaEtapas
+    ? pas.filter((p) => ['aguardando_pagamento', 'sem_resposta'].includes(etapaDe(p)?.etapa ?? ''))
+    : pas.filter((p) => !ehPago(p) && p.status === 'confirmado' && p.orcamento_status === 'definido')
+  const aguardandoPagamento = aguardandoLista.map(paItem)
+  const orcamentosVencidos = usaEtapas ? pas.filter((p) => etapaDe(p)?.etapa === 'orcamento_vencido').length : 0
   // Fornecedor aceitou (negociação aberta), orçamento ainda não formalizado.
-  const emNegociacao = pas
-    .filter((p) => !ehPago(p) && p.status === 'confirmado' && p.orcamento_status !== 'definido' && fornAceitoPorPedido.has(p.id))
-    .map(paItem)
+  const emNegociacao = (usaEtapas
+    ? pas.filter((p) => etapaDe(p)?.grupo === 'negociacao')
+    : pas.filter((p) => !ehPago(p) && p.status === 'confirmado' && p.orcamento_status !== 'definido' && fornAceitoPorPedido.has(p.id))
+  ).map(paItem)
   // Confirmado, nenhum fornecedor aceitou ainda.
-  const buscandoFornecedor = pas
-    .filter((p) => !ehPago(p) && p.status === 'confirmado' && p.orcamento_status !== 'definido' && !fornAceitoPorPedido.has(p.id))
-    .map(paItem)
+  const buscandoFornecedor = (usaEtapas
+    ? pas.filter((p) => etapaDe(p)?.grupo === 'fornecedor')
+    : pas.filter((p) => !ehPago(p) && p.status === 'confirmado' && p.orcamento_status !== 'definido' && !fornAceitoPorPedido.has(p.id))
+  ).map(paItem)
   // Receita SÓ é real quando o Asaas confirma (webhook/reconciliação).
   const receitaPagaCentavos = pas.filter(ehPago).reduce((acc, p) => acc + (p.valor_centavos ?? 0), 0)
-  const receitaAguardandoCentavos = pas
-    .filter((p) => !ehPago(p) && p.status === 'confirmado' && p.orcamento_status === 'definido')
-    .reduce((acc, p) => acc + (p.valor_centavos ?? 0), 0)
+  const receitaAguardandoCentavos = aguardandoLista.reduce((acc, p) => acc + (p.valor_centavos ?? 0), 0)
   const ofertasNoAr = opasTodas.filter((o) => o.status === 'ofertada').length
 
   // --------------------------------------------------- pedidos clássicos
@@ -263,6 +289,7 @@ export async function GET(req: NextRequest) {
       emProducao,
       finalizados,
       cancelados,
+      orcamentosVencidos,
       receitaPagaCentavos,
       receitaAguardandoCentavos,
       ofertasNoAr,

@@ -37,6 +37,37 @@ const GATILHOS: Array<{ id: Gatilho; label: string; ajuda: string }> = [
     label: 'Está na base e nunca comprou',
     ajuda: 'Entra quem está na base há X dias, nunca fechou e não recebeu contato nesse período.',
   },
+  // Por etapa do pedido (D-8): entra quem está na etapa há X dias, sai quando muda de etapa.
+  {
+    id: 'etapa_captado',
+    label: 'Pedido captado (peça incompleta)',
+    ajuda: 'Deixou nome e WhatsApp, mas a peça está sem modelo, cor ou quantidade há X dias. Objetivo: completar o pedido.',
+  },
+  {
+    id: 'etapa_pedido_completo',
+    label: 'Pedido completo sem confirmar',
+    ajuda: 'Peça completa e não clicou em "Buscar fornecedor" há X dias. Objetivo: confirmar.',
+  },
+  {
+    id: 'etapa_sem_resposta',
+    label: 'Orçamento sem resposta',
+    ajuda: 'Recebeu o orçamento e está há X dias sem responder. Objetivo: entender o motivo e fechar.',
+  },
+  {
+    id: 'etapa_orcamento_vencido',
+    label: 'Orçamento vencido (21 dias)',
+    ajuda: 'Orçamento há mais de 21 dias sem pagamento, há X dias nessa situação. Objetivo: recuperar ou encerrar.',
+  },
+  {
+    id: 'etapa_inativo',
+    label: 'Pedido inativo (30 dias sem toque)',
+    ajuda: 'Captado ou completo há 30 dias sem nenhum contato, há X dias nessa situação. Objetivo: reengajar.',
+  },
+  {
+    id: 'etapa_sem_fornecedor',
+    label: 'Pedido sem fornecedor',
+    ajuda: 'Confirmado há X dias sem fornecedor aceito. Mensagem pro cliente: "estamos buscando" — a captação é por dentro.',
+  },
 ]
 
 const STATUS_BADGE: Record<StatusAutomacao, string> = {

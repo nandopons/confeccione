@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { listarPedidosPagos } from '@/app/lib/pedido-assistente-oferta'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
+import { etapasDosPedidos } from '@/app/lib/etapas-pedido'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -16,7 +17,8 @@ export async function GET(req: NextRequest) {
   }
   const dados = await listarPedidosPagos()
 
-  // finalizado_em vem por fora pra não mexer na lib compartilhada.
+  // finalizado_em e a etapa (view pedidos_assistente_etapas, D-8) vêm por
+  // fora pra não mexer na lib compartilhada.
   const ids = dados.pedidos.map((p) => p.id)
   const finalizadoPorId = new Map<string, string | null>()
   if (ids.length > 0) {
@@ -28,10 +30,26 @@ export async function GET(req: NextRequest) {
       finalizadoPorId.set(r.id, r.finalizado_em)
     }
   }
+  const etapas = await etapasDosPedidos(ids).catch((err) => {
+    console.error('[admin/pedidos-pagos] etapas falharam (lista segue sem elas)', { err })
+    return new Map<string, never>()
+  })
 
   return NextResponse.json({
     ok: true,
     ...dados,
-    pedidos: dados.pedidos.map((p) => ({ ...p, finalizado_em: finalizadoPorId.get(p.id) ?? null })),
+    pedidos: dados.pedidos.map((p) => {
+      const e = etapas.get(p.id)
+      return {
+        ...p,
+        finalizado_em: finalizadoPorId.get(p.id) ?? null,
+        etapa: e?.etapa ?? null,
+        grupo: e?.grupo ?? null,
+        alerta: e?.alerta ?? false,
+        desde: e?.desde ?? null,
+        encerrado_motivo: e?.encerrado_motivo ?? null,
+        motivo_parada: e?.motivo_parada ?? null,
+      }
+    }),
   })
 }

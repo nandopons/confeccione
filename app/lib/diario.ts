@@ -17,6 +17,7 @@
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
+import { contagemPorEtapa, type Etapa, type GrupoEtapa } from './etapas-pedido'
 
 // ─── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -371,20 +372,31 @@ export type ItemCobranca = {
   desde: string | null
   dias_em_aberto: number | null
   link_pagamento: string | null
+  /** Etapa da view (pedidos): aguardando_pagamento | sem_resposta | orcamento_vencido. Avulsos: 'cobranca_gerada'. */
+  etapa: string
+  /** Última mensagem do cliente no WhatsApp (pedidos). */
+  ultimo_contato_cliente_em: string | null
+  motivo_parada: string | null
 }
 
 /** Quem tem orçamento definido e ainda não pagou — a receita mais próxima
- *  que existe. Pedidos do chat + orçamentos avulsos com cobrança gerada. */
+ *  que existe. Pedidos do chat pela etapa (aguardando_pagamento, sem_resposta
+ *  e orcamento_vencido, nessa ordem de urgência) + orçamentos avulsos com
+ *  cobrança gerada. Quem quiser só o "vivo" filtra etapa <> orcamento_vencido. */
 export async function filaCobranca(): Promise<ItemCobranca[]> {
-  const [pedidosQ, orcamentosQ] = await Promise.all([
+  const [pedidosQ, pixQ, orcamentosQ] = await Promise.all([
+    supabaseAdmin
+      .from('pedidos_assistente_etapas')
+      .select('id, codigo, numero, nome, telefone, email, valor_centavos, desde, etapa, ultimo_contato_cliente_em, motivo_parada')
+      .in('etapa', ['sem_resposta', 'aguardando_pagamento', 'orcamento_vencido'])
+      .order('desde', { ascending: true })
+      .limit(300),
     supabaseAdmin
       .from('pedidos_assistente')
-      .select('id, codigo, numero, nome, telefone, email, valor_centavos, orcamento_definido_em, pix_link, pagamento_status')
-      .eq('status', 'confirmado')
+      .select('id, pix_link, orcamento_definido_em')
       .eq('orcamento_status', 'definido')
       .or('pagamento_status.is.null,pagamento_status.neq.pago')
-      .order('orcamento_definido_em', { ascending: true })
-      .limit(200),
+      .limit(300),
     supabaseAdmin
       .from('orcamentos')
       .select('id, numero, cliente_nome, cliente_email, total_centavos, criado_em, cobranca_vencimento, asaas_invoice_url')
@@ -393,29 +405,41 @@ export async function filaCobranca(): Promise<ItemCobranca[]> {
       .limit(200),
   ])
   if (pedidosQ.error) throw new Error(`fila de cobrança (pedidos): ${pedidosQ.error.message}`)
+  if (pixQ.error) throw new Error(`fila de cobrança (pix): ${pixQ.error.message}`)
   if (orcamentosQ.error) throw new Error(`fila de cobrança (orçamentos): ${orcamentosQ.error.message}`)
 
   type P = {
     id: string; codigo: string | null; numero: string | null; nome: string | null; telefone: string | null
-    email: string | null; valor_centavos: number | null; orcamento_definido_em: string | null; pix_link: string | null
+    email: string | null; valor_centavos: number | null; desde: string; etapa: string
+    ultimo_contato_cliente_em: string | null; motivo_parada: string | null
   }
+  type X = { id: string; pix_link: string | null; orcamento_definido_em: string | null }
   type O = {
     id: string; numero: string | null; cliente_nome: string | null; cliente_email: string | null
     total_centavos: number | null; criado_em: string; cobranca_vencimento: string | null; asaas_invoice_url: string | null
   }
 
-  const pedidos = ((pedidosQ.data ?? []) as P[]).map<ItemCobranca>((p) => ({
-    fonte: 'pedido',
-    id: p.id,
-    referencia: p.codigo || p.numero || p.id.slice(0, 8).toUpperCase(),
-    cliente: p.nome,
-    telefone: p.telefone,
-    email: p.email,
-    valor_centavos: p.valor_centavos ?? 0,
-    desde: p.orcamento_definido_em,
-    dias_em_aberto: diasDesde(p.orcamento_definido_em),
-    link_pagamento: p.pix_link,
-  }))
+  const extra = new Map(((pixQ.data ?? []) as X[]).map((x) => [x.id, x]))
+  const ordem: Record<string, number> = { sem_resposta: 0, aguardando_pagamento: 1, orcamento_vencido: 2 }
+
+  const pedidos = ((pedidosQ.data ?? []) as P[]).map<ItemCobranca>((p) => {
+    const definidoEm = extra.get(p.id)?.orcamento_definido_em ?? p.desde
+    return {
+      fonte: 'pedido',
+      id: p.id,
+      referencia: p.codigo || p.numero || p.id.slice(0, 8).toUpperCase(),
+      cliente: p.nome,
+      telefone: p.telefone,
+      email: p.email,
+      valor_centavos: p.valor_centavos ?? 0,
+      desde: definidoEm,
+      dias_em_aberto: diasDesde(definidoEm),
+      link_pagamento: extra.get(p.id)?.pix_link ?? null,
+      etapa: p.etapa,
+      ultimo_contato_cliente_em: p.ultimo_contato_cliente_em,
+      motivo_parada: p.motivo_parada,
+    }
+  })
 
   const orcamentos = ((orcamentosQ.data ?? []) as O[]).map<ItemCobranca>((o) => ({
     fonte: 'orcamento_avulso',
@@ -428,9 +452,17 @@ export async function filaCobranca(): Promise<ItemCobranca[]> {
     desde: o.criado_em,
     dias_em_aberto: diasDesde(o.criado_em),
     link_pagamento: o.asaas_invoice_url,
+    etapa: 'cobranca_gerada',
+    ultimo_contato_cliente_em: null,
+    motivo_parada: null,
   }))
 
-  return [...pedidos, ...orcamentos].sort((a, b) => (b.dias_em_aberto ?? 0) - (a.dias_em_aberto ?? 0))
+  return [...pedidos, ...orcamentos].sort((a, b) => {
+    const oa = ordem[a.etapa] ?? 1
+    const ob = ordem[b.etapa] ?? 1
+    if (oa !== ob) return oa - ob
+    return (b.dias_em_aberto ?? 0) - (a.dias_em_aberto ?? 0)
+  })
 }
 
 export type ConversaSemResposta = {
@@ -508,75 +540,55 @@ export type PedidoSemFornecedor = {
   horas_esperando: number
   ofertas_no_ar: number
   ofertas_recusadas: number
+  /** sem_fornecedor (alerta) ou buscando_fornecedor (ainda dentro das 24 h). */
+  etapa: string
 }
 
-/** Pedidos confirmados sem nenhuma oferta aceita há mais de N horas. É onde
- *  o mapa de lacunas de fornecedores começa. */
+/** Pedidos confirmados sem nenhuma oferta aceita — pela etapa da view:
+ *  `sem_fornecedor` (24 h sem aceite e sem oferta fresca) e, se `horas` for
+ *  0, também os `buscando_fornecedor`. É onde o mapa de lacunas começa. */
 export async function pedidosSemFornecedor(horas = 24): Promise<PedidoSemFornecedor[]> {
-  const { data: pedidos, error } = await supabaseAdmin
-    .from('pedidos_assistente')
-    .select('id, codigo, numero, nome, telefone, uf, categoria, linhas, valor_centavos, confirmado_em, criado_em, pagamento_status')
-    .eq('status', 'confirmado')
-    .or('pagamento_status.is.null,pagamento_status.neq.pago')
-    .order('confirmado_em', { ascending: true })
+  const etapas = horas > 0 ? ['sem_fornecedor'] : ['sem_fornecedor', 'buscando_fornecedor']
+  const { data, error } = await supabaseAdmin
+    .from('pedidos_assistente_etapas')
+    .select('id, codigo, numero, nome, telefone, uf, categoria, linhas, valor_centavos, confirmado_em, criado_em, desde, etapa, ofertas_no_ar, ofertas_recusadas')
+    .in('etapa', etapas)
+    .order('desde', { ascending: true })
     .limit(300)
   if (error) throw new Error(`pedidos sem fornecedor: ${error.message}`)
 
   type P = {
     id: string; codigo: string | null; numero: string | null; nome: string | null; telefone: string | null
     uf: string | null; categoria: string | null; linhas: unknown; valor_centavos: number | null
-    confirmado_em: string | null; criado_em: string
+    confirmado_em: string | null; criado_em: string; desde: string; etapa: string
+    ofertas_no_ar: number; ofertas_recusadas: number
   }
-  const lista = (pedidos ?? []) as P[]
-  if (lista.length === 0) return []
-
-  const { data: ofertas } = await supabaseAdmin
-    .from('ofertas_pedido_assistente')
-    .select('pedido_id, status')
-    .in('pedido_id', lista.map((p) => p.id))
-
-  type O = { pedido_id: string; status: string }
-  const porPedido = new Map<string, { aceita: boolean; noAr: number; recusadas: number }>()
-  for (const o of (ofertas ?? []) as O[]) {
-    const s = porPedido.get(o.pedido_id) ?? { aceita: false, noAr: 0, recusadas: 0 }
-    if (o.status === 'aceita') s.aceita = true
-    if (o.status === 'ofertada') s.noAr++
-    if (o.status === 'recusada') s.recusadas++
-    porPedido.set(o.pedido_id, s)
-  }
-
-  const limite = Date.now() - horas * 3600_000
-  return lista
-    .filter((p) => {
-      const s = porPedido.get(p.id)
-      const desde = new Date(p.confirmado_em ?? p.criado_em).getTime()
-      return !s?.aceita && desde < limite
-    })
-    .map<PedidoSemFornecedor>((p) => {
-      const s = porPedido.get(p.id)
-      const desde = p.confirmado_em ?? p.criado_em
-      return {
-        id: p.id,
-        referencia: p.codigo || p.numero || p.id.slice(0, 8).toUpperCase(),
-        cliente: p.nome,
-        telefone: p.telefone,
-        uf: p.uf,
-        categoria: p.categoria,
-        resumo: resumoLinhas(p.linhas),
-        valor_centavos: p.valor_centavos,
-        confirmado_em: p.confirmado_em,
-        horas_esperando: Math.round((Date.now() - new Date(desde).getTime()) / 3600_000),
-        ofertas_no_ar: s?.noAr ?? 0,
-        ofertas_recusadas: s?.recusadas ?? 0,
-      }
-    })
-    .sort((a, b) => b.horas_esperando - a.horas_esperando)
+  return ((data ?? []) as P[]).map<PedidoSemFornecedor>((p) => {
+    const inicio = p.confirmado_em ?? p.criado_em
+    return {
+      id: p.id,
+      referencia: p.codigo || p.numero || p.id.slice(0, 8).toUpperCase(),
+      cliente: p.nome,
+      telefone: p.telefone,
+      uf: p.uf,
+      categoria: p.categoria,
+      resumo: resumoLinhas(p.linhas),
+      valor_centavos: p.valor_centavos,
+      confirmado_em: p.confirmado_em,
+      horas_esperando: Math.round((Date.now() - new Date(inicio).getTime()) / 3600_000),
+      ofertas_no_ar: p.ofertas_no_ar,
+      ofertas_recusadas: p.ofertas_recusadas,
+      etapa: p.etapa,
+    }
+  })
 }
 
 // ─── Resumo pra reunião ─────────────────────────────────────────────────────
 
 export type ResumoGestao = {
   gerado_em: string
+  /** A foto do funil: quantos pedidos em cada etapa (view pedidos_assistente_etapas). */
+  funil: Array<{ etapa: Etapa; grupo: GrupoEtapa; n: number; valor_centavos: number }>
   placar: Placar
   ultimo_placar_gravado: PlacarGravado | null
   decisoes_para_revisar: Decisao[]
@@ -589,12 +601,13 @@ export type ResumoGestao = {
  *  placar de agora, última foto gravada, decisões vencendo, pendências em
  *  aberto das últimas atas. */
 export async function resumoGestao(): Promise<ResumoGestao> {
-  const [placar, placares, paraRevisar, recentes, reunioes] = await Promise.all([
+  const [placar, placares, paraRevisar, recentes, reunioes, funil] = await Promise.all([
     calcularPlacar(),
     listarPlacares(1),
     listarDecisoes({ paraRevisar: true, limite: 20 }),
     listarDecisoes({ status: 'vigente', limite: 8 }),
     listarReunioes({ limite: 6 }),
+    contagemPorEtapa(),
   ])
 
   const pendencias = reunioes.flatMap((r) =>
@@ -605,6 +618,7 @@ export async function resumoGestao(): Promise<ResumoGestao> {
 
   return {
     gerado_em: new Date().toISOString(),
+    funil,
     placar,
     ultimo_placar_gravado: placares[0] ?? null,
     decisoes_para_revisar: paraRevisar,

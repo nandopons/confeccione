@@ -34,7 +34,27 @@ import {
 import { conteudoDoTemplate, obterTemplate, type TemplateMarketing } from './templates-marketing'
 import { listarLeadsCompleto, registrarToque, type FiltroLeads, type Lead } from './leads-marketing'
 
-export type Gatilho = 'lead_novo' | 'pedido_parado' | 'pos_compra' | 'lead_frio'
+export type Gatilho =
+  | 'lead_novo'
+  | 'pedido_parado'
+  | 'pos_compra'
+  | 'lead_frio'
+  | 'etapa_captado'
+  | 'etapa_pedido_completo'
+  | 'etapa_sem_fornecedor'
+  | 'etapa_sem_resposta'
+  | 'etapa_orcamento_vencido'
+  | 'etapa_inativo'
+
+/** Gatilhos por etapa → a etapa da view que o pedido precisa estar. */
+export const ETAPA_DO_GATILHO: Partial<Record<Gatilho, string>> = {
+  etapa_captado: 'captado',
+  etapa_pedido_completo: 'pedido_completo',
+  etapa_sem_fornecedor: 'sem_fornecedor',
+  etapa_sem_resposta: 'sem_resposta',
+  etapa_orcamento_vencido: 'orcamento_vencido',
+  etapa_inativo: 'inativo',
+}
 export type StatusAutomacao = 'rascunho' | 'ativa' | 'pausada'
 
 export const MAX_POR_RODADA = 30
@@ -44,6 +64,12 @@ export const GATILHO_LABEL: Record<Gatilho, string> = {
   pedido_parado: 'Pedido parado sem pagar',
   pos_compra: 'Depois da compra',
   lead_frio: 'Está na base e nunca comprou',
+  etapa_captado: 'Pedido captado (peça incompleta)',
+  etapa_pedido_completo: 'Pedido completo sem confirmar',
+  etapa_sem_fornecedor: 'Pedido sem fornecedor',
+  etapa_sem_resposta: 'Orçamento sem resposta do cliente',
+  etapa_orcamento_vencido: 'Orçamento vencido (21 dias)',
+  etapa_inativo: 'Pedido inativo (30 dias sem toque)',
 }
 
 /** Como o número de dias do gatilho deve ser lido na tela. */
@@ -52,6 +78,12 @@ export const GATILHO_AJUDA: Record<Gatilho, string> = {
   pedido_parado: 'Entra quem montou pedido, não pagou e está parado há X dias.',
   pos_compra: 'Entra quem pagou há X dias.',
   lead_frio: 'Entra quem está na base há X dias, nunca comprou e não recebeu contato nesse período.',
+  etapa_captado: 'Entra quem deixou contato mas a peça está incompleta (modelo, cor, quantidade) há X dias. Sai quando completa.',
+  etapa_pedido_completo: 'Entra quem tem a peça completa e não clicou em "Buscar fornecedor" há X dias. Sai quando confirma.',
+  etapa_sem_fornecedor: 'Entra o pedido confirmado há X dias sem fornecedor aceito. Sai quando alguém aceita.',
+  etapa_sem_resposta: 'Entra quem recebeu orçamento e está há X dias sem responder. Sai quando responde, paga ou vence.',
+  etapa_orcamento_vencido: 'Entra quem tem orçamento há mais de 21 dias sem pagar, há X dias nessa situação. Sai quando paga ou é encerrado.',
+  etapa_inativo: 'Entra quem está captado ou completo há 30 dias sem nenhum toque, há X dias nessa situação. Sai quando mexe no pedido.',
 }
 
 export type PassoAutomacao = {
@@ -249,25 +281,55 @@ export async function excluirAutomacao(id: string): Promise<void> {
 // Gatilhos
 // ─────────────────────────────────────────────────────────────
 
-type InfoPedido = { pago: boolean; mexidoEm: number }
+type InfoPedido = {
+  pago: boolean
+  mexidoEm: number
+  /** Etapa da view pedidos_assistente_etapas (null se a view não respondeu). */
+  etapa: string | null
+  /** Quando entrou na etapa atual (ms). */
+  desdeMs: number
+}
 
-/** Estado dos pedidos do chat, indexado por id — base dos gatilhos de pedido. */
+/** Estado dos pedidos do chat, indexado por id — base dos gatilhos de pedido.
+ *  Lê a view de etapas (D-8); se ela falhar, cai na tabela e os gatilhos por
+ *  etapa simplesmente não casam com ninguém nessa rodada. */
 async function mapaDePedidos(): Promise<Map<string, InfoPedido>> {
+  const m = new Map<string, InfoPedido>()
+  const view = await supabaseAdmin
+    .from('pedidos_assistente_etapas')
+    .select('id, pagamento_status, atualizado_em, criado_em, etapa, desde')
+    .limit(5000)
+  if (!view.error) {
+    for (const p of (view.data ?? []) as Array<{
+      id: string
+      pagamento_status: string | null
+      atualizado_em: string | null
+      criado_em: string
+      etapa: string
+      desde: string
+    }>) {
+      m.set(p.id, {
+        pago: p.pagamento_status === 'pago',
+        mexidoEm: new Date(p.atualizado_em ?? p.criado_em).getTime(),
+        etapa: p.etapa,
+        desdeMs: new Date(p.desde).getTime(),
+      })
+    }
+    return m
+  }
+  console.error('[automacoes] view de etapas falhou, usando a tabela', { erro: view.error.message })
   const { data } = await supabaseAdmin
     .from('pedidos_assistente')
     .select('id, pagamento_status, atualizado_em, criado_em')
     .limit(5000)
-  const m = new Map<string, InfoPedido>()
   for (const p of (data ?? []) as Array<{
     id: string
     pagamento_status: string | null
     atualizado_em: string | null
     criado_em: string
   }>) {
-    m.set(p.id, {
-      pago: p.pagamento_status === 'pago',
-      mexidoEm: new Date(p.atualizado_em ?? p.criado_em).getTime(),
-    })
+    const mexidoEm = new Date(p.atualizado_em ?? p.criado_em).getTime()
+    m.set(p.id, { pago: p.pagamento_status === 'pago', mexidoEm, etapa: null, desdeMs: mexidoEm })
   }
   return m
 }
@@ -305,6 +367,12 @@ export function leadsDoGatilho(
           criadoMs <= corte &&
           ultimoContatoMs <= corte
         )
+
+      default: {
+        // Gatilhos por etapa: está na etapa e entrou nela há pelo menos X dias.
+        const etapa = ETAPA_DO_GATILHO[a.gatilho]
+        return !!etapa && !!pedido && pedido.etapa === etapa && pedido.desdeMs <= corte
+      }
     }
   })
 }
@@ -315,6 +383,12 @@ function continuaElegivel(l: Lead, pedidos: Map<string, InfoPedido>, gatilho: Ga
   const pedido = l.pedidoId ? pedidos.get(l.pedidoId) : undefined
   if ((gatilho === 'pedido_parado' || gatilho === 'lead_frio') && (pedido?.pago || l.status === 'cliente')) {
     return 'comprou'
+  }
+  const etapa = ETAPA_DO_GATILHO[gatilho]
+  if (etapa) {
+    if (pedido?.pago) return 'comprou'
+    // Mudou de etapa (completou, confirmou, respondeu, foi encerrado…): a régua para.
+    if (!pedido || pedido.etapa !== etapa) return 'mudou_de_etapa'
   }
   return null
 }
