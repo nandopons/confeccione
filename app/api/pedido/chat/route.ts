@@ -18,6 +18,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { SEGMENTOS_CAPTACAO } from '@/app/lib/captacao-templates'
+import { registrarUsoIa } from '@/app/lib/uso-ia'
 
 export const runtime = 'nodejs'
 
@@ -226,6 +227,9 @@ export async function POST(req: Request) {
       ],
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     })
+
+    // Contabiliza o gasto da chamada (não bloqueia a resposta).
+    void registrarUsoIa('pedido-chat', MODELO, resposta.usage)
     texto = textoDaResposta(resposta.content)
   } catch (err) {
     console.error('[pedido/chat] falha na chamada ao modelo:', err)

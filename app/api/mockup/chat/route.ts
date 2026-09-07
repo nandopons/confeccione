@@ -10,6 +10,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { MOCKUPS, CATEGORIAS } from "@/app/lib/mockups";
+import { registrarUsoIa } from '@/app/lib/uso-ia'
 
 export const runtime = "nodejs";
 
@@ -147,6 +148,9 @@ export async function POST(req: Request) {
       ],
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
     });
+
+    // Contabiliza o gasto da chamada (não bloqueia a resposta).
+    void registrarUsoIa('mockup-chat', MODELO, r.usage)
     texto = textoDaResposta(r.content);
   } catch (err) {
     console.error("[mockup/chat] modelo:", err);

@@ -7,6 +7,7 @@
 // ============================================================================
 
 import Anthropic from '@anthropic-ai/sdk'
+import { registrarUsoIa } from '@/app/lib/uso-ia'
 
 const MODELO = 'claude-sonnet-4-6'
 export const FAIXAS_PADRAO = [1, 3, 6, 9, 15, 20, 30, 50, 70, 100]
@@ -61,6 +62,9 @@ Responda SOMENTE JSON válido (sem markdown):
       temperature: 0.3,
       messages: [{ role: 'user', content: prompt }],
     })
+
+    // Contabiliza o gasto da chamada (não bloqueia a resposta).
+    void registrarUsoIa('pesquisa-preco', MODELO, r.usage)
     texto = r.content.filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text').map((b) => b.text).join('')
   } catch (err) {
     console.error('[pesquisa-preco] IA falhou:', err)

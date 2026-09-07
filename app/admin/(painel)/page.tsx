@@ -7,6 +7,8 @@
 // núcleo da aba). Determinismo: agoraMs capturado UMA vez no início do
 // render e propagado pras funções puras de admin-saude.ts.
 // KPIs de marketing vêm de dadosMarketing() (mesma fonte da aba Marketing).
+// O card de IA mostra o gasto MEDIDO por nós (uso_ia). Saldo de crédito não
+// tem API pública na Anthropic — por isso o card linka pro Console.
 // ============================================================================
 
 import Link from 'next/link'
@@ -22,6 +24,7 @@ import {
 } from '@/app/lib/admin-saude'
 import { contarPrecisaAtencao } from '@/app/lib/precisa-atencao'
 import { dadosMarketing } from '@/app/lib/marketing'
+import { resumoUsoIa } from '@/app/lib/uso-ia'
 import { BotaoDispararCron } from './BotaoDispararCron'
 
 function brlC(c: number): string {
@@ -206,6 +209,10 @@ export default async function AdminDashboardPage() {
     },
   ]
 
+  const ia = await resumoUsoIa()
+  const usd = (v: number) =>
+    v.toLocaleString('pt-BR', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 })
+
   const kpisMkt: Array<{ label: string; valor: string; sub: string; cor: string }> = [
     {
       label: 'Leads',
@@ -286,6 +293,84 @@ export default async function AdminDashboardPage() {
             </Link>
           ))}
         </div>
+      </div>
+
+      {/* ───────── Custo de IA ───────── */}
+      <div className="mt-8">
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-xs text-gray-500 uppercase tracking-wider font-semibold">
+            Consumo da API do Claude
+          </h2>
+          <a
+            href="https://platform.claude.com/cost"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-[#0F6E56] font-medium hover:underline"
+          >
+            Ver custo e saldo no Console ↗
+          </a>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white border border-gray-200 rounded-lg p-5">
+            <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Gasto no mês</div>
+            <div className="text-3xl font-bold text-gray-900 mt-2">{usd(ia.mesUsd)}</div>
+            <div className="text-[11px] text-gray-400 mt-1">
+              {ia.mesChamadas} {ia.mesChamadas === 1 ? 'chamada' : 'chamadas'}
+            </div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-lg p-5">
+            <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Hoje</div>
+            <div className="text-3xl font-bold text-gray-900 mt-2">{usd(ia.hojeUsd)}</div>
+            <div className="text-[11px] text-gray-400 mt-1">
+              {ia.hojeChamadas} {ia.hojeChamadas === 1 ? 'chamada' : 'chamadas'}
+            </div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-lg p-5">
+            <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Projeção do mês</div>
+            <div className="text-3xl font-bold text-amber-600 mt-2">{usd(ia.projecaoMesUsd)}</div>
+            <div className="text-[11px] text-gray-400 mt-1">no ritmo atual</div>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-lg p-5">
+            <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Onde gasta mais</div>
+            {ia.porRota.length > 0 ? (
+              <>
+                <div className="text-lg font-bold text-gray-900 mt-2 truncate">{ia.porRota[0].rota}</div>
+                <div className="text-[11px] text-gray-400 mt-1">
+                  {usd(ia.porRota[0].usd)} · {ia.porRota[0].chamadas} chamadas
+                </div>
+              </>
+            ) : (
+              <div className="text-sm text-gray-400 mt-2">sem chamadas ainda</div>
+            )}
+          </div>
+        </div>
+
+        {ia.porRota.length > 1 && (
+          <div className="mt-3 bg-white border border-gray-200 rounded-lg p-4">
+            <div className="space-y-1.5">
+              {ia.porRota.map((r) => (
+                <div key={r.rota} className="flex items-center gap-3 text-xs">
+                  <span className="w-40 shrink-0 text-gray-600">{r.rota}</span>
+                  <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="h-2 rounded-full bg-[#1D9E75]"
+                      style={{ width: `${Math.max((r.usd / (ia.porRota[0].usd || 1)) * 100, 2)}%` }}
+                    />
+                  </div>
+                  <span className="w-20 text-right text-gray-500">{usd(r.usd)}</span>
+                  <span className="w-16 text-right text-gray-400">{r.chamadas}x</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+          Custo estimado a partir dos tokens que cada resposta devolve, pela tabela de preços da Anthropic. É medição
+          nossa, não a fatura — serve pra saber qual parte do site gasta mais. O saldo de crédito não é exposto por API
+          e só aparece no Console.
+        </p>
       </div>
 
       {/* ───────── Comportamento dos usuários (Microsoft Clarity) ───────── */}
