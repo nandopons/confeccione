@@ -5,6 +5,7 @@
 
 import { formatarWhatsappBR } from './format'
 import { loginComEmailUrl, painelClientePedidoUrl } from './url'
+import { emailTextoLuigi } from './email-luigi'
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails'
 const FROM = 'Confeccione <contato@confeccione.com.br>'
@@ -927,22 +928,6 @@ export function linkDescadastro(leadId: string): string {
   return `${SITE_URL}/api/marketing/descadastrar?lead=${leadId}`
 }
 
-/** Converte o texto simples da campanha em HTML (parágrafos + links). */
-function corpoMarketingHtml(texto: string): string {
-  return texto
-    .split(/\n{2,}/)
-    .map((par) => {
-      const html = escapeHtml(par.trim())
-        .replace(/\n/g, '<br>')
-        .replace(
-          /(https?:\/\/[^\s<]+)/g,
-          '<a href="$1" style="color:#2563eb;text-decoration:none;">$1</a>'
-        )
-      return `<p style="margin:0 0 14px;">${html}</p>`
-    })
-    .join('')
-}
-
 /**
  * Envelope dos e-mails de marketing montados por blocos. Diferente do
  * `layout()` transacional: sem o cabeçalho azul da Confeccione, porque o
@@ -984,7 +969,9 @@ export async function enviarEmailMarketing(params: {
     `<p style="margin:24px 0 0;font-size:12px;color:#9ca3af;">` +
     `Você recebe este e-mail porque se cadastrou ou pediu orçamento na Confeccione. ` +
     `<a href="${desc}" style="color:#9ca3af;text-decoration:underline;">Descadastrar</a>.</p>`
-  const conteudo = (params.html ?? corpoMarketingHtml(params.corpo)) + rodape
+  // Blocos: o template traz a própria diagramação. Texto: vira o e-mail do
+  // Luigi (email-luigi.ts) — saudação, botão no lugar do link, assinatura.
+  const html = params.html ? layoutMarketing(params.html + rodape, params.assunto) : emailTextoLuigi(params.corpo, params.assunto, desc)
 
   try {
     const resp = await fetch(RESEND_ENDPOINT, {
@@ -995,7 +982,7 @@ export async function enviarEmailMarketing(params: {
         to: [params.para],
         reply_to: REPLY_TO,
         subject: params.assunto,
-        html: params.html ? layoutMarketing(conteudo, params.assunto) : layout(conteudo, params.assunto),
+        html,
         text: `${params.corpo}\n\n---\nDescadastrar: ${desc}`,
         headers: { 'List-Unsubscribe': `<${desc}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
       }),
