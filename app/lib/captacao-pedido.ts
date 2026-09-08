@@ -29,7 +29,8 @@ import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
 import { registrarUsoIa } from './uso-ia'
 import { pedidosPorEtapa, pedidoEtapa, type PedidoEtapa } from './etapas-pedido'
-import { normalizarWaId, enviarTemplate, enviarTexto, enviarMidiaPorId, uploadMidia, marcarComoLida } from './whatsapp-cloud'
+import { normalizarWaId, enviarTemplate, enviarTexto, enviarMidiaPorId, uploadMidia, marcarComoLida, listarTemplates } from './whatsapp-cloud'
+import { consultarTemplatesWhatsApp } from './whatsapp-templates'
 import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 import { emailSondagemProducao } from './email'
 import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
@@ -47,8 +48,52 @@ const MAX_TOKENS_RESPOSTA = 500
 const PEDIDOS_POR_RODADA = 4
 const HISTORICO_MENSAGENS = 20
 
-/** Template aprovado na Meta pra sondagem fria; sem ele, só e-mail sai. */
-export const TEMPLATE_SONDAGEM = process.env.WHATSAPP_TEMPLATE_SONDAGEM || ''
+/**
+ * Template da sondagem fria (a abertura curta: "Oi, {{1}}, tudo bem? Aqui é o
+ * Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com
+ * vocês."). Submetido à Meta em 08/09/2026 como `sondagem_producao`; a env só
+ * serve pra trocar de nome sem deploy.
+ */
+export const TEMPLATE_SONDAGEM = process.env.WHATSAPP_TEMPLATE_SONDAGEM || 'sondagem_producao'
+const IDIOMA_TEMPLATE_SONDAGEM = 'pt_BR'
+
+export type StatusTemplateSondagem = {
+  nome: string
+  /** APPROVED | PENDING | REJECTED | … da Meta; 'inexistente' se a WABA não tem esse nome; null se a consulta falhou. */
+  status: string | null
+  categoria: string | null
+  motivo_rejeicao: string | null
+  erro: string | null
+}
+
+let cacheAprovado: { ok: boolean; em: number } | null = null
+const CACHE_APROVACAO_MS = 15 * 60 * 1000
+
+/**
+ * O WhatsApp da sondagem só sai com o template APROVADO na Meta — mandar um
+ * pendente devolve erro e suja a linha do candidato. Em vez de env + redeploy
+ * no dia da aprovação, a lib pergunta à WABA (lista de aprovados): a rodada
+ * seguinte à aprovação já manda. Só o "sim" fica em cache (15 min por
+ * instância); enquanto está pendente, cada abordagem com WhatsApp faz uma
+ * consulta — são poucas por dia e é isso que percebe a aprovação na hora.
+ */
+export async function templateSondagemAprovado(): Promise<boolean> {
+  if (cacheAprovado?.ok && Date.now() - cacheAprovado.em < CACHE_APROVACAO_MS) return true
+  const aprovados = await listarTemplates()
+  const ok = aprovados.some((t) => t.name === TEMPLATE_SONDAGEM && t.language === IDIOMA_TEMPLATE_SONDAGEM)
+  if (ok) cacheAprovado = { ok, em: Date.now() }
+  return ok
+}
+
+/** Situação do template na Meta, pro painel dizer se a sondagem sai também por WhatsApp. */
+export async function statusTemplateSondagem(): Promise<StatusTemplateSondagem> {
+  const r = await consultarTemplatesWhatsApp([TEMPLATE_SONDAGEM])
+  if (!r.ok) return { nome: TEMPLATE_SONDAGEM, status: null, categoria: null, motivo_rejeicao: null, erro: r.erro ?? 'consulta falhou' }
+  const t = r.templates.find((x) => x.language === IDIOMA_TEMPLATE_SONDAGEM) ?? r.templates[0]
+  if (!t) return { nome: TEMPLATE_SONDAGEM, status: 'inexistente', categoria: null, motivo_rejeicao: null, erro: null }
+  const rejeicao = t.rejected_reason && t.rejected_reason !== 'NONE' ? t.rejected_reason : null
+  return { nome: TEMPLATE_SONDAGEM, status: t.status, categoria: t.category || null, motivo_rejeicao: rejeicao, erro: null }
+}
 
 // ─── Configuração (agentes_config, linha 'captacao') ────────────────────────
 
@@ -218,7 +263,10 @@ function telefoneParaWaId(v: string | null): { whatsapp: string | null; telefone
   const dig = v.replace(/\D/g, '').replace(/^0+/, '')
   if (dig.length < 10) return { whatsapp: null, telefone: null }
   const nacional = dig.startsWith('55') && dig.length >= 12 ? dig.slice(2) : dig
-  if (nacional.length === 11 && nacional[2] === '9') return { whatsapp: normalizarWaId(nacional), telefone: null }
+  if (nacional.length === 11 && nacional[2] === '9') return { whatsapp: `55${nacional}`, telefone: null }
+  // Celular no formato antigo (DDD + 8 dígitos começando em 6–9): site desatualizado.
+  // Fixo começa em 2–5, então não há ambiguidade — entra o nono dígito.
+  if (nacional.length === 10 && /[6-9]/.test(nacional[2])) return { whatsapp: `55${nacional.slice(0, 2)}9${nacional.slice(2)}`, telefone: null }
   if (nacional.length === 10 || nacional.length === 11) return { whatsapp: null, telefone: nacional }
   return { whatsapp: null, telefone: null }
 }
@@ -698,11 +746,11 @@ export async function enviarSondagem(id: string, c: { nome: string | null; email
   }
 
   if (c.whatsapp) {
-    if (!TEMPLATE_SONDAGEM) {
+    if (!(await templateSondagemAprovado())) {
       whatsapp = false
-      erros.push('whatsapp: template de sondagem não configurado (WHATSAPP_TEMPLATE_SONDAGEM)')
+      erros.push(`whatsapp: template ${TEMPLATE_SONDAGEM} ainda não aprovado na Meta`)
     } else {
-      const r = await enviarTemplate(c.whatsapp, TEMPLATE_SONDAGEM, 'pt_BR', [
+      const r = await enviarTemplate(c.whatsapp, TEMPLATE_SONDAGEM, IDIOMA_TEMPLATE_SONDAGEM, [
         { type: 'body', parameters: [{ type: 'text', text: (c.nome || 'pessoal').slice(0, 60) }] },
       ])
       whatsapp = r.ok
@@ -736,7 +784,69 @@ export type ResultadoRodada = {
   pedidos_olhados: number
   buscas: Array<{ pedido: string; regiao: RegiaoBusca; encontrados: number; novos: number; contatados: number; erro: string | null }>
   contatados_hoje_antes: number
+  /** Candidatos que tinham ficado sem canal (template pendente, Resend fora) e receberam a sondagem nesta rodada. */
+  reabordados: number
   pulado: string | null
+}
+
+const MAX_TENTATIVAS_SONDAGEM = 3
+
+/**
+ * Segunda chance pra quem ficou sem nenhum canal na abordagem: confecção só
+ * com WhatsApp enquanto o template estava pendente na Meta, ou e-mail que o
+ * Resend recusou (limite do dia). Enquanto o pedido seguir sem confecção e
+ * dentro dos tetos, a rodada tenta de novo — é o que faz o WhatsApp da
+ * sondagem "ligar sozinho" no dia em que a Meta aprovar, sem env nem deploy.
+ * Quem só tem WhatsApp não gasta tentativa enquanto o template não sair.
+ */
+async function reabordarPendentes(pedidos: PedidoEtapa[], config: ConfigCaptacao): Promise<number> {
+  if (pedidos.length === 0) return 0
+  type Pendente = { id: string; nome: string | null; email: string | null; whatsapp: string | null; canal_whatsapp: boolean | null; pedido_id: string; erros: number | null }
+  const { data } = await supabaseAdmin
+    .from('captacao_fornecedores')
+    .select('id, nome, email, whatsapp, canal_whatsapp, pedido_id, erros')
+    .eq('origem', 'pedido')
+    .eq('status', 'erro')
+    .is('ultimo_contato_em', null)
+    .is('resposta', null)
+    .lt('erros', MAX_TENTATIVAS_SONDAGEM)
+    .in('pedido_id', pedidos.map((p) => p.id))
+    .order('criado_em', { ascending: true })
+    .limit(60)
+  const pendentes = (data ?? []) as Pendente[]
+  if (pendentes.length === 0) return 0
+
+  const waAprovado = pendentes.some((c) => c.canal_whatsapp && c.whatsapp) ? await templateSondagemAprovado() : false
+  const fila = pendentes
+    .map((c) => ({ ...c, whatsapp: c.canal_whatsapp && waAprovado ? c.whatsapp : null }))
+    .filter((c) => c.email || c.whatsapp)
+  if (fila.length === 0) return 0
+
+  let reabordados = 0
+  const porPedido = new Map<string, { perfil: PerfilBusca; pdf: { bytes: Uint8Array; nomeArquivo: string } | null; contatados: number }>()
+  for (const c of fila) {
+    if (config.max_por_dia - (await contatadosHoje()) <= 0) break
+    let ctx = porPedido.get(c.pedido_id)
+    if (!ctx) {
+      const pedido = pedidos.find((p) => p.id === c.pedido_id)
+      if (!pedido) continue
+      ctx = {
+        perfil: perfilDeBusca(pedido, await prazoDoPedido(pedido.id)),
+        pdf: await pdfSondagem(pedido.id).catch(() => null),
+        contatados: await contatadosDoPedido(pedido.id),
+      }
+      porPedido.set(c.pedido_id, ctx)
+    }
+    if (ctx.contatados >= config.max_por_pedido) continue
+    const r = await enviarSondagem(c.id, { nome: c.nome, email: c.email, whatsapp: c.whatsapp }, ctx.perfil, ctx.pdf)
+    if (r.email || r.whatsapp) {
+      reabordados++
+      ctx.contatados++
+    } else {
+      await supabaseAdmin.from('captacao_fornecedores').update({ erros: (c.erros ?? 0) + 1 }).eq('id', c.id)
+    }
+  }
+  return reabordados
 }
 
 async function prazoDoPedido(pedidoId: string): Promise<number | null> {
@@ -822,7 +932,7 @@ export async function captarParaPedido(
 /** O cron: olha os pedidos sem fornecedor e roda a busca de quem está na vez. */
 export async function rodarCaptacaoPedidos(origem: 'cron' | 'admin' | 'mcp' = 'cron'): Promise<ResultadoRodada> {
   const { modo, config } = await configCaptacao()
-  const resultado: ResultadoRodada = { pedidos_olhados: 0, buscas: [], contatados_hoje_antes: await contatadosHoje(), pulado: null }
+  const resultado: ResultadoRodada = { pedidos_olhados: 0, buscas: [], contatados_hoje_antes: await contatadosHoje(), reabordados: 0, pulado: null }
   if (modo === 'desligado') {
     resultado.pulado = 'agente de captação desligado'
     return resultado
@@ -839,6 +949,7 @@ export async function rodarCaptacaoPedidos(origem: 'cron' | 'admin' | 'mcp' = 'c
     .filter((p) => new Date(p.confirmado_em ?? p.desde).getTime() >= limiteIdade)
     .sort((a, b) => (b.confirmado_em ?? b.desde).localeCompare(a.confirmado_em ?? a.desde))
   resultado.pedidos_olhados = pedidos.length
+  if (modo === 'responde') resultado.reabordados = await reabordarPendentes(pedidos, config)
   let rodadas = 0
   for (const p of pedidos) {
     if (rodadas >= PEDIDOS_POR_RODADA) break

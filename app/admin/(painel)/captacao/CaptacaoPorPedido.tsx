@@ -60,14 +60,25 @@ type Estado = {
   modo: ModoLuigi
   config: { max_por_pedido: number; max_por_dia: number; regioes: string[]; horas_entre_buscas: number; idade_max_dias: number }
   hoje: { contatados: number; teto: number }
+  template: { nome: string; status: string | null; categoria: string | null; motivo_rejeicao: string | null; erro: string | null }
   pedidos: PedidoFila[]
   buscas: Busca[]
+}
+
+/** Uma linha sobre o WhatsApp da sondagem: só sai com o template aprovado na Meta. */
+function linhaTemplate(t: Estado['template']): { texto: string; cor: string } {
+  if (t.status === 'APPROVED') return { texto: `WhatsApp ligado: template ${t.nome} aprovado na Meta${t.categoria === 'MARKETING' ? ' (categoria marketing, R$ 0,32 por abertura)' : ''}.`, cor: 'text-emerald-700' }
+  if (t.status === 'PENDING') return { texto: `Só e-mail por enquanto: template ${t.nome} em análise na Meta. Quando aprovar, o WhatsApp liga sozinho e quem ficou só com WhatsApp recebe na rodada seguinte.`, cor: 'text-amber-700' }
+  if (t.status === 'REJECTED') return { texto: `Só e-mail: a Meta rejeitou o template ${t.nome}${t.motivo_rejeicao ? ` (${t.motivo_rejeicao})` : ''}. Precisa submeter outro texto.`, cor: 'text-red-600' }
+  if (t.status === 'inexistente') return { texto: `Só e-mail: o template ${t.nome} não existe na WABA.`, cor: 'text-red-600' }
+  if (t.status) return { texto: `Só e-mail: template ${t.nome} com status ${t.status} na Meta.`, cor: 'text-amber-700' }
+  return { texto: `Não consegui consultar o template ${t.nome} na Meta${t.erro ? ` (${t.erro})` : ''}.`, cor: 'text-gray-500' }
 }
 
 const AJUDA: Record<ModoLuigi, string> = {
   desligado: 'Nada acontece. Pedido sem fornecedor fica esperando você.',
   sugere: 'O sistema busca as confecções e lista aqui; você clica em Abordar em quem quiser.',
-  responde: 'O sistema busca e manda a sondagem sozinho (e-mail com o PDF; WhatsApp quando o template for aprovado), dentro dos tetos. Quem responde é atendido pelo Luigi e você recebe aviso.',
+  responde: 'O sistema busca e manda a sondagem sozinho (e-mail com o PDF; WhatsApp assim que a Meta aprovar o template), dentro dos tetos. Quem responde é atendido pelo Luigi e você recebe aviso.',
 }
 
 const REGIAO: Record<string, string> = { uf: 'estado do cliente', pe: 'polo de PE', brasil: 'Brasil' }
@@ -144,7 +155,8 @@ export default function CaptacaoPorPedido() {
         setMsg(res.erro ? `Busca (${REGIAO[res.regiao]}): ${res.erro}` : `Busca (${REGIAO[res.regiao]}): ${res.encontrados} encontradas, ${res.novos} novas, ${res.contatados} abordadas.`)
       } else if (corpo.acao === 'rodar') {
         const res = j.resultado
-        setMsg(res.pulado ? `Rodada: ${res.pulado}.` : `Rodada: ${res.buscas.length} busca(s) em ${res.pedidos_olhados} pedido(s) sem fornecedor.`)
+        const reabordados = res.reabordados ? ` ${res.reabordados} pendente(s) receberam a sondagem.` : ''
+        setMsg(res.pulado ? `Rodada: ${res.pulado}.${reabordados}` : `Rodada: ${res.buscas.length} busca(s) em ${res.pedidos_olhados} pedido(s) sem fornecedor.${reabordados}`)
       } else if (corpo.acao === 'abordar') {
         setMsg(j.ok ? 'Sondagem enviada.' : `Não saiu: ${j.resultado?.erro ?? 'erro'}`)
       }
@@ -228,6 +240,7 @@ export default function CaptacaoPorPedido() {
             {ocupado === 'rodar' ? 'Rodando…' : 'Rodar agora'}
           </button>
         </div>
+        {estado.template && <p className={`mt-2 text-xs ${linhaTemplate(estado.template).cor}`}>{linhaTemplate(estado.template).texto}</p>}
         {msg && <p className="mt-3 text-xs text-[#0F6E56] bg-[#E1F5EE] border border-[#1D9E75]/20 rounded-lg px-3 py-2">{msg}</p>}
         {erro && <p className="mt-3 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{erro}</p>}
       </div>

@@ -36,10 +36,15 @@ function urlGraph(path: string): string {
   return `${GRAPH_BASE}/${GRAPH_VERSION}/${path}`
 }
 
-/** Normaliza telefone pro formato wa_id da Meta: só dígitos, com DDI 55. */
+/**
+ * Normaliza telefone pro formato wa_id da Meta: só dígitos, com DDI 55.
+ * Até 11 dígitos é número nacional (DDD + 8 ou 9) e ganha o 55 — inclusive
+ * quando o DDD é 55 (Santa Maria, Uruguaiana…): com DDI, um número do Brasil
+ * tem 12 ou 13 dígitos, então "55 99134-2110" nunca é internacional.
+ */
 export function normalizarWaId(telefone: string): string {
-  const digitos = telefone.replace(/\D/g, '')
-  if (digitos.length <= 11 && !digitos.startsWith('55')) return `55${digitos}`
+  const digitos = telefone.replace(/\D/g, '').replace(/^0+/, '')
+  if (digitos.length <= 11) return `55${digitos}`
   return digitos
 }
 

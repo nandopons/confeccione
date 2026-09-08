@@ -2,8 +2,10 @@
 // ============================================================================
 // Painel da captação puxada pelo pedido.
 //
-// GET  → { modo, config, hoje: {contatados, teto}, pedidos: [pedidos sem
-//          fornecedor com buscas e candidatos], buscas: últimas rodadas }
+// GET  → { modo, config, hoje: {contatados, teto}, template: {nome, status}
+//          (o template da sondagem na Meta: só APPROVED manda WhatsApp),
+//          pedidos: [pedidos sem fornecedor com buscas e candidatos],
+//          buscas: últimas rodadas }
 // PUT  { modo?, max_por_pedido?, max_por_dia?, regioes?, horas_entre_buscas? }
 // POST { acao: 'buscar', pedidoId, regiao? }          → roda a busca agora pra um pedido
 //      { acao: 'abordar', candidatoId }                → manda a sondagem de um candidato 'sugerido'
@@ -26,6 +28,7 @@ import {
   perfilDeBusca,
   REGIOES,
   rodarCaptacaoPedidos,
+  statusTemplateSondagem,
   type RegiaoBusca,
 } from '@/app/lib/captacao-pedido'
 import { ehModoLuigi } from '@/app/lib/luigi-catalogo'
@@ -41,7 +44,13 @@ function naoAutorizado() {
 export async function GET(req: NextRequest) {
   if (!ehTokenAdminValido(req.cookies.get(COOKIE_ADMIN)?.value)) return naoAutorizado()
   try {
-    const [{ modo, config }, hoje, pedidos, buscas] = await Promise.all([configCaptacao(), contatadosHoje(), pedidosPorEtapa(['sem_fornecedor', 'buscando_fornecedor'], 60), buscasRecentes(40)])
+    const [{ modo, config }, hoje, pedidos, buscas, template] = await Promise.all([
+      configCaptacao(),
+      contatadosHoje(),
+      pedidosPorEtapa(['sem_fornecedor', 'buscando_fornecedor'], 60),
+      buscasRecentes(40),
+      statusTemplateSondagem(),
+    ])
     const candidatos = await candidatosPorPedido(pedidos.map((p) => p.id))
     const buscasPorPedido = new Map<string, number>()
     for (const b of buscas) buscasPorPedido.set(b.pedido_id, (buscasPorPedido.get(b.pedido_id) ?? 0) + 1)
@@ -50,6 +59,7 @@ export async function GET(req: NextRequest) {
       config,
       regioes: REGIOES,
       hoje: { contatados: hoje, teto: config.max_por_dia },
+      template,
       pedidos: pedidos.map((p) => ({
         id: p.id,
         codigo: p.codigo,

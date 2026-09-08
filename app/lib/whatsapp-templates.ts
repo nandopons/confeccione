@@ -17,6 +17,8 @@
 // ============================================================================
 
 const GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v23.0'
+// Só pra mock local (mesmo knob de whatsapp-cloud.ts). Em produção fica sem definir.
+const GRAPH_BASE = process.env.WHATSAPP_GRAPH_BASE || 'https://graph.facebook.com'
 
 export type CategoriaTemplate = 'UTILITY' | 'MARKETING'
 
@@ -99,7 +101,7 @@ export async function criarTemplateWhatsApp(t: NovoTemplate): Promise<ResultadoC
   }
 
   try {
-    const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${cred.wabaId}/message_templates`, {
+    const res = await fetch(`${GRAPH_BASE}/${GRAPH_VERSION}/${cred.wabaId}/message_templates`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cred.token}` },
       body: JSON.stringify(payload),
@@ -131,7 +133,7 @@ export async function consultarTemplatesWhatsApp(nomes?: string[]): Promise<{ ok
   const cred = credenciais()
   if (!cred) return { ok: false, templates: [], erro: 'WHATSAPP_TOKEN/WHATSAPP_WABA_ID ausentes' }
 
-  const url = new URL(`https://graph.facebook.com/${GRAPH_VERSION}/${cred.wabaId}/message_templates`)
+  const url = new URL(`${GRAPH_BASE}/${GRAPH_VERSION}/${cred.wabaId}/message_templates`)
   url.searchParams.set('fields', 'name,status,category,language,rejected_reason,components')
   url.searchParams.set('limit', '200')
 
