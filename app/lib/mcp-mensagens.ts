@@ -230,21 +230,37 @@ export async function prepararMensagem(params: {
   // aparece em toda tela e em toda conversa — mas a coluna é uuid. Resolver
   // aqui evita o erro de tipo e evita exigir que quem chama saiba a diferença.
   let pedidoId: string | null = null
+  // O NOME NÃO PODE SE PERDER NO CAMINHO — 09/09/2026.
+  // O agente manda o nome dentro de `template_variaveis` (é o {{1}}) e deixa
+  // `nome` vazio. A mensagem sai certa ("Oi, Thierry"), mas o contato entra no
+  // inbox sem nome, e a lista de conversas vira uma coluna de telefones — como
+  // ficou hoje com o Thierry e o Leonardo. Quem abre o inbox depois não sabe
+  // com quem falou.
+  //
+  // Ordem de preferência: o que veio explícito, depois o nome do pedido (é o
+  // cadastro, mais confiável), e por último a primeira variável do template.
+  let nome = params.nome?.trim() || null
   if (params.pedidoId) {
     const ref = params.pedidoId.trim()
-    pedidoId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)
-      ? ref
-      : ((await acharPedido(ref))?.id ?? null)
+    const ehUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)
+    const achado = ehUuid ? null : await acharPedido(ref)
+    pedidoId = ehUuid ? ref : (achado?.id ?? null)
     if (!pedidoId) {
       return { ok: false, erro: `Pedido "${params.pedidoId}" não encontrado — confira o código, ou deixe o campo vazio.` }
     }
+    if (!nome && achado?.nome) nome = achado.nome
+  }
+  if (!nome) {
+    const primeira = params.templateVariaveis?.[0]?.trim()
+    // Só se parecer nome: {{1}} de outros templates carrega hora, valor, código.
+    if (primeira && primeira.length >= 2 && /^\p{L}[\p{L}\s.'-]{1,60}$/u.test(primeira)) nome = primeira
   }
 
   const { data, error } = await supabaseAdmin
     .from('mcp_mensagens_rascunho')
     .insert({
       wa_id: waId,
-      nome: params.nome ?? null,
+      nome,
       texto,
       template_nome: params.templateNome ?? null,
       template_variaveis: params.templateVariaveis ?? null,
@@ -268,7 +284,7 @@ export async function prepararMensagem(params: {
     rascunho: {
       id: data.id as string,
       waId,
-      nome: params.nome ?? null,
+      nome,
       texto,
       templateNome: params.templateNome ?? null,
       janelaAberta,
