@@ -29,7 +29,21 @@
 import { supabaseAdmin } from './supabase-server'
 import { enviarTemplate, enviarTexto, normalizarWaId } from './whatsapp-cloud'
 import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
-import { numerosGestao } from './gestao-whatsapp'
+
+/**
+ * Números do gestor, lidos da env aqui em vez de importados de gestao-whatsapp.
+ * O agente de gestão importa este módulo (pra ganhar preparar/enviar), então
+ * importar de volta fecharia um ciclo entre os dois arquivos. Como isto é só
+ * leitura de env, duplicar as três linhas sai mais barato que o ciclo.
+ */
+function numerosDoGestor(): string[] {
+  return (process.env.WHATSAPP_GESTAO_NUMEROS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(normalizarWaId)
+    .filter((n) => n.replace(/\D/g, '').length >= 10)
+}
 
 export type Rascunho = {
   id: string
@@ -67,7 +81,7 @@ export async function prepararMensagem(params: {
     return { ok: false, erro: `Telefone "${params.telefone}" não parece um número válido com DDI e DDD.` }
   }
 
-  if (numerosGestao().includes(waId)) {
+  if (numerosDoGestor().includes(waId)) {
     return {
       ok: false,
       erro: 'Esse é o número do gestor. Pauta e aviso de gestão vão por enviar_pauta_gestao, não por aqui.',

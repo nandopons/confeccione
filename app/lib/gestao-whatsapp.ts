@@ -52,10 +52,13 @@ import {
   INFO_ETAPA,
   MOTIVOS_ENCERRAMENTO,
   pedidosPorEtapa,
+  reabrirPedidoEncerrado,
   registrarMotivoParada,
   type Etapa,
   type MotivoEncerramento,
 } from './etapas-pedido'
+import { corrigirOrcamento } from './orcamento-versoes'
+import { enviarRascunho, prepararMensagem } from './mcp-mensagens'
 
 const MODELO = 'claude-sonnet-4-6'
 const MAX_RODADAS = 6
@@ -185,7 +188,19 @@ export async function enviarParaGestor(
   return { ok: true, wamid: r.wamid, template: TEMPLATE_REUNIAO_GESTAO }
 }
 
-// ─── Ferramentas do agente (só leitura e registro) ──────────────────────────
+// ─── Ferramentas do agente ──────────────────────────────────────────────────
+//
+// Até 08/09/2026 eram só leitura e registro. Desde 09/09 o agente também
+// corrige orçamento, reabre pedido e fala com cliente — as mesmas quatro que o
+// servidor MCP ganhou, sobre as mesmas libs, pra não existirem duas regras.
+//
+// Por que aqui é aceitável ter ação com efeito externo: este agente só
+// responde ao número do Fernando (WHATSAPP_GESTAO_NUMEROS, verificado no
+// webhook). Quem fala com cliente desconhecido é o Luigi, e é por isso que o
+// Luigi NÃO tem estas ferramentas — texto de terceiro não pode virar comando.
+//
+// Mensagem a cliente continua em duas etapas: preparar_mensagem devolve o
+// texto, o Fernando lê no WhatsApp, e só então enviar_rascunho manda.
 
 const FERRAMENTAS: Anthropic.Messages.Tool[] = [
   {
@@ -329,6 +344,63 @@ const FERRAMENTAS: Anthropic.Messages.Tool[] = [
       required: ['pedido', 'motivo'],
     },
   },
+  {
+    name: 'corrigir_orcamento',
+    description:
+      'Corrige valor, frete e repasse de um pedido, com motivo, e grava versão no histórico. Valores em CENTAVOS. ' +
+      'O repasse não pode passar do valor. Pedido pago não muda de valor. SÓ depois de o Fernando confirmar os números ' +
+      'nesta conversa. Não existe "mover etapa": ao definir o orçamento o pedido anda sozinho pra aguardando pagamento.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pedido: { type: 'string', description: 'Código (2026090…), número ou id.' },
+        valor_centavos: { type: 'number', minimum: 0 },
+        frete_centavos: { type: 'number', minimum: 0 },
+        repasse_centavos: { type: 'number', minimum: 0 },
+        motivo: { type: 'string', maxLength: 500 },
+      },
+      required: ['pedido', 'valor_centavos', 'frete_centavos', 'repasse_centavos', 'motivo'],
+    },
+  },
+  {
+    name: 'reabrir_pedido',
+    description: 'Desfaz o encerramento de um pedido: ele volta a ser calculado pela etapa real. Use quando o cliente voltou ou foi engano.',
+    input_schema: {
+      type: 'object',
+      properties: { pedido: { type: 'string', description: 'Código, número ou id.' } },
+      required: ['pedido'],
+    },
+  },
+  {
+    name: 'preparar_mensagem',
+    description:
+      'Escreve uma mensagem pra um cliente ou fornecedor e devolve rascunho_id. NÃO ENVIA. Mostre ao Fernando o texto ' +
+      'exatamente como voltou e só chame enviar_rascunho depois do "pode mandar" dele. Vale 30 min. Fora da janela de ' +
+      '24 h é preciso template aprovado. Não serve pro número do próprio Fernando.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        telefone: { type: 'string', description: 'Com DDI e DDD, ex.: 5581998496055.' },
+        texto: { type: 'string', maxLength: 4000 },
+        nome: { type: 'string', maxLength: 120 },
+        template_nome: { type: 'string', maxLength: 512 },
+        pedido_id: { type: 'string' },
+        contexto: { type: 'string', maxLength: 500 },
+      },
+      required: ['telefone', 'texto'],
+    },
+  },
+  {
+    name: 'enviar_rascunho',
+    description:
+      'Manda o rascunho criado por preparar_mensagem — sai exatamente o texto gravado. Efeito externo e irreversível: ' +
+      'só depois de o Fernando ler o texto e aprovar. Envia uma vez só.',
+    input_schema: {
+      type: 'object',
+      properties: { rascunho_id: { type: 'string' } },
+      required: ['rascunho_id'],
+    },
+  },
 ]
 
 type Entrada = Record<string, unknown>
@@ -437,6 +509,67 @@ async function executarFerramenta(nome: string, entrada: Entrada): Promise<unkno
       if (!p) throw new Error(`pedido "${ref}" não encontrado`)
       const r = await encerrarPedido(p.id, motivo, 'gestor_whatsapp', str(entrada.observacao) ?? null)
       return { codigo: r.codigo, nome: r.nome, etapa: r.etapa, encerrado_motivo: r.encerrado_motivo }
+    }
+    case 'corrigir_orcamento': {
+      const ref = str(entrada.pedido)
+      const valor = num(entrada.valor_centavos)
+      const frete = num(entrada.frete_centavos)
+      const repasse = num(entrada.repasse_centavos)
+      const motivo = str(entrada.motivo)
+      if (!ref || valor === undefined || frete === undefined || repasse === undefined || !motivo) {
+        throw new Error('pedido, valor_centavos, frete_centavos, repasse_centavos e motivo são obrigatórios')
+      }
+      const p = await acharPedido(ref)
+      if (!p) throw new Error(`pedido "${ref}" não encontrado`)
+      const r = await corrigirOrcamento({
+        pedidoId: p.id,
+        valorCentavos: valor,
+        freteCentavos: frete,
+        repasseCentavos: repasse,
+        motivo,
+        autorNome: 'Agente de gestão (WhatsApp)',
+      })
+      if (!r.ok) throw new Error(r.erro)
+      const depois = await acharPedido(p.id)
+      return { codigo: p.codigo, nome: p.nome, valor_centavos: r.valorCentavos, etapa_antes: p.etapa, etapa_agora: depois?.etapa ?? p.etapa }
+    }
+    case 'reabrir_pedido': {
+      const ref = str(entrada.pedido)
+      if (!ref) throw new Error('pedido é obrigatório')
+      const p = await acharPedido(ref)
+      if (!p) throw new Error(`pedido "${ref}" não encontrado`)
+      if (!p.encerrado_motivo) throw new Error(`o pedido ${p.codigo ?? ref} não está encerrado (etapa: ${p.etapa})`)
+      const r = await reabrirPedidoEncerrado(p.id)
+      return { codigo: r.codigo, nome: r.nome, etapa_antes: p.etapa, etapa_agora: r.etapa }
+    }
+    case 'preparar_mensagem': {
+      const telefone = str(entrada.telefone)
+      const texto = str(entrada.texto)
+      if (!telefone || !texto) throw new Error('telefone e texto são obrigatórios')
+      const r = await prepararMensagem({
+        telefone,
+        texto,
+        nome: str(entrada.nome) ?? null,
+        templateNome: str(entrada.template_nome) ?? null,
+        pedidoId: str(entrada.pedido_id) ?? null,
+        contexto: str(entrada.contexto) ?? null,
+      })
+      if (!r.ok) throw new Error(r.erro)
+      return {
+        rascunho_id: r.rascunho.id,
+        para: r.rascunho.waId,
+        janela_24h: r.rascunho.janelaAberta ? 'aberta' : 'fechada',
+        texto_que_sera_enviado: r.rascunho.texto,
+        aviso: r.aviso,
+        proximo_passo: 'Mostre o texto ao Fernando e só envie com o "pode mandar" dele.',
+      }
+    }
+    case 'enviar_rascunho': {
+      const id = str(entrada.rascunho_id)
+      if (!id) throw new Error('rascunho_id é obrigatório')
+      const r = await enviarRascunho(id)
+      if (!r.ok) throw new Error(r.erro)
+      return { enviado: true, para: r.waId, wamid: r.wamid }
     }
     default:
       throw new Error(`ferramenta desconhecida: ${nome}`)
