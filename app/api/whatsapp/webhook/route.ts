@@ -142,15 +142,41 @@ async function vincularContato(waId: string): Promise<{ clienteId: string | null
   return { clienteId: cliente?.id ?? null, fornecedorId: fornecedor?.id ?? null }
 }
 
+/**
+ * Acha o contato mesmo quando o número chega com ou sem o nono dígito.
+ *
+ * POR QUE ISTO EXISTE (09/09/2026)
+ * O celular brasileiro tem duas formas do MESMO número: com e sem o 9 depois
+ * do DDD. A gente manda pra 5581984782237 (o que está no cadastro), a pessoa
+ * responde e a Meta entrega 55819984782237 — outro wa_id, contato novo,
+ * conversa nova. Foi o que aconteceu com a Marilia: a sondagem ficou numa
+ * conversa e a resposta dela apareceu noutra, com o nome do perfil dela.
+ *
+ * O casamento exige MESMO DDI+DDD e mesmos 8 dígitos finais. Só os 8 finais
+ * não bastam: 5581 9xxxx-1234 e 5511 9xxxx-1234 são pessoas diferentes que
+ * terminam igual, e juntar as duas seria pior que duplicar.
+ */
+async function contatoPorNumero(waId: string): Promise<string | null> {
+  const so = waId.replace(/\D/g, '')
+  const { data: exato } = await supabaseAdmin.from('wa_contatos').select('id').eq('wa_id', waId).maybeSingle()
+  if (exato?.id) return exato.id as string
+
+  if (so.length < 12) return null
+  const fim8 = so.slice(-8)
+  // DDI (2) + DDD (2) — o que vem antes do número em si.
+  const prefixo = so.slice(0, 4)
+
+  const { data: parecidos } = await supabaseAdmin.from('wa_contatos').select('id, wa_id').ilike('wa_id', `%${fim8}`)
+  for (const c of (parecidos ?? []) as Array<{ id: string; wa_id: string }>) {
+    const outro = c.wa_id.replace(/\D/g, '')
+    if (outro.slice(0, 4) === prefixo && outro.slice(-8) === fim8) return c.id
+  }
+  return null
+}
+
 /** Garante contato + conversa pro wa_id; retorna o id da conversa. */
 async function obterConversa(waId: string, nomePerfil: string | undefined): Promise<string | null> {
-  const { data: contatoExistente } = await supabaseAdmin
-    .from('wa_contatos')
-    .select('id')
-    .eq('wa_id', waId)
-    .maybeSingle()
-
-  let contatoId = contatoExistente?.id as string | undefined
+  let contatoId = (await contatoPorNumero(waId)) ?? undefined
 
   if (!contatoId) {
     const { clienteId, fornecedorId } = await vincularContato(waId)
@@ -161,8 +187,7 @@ async function obterConversa(waId: string, nomePerfil: string | undefined): Prom
       .single()
     if (error) {
       // corrida entre dois eventos simultâneos — busca de novo
-      const { data: retry } = await supabaseAdmin.from('wa_contatos').select('id').eq('wa_id', waId).maybeSingle()
-      contatoId = retry?.id
+      contatoId = (await contatoPorNumero(waId)) ?? undefined
     } else {
       contatoId = novo.id
     }
