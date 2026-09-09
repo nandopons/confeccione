@@ -490,7 +490,15 @@ const FERRAMENTAS: Anthropic.Messages.Tool[] = [
         texto: { type: 'string', maxLength: 4000 },
         nome: { type: 'string', maxLength: 120 },
         template_nome: { type: 'string', maxLength: 512 },
-        pedido_id: { type: 'string' },
+        template_variaveis: {
+          type: 'array',
+          items: { type: 'string', maxLength: 200 },
+          maxItems: 10,
+          description:
+            'Valores de {{1}}, {{2}}… na ordem. OBRIGATÓRIO quando o corpo do template tem variável — veja o corpo em ' +
+            'templates_whatsapp. Em quase todos, {{1}} é o primeiro nome de quem recebe (ex.: ["Nicole"]).',
+        },
+        pedido_id: { type: 'string', description: 'Código (2026090…) ou id do pedido.' },
         contexto: { type: 'string', maxLength: 500 },
       },
       required: ['telefone', 'texto'],
@@ -716,11 +724,15 @@ async function executarFerramenta(nome: string, entrada: Entrada): Promise<unkno
       const telefone = str(entrada.telefone)
       const texto = str(entrada.texto)
       if (!telefone || !texto) throw new Error('telefone e texto são obrigatórios')
+      const variaveis = Array.isArray(entrada.template_variaveis)
+        ? (entrada.template_variaveis as unknown[]).map((v) => String(v ?? '').trim()).filter(Boolean)
+        : undefined
       const r = await prepararMensagem({
         telefone,
         texto,
         nome: str(entrada.nome) ?? null,
         templateNome: str(entrada.template_nome) ?? null,
+        templateVariaveis: variaveis,
         pedidoId: str(entrada.pedido_id) ?? null,
         contexto: str(entrada.contexto) ?? null,
       })
