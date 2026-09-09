@@ -28,6 +28,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
 import { salvarFotoDaConversa } from './portfolio-fornecedor'
+import { salvarPerfil } from './perfil-producao'
 import { registrarUsoIa } from './uso-ia'
 import { pedidosPorEtapa, pedidoEtapa, type PedidoEtapa } from './etapas-pedido'
 import { normalizarWaId, enviarTemplate, enviarTexto, enviarMidiaPorId, uploadMidia, marcarComoLida, listarTemplates } from './whatsapp-cloud'
@@ -1045,6 +1046,21 @@ function promptCandidato(cand: CandidatoLinha, perfil: PerfilBusca | null, pdfJa
     : 'pedido não encontrado (o Fernando resolve)'
   return `Você é o Luigi, da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções de todo o Brasil (sede em Recife). Está falando pelo WhatsApp oficial com uma CONFECÇÃO que a gente abordou por causa de um pedido sem fornecedor. A abertura foi só "Oi, tudo bem? Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês." — então, quando ela responder ("oi", "pode falar", "quem é?"), a sua PRIMEIRA mensagem é a dúvida em si, natural e direta: temos um pedido de X pra entregar em Y, vocês produzem esse tipo de peça nessa quantidade? Não se apresente de novo (o nome já foi dito), não repita a dúvida depois. Se perguntarem o que é a Confeccione: em uma linha, marketplace que traz pedidos de roupa pra confecções, com pagamento garantido e sem custo pra entrar, a plataforma só ganha comissão quando o pedido fecha.
 
+ATUALIZAR O PERFIL DE PRODUÇÃO (quando a conversa for essa). Se a confecção já é cadastrada e o assunto é atualizar o perfil dela, o seu trabalho é uma conversa curta, não um questionário. O que a gente precisa saber, em ordem de importância:
+
+1. o que ela faz — facção pura, ou também corte, modelagem, pilotagem, estamparia, bordado
+2. ela fornece o tecido e o aviamento, ou o cliente manda o material
+3. que tecido ela trabalha — malha, plana, suplex, moletom, jeans
+4. quanto ela dá conta por mês, em peças
+5. prazo mínimo que ela aceita, e se pega encaixe (pedido no meio da agenda cheia)
+6. o que ela NÃO faz — isso vale tanto quanto o resto e quase ninguém pergunta
+
+UMA PERGUNTA POR MENSAGEM, e chame salvar_perfil_producao A CADA resposta, não só no fim. A conversa pode morrer na terceira pergunta, e três respostas gravadas já melhoram o match. Se ela responder duas coisas de uma vez, grave as duas e pule a pergunta que ela já respondeu.
+
+Não faça as seis se ela estiver com pressa: as duas primeiras já valem a conversa. Agradeça e encerre pela porta aberta.
+
+Diga POR QUE está perguntando, uma vez só, no começo: é pra mandar só pedido que combina com ela, em vez de tudo. Isso é verdade e é o que faz ela responder — o benefício é dela.
+
 PEÇA AS FOTOS DEPOIS DO CADASTRO. Confecção cadastrada e sem foto no perfil é um card vazio: o cliente não escolhe quem ele não vê trabalhar. Quando ela se cadastrar, ou quando disser o que produz, peça em uma linha: "manda 3 ou 4 fotos de peças que vocês já fizeram, coloco no perfil de vocês". Ela manda na hora, porque é o que ela já faz o dia inteiro no Instagram. Cada foto que chegar, chame salvar_no_portfolio com uma legenda curta do que é a peça, nas palavras dela.
 
 Não peça foto antes do cadastro (não existe perfil pra guardar), não peça mais de uma vez na mesma conversa, e não insista se ela não mandar — é bônus, o cadastro é o objetivo. Se ela mandar catálogo em PDF ou link do Instagram em vez de foto, agradeça e siga: por enquanto só a foto entra no perfil.
@@ -1102,6 +1118,40 @@ const FERRAMENTAS_CANDIDATO: Anthropic.Messages.Tool[] = [
         },
       },
       required: ['resposta'],
+    },
+  },
+  {
+    name: 'salvar_perfil_producao',
+    description:
+      'Grava o que a confecção contou sobre a produção dela. Chame A CADA resposta, não só no fim: ' +
+      'a conversa pode parar no meio e três respostas gravadas já melhoram o match. ' +
+      'Campo que você não passar fica como estava — nunca some por omissão.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        servicos: {
+          type: 'array',
+          items: { type: 'string', maxLength: 40 },
+          description: 'Ex.: ["facção", "corte", "modelagem", "pilotagem", "estamparia", "bordado"].',
+        },
+        tecidos: {
+          type: 'array',
+          items: { type: 'string', maxLength: 40 },
+          description: 'Ex.: ["malha", "plana", "suplex", "moletom", "jeans"].',
+        },
+        maquinas: {
+          type: 'array',
+          items: { type: 'string', maxLength: 40 },
+          description: 'Ex.: ["reta", "overloque", "galoneira", "travete"].',
+        },
+        fornece_material: { type: 'boolean', description: 'true = fornece tecido e aviamento; false = facção pura.' },
+        capacidade_mes: { type: 'number', minimum: 1, description: 'Peças por mês, no número que ELA disse.' },
+        aceita_encaixe: { type: 'boolean', description: 'Pega pedido no meio da agenda cheia?' },
+        faz_desenvolvimento: { type: 'boolean', description: 'Desenvolve peça a partir de foto, sem molde pronto?' },
+        prazo_minimo_dias: { type: 'number', minimum: 1, maximum: 180, description: 'Prazo mínimo que ela aceita.' },
+        nao_faz: { type: 'string', maxLength: 200, description: 'O que ela NÃO faz. Vale tanto quanto o que faz.' },
+        observacao: { type: 'string', maxLength: 300 },
+      },
     },
   },
   {
@@ -1236,6 +1286,51 @@ export async function responderCandidato(params: {
             await avisarGestor(`Captação: ${cand.nome ?? waId} respondeu SIM pro pedido ${pedido?.codigo ?? cand.pedido_id ?? ''}${str(entrada.observacao) ? ` — ${str(entrada.observacao)}` : ''}. Falta aprovar o cadastro e ofertar (/admin/whatsapp).`)
           }
           resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify({ ok: true, resposta: v }) })
+        } else if (uso.name === 'salvar_perfil_producao') {
+          const { data: c } = await supabaseAdmin
+            .from('wa_contatos')
+            .select('fornecedor_id')
+            .eq('wa_id', waId)
+            .maybeSingle<{ fornecedor_id: string | null }>()
+
+          if (!c?.fornecedor_id) {
+            resultados.push({
+              type: 'tool_result',
+              tool_use_id: uso.id,
+              content: JSON.stringify({
+                ok: false,
+                aviso: 'Essa confecção ainda não tem cadastro — sem cadastro não há perfil pra preencher. Mande o link primeiro.',
+              }),
+            })
+          } else {
+            const lista = (v: unknown) =>
+              Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean).slice(0, 20) : null
+            const bool = (v: unknown) => (typeof v === 'boolean' ? v : null)
+            // O `num` daqui exige padrão e faixa; aqui ausência precisa virar
+            // null, não um valor inventado — perfil pela metade é esperado.
+            const inteiro = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : null)
+            try {
+              const salvo = await salvarPerfil(c.fornecedor_id, {
+                servicos: lista(entrada.servicos),
+                tecidos: lista(entrada.tecidos),
+                maquinas: lista(entrada.maquinas),
+                forneceMaterial: bool(entrada.fornece_material),
+                capacidadeMes: inteiro(entrada.capacidade_mes),
+                aceitaEncaixe: bool(entrada.aceita_encaixe),
+                fazDesenvolvimento: bool(entrada.faz_desenvolvimento),
+                prazoMinimoDias: inteiro(entrada.prazo_minimo_dias),
+                naoFaz: str(entrada.nao_faz),
+                observacao: str(entrada.observacao),
+              })
+              resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify({ ok: true, perfil: salvo }) })
+            } catch (e) {
+              resultados.push({
+                type: 'tool_result',
+                tool_use_id: uso.id,
+                content: JSON.stringify({ ok: false, erro: e instanceof Error ? e.message : 'falha ao gravar' }),
+              })
+            }
+          }
         } else if (uso.name === 'salvar_no_portfolio') {
           // O fornecedor_id vem do contato do WhatsApp, não do que o modelo
           // diz: portfólio é dado de cadastro e não pode depender de o agente
