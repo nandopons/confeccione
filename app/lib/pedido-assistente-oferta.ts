@@ -197,14 +197,21 @@ export function pontuarFornecedor(
     }
   }
 
-  // Prazo NÃO ganha margem, e a diferença é real: quantidade é negociável (a
-  // confecção decide se compensa), prazo é agenda — ou a peça cabe na fila de
-  // produção dela ou não cabe, e "vai que cola" só gera recusa. Quem declarou
-  // que só pega a partir de 21 dias fica de fora do pedido de 10.
+  // PRAZO NÃO ENTRA NO MATCH — decisão do Fernando, 09/09/2026.
+  //
+  // Eu tinha feito o prazo mínimo da confecção eliminar candidato, por simetria
+  // com o pedido mínimo. Ele corrigiu, e a correção está certa: agenda de
+  // confecção muda por semana. A que hoje só pega a partir de 21 dias porque
+  // está cheia, na semana que vem topa 8 porque abriu buraco. Filtrar por isso
+  // é descartar fornecedor por um dado que envelhece em dias — e o custo do
+  // erro é assimétrico: perder quem toparia é pior que mandar pra quem recusa.
+  //
+  // O prazo do PEDIDO continua indo na oferta (ver ofertarPedido), que é onde
+  // ele importa: quem decide se cabe na agenda é ela, na hora, olhando a
+  // própria fila. `prazo_minimo_dias` fica como informação na tela, nunca como
+  // filtro.
   if (pedido.prazoDias != null && f.prazo_minimo_dias != null && pedido.prazoDias < f.prazo_minimo_dias) {
-    viavel = false
-    pontos -= 60
-    motivos.push(`só a partir de ${f.prazo_minimo_dias} dias`)
+    motivos.push(`costuma pegar a partir de ${f.prazo_minimo_dias} dias`)
   }
 
   if (f.status && f.status !== 'ativo') {
