@@ -35,6 +35,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
+import { blocoDoPdf, ehPdf, type BlocoPdf } from './anexo-pdf'
 import { enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
 import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 // O tipo local LinhaPedido deste arquivo é um recorte antigo, sem material nem
@@ -760,7 +761,9 @@ Certo: "Entendi. Lote pequeno costuma ter fornecedor disponível. Quantas peças
 Errado: "A gente conecta quem precisa produzir a confecções de todo o Brasil. Você descreve o que quer (peça, cor, quantidade, arte), a gente oferece pra fornecedores e quem topar monta o orçamento — você só paga se aprovar. O que você está pensando em produzir?"
 Certo: "A gente leva seu pedido às confecções e elas enviam o orçamento. O que você quer produzir?"
 
-VOCÊ ENXERGA AS IMAGENS: quando o cliente manda foto, você a vê de verdade. Use o que está nela — modelo da peça, cor, estampa, referência que ele mandou — pra preencher o pedido e pra confirmar com ele o que entendeu ("essa camisa é gola careca, certo?"). Nunca peça pra ele descrever o que já está na foto. Diga o que vê de forma concreta, e pergunte só o que a imagem não responde (quantidade, tamanhos, público). Se a foto estiver ruim ou não der pra concluir, diga o que não deu pra ver em vez de adivinhar. Áudio você ainda não escuta.
+VOCÊ ENXERGA AS IMAGENS: quando o cliente manda foto, você a vê de verdade. Use o que está nela — modelo da peça, cor, estampa, referência que ele mandou — pra preencher o pedido e pra confirmar com ele o que entendeu ("essa camisa é gola careca, certo?"). Nunca peça pra ele descrever o que já está na foto. Diga o que vê de forma concreta, e pergunte só o que a imagem não responde (quantidade, tamanhos, público). Se a foto estiver ruim ou não der pra concluir, diga o que não deu pra ver em vez de adivinhar.
+
+VOCÊ TAMBÉM LÊ PDF E ESCUTA ÁUDIO. O PDF chega inteiro pra você, com o layout: ficha técnica, tabela de grade e tamanhos, arte da estampa, orçamento que ele pediu em outro lugar. Leia e USE — se a tabela de grade traz P 10, M 20, G 15, isso é a quantidade do pedido e você não pergunta de novo. O áudio chega já transcrito no texto da mensagem; trate como se ele tivesse escrito. Nos dois casos, confirme o que entendeu em uma frase antes de gravar, porque transcrição erra nome e número: "entendi 40 camisas, 20 P e 20 M, confere?". Nunca peça pra ele digitar o que já mandou no arquivo — foi justamente pra não digitar que ele mandou.
 
 PEDIDO REPETIDO DO MESMO CLIENTE: se o contexto mostrar que ele tem mais de um pedido incompleto criado quase junto (mesmo dia, ou poucos minutos de diferença), quase sempre é a mesma intenção duplicada, não dois pedidos de verdade. Não trate como dois: pergunte de forma leve se ele quer seguir com os dois ou se foi sem querer, e siga com o que ele disser. Nunca mande a mesma cutucada duas vezes pelo mesmo motivo, nem fale de um pedido como se o outro não existisse — isso mostra que a gente não olha o que tem na mão. Se ele disser que era um só, registre o motivo no que sobrou e encerre o duplicado com encerrar_pedido, quando ele confirmar.
 
@@ -821,6 +824,8 @@ type LinhaMensagem = {
  * de mandar mais a anterior; carregar toda a conversa encarece cada turno.
  */
 const IMAGENS_NO_HISTORICO = 2
+/** PDF é pesado: um por vez já cobre ficha técnica e tabela de grade. */
+const PDFS_NO_HISTORICO = 1
 const MIMES_VISAO = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const
 type BlocoImagem = { type: 'image'; source: { type: 'base64'; media_type: (typeof MIMES_VISAO)[number]; data: string } }
 
@@ -865,10 +870,20 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
   const wamids = new Set(linhas.map((m) => m.wamid).filter((w): w is string => Boolean(w)))
 
   const comImagem = linhas.filter((m) => m.direcao === 'entrada' && m.tipo === 'image' && m.midia_path)
-  const blocos = new Map<string, BlocoImagem>()
+  const blocos = new Map<string, BlocoImagem | BlocoPdf>()
   await Promise.all(
     comImagem.slice(-IMAGENS_NO_HISTORICO).map(async (m) => {
       const b = await blocoDaImagem(m.midia_path as string, m.midia_mime)
+      if (b) blocos.set(m.midia_path as string, b)
+    })
+  )
+  // PDF entra igual imagem: ficha técnica, tabela de grade e arte chegam como
+  // documento, e ler só "[documento]" é pedir pro cliente digitar o que ele
+  // acabou de mandar pronto. Só o último — PDF pesa muito mais que foto.
+  const comPdf = linhas.filter((m) => m.direcao === 'entrada' && m.tipo === 'document' && m.midia_path && ehPdf(m.midia_mime))
+  await Promise.all(
+    comPdf.slice(-PDFS_NO_HISTORICO).map(async (m) => {
+      const b = await blocoDoPdf(m.midia_path as string, m.midia_mime)
       if (b) blocos.set(m.midia_path as string, b)
     })
   )
@@ -879,9 +894,11 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
   for (const m of linhas) {
     const role: 'user' | 'assistant' = m.direcao === 'entrada' ? 'user' : 'assistant'
     const bloco = m.midia_path ? blocos.get(m.midia_path) : undefined
-    const texto = bloco ? (m.corpo?.trim() || 'Mandei esta imagem.') : textoDaLinha(m)
+    const texto = bloco
+      ? m.corpo?.trim() || (bloco.type === 'document' ? 'Mandei este arquivo.' : 'Mandei esta imagem.')
+      : textoDaLinha(m)
 
-    // Com imagem o conteúdo é lista de blocos e não concatena como texto.
+    // Com anexo o conteúdo é lista de blocos e não concatena como texto.
     if (bloco) {
       msgs.push({ role, content: [bloco, { type: 'text', text: texto }] })
       continue
@@ -899,11 +916,12 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
 }
 
 /**
- * Junta ao histórico a imagem que acabou de chegar. O webhook grava e responde
- * quase junto, então a foto do cliente pode não estar na leitura acima — e sem
- * isto ela apareceria como "[imagem]" logo na mensagem que motivou a resposta.
+ * Junta ao histórico o anexo que acabou de chegar — imagem ou PDF. O webhook
+ * grava e responde quase junto, então o arquivo do cliente pode não estar na
+ * leitura acima, e sem isto ele apareceria como "[imagem]" ou "[documento]"
+ * logo na mensagem que motivou a resposta.
  */
-async function comImagemRecente(
+async function comAnexoRecente(
   msgs: Anthropic.Messages.MessageParam[],
   wamid: string,
   corpo: string | null,
@@ -916,10 +934,12 @@ async function comImagemRecente(
     .eq('wamid', wamid)
     .maybeSingle<{ midia_path: string | null; midia_mime: string | null }>()
   if (!data?.midia_path) return msgs
-  const bloco = await blocoDaImagem(data.midia_path, data.midia_mime)
+  const bloco = ehPdf(data.midia_mime)
+    ? await blocoDoPdf(data.midia_path, data.midia_mime)
+    : await blocoDaImagem(data.midia_path, data.midia_mime)
   if (!bloco) return msgs
 
-  const legenda = (corpo ?? '').trim() || 'Mandei esta imagem.'
+  const legenda = (corpo ?? '').trim() || (bloco.type === 'document' ? 'Mandei este arquivo.' : 'Mandei esta imagem.')
   const fim = msgs[msgs.length - 1]
   return fim && fim.role === 'user' && typeof fim.content === 'string' && !fim.content.trim()
     ? [...msgs.slice(0, -1), { role: 'user', content: [bloco, { type: 'text', text: legenda }] }]
@@ -1200,14 +1220,16 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     }
     const nome = params.nome ?? contato?.nome ?? null
 
-    // Imagem o Luigi lê (o histórico monta o bloco de visão), mesmo sem
-    // legenda: cliente manda foto de referência, print de estampa ou arte da
-    // logo, e pedir pra descrever é o oposto do que ele quis. Áudio ainda não,
-    // porque exigiria transcrição.
+    // Imagem e PDF o Luigi lê (o histórico monta o bloco), mesmo sem legenda:
+    // cliente manda foto de referência, print de estampa, arte da logo ou a
+    // ficha técnica em PDF, e pedir pra descrever é o oposto do que ele quis.
+    // Áudio já chega transcrito do webhook — se não tem texto aqui, é porque a
+    // transcrição falhou, e aí o pedido pra escrever continua valendo.
     const temTexto = Boolean(params.corpo && params.corpo.trim())
-    if (!temTexto && params.tipo !== 'image') {
+    const anexoQueEuLeio = params.tipo === 'image' || params.tipo === 'document'
+    if (!temTexto && !anexoQueEuLeio) {
       if (modo === 'responde' && params.tipo === 'audio') {
-        const aviso = 'Recebi seu áudio, mas por aqui eu só consigo ler texto. Pode me escrever?'
+        const aviso = 'Recebi seu áudio, mas não consegui ouvir direito. Pode me escrever?'
         const r = await enviarTexto(waId, aviso)
         if (r.ok) await registrarSaidaInbox(waId, nome, r.wamid, aviso, null, 'luigi')
         await gravarLog({ ...base, resposta: aviso, pedido_id: null, ferramentas: [], escalado: false, motivo_escalada: null, status: r.ok ? 'enviada' : 'falhou', rodadas: 0, tokens_entrada: 0, tokens_saida: 0, duracao_ms: Date.now() - inicio, erro: r.ok ? null : r.erro })
@@ -1250,8 +1272,8 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       }
     }
 
-    if (params.tipo === 'image') {
-      mensagens = await comImagemRecente(mensagens, params.wamid, params.corpo, historico.wamids.has(params.wamid))
+    if (params.tipo === 'image' || params.tipo === 'document') {
+      mensagens = await comAnexoRecente(mensagens, params.wamid, params.corpo, historico.wamids.has(params.wamid))
     }
 
     const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens)

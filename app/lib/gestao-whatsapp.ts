@@ -26,6 +26,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
+import { blocoDoPdf, ehPdf, type BlocoPdf } from './anexo-pdf'
 import { enviarTemplate, enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
 import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 import { registrarUsoIa } from './uso-ia'
@@ -811,6 +812,8 @@ A EMPRESA, PRA QUANDO VOCÊ ESCREVER: Confeccione, marketplace B2B de confecçã
 
 PROCURE ANTES DE PERGUNTAR: quando o Fernando citar alguém pelo nome ("responde o André", "e a Rafaella?", "a JJ Camisetas"), chame buscar_contato — você acha o telefone, o papel, os pedidos e a última mensagem sozinho. Quando ele falar de um pedido, chame detalhe_pedido pra ver as peças. Antes de escrever pra alguém, chame ler_conversa. NUNCA responda "não tenho ferramenta pra isso", "não sei o conteúdo" ou peça a ele um dado que você consegue buscar: primeiro procure com as ferramentas, e só diga que não achou depois de ter procurado de verdade. Não peça permissão pra consultar — leitura não precisa de confirmação, faça e traga o resultado.
 
+VOCÊ LÊ PDF E ESCUTA ÁUDIO. Quando o Fernando encaminhar um PDF — boleto, contrato, orçamento de fornecedor, ficha técnica, extrato — ele chega inteiro pra você, com o layout preservado. Leia e responda o que ele quer saber, sem pedir pra ele resumir ou digitar. Áudio chega já transcrito no texto. Como transcrição e leitura de tabela erram número, confirme valor e data em uma linha antes de agir em cima ("boleto de R$ 998 vencendo 15/09, confere?") — e valor que vira decisão você nunca chuta.
+
 NOME, TELEFONE, CÓDIGO E NÚMERO SÓ SAEM DE FERRAMENTA: se você vai escrever um nome de cliente, um telefone, um código de pedido, um valor ou uma contagem ("são 60 pedidos"), esse dado precisa ter voltado de uma ferramenta NESTA conversa. Não existe estimativa, não existe exemplo ilustrativo, não existe "algo como". Se você ainda não chamou a ferramenta, chame agora; se chamou e não veio, diga que não veio. Uma lista inventada é pior do que nenhuma lista: o Fernando toma decisão em cima dela, manda mensagem pra gente que não existe, e quando descobre não sabe mais o que da sua resposta era real. Você não tem como saber de cabeça quem está parado no funil — isso muda toda hora e mora no banco, não em você.
 
 E NÃO DIGA QUE NÃO TEM O QUE VOCÊ TEM: pedidos_por_etapa devolve a lista real com nome, telefone e código, até 200 por chamada. O que você não tem é DISPARO EM LOTE — cada mensagem é um preparar_mensagem e um enviar_rascunho, e por isso mandar pra dezenas de pessoas numa conversa não cabe. Essas duas coisas são diferentes: a primeira você faz, a segunda é da régua automática, não sua.
@@ -877,6 +880,8 @@ function textoDaLinha(m: LinhaMensagem): string {
  * é o que ele acabou de mandar. As mais antigas continuam como "[imagem]".
  */
 const IMAGENS_NO_HISTORICO = 3
+/** PDF é pesado: um por vez já cobre ficha técnica e tabela de grade. */
+const PDFS_NO_HISTORICO = 1
 const MIMES_VISAO = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const
 
 type BlocoImagem = { type: 'image'; source: { type: 'base64'; media_type: (typeof MIMES_VISAO)[number]; data: string } }
@@ -992,11 +997,20 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
   // Só as últimas N imagens que ELE mandou entram como visão.
   const comImagem = linhas.filter((m) => m.direcao === 'entrada' && m.tipo === 'image' && m.midia_path)
   const carregar = new Set(comImagem.slice(-IMAGENS_NO_HISTORICO).map((m) => m.midia_path as string))
-  const blocos = new Map<string, BlocoImagem>()
+  const blocos = new Map<string, BlocoImagem | BlocoPdf>()
   await Promise.all(
     [...carregar].map(async (path) => {
       const b = await blocoDaImagem(path, comImagem.find((m) => m.midia_path === path)?.midia_mime ?? null)
       if (b) blocos.set(path, b)
+    })
+  )
+  // PDF que o Fernando encaminha (boleto, contrato, orçamento de fornecedor,
+  // ficha técnica) o agente passa a ler, em vez de responder "[documento]".
+  const comPdf = linhas.filter((m) => m.direcao === 'entrada' && m.tipo === 'document' && m.midia_path && ehPdf(m.midia_mime))
+  await Promise.all(
+    comPdf.slice(-PDFS_NO_HISTORICO).map(async (m) => {
+      const b = await blocoDoPdf(m.midia_path as string, m.midia_mime)
+      if (b) blocos.set(m.midia_path as string, b)
     })
   )
 
@@ -1004,7 +1018,9 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
   for (const m of linhas) {
     const role: 'user' | 'assistant' = m.direcao === 'entrada' ? 'user' : 'assistant'
     const bloco = m.midia_path ? blocos.get(m.midia_path) : undefined
-    const texto = bloco ? (m.corpo?.trim() || 'Olha esta imagem.') : textoDaLinha(m)
+    const texto = bloco
+      ? m.corpo?.trim() || (bloco.type === 'document' ? 'Olha este arquivo.' : 'Olha esta imagem.')
+      : textoDaLinha(m)
 
     // Com imagem o conteúdo vira lista de blocos e não dá pra concatenar como
     // texto — por isso a mensagem com imagem sempre abre um turno próprio.
@@ -1233,16 +1249,19 @@ export async function responderGestao(params: {
     // A imagem recém-chegada pode não estar no histórico ainda: o webhook grava
     // e responde quase junto. Sem isto, o print que ele acabou de mandar
     // apareceria como "[imagem]" e o agente pediria pra ele escrever.
-    if (params.tipo === 'image' && !historico.wamids.has(params.wamid)) {
+    if ((params.tipo === 'image' || params.tipo === 'document') && !historico.wamids.has(params.wamid)) {
       const { data: recem } = await supabaseAdmin
         .from('wa_mensagens')
         .select('midia_path, midia_mime')
         .eq('wamid', params.wamid)
         .maybeSingle<{ midia_path: string | null; midia_mime: string | null }>()
       if (recem?.midia_path) {
-        const bloco = await blocoDaImagem(recem.midia_path, recem.midia_mime)
+        const bloco = ehPdf(recem.midia_mime)
+          ? await blocoDoPdf(recem.midia_path, recem.midia_mime)
+          : await blocoDaImagem(recem.midia_path, recem.midia_mime)
         if (bloco) {
-          const legenda = (params.corpo ?? '').trim() || 'Olha esta imagem.'
+          const legenda =
+            (params.corpo ?? '').trim() || (bloco.type === 'document' ? 'Olha este arquivo.' : 'Olha esta imagem.')
           const fim = mensagens[mensagens.length - 1]
           // Se o último turno é dele e virou só a legenda vazia, troca pelo par
           // imagem + texto em vez de empilhar um turno de usuário duplicado.
