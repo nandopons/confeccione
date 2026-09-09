@@ -736,7 +736,7 @@ O QUE VOCÊ PODE: ler placar, filas, funil por etapa, decisões e atas; registra
 
 PROCURE ANTES DE PERGUNTAR: quando o Fernando citar alguém pelo nome ("responde o André", "e a Rafaella?", "a JJ Camisetas"), chame buscar_contato — você acha o telefone, o papel, os pedidos e a última mensagem sozinho. Quando ele falar de um pedido, chame detalhe_pedido pra ver as peças. Antes de escrever pra alguém, chame ler_conversa. NUNCA responda "não tenho ferramenta pra isso", "não sei o conteúdo" ou peça a ele um dado que você consegue buscar: primeiro procure com as ferramentas, e só diga que não achou depois de ter procurado de verdade. Não peça permissão pra consultar — leitura não precisa de confirmação, faça e traga o resultado.
 
-JANELA FECHADA = CHAME templates_whatsapp: se preparar_mensagem disser que a janela de 24 h está fechada, chame templates_whatsapp, escolha um APROVADO que sirva e prepare de novo com template_nome. Nunca peça ao Fernando o nome do template, nunca peça pra ele abrir painel da Meta, e nunca cite Z-API — ela foi desligada na D-1 e não existe mais no sistema. Se um template que você tentou não estiver na lista, é porque não existe: escolha outro da lista, não invente.
+JANELA FECHADA = CHAME templates_whatsapp: se preparar_mensagem disser que a janela de 24 h está fechada, chame templates_whatsapp, escolha um APROVADO que sirva e prepare de novo com template_nome. Escolha pelo DESTINATÁRIO, não pelo nome do template: pra CLIENTE com pedido em aberto use duvida_pedido_manha, duvida_pedido_tarde ou duvida_pedido_noite conforme a hora aqui (manhã até 11:59, tarde até 17:59, noite depois) — falam do pedido dele. sondagem_producao e luigi_apresentacao são pra abordar CONFECÇÃO ("uma produção com vocês") e soam errados pra cliente. retomar_pedido_v3 leva o cliente de volta ao site; use quando a intenção for que ele preencha lá, não quando você quiser conversar aqui. Nunca peça ao Fernando o nome do template, nunca peça pra ele abrir painel da Meta, e nunca cite Z-API — ela foi desligada na D-1 e não existe mais no sistema. Se um template que você tentou não estiver na lista, é porque não existe: escolha outro da lista, não invente.
 
 QUANDO UMA FERRAMENTA FALHAR: leia a mensagem de erro e resolva o que ela diz. Não liste hipóteses pro Fernando nem devolva o problema pra ele antes de tentar. Se o erro citar um campo, corrija aquele campo e chame de novo. Só o traga quando você já tiver tentado e a mensagem disser algo que só ele pode resolver.
 
@@ -763,7 +763,17 @@ ESTILO: WhatsApp. Curto — de 2 a 8 linhas na maior parte das vezes; a pauta po
 
 // ─── Histórico da conversa ──────────────────────────────────────────────────
 
-type LinhaMensagem = { wamid: string | null; direcao: string; tipo: string; corpo: string | null; template_nome: string | null; criado_em: string }
+type LinhaMensagem = {
+  wamid: string | null
+  direcao: string
+  tipo: string
+  corpo: string | null
+  template_nome: string | null
+  criado_em: string
+  /** Caminho no bucket wa-midia — é por ele que a imagem chega ao modelo. */
+  midia_path: string | null
+  midia_mime: string | null
+}
 
 function textoDaLinha(m: LinhaMensagem): string {
   if (m.corpo && m.corpo.trim()) return m.corpo.trim()
@@ -779,20 +789,72 @@ function textoDaLinha(m: LinhaMensagem): string {
   }
 }
 
+/**
+ * Quantas imagens do histórico o agente enxerga de verdade.
+ *
+ * Cada imagem custa tokens de entrada e o Fernando manda print com frequência
+ * (foi assim que ele mostrou a lista de templates em 09/09/2026). Carregar
+ * todas de uma conversa longa encareceria cada turno sem ganho: o que importa
+ * é o que ele acabou de mandar. As mais antigas continuam como "[imagem]".
+ */
+const IMAGENS_NO_HISTORICO = 3
+const MIMES_VISAO = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const
+
+type BlocoImagem = { type: 'image'; source: { type: 'base64'; media_type: (typeof MIMES_VISAO)[number]; data: string } }
+
+/** Baixa a imagem do Storage e devolve o bloco pro modelo. Falha vira null. */
+async function blocoDaImagem(path: string, mime: string | null): Promise<BlocoImagem | null> {
+  const media_type = (MIMES_VISAO as readonly string[]).includes(mime ?? '')
+    ? (mime as (typeof MIMES_VISAO)[number])
+    : 'image/jpeg'
+  try {
+    const { data, error } = await supabaseAdmin.storage.from('wa-midia').download(path)
+    if (error || !data) return null
+    const buffer = Buffer.from(await data.arrayBuffer())
+    // Acima disto o custo por turno deixa de compensar; o print de tela do
+    // Fernando fica bem abaixo desse teto.
+    if (buffer.byteLength > 4 * 1024 * 1024) return null
+    return { type: 'image', source: { type: 'base64', media_type, data: buffer.toString('base64') } }
+  } catch {
+    return null
+  }
+}
+
 async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.Messages.MessageParam[]; wamids: Set<string> }> {
   const { data } = await supabaseAdmin
     .from('wa_mensagens')
-    .select('wamid, direcao, tipo, corpo, template_nome, criado_em')
+    .select('wamid, direcao, tipo, corpo, template_nome, criado_em, midia_path, midia_mime')
     .eq('conversa_id', conversaId)
     .order('criado_em', { ascending: false })
     .limit(HISTORICO_MENSAGENS)
 
   const linhas = ((data ?? []) as LinhaMensagem[]).reverse()
   const wamids = new Set(linhas.map((m) => m.wamid).filter((w): w is string => Boolean(w)))
+
+  // Só as últimas N imagens que ELE mandou entram como visão.
+  const comImagem = linhas.filter((m) => m.direcao === 'entrada' && m.tipo === 'image' && m.midia_path)
+  const carregar = new Set(comImagem.slice(-IMAGENS_NO_HISTORICO).map((m) => m.midia_path as string))
+  const blocos = new Map<string, BlocoImagem>()
+  await Promise.all(
+    [...carregar].map(async (path) => {
+      const b = await blocoDaImagem(path, comImagem.find((m) => m.midia_path === path)?.midia_mime ?? null)
+      if (b) blocos.set(path, b)
+    })
+  )
+
   const msgs: Anthropic.Messages.MessageParam[] = []
   for (const m of linhas) {
     const role: 'user' | 'assistant' = m.direcao === 'entrada' ? 'user' : 'assistant'
-    const texto = textoDaLinha(m)
+    const bloco = m.midia_path ? blocos.get(m.midia_path) : undefined
+    const texto = bloco ? (m.corpo?.trim() || 'Olha esta imagem.') : textoDaLinha(m)
+
+    // Com imagem o conteúdo vira lista de blocos e não dá pra concatenar como
+    // texto — por isso a mensagem com imagem sempre abre um turno próprio.
+    if (bloco) {
+      msgs.push({ role, content: [bloco, { type: 'text', text: texto }] })
+      continue
+    }
+
     const anterior = msgs[msgs.length - 1]
     if (anterior && anterior.role === role && typeof anterior.content === 'string') {
       anterior.content = `${anterior.content}\n\n${texto}`
@@ -930,10 +992,12 @@ export async function responderGestao(params: {
     modelo: MODELO,
   }
 
-  // Só texto por enquanto (áudio exigiria transcrição).
+  // Imagem o agente lê (o histórico monta o bloco de visão); áudio ainda não,
+  // porque exigiria transcrição. Print sem legenda é caso comum: o Fernando
+  // manda a tela e espera que ele olhe.
   const temTexto = Boolean(params.corpo && params.corpo.trim())
-  if (!temTexto) {
-    const aviso = 'Por enquanto só leio texto. Me manda escrito?'
+  if (!temTexto && params.tipo !== 'image') {
+    const aviso = 'Áudio eu ainda não escuto. Me manda escrito ou por print?'
     const r = await enviarTexto(waId, aviso)
     if (r.ok) await registrarSaidaInbox(waId, params.nome, r.wamid, aviso, null, 'gestao')
     await gravarLog({ ...base, resposta: aviso, ferramentas: [], rodadas: 0, tokens_entrada: 0, tokens_saida: 0, duracao_ms: Date.now() - inicio, enviado: r.ok, erro: r.ok ? null : r.erro })
@@ -975,6 +1039,30 @@ export async function responderGestao(params: {
         mensagens = [...mensagens.slice(0, -1), { role: 'user', content: `${ultima.content}\n\n${atual}` }]
       } else {
         mensagens = [...mensagens, { role: 'user', content: atual }]
+      }
+    }
+
+    // A imagem recém-chegada pode não estar no histórico ainda: o webhook grava
+    // e responde quase junto. Sem isto, o print que ele acabou de mandar
+    // apareceria como "[imagem]" e o agente pediria pra ele escrever.
+    if (params.tipo === 'image' && !historico.wamids.has(params.wamid)) {
+      const { data: recem } = await supabaseAdmin
+        .from('wa_mensagens')
+        .select('midia_path, midia_mime')
+        .eq('wamid', params.wamid)
+        .maybeSingle<{ midia_path: string | null; midia_mime: string | null }>()
+      if (recem?.midia_path) {
+        const bloco = await blocoDaImagem(recem.midia_path, recem.midia_mime)
+        if (bloco) {
+          const legenda = (params.corpo ?? '').trim() || 'Olha esta imagem.'
+          const fim = mensagens[mensagens.length - 1]
+          // Se o último turno é dele e virou só a legenda vazia, troca pelo par
+          // imagem + texto em vez de empilhar um turno de usuário duplicado.
+          mensagens =
+            fim && fim.role === 'user' && typeof fim.content === 'string' && !fim.content.trim()
+              ? [...mensagens.slice(0, -1), { role: 'user', content: [bloco, { type: 'text', text: legenda }] }]
+              : [...mensagens, { role: 'user', content: [bloco, { type: 'text', text: legenda }] }]
+        }
       }
     }
 
