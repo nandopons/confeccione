@@ -117,6 +117,78 @@ export async function buscarContato(termo: string, limite = 5): Promise<ContatoE
 }
 
 /**
+ * O pedido por inteiro: quem é o cliente, em que etapa está, valores e — o que
+ * mais faltava — AS PEÇAS, com modelo, tecido, cor e quantidade.
+ *
+ * Sem isto o agente sabia listar códigos e etapas mas não sabia dizer o que o
+ * cliente tinha pedido; em 09/09/2026 ele respondeu "não sei o conteúdo do
+ * pedido só com o que tenho aqui", que era verdade e era um buraco nosso.
+ */
+export async function detalhePedido(pedidoId: string) {
+  const { data: p } = await supabaseAdmin
+    .from('pedidos_assistente_etapas')
+    .select(COLUNAS_ETAPA)
+    .eq('id', pedidoId)
+    .maybeSingle<PedidoEtapa>()
+  if (!p) return null
+
+  const { data: bruto } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('linhas, prazo_dias, observacoes, orcamento_status, pagamento_status')
+    .eq('id', pedidoId)
+    .maybeSingle<{
+      linhas: Array<Record<string, unknown>> | null
+      prazo_dias: number | null
+      observacoes: string | null
+      orcamento_status: string | null
+      pagamento_status: string | null
+    }>()
+
+  const linhas = Array.isArray(bruto?.linhas) ? bruto.linhas : []
+
+  const { data: ofertas } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('status, criado_em, valor_repasse_centavos, leads_fornecedores(nome)')
+    .eq('pedido_id', pedidoId)
+    .order('criado_em', { ascending: false })
+    .limit(5)
+
+  return {
+    codigo: p.codigo,
+    cliente: p.nome,
+    telefone: p.telefone,
+    uf: p.uf,
+    etapa: p.etapa,
+    desde: p.desde,
+    valor_centavos: p.valor_centavos,
+    orcamento_status: bruto?.orcamento_status ?? null,
+    pagamento_status: bruto?.pagamento_status ?? null,
+    prazo_dias: bruto?.prazo_dias ?? null,
+    observacoes: bruto?.observacoes ?? null,
+    motivo_parada: p.motivo_parada,
+    // Posição é o que o Luigi usa em ajustar_peca_pedido — devolver numerado
+    // evita que o agente e ele falem de peças diferentes.
+    pecas: linhas.map((l, i) => ({
+      posicao: i + 1,
+      modelo: l.modelo ?? null,
+      material: l.material ?? null,
+      cor: l.cor ?? null,
+      quantidade: l.total ?? null,
+      descricao: l.descricao ?? null,
+    })),
+    ofertas: (ofertas ?? []).map((o) => {
+      const f = o.leads_fornecedores as { nome: string | null } | { nome: string | null }[] | null
+      return {
+        fornecedor: (Array.isArray(f) ? f[0]?.nome : f?.nome) ?? null,
+        status: o.status,
+        em: o.criado_em,
+        repasse_centavos: o.valor_repasse_centavos,
+      }
+    }),
+  }
+}
+
+/**
  * As últimas mensagens trocadas com um número, das duas conversas quando o
  * contato está duplicado — em ordem cronológica, pra o agente ler como conversa.
  */

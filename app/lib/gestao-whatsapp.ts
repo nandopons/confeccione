@@ -59,7 +59,7 @@ import {
 } from './etapas-pedido'
 import { corrigirOrcamento } from './orcamento-versoes'
 import { enviarRascunho, prepararMensagem } from './mcp-mensagens'
-import { buscarContato, lerConversa } from './gestao-consulta'
+import { buscarContato, detalhePedido, lerConversa } from './gestao-consulta'
 import { captarParaPedido, REGIOES, type RegiaoBusca } from './captacao-pedido'
 
 const MODELO = 'claude-sonnet-4-6'
@@ -376,6 +376,18 @@ const FERRAMENTAS: Anthropic.Messages.Tool[] = [
     },
   },
   {
+    name: 'detalhe_pedido',
+    description:
+      'Abre um pedido por inteiro: cliente, etapa, valores, prazo, observações, as PEÇAS (modelo, tecido/material, cor, ' +
+      'quantidade, numeradas por posição) e as ofertas de fornecedor. USE SEMPRE que o Fernando perguntar o que o cliente ' +
+      'pediu, o que tem no pedido ou o que precisa ajustar — não responda "não sei o conteúdo" sem chamar isto antes.',
+    input_schema: {
+      type: 'object',
+      properties: { pedido: { type: 'string', description: 'Código (2026090…), número ou id.' } },
+      required: ['pedido'],
+    },
+  },
+  {
     name: 'captar_para_pedido',
     description:
       'Sai atrás de confecções pra um pedido que está sem fornecedor: busca candidatas na região, registra e prepara a ' +
@@ -568,6 +580,13 @@ async function executarFerramenta(nome: string, entrada: Entrada): Promise<unkno
       if (!telefone) throw new Error('telefone é obrigatório')
       return await lerConversa(telefone, num(entrada.limite) ?? 30)
     }
+    case 'detalhe_pedido': {
+      const ref = str(entrada.pedido)
+      if (!ref) throw new Error('pedido é obrigatório')
+      const p = await acharPedido(ref)
+      if (!p) throw new Error(`pedido "${ref}" não encontrado`)
+      return (await detalhePedido(p.id)) ?? { aviso: 'pedido sem detalhe' }
+    }
     case 'captar_para_pedido': {
       const ref = str(entrada.pedido)
       if (!ref) throw new Error('pedido é obrigatório')
@@ -658,7 +677,9 @@ FONTE DE VERDADE: o diário de bordo, pelas ferramentas. Nunca invente número �
 
 O QUE VOCÊ PODE: ler placar, filas, funil por etapa, decisões e atas; registrar decisão, ata, pendência concluída, foto do placar, motivo de parada de um pedido; ENCERRAR um pedido como perdido e REABRIR um encerrado; CORRIGIR o orçamento de um pedido (valor, frete e repasse, em centavos, com motivo — pedido pago não muda de valor); e FALAR COM CLIENTE OU FORNECEDOR, em duas etapas.
 
-PROCURE ANTES DE PERGUNTAR: quando o Fernando citar alguém pelo nome ("responde o André", "e a Rafaella?", "a JJ Camisetas"), chame buscar_contato — você acha o telefone, o papel, os pedidos e a última mensagem sozinho. Pedir a ele um dado que você consegue buscar é o que não deve acontecer. Antes de escrever pra alguém, chame ler_conversa: responder sem ler o que já foi dito faz o cliente repetir tudo.
+PROCURE ANTES DE PERGUNTAR: quando o Fernando citar alguém pelo nome ("responde o André", "e a Rafaella?", "a JJ Camisetas"), chame buscar_contato — você acha o telefone, o papel, os pedidos e a última mensagem sozinho. Quando ele falar de um pedido, chame detalhe_pedido pra ver as peças. Antes de escrever pra alguém, chame ler_conversa. NUNCA responda "não tenho ferramenta pra isso", "não sei o conteúdo" ou peça a ele um dado que você consegue buscar: primeiro procure com as ferramentas, e só diga que não achou depois de ter procurado de verdade. Não peça permissão pra consultar — leitura não precisa de confirmação, faça e traga o resultado.
+
+QUANDO O DADO NÃO BATER: se o que o Fernando te passa não casa com o que você acha (um telefone que não existe no sistema, um código que não é daquela pessoa), diga isso na hora e mostre o que VOCÊ achou, com nome e número. Ele digita de memória e erra; seu papel é cruzar, não aceitar. Um telefone brasileiro tem DDI 55 + DDD de 2 dígitos + 8 ou 9 dígitos — DDD diferente é quase sempre outra pessoa.
 
 FALAR COM CLIENTE OU FORNECEDOR (duas etapas, sempre): primeiro preparar_mensagem, que só escreve e devolve um rascunho_id — não sai nada. Mostre a ele o texto exatamente como voltou, em bloco, e pergunte se pode mandar. Só com o "pode mandar" dele, chame enviar_rascunho com aquele id. Se ele pedir mudança, prepare um rascunho novo: o texto gravado não se altera. Rascunho vale 30 min. Nunca chame enviar_rascunho na mesma resposta em que preparou.
 
