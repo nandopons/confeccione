@@ -6,13 +6,12 @@
 //
 // Canais:
 //   email       → Resend, com link de descadastro no rodapé
-//   whatsapp    → template aprovado na Meta (fora da janela de 24h é a única
-//                 forma legítima de iniciar conversa) ou texto puro via Z-API
+//   whatsapp    → template aprovado na Meta. Só isso: fora da janela de 24h é a
+//                 única forma legítima (e possível) de iniciar conversa
 //   mala_direta → peça física: não tem envio automático. Retorna 'nao_enviavel'
 //                 pra quem chamou tratar (a peça entra em lista de postagem).
 // ============================================================================
 
-import { enviarMensagem } from './zapi'
 import { enviarTemplate, normalizarWaId } from './whatsapp-cloud'
 import { enviarEmailMarketing } from './email'
 import { visualizadorPedidoUrl } from './url'
@@ -46,7 +45,10 @@ export type ResultadoEnvio = {
  *   #nome    primeiro nome (some junto com a vírgula se não houver nome)
  *   #empresa #cidade
  *   #link    link do pedido do lead no visualizador (se ele tiver pedido)
- *   #pedido  só o id do pedido — serve pro sufixo do botão de URL do template
+ *   #pedido  o id do pedido — SÓ pro sufixo do botão de URL do template.
+ *            Não use no corpo: é um uuid, e o cliente veria
+ *            "seu pedido 3f2a...-9c1b" no WhatsApp. O número que ele conhece é
+ *            o `codigo` (20260900268), que não está no lead.
  */
 export function aplicarPlaceholders(texto: string, lead: Lead): string {
   const primeiro = (lead.nome ?? '').trim().split(/\s+/)[0] ?? ''
@@ -103,17 +105,21 @@ export async function enviarConteudo(c: ConteudoEnvio, lead: Lead): Promise<Resu
   // ── WhatsApp ──
   if (!lead.telefone) return { ok: false, mensagem: corpo, erro: 'lead sem WhatsApp' }
 
-  // Texto puro (Z-API): sem custo e sem aprovação, mas só pra base morna —
-  // em base fria é o caminho mais curto pro número ser banido.
+  // TEXTO PURO NÃO SAI MAIS DAQUI — 09/09/2026.
+  // Esse ramo mandava por Z-API, que foi desligada em 07/09 sem substituto. Ele
+  // continuava no código chamando um serviço morto: o envio falhava, o motor
+  // marcava `motivo_saida` e no segundo erro tirava a pessoa do fluxo. Ou seja,
+  // um template mal configurado não avisava ninguém — ia comendo a fila em
+  // silêncio.
+  //
+  // Fora da janela de 24h a Cloud API só aceita template aprovado, então
+  // "template não definido" não é uma variação de configuração: é um fluxo que
+  // não tem como enviar. Falha na cara, com o nome do template no erro.
   if (c.usaTemplateOficial === false || !c.templateMeta) {
-    if (!c.templateMeta && c.usaTemplateOficial !== false) {
-      return { ok: false, mensagem: corpo, erro: 'template oficial não definido' }
-    }
-    try {
-      const ok = await enviarMensagem(lead.telefone, corpo)
-      return { ok, mensagem: corpo, erro: ok ? undefined : 'Z-API recusou o envio' }
-    } catch (e) {
-      return { ok: false, mensagem: corpo, erro: e instanceof Error ? e.message : 'falha Z-API' }
+    return {
+      ok: false,
+      mensagem: corpo,
+      erro: 'template oficial não definido — fora da janela de 24h a Meta só aceita template aprovado',
     }
   }
 
@@ -135,10 +141,15 @@ export async function enviarConteudo(c: ConteudoEnvio, lead: Lead): Promise<Resu
   }
   try {
     const r = await enviarTemplate(normalizarWaId(lead.telefone), c.templateMeta, 'pt_BR', components)
+    // O ERRO DA META VAI INTEIRO — 09/09/2026.
+    // Antes isso virava "Meta recusou o envio". A mensagem real ("Number of
+    // parameters does not match") ficava só no log, e quem lia o painel achava
+    // que o problema era o número do cliente. Custou uma manhã de diagnóstico
+    // errado no caso da Nicole.
     return {
       ok: r.ok,
       mensagem: corpo || `[template ${c.templateMeta}]`,
-      erro: r.ok ? undefined : 'Meta recusou o envio',
+      erro: r.ok ? undefined : `${c.templateMeta}: ${r.erro}`,
     }
   } catch (e) {
     return { ok: false, mensagem: corpo, erro: e instanceof Error ? e.message : 'falha Meta' }

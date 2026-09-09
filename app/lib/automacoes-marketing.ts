@@ -341,12 +341,89 @@ async function mapaDePedidos(): Promise<Map<string, InfoPedido>> {
   return m
 }
 
+// ─────────────────────────────────────────────────────────────
+// Conversa em andamento (09/09/2026)
+//
+// Um fluxo não fala por cima de uma conversa viva. Se a pessoa mandou mensagem
+// nas últimas 24h, a janela do WhatsApp está aberta e o Luigi está atendendo
+// ela agora — um template "posso tirar uma dúvida?" em cima disso é a máquina
+// ignorando o que o cliente acabou de dizer.
+//
+// A comparação é pelos 8 últimos dígitos porque o mesmo celular aparece com e
+// sem o nono dígito (5581 9xxxx-xxxx e 5581 xxxx-xxxx são a mesma pessoa).
+// ─────────────────────────────────────────────────────────────
+
+/** Fim do telefone (8 dígitos) — a chave que sobrevive ao nono dígito. */
+export function fim8(telefone: string | null | undefined): string | null {
+  const so = (telefone ?? '').replace(/\D/g, '')
+  return so.length >= 8 ? so.slice(-8) : null
+}
+
+/**
+ * Os números da casa nunca entram em fluxo de marketing.
+ *
+ * O Fernando testa o site com o próprio WhatsApp, e esses testes viram pedido
+ * de verdade: o 20260700108 está parado em "captado" desde julho, com o número
+ * dele. Sem essa trava, o primeiro fluxo ligado manda "posso tirar uma dúvida
+ * sobre seu pedido?" pro dono da empresa.
+ *
+ * Lê a env direto em vez de importar de gestao-whatsapp: aquele módulo carrega
+ * o agente inteiro (SDK, ferramentas), e automação não precisa de nada disso.
+ */
+function fim8DaCasa(): Set<string> {
+  const out = new Set<string>()
+  for (const n of (process.env.WHATSAPP_GESTAO_NUMEROS ?? '').split(',')) {
+    const chave = fim8(n)
+    if (chave) out.add(chave)
+  }
+  return out
+}
+
+/** Quem nos escreveu nas últimas `horas` — não recebe automação. */
+export async function conversasQuentes(horas = 24): Promise<Set<string>> {
+  const desde = new Date(Date.now() - horas * 60 * 60 * 1000).toISOString()
+
+  // Três consultas simples em vez de um embed aninhado do PostgREST: se essa
+  // leitura falhar, TODA automação para (é ela que autoriza o envio). Não vale
+  // a pena depender de sintaxe de join pra economizar duas idas ao banco.
+  const msgs = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('conversa_id')
+    .eq('direcao', 'entrada')
+    .gte('criado_em', desde)
+    .limit(2000)
+  if (msgs.error) throw new Error(`conversas quentes indisponíveis: ${msgs.error.message}`)
+
+  // Os números da casa entram na mesma lista: pro motor, "não escreva pra esse
+  // número" é a mesma regra, e assim vale pra todo fluxo de uma vez.
+  const out = fim8DaCasa()
+
+  const conversaIds = [...new Set(((msgs.data ?? []) as Array<{ conversa_id: string }>).map((m) => m.conversa_id))]
+  if (conversaIds.length === 0) return out
+
+  const convs = await supabaseAdmin.from('wa_conversas').select('contato_id').in('id', conversaIds)
+  if (convs.error) throw new Error(`conversas quentes indisponíveis: ${convs.error.message}`)
+
+  const contatoIds = [...new Set(((convs.data ?? []) as Array<{ contato_id: string }>).map((c) => c.contato_id))]
+  if (contatoIds.length === 0) return out
+
+  const contatos = await supabaseAdmin.from('wa_contatos').select('wa_id').in('id', contatoIds)
+  if (contatos.error) throw new Error(`conversas quentes indisponíveis: ${contatos.error.message}`)
+
+  for (const c of (contatos.data ?? []) as Array<{ wa_id: string }>) {
+    const chave = fim8(c.wa_id)
+    if (chave) out.add(chave)
+  }
+  return out
+}
+
 /** Quem, hoje, satisfaz o gatilho do fluxo (antes de checar canal/duplicidade). */
 export function leadsDoGatilho(
   leads: Lead[],
   pedidos: Map<string, InfoPedido>,
   a: Pick<Automacao, 'gatilho' | 'gatilhoDias' | 'gatilhoMinutos'>,
-  agoraMs: number
+  agoraMs: number,
+  quentes?: Set<string>
 ): Lead[] {
   // Minutos quando definido; senão o comportamento antigo, em dias. O primeiro
   // toque da régua de pedido incompleto é de 20 min — o cliente acabou de sair
@@ -356,6 +433,9 @@ export function leadsDoGatilho(
 
   return leads.filter((l) => {
     if (l.optOut) return false
+    // Conversa aberta: o Luigi está com essa pessoa. O fluxo não entra por cima.
+    const chave = fim8(l.telefone)
+    if (quentes && chave && quentes.has(chave)) return false
     const criadoMs = new Date(l.criadoEm).getTime()
     const pedido = l.pedidoId ? pedidos.get(l.pedidoId) : undefined
     const ultimoContatoMs = l.ultimoContatoEm ? new Date(l.ultimoContatoEm).getTime() : 0
@@ -389,8 +469,17 @@ export function leadsDoGatilho(
 }
 
 /** O gatilho ainda vale pra esse lead? (Reavaliado na hora de cada envio.) */
-function continuaElegivel(l: Lead, pedidos: Map<string, InfoPedido>, gatilho: Gatilho): string | null {
+function continuaElegivel(
+  l: Lead,
+  pedidos: Map<string, InfoPedido>,
+  gatilho: Gatilho,
+  quentes?: Set<string>
+): string | null {
   if (l.optOut) return 'descadastrou'
+  // Entre a inscrição e o envio podem passar dias. Se nesse meio-tempo a pessoa
+  // escreveu, ela não é mais alvo de régua — é atendimento, e o passo espera.
+  const chave = fim8(l.telefone)
+  if (quentes && chave && quentes.has(chave)) return 'adiar_conversa_aberta'
   const pedido = l.pedidoId ? pedidos.get(l.pedidoId) : undefined
   if ((gatilho === 'pedido_parado' || gatilho === 'lead_frio') && (pedido?.pago || l.status === 'cliente')) {
     return 'comprou'
@@ -426,11 +515,12 @@ export async function detalheAutomacao(id: string): Promise<DetalheAutomacao | n
   const a = await obterAutomacao(id)
   if (!a) return null
 
-  const [leads, pedidos] = await Promise.all([
+  const [leads, pedidos, quentes] = await Promise.all([
     listarLeadsCompleto({ ...a.publico, incluirOptOut: false }),
     mapaDePedidos(),
+    conversasQuentes().catch(() => new Set<string>()),
   ])
-  const candidatos = leadsDoGatilho(leads, pedidos, a, Date.now())
+  const candidatos = leadsDoGatilho(leads, pedidos, a, Date.now(), quentes)
 
   const dentro = new Map<string, { passo_ordem: number; enviados: number; status: string; proximo_em: string | null }>()
   const { data: execs } = await supabaseAdmin
@@ -484,6 +574,7 @@ export async function detalheAutomacao(id: string): Promise<DetalheAutomacao | n
     `Teto: ${a.maxToques} ${a.maxToques === 1 ? 'toque' : 'toques'} por pessoa neste fluxo; ninguém entra duas vezes.`,
     `Passos: ${passosAtivos.length === 0 ? 'nenhum com template — não roda' : passosAtivos.map((p) => `${p.esperaDias === 0 ? 'na hora' : `+${p.esperaDias} d`}`).join(' → ')}.`,
     'Só manda com o canal do passo disponível (WhatsApp precisa de telefone; e-mail, de e-mail).',
+    `Quem mandou mensagem nas últimas 24h não recebe: o passo espera mais um dia (${quentes.size} ${quentes.size === 1 ? 'pessoa está' : 'pessoas estão'} nessa situação agora).`,
   ]
 
   const hora = horaEmRecife()
@@ -527,6 +618,8 @@ export type ResultadoRodada = {
   enviados: number
   erros: number
   sairam: number
+  /** Passos que venceram mas a pessoa estava conversando com a gente. */
+  adiados: number
   pendentes: number
   observacao?: string
 }
@@ -542,6 +635,7 @@ export async function rodarAutomacao(id: string, opts?: { forcar?: boolean }): P
     enviados: 0,
     erros: 0,
     sairam: 0,
+    adiados: 0,
     pendentes: 0,
   }
 
@@ -557,14 +651,18 @@ export async function rodarAutomacao(id: string, opts?: { forcar?: boolean }): P
     return { ...base, observacao: `fora da janela de envio (${a.horaInicio}h–${a.horaFim}h)` }
   }
 
-  const [leads, pedidos] = await Promise.all([
+  // `conversasQuentes` joga se a leitura falhar: sem saber quem está falando
+  // com a gente agora, a rodada inteira para. Uma rodada perdida custa uma hora;
+  // escrever por cima de 30 conversas abertas custa a confiança de 30 clientes.
+  const [leads, pedidos, quentes] = await Promise.all([
     listarLeadsCompleto({ ...a.publico, incluirOptOut: false }),
     mapaDePedidos(),
+    conversasQuentes(),
   ])
   const porId = new Map(leads.map((l) => [l.id, l]))
 
-  base.inscritos = await inscrever(a, leads, pedidos, passosAtivos[0].esperaDias)
-  const exec = await executarVencidos(a, porId, pedidos)
+  base.inscritos = await inscrever(a, leads, pedidos, passosAtivos[0].esperaDias, quentes)
+  const exec = await executarVencidos(a, porId, pedidos, quentes)
 
   await supabaseAdmin
     .from('automacoes_marketing')
@@ -579,9 +677,10 @@ async function inscrever(
   a: Automacao,
   leads: Lead[],
   pedidos: Map<string, InfoPedido>,
-  esperaPrimeiroPasso: number
+  esperaPrimeiroPasso: number,
+  quentes: Set<string>
 ): Promise<number> {
-  const candidatos = leadsDoGatilho(leads, pedidos, a, Date.now())
+  const candidatos = leadsDoGatilho(leads, pedidos, a, Date.now(), quentes)
   if (candidatos.length === 0) return 0
 
   // Quem já está no fluxo — consultado em fatias pra não estourar a URL do
@@ -623,8 +722,9 @@ type ExecucaoRow = {
 async function executarVencidos(
   a: Automacao,
   leadsPorId: Map<string, Lead>,
-  pedidos: Map<string, InfoPedido>
-): Promise<{ enviados: number; erros: number; sairam: number; pendentes: number }> {
+  pedidos: Map<string, InfoPedido>,
+  quentes: Set<string>
+): Promise<{ enviados: number; erros: number; sairam: number; adiados: number; pendentes: number }> {
   const agora = new Date().toISOString()
   const { data: vencidas } = await supabaseAdmin
     .from('automacao_execucoes')
@@ -638,6 +738,7 @@ async function executarVencidos(
   let enviados = 0
   let erros = 0
   let sairam = 0
+  let adiados = 0
 
   const cacheTemplates = new Map<string, TemplateMarketing | null>()
   const pegarTemplate = async (id: string) => {
@@ -654,7 +755,19 @@ async function executarVencidos(
       sairam++
       continue
     }
-    const motivo = continuaElegivel(lead, pedidos, a.gatilho)
+    const motivo = continuaElegivel(lead, pedidos, a.gatilho, quentes)
+    // Conversa aberta ADIA, não elimina: o Luigi pode estar fechando o pedido
+    // agora (e aí a pessoa muda de etapa e sai sozinha), ou a conversa pode
+    // morrer sem resolver nada — e nesse caso a régua tem que continuar de onde
+    // parou. Encerrar aqui perderia quem mais precisa do próximo toque.
+    if (motivo === 'adiar_conversa_aberta') {
+      await supabaseAdmin
+        .from('automacao_execucoes')
+        .update({ proximo_em: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), atualizado_em: agora })
+        .eq('id', e.id)
+      adiados++
+      continue
+    }
     if (motivo) {
       await encerrar(e.id, 'saiu', motivo)
       sairam++
@@ -733,7 +846,7 @@ async function executarVencidos(
     .eq('status', 'ativa')
     .lte('proximo_em', new Date().toISOString())
 
-  return { enviados, erros, sairam, pendentes: count ?? 0 }
+  return { enviados, erros, sairam, adiados, pendentes: count ?? 0 }
 }
 
 function rotuloCanal(c: CanalEnvio): string {
@@ -787,7 +900,21 @@ export async function rodarTodasAutomacoes(): Promise<ResultadoRodada[]> {
     try {
       out.push(await rodarAutomacao(a.id))
     } catch (e) {
-      console.error('[automacoes] falha na rodada', { id: a.id, e })
+      // A falha vai no retorno, não só no console: o cron responde JSON e é
+      // esse JSON que a gente lê quando um fluxo "não mandou nada hoje".
+      const erro = e instanceof Error ? e.message : String(e)
+      console.error('[automacoes] falha na rodada', { id: a.id, erro })
+      out.push({
+        automacao: a.id,
+        status: 'ativa',
+        inscritos: 0,
+        enviados: 0,
+        erros: 1,
+        sairam: 0,
+        adiados: 0,
+        pendentes: 0,
+        observacao: `rodada falhou: ${erro}`,
+      })
     }
   }
   return out
@@ -807,7 +934,10 @@ export async function previaAutomacao(
     listarLeadsCompleto({ ...publico, incluirOptOut: false }),
     mapaDePedidos(),
   ])
-  const alvo = leadsDoGatilho(leads, pedidos, { gatilho, gatilhoDias, gatilhoMinutos: null }, Date.now())
+  // Prévia não manda nada, então se a leitura das conversas falhar ela só
+  // deixa de descontar quem está conversando — mostra a mais, nunca a menos.
+  const quentes = await conversasQuentes().catch(() => new Set<string>())
+  const alvo = leadsDoGatilho(leads, pedidos, { gatilho, gatilhoDias, gatilhoMinutos: null }, Date.now(), quentes)
   const alcancaveis = canalPrimeiroPasso ? alvo.filter((l) => leadAlcancavel(l, canalPrimeiroPasso)) : alvo
   return {
     total: alvo.length,

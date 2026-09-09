@@ -407,6 +407,59 @@ export async function registrarToque(id: string): Promise<void> {
 export type ResultadoSync = { lidos: number; criados: number; atualizados: number; ignorados: number }
 
 /**
+ * Só os pedidos das últimas `horas` — a versão que roda de hora em hora antes
+ * das automações.
+ *
+ * POR QUE ISSO EXISTE (09/09/2026)
+ * A sincronização completa era um botão no /admin, e ninguém aperta um botão de
+ * hora em hora. O resultado: dos 66 pedidos parados na etapa "captado", os 7
+ * mais novos não tinham lead nenhum — e fluxo de automação trabalha em cima de
+ * lead. Os pedidos de hoje eram justamente os invisíveis pro robô. A régua
+ * pegaria os antigos e deixaria passar quem acabou de sair do site.
+ *
+ * A completa continua existindo pro backfill manual; ela varre 5000 pedidos um
+ * a um e não cabe num cron de hora em hora.
+ */
+export async function sincronizarLeadsRecentes(horas = 6): Promise<ResultadoSync> {
+  const r: ResultadoSync = { lidos: 0, criados: 0, atualizados: 0, ignorados: 0 }
+  const desde = new Date(Date.now() - horas * 60 * 60 * 1000).toISOString()
+
+  const { data, error } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, nome, telefone, email, cidade, uf, pagamento_status, criado_em')
+    .gte('criado_em', desde)
+    .order('criado_em', { ascending: true })
+    .limit(300)
+  if (error) throw new Error(`sincronizar leads recentes: ${error.message}`)
+
+  for (const p of (data ?? []) as Array<{
+    id: string
+    nome: string | null
+    telefone: string | null
+    email: string | null
+    cidade: string | null
+    uf: string | null
+    pagamento_status: string | null
+  }>) {
+    r.lidos++
+    const res = await upsertLead({
+      nome: p.nome,
+      telefone: p.telefone,
+      email: p.email,
+      cidade: p.cidade,
+      uf: p.uf,
+      origem: 'chat',
+      pedidoId: p.id,
+      status: p.pagamento_status === 'pago' ? 'cliente' : 'lead',
+    })
+    if (res.acao === 'criado') r.criados++
+    else if (res.acao === 'atualizado') r.atualizados++
+    else r.ignorados++
+  }
+  return r
+}
+
+/**
  * Traz pra base todo mundo que já apareceu no site: quem montou pedido no
  * chat (pedidos_assistente) e quem criou conta (contas_clientes). Idempotente
  * — pode rodar quantas vezes quiser.
