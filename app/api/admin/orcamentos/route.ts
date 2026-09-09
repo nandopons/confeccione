@@ -345,6 +345,18 @@ export async function POST(req: NextRequest) {
         throw new Error(updErr?.message ?? 'update do orçamento com dados da cobrança falhou')
       }
       orcamento = atualizado
+
+      // COBRANÇA CRIADA E QR AUSENTE NÃO É SUCESSO — 09/09/2026.
+      // Foi o que aconteceu no ORC-2026-0031: o Asaas aceitou a cobrança, a
+      // busca do QR falhou, e como o fluxo seguiu normalmente o PDF foi pro
+      // cliente sem nenhuma forma de pagar. Ninguém percebeu até ele perguntar.
+      // Aqui a cobrança NÃO é desfeita (ela existe e é válida) — o que muda é
+      // que o aviso aparece na tela, com o caminho pra consertar.
+      if (!cobranca.qrImagem) {
+        cobranca_erro =
+          'Cobrança criada no Asaas, mas o QR do PIX não veio — o PDF sairia sem forma de pagamento. ' +
+          `Rode "recuperar QR" para o ${data.numero} antes de mandar pro cliente.`
+      }
     } catch (err) {
       console.error('[admin/orcamentos] cobrança ASAAS falhou:', err)
       cobranca_erro =

@@ -109,17 +109,7 @@ export async function criarCobrancaOrcamento(input: {
     },
   })
 
-  let copiaCola: string | null = null
-  let qrImagem: string | null = null
-  try {
-    const pix = await asaasFetch<{ payload: string; encodedImage: string }>(
-      `/payments/${payment.id}/pixQrCode`
-    )
-    copiaCola = pix.payload
-    qrImagem = pix.encodedImage
-  } catch (err) {
-    console.error('[orcamento-cobranca] busca QR pix falhou:', err)
-  }
+  const { copiaCola, qrImagem } = await buscarQrPix(payment.id)
 
   return {
     customerId,
@@ -129,4 +119,43 @@ export async function criarCobrancaOrcamento(input: {
     qrImagem,
     vencimento,
   }
+}
+
+/**
+ * Busca o QR do Pix de uma cobrança, com repetição.
+ *
+ * POR QUE REPETIR (09/09/2026)
+ * O ORC-2026-0031 saiu com cobrança válida no Asaas (pay_72fejmteqcw3kqp3) e
+ * SEM QR: nem a imagem, nem o copia-e-cola. O PDF foi pro cliente sem forma de
+ * pagar. A causa é que /pixQrCode é consultado no mesmo instante em que a
+ * cobrança é criada, e do lado do Asaas o QR às vezes ainda não existe — a
+ * primeira chamada devolve erro e a antiga implementação engolia com um
+ * console.error, devolvendo null como se fosse resultado normal.
+ *
+ * Três tentativas com espera crescente resolvem o caso comum (QR ainda sendo
+ * gerado). O que não resolve, esta função devolve como ERRO, e não como null
+ * silencioso — a diferença entre "não tem QR" e "não consegui buscar o QR" é a
+ * diferença entre um PDF que o cliente paga e um que ele devolve perguntando.
+ */
+export async function buscarQrPix(
+  paymentId: string,
+  tentativas = 3
+): Promise<{ copiaCola: string | null; qrImagem: string | null; erro?: string }> {
+  let ultimoErro = ''
+  for (let i = 0; i < tentativas; i++) {
+    if (i > 0) await new Promise((ok) => setTimeout(ok, 800 * i))
+    try {
+      const pix = await asaasFetch<{ payload: string; encodedImage: string }>(
+        `/payments/${paymentId}/pixQrCode`
+      )
+      if (pix?.payload && pix?.encodedImage) {
+        return { copiaCola: pix.payload, qrImagem: pix.encodedImage }
+      }
+      ultimoErro = 'Asaas devolveu QR vazio'
+    } catch (err) {
+      ultimoErro = err instanceof Error ? err.message : String(err)
+    }
+  }
+  console.error('[orcamento-cobranca] QR pix não veio', { paymentId, ultimoErro })
+  return { copiaCola: null, qrImagem: null, erro: ultimoErro }
 }
