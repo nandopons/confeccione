@@ -59,6 +59,7 @@ import {
 } from './etapas-pedido'
 import { corrigirOrcamento } from './orcamento-versoes'
 import { enviarRascunho, prepararMensagem } from './mcp-mensagens'
+import { buscarContato, lerConversa } from './gestao-consulta'
 
 const MODELO = 'claude-sonnet-4-6'
 const MAX_RODADAS = 6
@@ -345,6 +346,35 @@ const FERRAMENTAS: Anthropic.Messages.Tool[] = [
     },
   },
   {
+    name: 'buscar_contato',
+    description:
+      'Acha uma pessoa por parte do nome ou por telefone e devolve telefone, papel (cliente ou fornecedor), última mensagem, ' +
+      'se o Luigi chamou gente e os pedidos dela. USE SEMPRE que o Fernando citar alguém pelo nome ("o André", "a Rafaella", ' +
+      '"a JJ Camisetas") — nunca peça o telefone a ele antes de procurar aqui.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        termo: { type: 'string', minLength: 2, description: 'Parte do nome ou o telefone.' },
+        limite: { type: 'number', minimum: 1, maximum: 10 },
+      },
+      required: ['termo'],
+    },
+  },
+  {
+    name: 'ler_conversa',
+    description:
+      'As últimas mensagens trocadas com um número, em ordem, dizendo quem escreveu (contato, Luigi, assistente, equipe). ' +
+      'Use antes de escrever pra alguém: assim você responde ao que já foi dito em vez de começar do zero.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        telefone: { type: 'string', description: 'Com DDI e DDD.' },
+        limite: { type: 'number', minimum: 1, maximum: 100, description: 'Padrão 30.' },
+      },
+      required: ['telefone'],
+    },
+  },
+  {
     name: 'corrigir_orcamento',
     description:
       'Corrige valor, frete e repasse de um pedido, com motivo, e grava versão no histórico. Valores em CENTAVOS. ' +
@@ -510,6 +540,17 @@ async function executarFerramenta(nome: string, entrada: Entrada): Promise<unkno
       const r = await encerrarPedido(p.id, motivo, 'gestor_whatsapp', str(entrada.observacao) ?? null)
       return { codigo: r.codigo, nome: r.nome, etapa: r.etapa, encerrado_motivo: r.encerrado_motivo }
     }
+    case 'buscar_contato': {
+      const termo = str(entrada.termo)
+      if (!termo) throw new Error('termo é obrigatório')
+      const achados = await buscarContato(termo, num(entrada.limite) ?? 5)
+      return achados.length > 0 ? achados : { aviso: `ninguém encontrado com "${termo}"` }
+    }
+    case 'ler_conversa': {
+      const telefone = str(entrada.telefone)
+      if (!telefone) throw new Error('telefone é obrigatório')
+      return await lerConversa(telefone, num(entrada.limite) ?? 30)
+    }
     case 'corrigir_orcamento': {
       const ref = str(entrada.pedido)
       const valor = num(entrada.valor_centavos)
@@ -586,6 +627,8 @@ RITUAL (decisão D-7): duas reuniões por dia por esta conversa. 07:00 — fila 
 FONTE DE VERDADE: o diário de bordo, pelas ferramentas. Nunca invente número — se não consultou, consulte. Na primeira mensagem de uma reunião chame resumo_gestao. Se a sua última mensagem foi só o aviso de que a pauta está pronta, a primeira resposta é a pauta completa. Consulte buscar_decisoes antes de propor algo que pode já ter sido decidido.
 
 O QUE VOCÊ PODE: ler placar, filas, funil por etapa, decisões e atas; registrar decisão, ata, pendência concluída, foto do placar, motivo de parada de um pedido; ENCERRAR um pedido como perdido e REABRIR um encerrado; CORRIGIR o orçamento de um pedido (valor, frete e repasse, em centavos, com motivo — pedido pago não muda de valor); e FALAR COM CLIENTE OU FORNECEDOR, em duas etapas.
+
+PROCURE ANTES DE PERGUNTAR: quando o Fernando citar alguém pelo nome ("responde o André", "e a Rafaella?", "a JJ Camisetas"), chame buscar_contato — você acha o telefone, o papel, os pedidos e a última mensagem sozinho. Pedir a ele um dado que você consegue buscar é o que não deve acontecer. Antes de escrever pra alguém, chame ler_conversa: responder sem ler o que já foi dito faz o cliente repetir tudo.
 
 FALAR COM CLIENTE OU FORNECEDOR (duas etapas, sempre): primeiro preparar_mensagem, que só escreve e devolve um rascunho_id — não sai nada. Mostre a ele o texto exatamente como voltou, em bloco, e pergunte se pode mandar. Só com o "pode mandar" dele, chame enviar_rascunho com aquele id. Se ele pedir mudança, prepare um rascunho novo: o texto gravado não se altera. Rascunho vale 30 min. Nunca chame enviar_rascunho na mesma resposta em que preparou.
 
