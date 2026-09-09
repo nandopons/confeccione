@@ -537,9 +537,12 @@ export async function avisoOficial(params: {
  * (wa_mensagens + preview da conversa). Failure-soft: erro aqui nunca
  * desfaz um envio que já aconteceu.
  */
-export type AutorSaida = 'luigi' | 'gestao'
+// 'mcp' = escrito pelo assistente no Cowork, via servidor MCP, com o texto
+// aprovado pelo Fernando (rascunho em duas etapas). Fica na bolha do inbox pra
+// não confundir com mensagem de gente nem com resposta autônoma do Luigi.
+export type AutorSaida = 'luigi' | 'gestao' | 'mcp'
 
-const PREFIXO_PREVIEW: Record<AutorSaida, string> = { luigi: 'Luigi', gestao: 'Agente' }
+const PREFIXO_PREVIEW: Record<AutorSaida, string> = { luigi: 'Luigi', gestao: 'Agente', mcp: 'Assistente' }
 
 export async function registrarSaidaInbox(
   waId: string,

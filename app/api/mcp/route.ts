@@ -25,11 +25,32 @@
 //   registrar_motivo_parada             → por que o cliente parou
 //   encerrar_pedido                     → perdido, com motivo (D-8, exige
 //                                         confirmar; pago não se encerra)
+//   corrigir_orcamento                  → valor/frete/repasse + versão no
+//                                         histórico (v1.3, exige confirmar;
+//                                         pago não muda de valor)
+//   reabrir_pedido                      → desfaz o encerramento
 //
-// O QUE NÃO EXPÕE, de propósito: enviar mensagem, cobrar, mexer em pedido,
-// dinheiro. Ação com efeito externo entra em versão futura, uma por vez, com
-// confirmação explícita (nível N1 do mapa de autonomia). Criar template não
-// manda nada pra ninguém — é catálogo; por isso entrou na v1.1 (07/09).
+// POR QUE NÃO EXISTE "mover_etapa_pedido" (09/09/2026)
+// Porque etapa não é campo: é a view pedidos_assistente_etapas, derivada dos
+// fatos (D-8). Uma ferramenta que gravasse etapa criaria a segunda fonte de
+// verdade que a D-8 acabou de eliminar — e o placar passaria a mentir. Pra
+// mover um pedido no funil se muda o FATO (definir orçamento, encerrar,
+// reabrir) e a etapa acompanha sozinha. Quem pedir "move pro pagamento" deve
+// ser respondido com corrigir_orcamento.
+//
+//   preparar_mensagem / enviar_rascunho → fala com cliente e fornecedor, em
+//                                         duas etapas (v1.3, 09/09/2026)
+//
+// POR QUE MANDAR MENSAGEM SÃO DUAS FERRAMENTAS, E NÃO UMA
+// Numa ferramenta só, o "confirmar=true" seria decidido pelo próprio modelo na
+// mesma chamada — e o texto que chega ao cliente poderia não ser o texto que o
+// Fernando leu. Separando, preparar_mensagem grava o texto exato e devolve um
+// id; enviar_rascunho manda AQUELE id. O que sai é, byte a byte, o que foi
+// aprovado. Detalhes e travas em app/lib/mcp-mensagens.ts.
+//
+// O QUE CONTINUA DE FORA, de propósito: cobrar e mover dinheiro. Ação sobre
+// dinheiro entra uma por vez, com confirmação explícita (nível N1 do mapa de
+// autonomia). Criar template não manda nada pra ninguém — é catálogo.
 //
 // TRANSPORTE: Streamable HTTP em modo stateless (sem sessão, resposta JSON),
 // via WebStandardStreamableHTTPServerTransport da SDK oficial — cada POST
@@ -75,8 +96,11 @@ import {
   ETAPAS,
   MOTIVOS_ENCERRAMENTO,
   pedidosPorEtapa,
+  reabrirPedidoEncerrado,
   registrarMotivoParada,
 } from '@/app/lib/etapas-pedido'
+import { corrigirOrcamento } from '@/app/lib/orcamento-versoes'
+import { enviarRascunho, prepararMensagem } from '@/app/lib/mcp-mensagens'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -472,6 +496,155 @@ function criarServidor(): McpServer {
       } catch (e) {
         return erro(e instanceof Error ? e.message : String(e))
       }
+    }
+  )
+
+  server.registerTool(
+    'corrigir_orcamento',
+    {
+      title: 'Corrigir o orçamento de um pedido',
+      description:
+        'Corrige valor, frete e repasse de um pedido e grava uma versão no histórico com o motivo (quem mexe explica). ' +
+        'Serve pra destravar erro de digitação do fornecedor sem "Reabrir", que zeraria tudo e devolveria o pedido pro ' +
+        'fornecedor refazer — perdendo o cliente no meio. Valores em CENTAVOS. O repasse não pode passar do valor cobrado. ' +
+        'Pedido já pago não muda de valor por aqui (o Asaas já cobrou; acerto é fora do sistema). ' +
+        'Efeito no funil: ao definir o orçamento o pedido caminha sozinho pra aguardando_pagamento — a etapa é derivada ' +
+        'do fato (D-8), não se move à mão. Só com confirmar=true depois de o Fernando aprovar os números nesta conversa.',
+      inputSchema: {
+        pedido: z.string().min(3).max(60).describe('Código, número ou id do pedido.'),
+        valor_centavos: z.number().int().min(0).describe('Total cobrado do cliente, em centavos (R$ 1.234,00 = 123400).'),
+        frete_centavos: z.number().int().min(0).describe('Frete em centavos (0 se não houver).'),
+        repasse_centavos: z.number().int().min(0).describe('O que vai pro fornecedor, em centavos. Não pode passar do valor.'),
+        motivo: z.string().min(3).max(500).describe('Por que está sendo corrigido — vai pro histórico.'),
+        confirmar: z.boolean().describe('Precisa ser true — o Fernando aprovou os números.'),
+      },
+      annotations: REGISTRO,
+    },
+    async ({ pedido, valor_centavos, frete_centavos, repasse_centavos, motivo, confirmar }) => {
+      if (!confirmar) {
+        return erro(
+          `Correção não confirmada. Confirme com o Fernando: valor R$ ${(valor_centavos / 100).toFixed(2)}, ` +
+            `frete R$ ${(frete_centavos / 100).toFixed(2)}, repasse R$ ${(repasse_centavos / 100).toFixed(2)} — ` +
+            'e chame de novo com confirmar=true.'
+        )
+      }
+      const p = await acharPedido(pedido)
+      if (!p) return erro(`Pedido "${pedido}" não encontrado.`)
+      const r = await corrigirOrcamento({
+        pedidoId: p.id,
+        valorCentavos: valor_centavos,
+        freteCentavos: frete_centavos,
+        repasseCentavos: repasse_centavos,
+        motivo,
+        autorNome: 'MCP (Cowork)',
+      })
+      if (!r.ok) return erro(r.erro)
+      const depois = await acharPedido(p.id)
+      return texto({
+        id: p.id,
+        codigo: p.codigo,
+        nome: p.nome,
+        valor_centavos: r.valorCentavos,
+        frete_centavos: r.freteCentavos,
+        repasse_centavos: r.repasseCentavos,
+        etapa_antes: p.etapa,
+        etapa_agora: depois?.etapa ?? p.etapa,
+      })
+    }
+  )
+
+  server.registerTool(
+    'reabrir_pedido',
+    {
+      title: 'Reabrir um pedido encerrado',
+      description:
+        'Desfaz o encerramento: limpa encerrado_em/motivo e o pedido volta a ser calculado pela etapa real (pode cair em ' +
+        'sem_fornecedor, aguardando_pagamento etc., conforme os fatos). É o desfazer de encerrar_pedido — use quando o ' +
+        'cliente voltou ou o encerramento foi engano.',
+      inputSchema: {
+        pedido: z.string().min(3).max(60).describe('Código, número ou id do pedido.'),
+      },
+      annotations: REGISTRO,
+    },
+    async ({ pedido }) => {
+      const p = await acharPedido(pedido)
+      if (!p) return erro(`Pedido "${pedido}" não encontrado.`)
+      if (!p.encerrado_motivo) return erro(`O pedido ${p.codigo ?? p.id} não está encerrado (etapa: ${p.etapa}).`)
+      try {
+        const r = await reabrirPedidoEncerrado(p.id)
+        return texto({ id: r.id, codigo: r.codigo, nome: r.nome, etapa_antes: p.etapa, etapa_agora: r.etapa })
+      } catch (e) {
+        return erro(e instanceof Error ? e.message : String(e))
+      }
+    }
+  )
+
+  server.registerTool(
+    'preparar_mensagem',
+    {
+      title: 'Escrever mensagem pro cliente (não envia)',
+      description:
+        'Escreve uma mensagem pra um cliente ou fornecedor e devolve um rascunho_id. NÃO ENVIA NADA. ' +
+        'Mostre o texto ao Fernando exatamente como voltou e só chame enviar_rascunho depois que ele aprovar — ' +
+        'é o texto gravado que sai, não uma reescrita. O rascunho vale 30 minutos. ' +
+        'Se a janela de 24 h estiver fechada, texto livre não sai (regra da Meta): informe template_nome de um ' +
+        'template aprovado (veja templates_whatsapp). Não serve pro número do gestor — pauta vai por enviar_pauta_gestao.',
+      inputSchema: {
+        telefone: z.string().min(10).max(20).describe('Número do contato com DDI e DDD, ex.: 5581998496055.'),
+        texto: z.string().min(2).max(4000).describe('A mensagem, exatamente como deve chegar ao cliente.'),
+        nome: z.string().max(120).optional().describe('Nome do contato, se souber (aparece no inbox).'),
+        template_nome: z.string().max(512).optional().describe('Obrigatório quando a janela de 24 h está fechada.'),
+        template_variaveis: z.array(z.string().max(200)).max(10).optional().describe('Valores de {{1}}, {{2}}… na ordem.'),
+        pedido_id: z.string().uuid().optional().describe('Pedido a que a mensagem se refere, se houver.'),
+        contexto: z.string().max(500).optional().describe('Por que está sendo mandada — fica no registro.'),
+      },
+      annotations: REGISTRO,
+    },
+    async ({ telefone, texto: t, nome, template_nome, template_variaveis, pedido_id, contexto }) => {
+      const r = await prepararMensagem({
+        telefone,
+        texto: t,
+        nome,
+        templateNome: template_nome,
+        templateVariaveis: template_variaveis,
+        pedidoId: pedido_id,
+        contexto,
+      })
+      if (!r.ok) return erro(r.erro)
+      return texto({
+        rascunho_id: r.rascunho.id,
+        para: r.rascunho.waId,
+        nome: r.rascunho.nome,
+        janela_24h: r.rascunho.janelaAberta ? 'aberta' : 'fechada',
+        template: r.rascunho.templateNome,
+        expira_em: r.rascunho.expiraEm,
+        texto_que_sera_enviado: r.rascunho.texto,
+        aviso: r.aviso,
+        proximo_passo:
+          'Mostre o texto acima ao Fernando. Só com o "pode mandar" dele, chame enviar_rascunho com este rascunho_id.',
+      })
+    }
+  )
+
+  server.registerTool(
+    'enviar_rascunho',
+    {
+      title: 'Enviar um rascunho já aprovado',
+      description:
+        'Manda o rascunho criado por preparar_mensagem — sai exatamente o texto gravado. Efeito externo e ' +
+        'irreversível: chame só depois de o Fernando ter lido o texto e aprovado nesta conversa. Um rascunho só ' +
+        'envia uma vez; expirado (30 min) não envia. A mensagem entra no inbox marcada como escrita pelo assistente.',
+      inputSchema: {
+        rascunho_id: z.string().uuid().describe('O id devolvido por preparar_mensagem.'),
+        confirmar: z.boolean().describe('Precisa ser true — o Fernando leu o texto e aprovou.'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ rascunho_id, confirmar }) => {
+      if (!confirmar) return erro('Envio não confirmado: mostre o texto ao Fernando e chame de novo com confirmar=true.')
+      const r = await enviarRascunho(rascunho_id)
+      if (!r.ok) return erro(r.erro)
+      return texto({ enviado: true, para: r.waId, wamid: r.wamid, texto: r.texto })
     }
   )
 

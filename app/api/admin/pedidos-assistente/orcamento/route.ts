@@ -20,7 +20,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
-import { listarVersoesOrcamento, registrarVersaoOrcamento } from '@/app/lib/orcamento-versoes'
+import { corrigirOrcamento, listarVersoesOrcamento } from '@/app/lib/orcamento-versoes'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -70,59 +70,14 @@ export async function PUT(req: NextRequest) {
   }
   const { pedidoId, valorCentavos, freteCentavos, repasseCentavos, motivo } = corpo.data
 
-  if (repasseCentavos > valorCentavos) {
-    return NextResponse.json(
-      { erro: 'O repasse não pode ser maior que o valor cobrado do cliente' },
-      { status: 400 },
-    )
+  // A regra (trava do pago, sincronia da oferta, versão) mora em
+  // corrigirOrcamento — o MCP chama a mesma função. Aqui só traduz pra HTTP.
+  const r = await corrigirOrcamento({ pedidoId, valorCentavos, freteCentavos, repasseCentavos, motivo })
+
+  if (!r.ok) {
+    const status = r.codigo === 'nao_encontrado' ? 404 : r.codigo === 'pago' ? 409 : r.codigo === 'falha_gravacao' ? 500 : 400
+    return NextResponse.json({ erro: r.erro }, { status })
   }
-
-  const { data: pedido } = await supabaseAdmin
-    .from('pedidos_assistente')
-    .select('id, pagamento_status')
-    .eq('id', pedidoId)
-    .maybeSingle()
-
-  if (!pedido) return NextResponse.json({ erro: 'Pedido não encontrado' }, { status: 404 })
-  if (pedido.pagamento_status === 'pago') {
-    return NextResponse.json(
-      { erro: 'Pedido já pago — o valor não pode mais ser alterado por aqui' },
-      { status: 409 },
-    )
-  }
-
-  const agora = new Date().toISOString()
-  const { error } = await supabaseAdmin
-    .from('pedidos_assistente')
-    .update({
-      valor_centavos: valorCentavos,
-      frete_centavos: freteCentavos,
-      repasse_centavos: repasseCentavos,
-      orcamento_status: 'definido',
-      orcamento_definido_em: agora,
-      atualizado_em: agora,
-    })
-    .eq('id', pedidoId)
-
-  if (error) return NextResponse.json({ erro: 'Não foi possível salvar' }, { status: 500 })
-
-  // Mantém a oferta aceita em sincronia — é dela que sai o "a receber" do
-  // fornecedor na Carteira. Sem isso o painel dele mostraria o valor velho.
-  await supabaseAdmin
-    .from('ofertas_pedido_assistente')
-    .update({ valor_repasse_centavos: repasseCentavos })
-    .eq('pedido_id', pedidoId)
-    .eq('status', 'aceita')
-
-  await registrarVersaoOrcamento({
-    pedidoId,
-    valorCentavos,
-    freteCentavos,
-    repasseCentavos,
-    autor: 'admin',
-    autorNome: 'Admin',
-    motivo,
-  })
 
   return NextResponse.json({ ok: true })
 }

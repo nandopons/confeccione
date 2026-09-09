@@ -83,6 +83,90 @@ export async function registrarVersaoOrcamento(params: {
   }
 }
 
+// ─── Correção do orçamento ──────────────────────────────────────────────────
+
+export type ResultadoCorrecaoOrcamento =
+  | { ok: true; valorCentavos: number; freteCentavos: number; repasseCentavos: number }
+  | { ok: false; erro: string; codigo: 'repasse_maior' | 'nao_encontrado' | 'pago' | 'falha_gravacao' }
+
+/**
+ * Corrige o orçamento de um pedido e deixa o rastro (versão + sincronia da
+ * oferta aceita). É a ÚNICA implementação da regra: a rota do admin e o
+ * servidor MCP chamam esta função, pra não existir uma segunda cópia da trava
+ * de "pedido pago não muda de valor" que pudesse divergir com o tempo.
+ *
+ * Não recebe Request nem devolve Response de propósito — quem chama traduz o
+ * resultado pro seu transporte (HTTP no admin, texto/erro no MCP).
+ *
+ * Efeito no funil (D-8): ao gravar orcamento_status='definido' o pedido passa
+ * de em_negociacao/orcamento_atrasado para aguardando_pagamento sozinho, porque
+ * a etapa é derivada do fato. Não existe (nem deve existir) "mover etapa".
+ */
+export async function corrigirOrcamento(params: {
+  pedidoId: string
+  valorCentavos: number
+  freteCentavos: number
+  repasseCentavos: number
+  motivo: string
+  autorNome?: string | null
+}): Promise<ResultadoCorrecaoOrcamento> {
+  const { pedidoId, valorCentavos, freteCentavos, repasseCentavos, motivo } = params
+
+  if (repasseCentavos > valorCentavos) {
+    return { ok: false, codigo: 'repasse_maior', erro: 'O repasse não pode ser maior que o valor cobrado do cliente' }
+  }
+
+  const { data: pedido } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, pagamento_status')
+    .eq('id', pedidoId)
+    .maybeSingle()
+
+  if (!pedido) return { ok: false, codigo: 'nao_encontrado', erro: 'Pedido não encontrado' }
+  if (pedido.pagamento_status === 'pago') {
+    return {
+      ok: false,
+      codigo: 'pago',
+      erro: 'Pedido já pago — o valor não pode mais ser alterado por aqui (o Asaas já cobrou; acerto é fora do sistema)',
+    }
+  }
+
+  const agora = new Date().toISOString()
+  const { error } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .update({
+      valor_centavos: valorCentavos,
+      frete_centavos: freteCentavos,
+      repasse_centavos: repasseCentavos,
+      orcamento_status: 'definido',
+      orcamento_definido_em: agora,
+      atualizado_em: agora,
+    })
+    .eq('id', pedidoId)
+
+  if (error) return { ok: false, codigo: 'falha_gravacao', erro: 'Não foi possível salvar' }
+
+  // Mantém a oferta aceita em sincronia — é dela que sai o "a receber" do
+  // fornecedor na Carteira. Sem isso o painel dele mostraria o valor velho.
+  await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .update({ valor_repasse_centavos: repasseCentavos })
+    .eq('pedido_id', pedidoId)
+    .eq('status', 'aceita')
+
+  await registrarVersaoOrcamento({
+    pedidoId,
+    valorCentavos,
+    freteCentavos,
+    repasseCentavos,
+    autor: 'admin',
+    autorNome: params.autorNome ?? 'Admin',
+    motivo,
+  })
+
+  return { ok: true, valorCentavos, freteCentavos, repasseCentavos }
+}
+
 export async function listarVersoesOrcamento(pedidoId: string): Promise<VersaoOrcamento[]> {
   const { data } = await supabaseAdmin
     .from('orcamento_versoes')
