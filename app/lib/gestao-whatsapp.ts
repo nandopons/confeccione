@@ -27,6 +27,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
 import { blocoDoPdf, ehPdf, type BlocoPdf } from './anexo-pdf'
+import { buscarParceiros, abrirDemanda, listarDemandas, fecharDemanda, historicoDeCustos, type TipoParceiro } from './logistica'
 import { enviarTemplate, enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
 import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 import { registrarUsoIa } from './uso-ia'
@@ -405,6 +406,63 @@ const FERRAMENTAS: Anthropic.Messages.Tool[] = [
     },
   },
   {
+    name: 'buscar_parceiro',
+    description:
+      'Acha na rede de apoio da casa: transportador, depósito de malha, aviamento, estamparia, bordado. ' +
+      'É a resposta pra "quem traz de Caruaru", "onde a gente compra malha", "quem faz bordado". ' +
+      'Não confunda com buscar_contato, que é cliente e confecção do marketplace.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        texto: { type: 'string', description: 'Nome, cidade ou o que ele fornece. Ex.: "malha", "Caruaru", "Menegotti".' },
+        tipo: { type: 'string', enum: ['transporte', 'malha', 'aviamento', 'estamparia', 'bordado', 'servico', 'outro'] },
+        rota: { type: 'string', description: 'Rota exata do transportador, ex.: "Caruaru-Recife".' },
+      },
+    },
+  },
+  {
+    name: 'abrir_demanda_logistica',
+    description:
+      'Registra uma coleta ou entrega a resolver (buscar malha, levar peça pra estamparia). ' +
+      'Abra a demanda ANTES de cotar: é ela que guarda o histórico de quanto custou a rota.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        descricao: { type: 'string', minLength: 5, maxLength: 300 },
+        origem: { type: 'string', maxLength: 200, description: 'De onde sai, com endereço se souber.' },
+        destino: { type: 'string', maxLength: 200 },
+        precisa_ate: { type: 'string', description: 'AAAA-MM-DD, se houver data limite.' },
+        observacao: { type: 'string', maxLength: 300 },
+      },
+      required: ['descricao'],
+    },
+  },
+  {
+    name: 'demandas_logistica',
+    description: 'Lista as coletas e entregas registradas, da mais recente pra mais antiga, com o custo das concluídas.',
+    input_schema: {
+      type: 'object',
+      properties: { status: { type: 'string', enum: ['aberta', 'cotando', 'contratada', 'concluida', 'cancelada'] } },
+    },
+  },
+  {
+    name: 'fechar_demanda_logistica',
+    description:
+      'Marca a demanda como contratada, concluída ou cancelada, com quem levou e por quanto. ' +
+      'O valor é o que faz a próxima cotação ter referência — sem ele, "está caro?" volta a ser achismo.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        demanda_id: { type: 'string' },
+        status: { type: 'string', enum: ['contratada', 'concluida', 'cancelada'] },
+        transportador_id: { type: 'string', description: 'id do parceiro que levou (veja em buscar_parceiro).' },
+        valor_centavos: { type: 'number', minimum: 0 },
+        observacao: { type: 'string', maxLength: 300 },
+      },
+      required: ['demanda_id', 'status'],
+    },
+  },
+  {
     name: 'buscar_contato',
     description:
       'Acha uma pessoa por parte do nome ou por telefone e devolve telefone, papel (cliente ou fornecedor), última mensagem, ' +
@@ -663,6 +721,47 @@ async function executarFerramenta(nome: string, entrada: Entrada): Promise<unkno
       const achados = await buscarContato(termo, num(entrada.limite) ?? 5)
       return achados.length > 0 ? achados : { aviso: `ninguém encontrado com "${termo}"` }
     }
+    case 'buscar_parceiro': {
+      const achados = await buscarParceiros({
+        texto: str(entrada.texto),
+        tipo: (str(entrada.tipo) as TipoParceiro | null) ?? null,
+        rota: str(entrada.rota),
+      })
+      return achados.length > 0
+        ? achados
+        : { aviso: 'nenhum parceiro com esse perfil está cadastrado — diga isso ao Fernando em vez de sugerir um nome' }
+    }
+    case 'abrir_demanda_logistica': {
+      const descricao = str(entrada.descricao)
+      if (!descricao) throw new Error('descricao é obrigatória')
+      return await abrirDemanda({
+        descricao,
+        origemTexto: str(entrada.origem),
+        destinoTexto: str(entrada.destino),
+        precisaAte: str(entrada.precisa_ate),
+        observacao: str(entrada.observacao),
+      })
+    }
+    case 'demandas_logistica': {
+      const lista = await listarDemandas(str(entrada.status))
+      return { demandas: lista, custos_recentes: await historicoDeCustos() }
+    }
+    case 'fechar_demanda_logistica': {
+      const demandaId = str(entrada.demanda_id)
+      const status = str(entrada.status)
+      if (!demandaId) throw new Error('demanda_id é obrigatório')
+      if (status !== 'contratada' && status !== 'concluida' && status !== 'cancelada') {
+        throw new Error('status deve ser contratada, concluida ou cancelada')
+      }
+      await fecharDemanda({
+        demandaId,
+        status,
+        transportadorId: str(entrada.transportador_id),
+        valorCentavos: num(entrada.valor_centavos),
+        observacao: str(entrada.observacao),
+      })
+      return { ok: true, status }
+    }
     case 'ler_conversa': {
       const telefone = str(entrada.telefone)
       if (!telefone) throw new Error('telefone é obrigatório')
@@ -811,6 +910,14 @@ UMA PESSOA, UMA MENSAGEM: antes de disparar pra uma lista, agrupe por TELEFONE, 
 A EMPRESA, PRA QUANDO VOCÊ ESCREVER: Confeccione, marketplace B2B de confecção, empresa de Recife embarcada no Porto Digital desde 28/05/2026, CNPJ 49.307.439/0001-50, página confeccione.com.br/porto-digital. Use quando preparar mensagem pra quem pode desconfiar de abordagem por WhatsApp — cliente novo ou confecção que a gente nunca contatou. Só o que está aqui: nada de prêmio, investidor ou número de clientes inventado.
 
 PROCURE ANTES DE PERGUNTAR: quando o Fernando citar alguém pelo nome ("responde o André", "e a Rafaella?", "a JJ Camisetas"), chame buscar_contato — você acha o telefone, o papel, os pedidos e a última mensagem sozinho. Quando ele falar de um pedido, chame detalhe_pedido pra ver as peças. Antes de escrever pra alguém, chame ler_conversa. NUNCA responda "não tenho ferramenta pra isso", "não sei o conteúdo" ou peça a ele um dado que você consegue buscar: primeiro procure com as ferramentas, e só diga que não achou depois de ter procurado de verdade. Não peça permissão pra consultar — leitura não precisa de confirmação, faça e traga o resultado.
+
+LOGÍSTICA DA CASA: VOCÊ RESOLVE, NÃO SÓ ANOTA. Quando o Fernando disser "preciso buscar uma mercadoria no Menegotti em Caruaru e trazer pro escritório", o caminho é: (1) abrir_demanda_logistica com origem e destino; (2) buscar_parceiro com tipo transporte e a rota, pra saber quem faz; (3) preparar_mensagem pra CADA um deles pedindo cotação — data da coleta, o que é a carga, de onde e pra onde; (4) trazer os preços pro Fernando escolher; (5) fechar_demanda_logistica com quem levou e por quanto.
+
+O passo 5 é o que a maioria pula e é o que mais rende: sem o valor gravado, daqui a três meses "quanto custa Caruaru-Recife" volta a ser pergunta pro WhatsApp. Com ele, você responde na hora e sabe dizer se a cotação de agora está cara.
+
+Cotação é MENSAGEM, então vale tudo que vale pra mensagem: uma por pessoa por dia, duas etapas (preparar e depois enviar com o "pode mandar" dele), e nunca invente valor — quem dá preço é o transportador.
+
+Se buscar_parceiro não achar ninguém pra rota, DIGA ISSO. Não sugira um transportador que você não leu no banco, nem mande o Fernando "procurar alguém": ofereça captar, do mesmo jeito que a gente capta confecção.
 
 VOCÊ LÊ PDF E ESCUTA ÁUDIO. Quando o Fernando encaminhar um PDF — boleto, contrato, orçamento de fornecedor, ficha técnica, extrato — ele chega inteiro pra você, com o layout preservado. Leia e responda o que ele quer saber, sem pedir pra ele resumir ou digitar. Áudio chega já transcrito no texto. Como transcrição e leitura de tabela erram número, confirme valor e data em uma linha antes de agir em cima ("boleto de R$ 998 vencendo 15/09, confere?") — e valor que vira decisão você nunca chuta.
 
