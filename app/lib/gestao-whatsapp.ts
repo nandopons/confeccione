@@ -139,12 +139,18 @@ function reais(centavos: number | null | undefined): string {
 
 /** Markdown vira o pouco que o WhatsApp entende: *negrito*, sem títulos, sem tabelas. */
 function paraWhatsApp(texto: string): string {
-  return texto
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/\*\*(.+?)\*\*/g, '*$1*')
-    .replace(/^\s*[-•]\s+/gm, '- ')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
+  return (
+    texto
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/\*\*(.+?)\*\*/g, '*$1*')
+      .replace(/^\s*[-•]\s+/gm, '- ')
+      // Travessão fora: no WhatsApp é assinatura de texto gerado. Preserva o
+      // "- " de início de linha, que aqui é marcador de lista de verdade.
+      .replace(/(?<!^)\s*[—–]\s*/gm, ', ')
+      .replace(/,\s*([,.;:!?])/g, '$1')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  )
 }
 
 /** Quebra em blocos de até LIMITE_TEXTO_WHATSAPP chars, de preferência em parágrafo. */

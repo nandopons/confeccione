@@ -130,15 +130,54 @@ function dias(desde: string | null | undefined): number | null {
 
 /** Tira o que o WhatsApp não mostra bem (D-6: sem markdown, sem emoji, sem lista). */
 function paraWhatsApp(texto: string): string {
-  return texto
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/\*\*(.+?)\*\*/g, '$1')
-    .replace(/^\s*[-•*]\s+/gm, '')
-    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-    .slice(0, LIMITE_TEXTO)
+  return (
+    texto
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/^\s*[-•*]\s+/gm, '')
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')
+      // Travessão e meia-risca são a assinatura de texto de máquina: ninguém
+      // digita "—" no WhatsApp. Vira vírgula (ou some, se já houver pontuação
+      // colada). Instruir no prompt não bastou — o modelo reincide.
+      .replace(/\s*[—–]\s*/g, ', ')
+      .replace(/,\s*([,.;:!?])/g, '$1')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+      .slice(0, LIMITE_TEXTO)
+  )
 }
+
+/**
+ * Quebra a resposta nas mensagens que serão enviadas de verdade.
+ *
+ * Um bloco por parágrafo, e o link sempre sozinho: no WhatsApp, link no meio de
+ * um parágrafo perde a prévia e some no texto. Duas mensagens curtas com pausa
+ * entre elas leem como alguém digitando; um bloco só lê como aviso de sistema.
+ */
+function mensagensSeparadas(texto: string): string[] {
+  const partes: string[] = []
+  for (const paragrafo of texto.split(/\n{2,}/)) {
+    const p = paragrafo.trim()
+    if (!p) continue
+    // Isola a linha que contém link, mantendo a ordem do texto.
+    const linhas = p.split('\n')
+    let buffer: string[] = []
+    for (const linha of linhas) {
+      if (/https?:\/\//.test(linha)) {
+        if (buffer.length) partes.push(buffer.join('\n').trim())
+        buffer = []
+        partes.push(linha.trim())
+      } else {
+        buffer.push(linha)
+      }
+    }
+    if (buffer.join('').trim()) partes.push(buffer.join('\n').trim())
+  }
+  return partes.filter(Boolean).slice(0, 4)
+}
+
+/** Pausa curta entre mensagens, pra chegarem como quem está digitando. */
+const PAUSA_ENTRE_MENSAGENS_MS = 3000
 
 function dormir(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -684,6 +723,12 @@ O QUE VOCÊ FAZ: tira dúvida sobre como funciona; diz em que pé está o pedido
 
 O QUE VOCÊ NÃO FAZ: não negocia preço nem dá desconto; não promete prazo, data ou valor que não esteja no contexto; não passa contato, nome de rua ou telefone de fornecedor; não muda orçamento nem pedido; não trata reclamação, reembolso, defeito ou atraso de entrega; não fala de outros clientes; não inventa número. Nesses casos, e quando o cliente pedir pra falar com uma pessoa ou perguntar algo que não está no contexto, chame chamar_humano e responda em uma linha que alguém da equipe continua por aqui (sem prometer hora). Não use chamar_humano pra dúvida simples que o contexto responde.
 
+NUNCA USE TRAVESSÃO: nada de "—" nem "–" no texto. Ninguém digita isso no WhatsApp; é marca de texto de máquina. Use vírgula, ponto ou reescreva a frase. Também não use parênteses explicativos nem ponto e vírgula.
+
+LINK SOZINHO: quando mandar um link, ele vai em linha própria, separado do resto por uma linha em branco, sem nada colado. Nunca escreva link no meio da frase.
+
+QUANDO PRECISAR DE DUAS FRASES, SEPARE: se de verdade precisar dizer duas coisas, escreva os dois blocos separados por uma linha em branco — cada bloco vira uma mensagem própria, enviada com alguns segundos de intervalo, como alguém digitando. No máximo dois blocos. Isso não é permissão pra falar mais: é pra o pouco que você diz chegar em pedaços que se leem rápido.
+
 ESTILO: WhatsApp, curto — 1 a 2 frases, no máximo 3 linhas, sem parágrafo duplo. Sem emoji, sem markdown, sem lista com marcadores, sem botão. Tom de atendente profissional: educado, formal e direto ao assunto, sem exclamação e sem entusiasmo. Português do Brasil. Valores em reais (R$ 1.234,56).
 
 CONVERSA, NÃO COMUNICADO — a regra mais importante deste prompt. Você manda MENSAGEM DE WHATSAPP, não parágrafo. Limite duro: 1 ou 2 frases, no máximo 3 linhas, SEM linha em branco no meio (se você escreveu dois parágrafos, está errado — corte). UMA pergunta por mensagem: uma só, nunca duas ligadas por "e" ou por vírgula. Depois da pergunta, PARE. Não explique antes de perguntar, não antecipe o passo seguinte, não responda o que ele não perguntou, não repita o que ele acabou de dizer. Se você sabe cinco coisas úteis, mande uma e guarde quatro — as outras vêm quando ele responder.
@@ -1096,8 +1141,18 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       return
     }
     void marcarComoLida(params.wamid).catch(() => false)
-    const envio = await enviarTexto(waId, r.texto)
-    if (envio.ok) await registrarSaidaInbox(waId, nome, envio.wamid, r.texto, null, 'luigi')
+
+    // Vai em mensagens separadas, com pausa: é assim que gente escreve no
+    // WhatsApp, e o link sozinho ganha prévia em vez de sumir no meio do texto.
+    const partes = mensagensSeparadas(r.texto)
+    let envio: Awaited<ReturnType<typeof enviarTexto>> = { ok: false, erro: 'sem texto pra enviar' }
+    for (const [i, parte] of partes.entries()) {
+      if (i > 0) await new Promise((ok) => setTimeout(ok, PAUSA_ENTRE_MENSAGENS_MS))
+      envio = await enviarTexto(waId, parte)
+      if (envio.ok) await registrarSaidaInbox(waId, nome, envio.wamid, parte, null, 'luigi')
+      // Se uma parte falha, parar: continuar deixaria a conversa sem sentido.
+      if (!envio.ok) break
+    }
     await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: Boolean(r.escalada), motivo_escalada: r.escalada?.motivo ?? null, status: envio.ok ? 'enviada' : 'falhou', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: envio.ok ? null : envio.erro })
     if (r.escalada) await escalar(params.conversaId, { nome, waId }, r.escalada.motivo, modo)
   } catch (err) {
