@@ -91,23 +91,32 @@ const MAX_RODADAS = 40
 const ORCAMENTO_MS = 95_000
 const MAX_TOKENS_RESPOSTA = 1200
 /**
- * QUANTAS MENSAGENS ELE LEMBRA — 30 → 200 em 09/09/2026.
+ * A MEMÓRIA DELE — 30 mensagens → a conversa inteira, em 09/09/2026.
  *
- * Com 30 ele enxergava cerca de uma hora de conversa de dia cheio. No dia 09/09
- * ele disse ao Fernando, com razão: "não tenho memória do que foi dito antes do
- * início desta conversa; o que aparece pra mim começa em 'mete bronca'" — e por
- * isso repetia pergunta já respondida e perdia decisão tomada de manhã.
+ * Com 30 ele enxergava cerca de uma hora de conversa de dia cheio, e disse ao
+ * Fernando, com razão: "não tenho memória do que foi dito antes do início desta
+ * conversa; o que aparece pra mim começa em 'mete bronca'". Repetia pergunta já
+ * respondida e perdia decisão tomada de manhã.
  *
- * A conta de sete dias inteiros dessa conversa deu 241 mensagens e ~11 mil
- * tokens: a memória COMPLETA da semana custa menos que o prompt de sistema.
- * Trinta não estava economizando nada relevante; estava só apagando o contexto
- * de quem precisa dele. Duzentas cobrem quase a semana toda.
+ * A medição desfez a premissa: a conversa TODA, 353 mensagens desde 05/07, dá
+ * ~19 mil tokens — 54 por mensagem. Dois meses de história cabem em menos que
+ * um prompt de sistema grande. Nunca houve trade-off; havia um número escolhido
+ * sem medir.
  *
- * O que 200 NÃO resolve: memória de meses. Isso é o diário de bordo
- * (buscar_decisoes, buscar_reunioes, resumo_gestao) — janela grande é pra
- * continuidade da conversa, ferramenta é pra história da empresa.
+ * Por isso o teto agora é de token e não de mensagem (ver historicoConversa), e
+ * este limite é só a rede de proteção da consulta ao banco: alto o bastante pra
+ * nunca cortar antes do orçamento, baixo o bastante pra não varrer a tabela.
  */
-const HISTORICO_MENSAGENS = 200
+const HISTORICO_MENSAGENS = 2000
+
+/**
+ * Teto do histórico que vai pro modelo. 60 mil tokens deixa folga larga pro
+ * prompt de sistema, as ferramentas e os resultados de ferramenta das até 40
+ * rodadas. No ritmo atual (≈19 mil tokens em dois meses), isso é a conversa
+ * completa por cerca de dois anos — e o custo real fica baixo porque o bloco
+ * estático vai com cache_control.
+ */
+const ORCAMENTO_HISTORICO_TOKENS = 60_000
 const LIMITE_TEXTO_WHATSAPP = 3500
 
 /** Template de abertura fora da janela de 24 h: {{1}} = hora, {{2}} = resumo em uma linha. */
@@ -898,7 +907,28 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
     .order('criado_em', { ascending: false })
     .limit(HISTORICO_MENSAGENS)
 
-  const linhas = ((data ?? []) as LinhaMensagem[]).reverse()
+  // CORTE POR TOKEN, NÃO POR NÚMERO DE MENSAGENS (09/09/2026)
+  // Contar mensagens é o jeito errado de medir memória: 200 mensagens curtas
+  // cabem folgado, 200 pautas de reunião não. A conta real desta conversa: 353
+  // mensagens desde 05/07 — a HISTÓRIA INTEIRA — dão ~19 mil tokens. Ou seja, o
+  // limite nunca foi o modelo, era o número que a gente tinha escolhido.
+  //
+  // Então o corte passa a ser o orçamento: leva tudo que couber em
+  // ORCAMENTO_HISTORICO_TOKENS, do mais novo pro mais velho. No ritmo de hoje
+  // isso é a conversa completa por uns dois anos. Quando um dia estourar, cai o
+  // mais antigo primeiro — e é aí que o diário de bordo (decisões, atas) passa
+  // a ser a memória longa, que é o papel dele.
+  const linhasDesc = (data ?? []) as LinhaMensagem[]
+  const cabe: LinhaMensagem[] = []
+  let orcamento = ORCAMENTO_HISTORICO_TOKENS
+  for (const m of linhasDesc) {
+    // ~4 caracteres por token, mais uma folga fixa pro cabeçalho do turno.
+    const custo = Math.ceil((m.corpo?.length ?? 12) / 4) + 8
+    if (cabe.length > 0 && custo > orcamento) break
+    orcamento -= custo
+    cabe.push(m)
+  }
+  const linhas = cabe.reverse()
   const wamids = new Set(linhas.map((m) => m.wamid).filter((w): w is string => Boolean(w)))
 
   // Só as últimas N imagens que ELE mandou entram como visão.
@@ -977,7 +1007,13 @@ async function rodarAgente(mensagens: Anthropic.Messages.MessageParam[], rota: s
     const resposta = await client.messages.create({
       model: MODELO,
       max_tokens: MAX_TOKENS_RESPOSTA,
-      system: promptSistema(),
+      // CACHE DO PROMPT (09/09/2026) — é o que torna a memória grande viável.
+      // O prompt de sistema e as ferramentas são idênticos em toda rodada e em
+      // toda mensagem do dia: sem cache, a gente paga por eles de novo a cada
+      // uma das até 40 rodadas de uma única resposta. Marcando o fim do bloco
+      // estático, a Anthropic reaproveita o que já processou e cobra uma
+      // fração. O histórico da conversa vem DEPOIS e continua variando.
+      system: [{ type: 'text', text: promptSistema(), cache_control: { type: 'ephemeral' } }],
       tools: FERRAMENTAS,
       messages: historico,
     })
