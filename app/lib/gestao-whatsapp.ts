@@ -72,9 +72,23 @@ const MODELO = 'claude-sonnet-4-6'
  * detalhe_pedido, ler_conversa e preparar_mensagem, uma tarefa comum ("responde
  * o fulano") já gasta 4 — e um pedido com três pessoas estourava no meio,
  * deixando o Fernando esperando um "um segundo" que nunca terminava
- * (09/09/2026, 13:45). 14 cobre o caso de três contatos sem virar loop infinito.
+ * (09/09/2026, 13:45).
+ *
+ * O limite que manda de verdade é o TEMPO, não este número: a rota tem
+ * maxDuration = 120 s e a Vercel mata a função no talo, sem resposta e sem log.
+ * Medido em produção, cada rodada leva ~5 s, então cabem ~20. Este teto fica
+ * alto o bastante pra nunca ser ele a cortar uma tarefa legítima, e serve só
+ * como rede contra loop (modelo chamando a mesma ferramenta pra sempre) —
+ * cada rodada reenvia todo o histórico, então loop solto custa dinheiro.
  */
-const MAX_RODADAS = 14
+const MAX_RODADAS = 40
+
+/**
+ * Quanto tempo o loop pode gastar antes de fechar a resposta por conta própria.
+ * Abaixo do maxDuration da rota, pra sobrar folga pro envio da mensagem e pro
+ * log — melhor ele mesmo encerrar e avisar do que ser morto no meio.
+ */
+const ORCAMENTO_MS = 95_000
 const MAX_TOKENS_RESPOSTA = 1200
 const HISTORICO_MENSAGENS = 30
 const LIMITE_TEXTO_WHATSAPP = 3500
@@ -909,8 +923,9 @@ async function rodarAgente(mensagens: Anthropic.Messages.MessageParam[], rota: s
   let rodadas = 0
   let texto = ''
   let concluiu = false
+  const limite = Date.now() + ORCAMENTO_MS
 
-  while (rodadas < MAX_RODADAS) {
+  while (rodadas < MAX_RODADAS && Date.now() < limite) {
     rodadas++
     const resposta = await client.messages.create({
       model: MODELO,

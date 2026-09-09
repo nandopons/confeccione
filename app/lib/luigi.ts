@@ -63,7 +63,23 @@ import { candidatoPeloWaId, responderCandidato } from './captacao-pedido'
 export * from './luigi-catalogo'
 
 const MODELO = 'claude-sonnet-4-6'
-const MAX_RODADAS = 4
+/**
+ * Voltas de ferramenta por resposta do Luigi.
+ *
+ * Eram 4, de quando ele só tinha chamar_humano e registrar_motivo_parada. Com
+ * as ferramentas de pedido (ajustar peça, definir peças, mandar resumo,
+ * liberar), fechar um pedido na conversa passa fácil disso — e ele parava no
+ * meio, prometendo o que não fez.
+ *
+ * Quem corta de verdade é o tempo: a rota do webhook tem maxDuration = 120 s.
+ * Aqui o teto é mais baixo que o do agente de gestão de propósito — do outro
+ * lado tem um CLIENTE esperando no WhatsApp, e resposta que demora um minuto
+ * parece que ninguém viu a mensagem.
+ */
+const MAX_RODADAS = 20
+
+/** Fecha a resposta antes de a Vercel matar a função, com folga pro envio. */
+const ORCAMENTO_MS = 45_000
 const MAX_TOKENS_RESPOSTA = 600
 const HISTORICO_MENSAGENS = 24
 const LIMITE_TEXTO = 1500
@@ -781,8 +797,9 @@ async function rodarLuigi(
   let tokensSaida = 0
   let rodadas = 0
   let texto = ''
+  const limite = Date.now() + ORCAMENTO_MS
 
-  while (rodadas < MAX_RODADAS) {
+  while (rodadas < MAX_RODADAS && Date.now() < limite) {
     rodadas++
     const resposta = await client.messages.create({
       model: MODELO,
