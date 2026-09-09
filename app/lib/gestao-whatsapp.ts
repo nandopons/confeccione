@@ -65,7 +65,16 @@ import { editarLinhasPedidoCliente } from './pedido-linhas-edicao'
 import { type LinhaPedido } from './pedido-assistente-oferta'
 
 const MODELO = 'claude-sonnet-4-6'
-const MAX_RODADAS = 6
+/**
+ * Quantas voltas de ferramenta o agente pode dar numa resposta.
+ *
+ * Era 6, de quando ele só lia placar e fila. Com buscar_contato,
+ * detalhe_pedido, ler_conversa e preparar_mensagem, uma tarefa comum ("responde
+ * o fulano") já gasta 4 — e um pedido com três pessoas estourava no meio,
+ * deixando o Fernando esperando um "um segundo" que nunca terminava
+ * (09/09/2026, 13:45). 14 cobre o caso de três contatos sem virar loop infinito.
+ */
+const MAX_RODADAS = 14
 const MAX_TOKENS_RESPOSTA = 1200
 const HISTORICO_MENSAGENS = 30
 const LIMITE_TEXTO_WHATSAPP = 3500
@@ -899,6 +908,7 @@ async function rodarAgente(mensagens: Anthropic.Messages.MessageParam[], rota: s
   let tokensSaida = 0
   let rodadas = 0
   let texto = ''
+  let concluiu = false
 
   while (rodadas < MAX_RODADAS) {
     rodadas++
@@ -917,7 +927,10 @@ async function rodarAgente(mensagens: Anthropic.Messages.MessageParam[], rota: s
     const parcial = textoDaResposta(resposta.content)
     if (parcial) texto = parcial
 
-    if (resposta.stop_reason !== 'tool_use' || usos.length === 0) break
+    if (resposta.stop_reason !== 'tool_use' || usos.length === 0) {
+      concluiu = true
+      break
+    }
 
     historico.push({ role: 'assistant', content: resposta.content })
     const resultados: Anthropic.Messages.ToolResultBlockParam[] = []
@@ -937,6 +950,15 @@ async function rodarAgente(mensagens: Anthropic.Messages.MessageParam[], rota: s
   }
 
   if (!texto) texto = 'Não consegui fechar uma resposta agora. Pode repetir de outro jeito?'
+
+  // Sem isto, estourar o limite mandava o último texto parcial — em geral um
+  // "um segundo" — e encerrava calado: o Fernando ficava esperando uma resposta
+  // que nunca vinha (09/09/2026). Dizer que parou no meio é o mínimo; ele
+  // decide se quebra o pedido em partes.
+  if (!concluiu) {
+    texto = `${texto}\n\n(Parei no meio: o pedido tem passos demais pra uma resposta só. Me diz por qual começar que eu sigo.)`
+  }
+
   return { texto: paraWhatsApp(texto), ferramentas, rodadas, tokensEntrada, tokensSaida }
 }
 
