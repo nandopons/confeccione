@@ -36,6 +36,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
 import { blocoDoPdf, ehPdf, type BlocoPdf } from './anexo-pdf'
+import { salvarPerfil } from './perfil-producao'
+import { salvarFotoDaConversa } from './portfolio-fornecedor'
 import { enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
 import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 // O tipo local LinhaPedido deste arquivo é um recorte antigo, sem material nem
@@ -287,6 +289,8 @@ type Contexto = {
   contato: { nome: string | null; telefone: string; conta: { nome: string | null; email: string | null } | null }
   pedidos: PedidoContexto[]
   pedidoEmFoco: PedidoEtapa | null
+  /** true = é confecção cadastrada, não cliente. Muda o prompt inteiro. */
+  ehFornecedor: boolean
 }
 
 async function pedidosDoContato(waId: string, clienteId: string | null): Promise<PedidoEtapa[]> {
@@ -358,7 +362,7 @@ async function prazosDesejados(pedidoIds: string[]): Promise<Map<string, number>
   return mapa
 }
 
-async function montarContexto(waId: string, nome: string | null, clienteId: string | null): Promise<Contexto> {
+async function montarContexto(waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
   const [pedidos, conta] = await Promise.all([
     pedidosDoContato(waId, clienteId),
     clienteId
@@ -399,6 +403,7 @@ async function montarContexto(waId: string, nome: string | null, clienteId: stri
   })
 
   return {
+    ehFornecedor,
     contato: { nome, telefone: waId, conta: conta.data ? { nome: conta.data.nome, email: conta.data.email } : null },
     pedidos: lista,
     pedidoEmFoco: abertos[0] ?? null,
@@ -548,7 +553,49 @@ const FERRAMENTA_LIBERAR: Anthropic.Messages.Tool = {
   },
 }
 
-function ferramentasDoModo(modo: Exclude<ModoLuigi, 'desligado'>): Anthropic.Messages.Tool[] {
+const FERRAMENTA_PERFIL_PRODUCAO: Anthropic.Messages.Tool = {
+  name: 'salvar_perfil_producao',
+  description:
+    'Grava o que a confecção contou sobre a produção dela. Chame A CADA resposta, não só no fim — ' +
+    'a conversa pode parar no meio e três respostas gravadas já melhoram o match. ' +
+    'Campo que você não passar fica como estava.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      servicos: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'facção, corte, modelagem, pilotagem, estamparia, bordado…' },
+      tecidos: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'malha, plana, suplex, moletom, jeans…' },
+      maquinas: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'reta, overloque, galoneira, travete…' },
+      fornece_material: { type: 'boolean', description: 'true = fornece tecido e aviamento; false = facção pura.' },
+      capacidade_mes: { type: 'number', minimum: 1, description: 'Peças por mês, no número que ELA disse.' },
+      aceita_encaixe: { type: 'boolean', description: 'Pega pedido no meio da agenda cheia?' },
+      faz_desenvolvimento: { type: 'boolean', description: 'Desenvolve peça a partir de foto, sem molde pronto?' },
+      pedido_minimo: { type: 'number', minimum: 1, description: 'Mínimo de peças por pedido.' },
+      nao_faz: { type: 'string', maxLength: 200, description: 'O que ela NÃO faz. Vale tanto quanto o que faz.' },
+      observacao: { type: 'string', maxLength: 300 },
+    },
+  },
+}
+
+const FERRAMENTA_PORTFOLIO: Anthropic.Messages.Tool = {
+  name: 'salvar_no_portfolio',
+  description:
+    'Guarda no perfil da confecção a última foto que ELA mandou nesta conversa. ' +
+    'Use quando ela mandar foto de peça que produz.',
+  input_schema: {
+    type: 'object',
+    properties: { legenda: { type: 'string', maxLength: 120, description: 'O que é a peça, nas palavras dela.' } },
+  },
+}
+
+function ferramentasDoModo(modo: Exclude<ModoLuigi, 'desligado'>, ehFornecedor = false): Anthropic.Messages.Tool[] {
+  // Confecção não tem pedido pra montar: dar a ela as ferramentas de peça seria
+  // oferecer ao modelo a chance de editar o pedido de OUTRA pessoa. O que ela
+  // precisa é registrar o próprio perfil e mandar foto.
+  if (ehFornecedor) {
+    return modo === 'responde'
+      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO]
+      : [FERRAMENTA_CHAMAR_HUMANO]
+  }
   return modo === 'responde'
     ? [
         FERRAMENTA_CHAMAR_HUMANO,
@@ -572,8 +619,62 @@ function acharNoContexto(ctx: Contexto, ref: string | undefined): { id: string; 
 
 type Escalada = { motivo: string } | null
 
+/** id do fornecedor a partir do número — o contato é a fonte, não o modelo. */
+async function fornecedorDoContato(waId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from('wa_contatos')
+    .select('fornecedor_id')
+    .eq('wa_id', waId)
+    .maybeSingle<{ fornecedor_id: string | null }>()
+  return data?.fornecedor_id ?? null
+}
+
 async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto, estado: { escalada: Escalada }): Promise<unknown> {
   switch (nome) {
+    case 'salvar_perfil_producao': {
+      const forn = await fornecedorDoContato(ctx.contato.telefone)
+      if (!forn) return { ok: false, aviso: 'não achei o cadastro de fornecedor desse número' }
+      const lista = (v: unknown) =>
+        Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean).slice(0, 20) : null
+      const bool = (v: unknown) => (typeof v === 'boolean' ? v : null)
+      const inteiro = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : null)
+      await salvarPerfil(forn, {
+        servicos: lista(entrada.servicos),
+        tecidos: lista(entrada.tecidos),
+        maquinas: lista(entrada.maquinas),
+        forneceMaterial: bool(entrada.fornece_material),
+        capacidadeMes: inteiro(entrada.capacidade_mes),
+        aceitaEncaixe: bool(entrada.aceita_encaixe),
+        fazDesenvolvimento: bool(entrada.faz_desenvolvimento),
+        naoFaz: typeof entrada.nao_faz === 'string' ? entrada.nao_faz : null,
+        observacao: typeof entrada.observacao === 'string' ? entrada.observacao : null,
+      })
+      const minimo = inteiro(entrada.pedido_minimo)
+      if (minimo != null) {
+        await supabaseAdmin.from('leads_fornecedores').update({ pedido_minimo: minimo }).eq('id', forn)
+      }
+      return { ok: true }
+    }
+    case 'salvar_no_portfolio': {
+      const forn = await fornecedorDoContato(ctx.contato.telefone)
+      if (!forn) return { ok: false, aviso: 'não achei o cadastro de fornecedor desse número' }
+      const { data: foto } = await supabaseAdmin
+        .from('wa_mensagens')
+        .select('midia_path, conversa_id, wa_conversas!inner(contato_id)')
+        .eq('direcao', 'entrada')
+        .eq('tipo', 'image')
+        .not('midia_path', 'is', null)
+        .order('criado_em', { ascending: false })
+        .limit(1)
+        .maybeSingle<{ midia_path: string | null }>()
+      if (!foto?.midia_path) return { ok: false, aviso: 'não achei foto mandada por ela' }
+      try {
+        await salvarFotoDaConversa(forn, foto.midia_path, typeof entrada.legenda === 'string' ? entrada.legenda : null)
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, erro: e instanceof Error ? e.message : 'falha ao guardar' }
+      }
+    }
     case 'chamar_humano': {
       const motivo = str(entrada.motivo) ?? 'cliente precisa de uma pessoa'
       estado.escalada = { motivo }
@@ -708,8 +809,38 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
 
 // ─── Prompt ─────────────────────────────────────────────────────────────────
 
+/**
+ * O Luigi quando quem está do outro lado é CONFECÇÃO, não cliente.
+ *
+ * Prompt próprio em vez de remendo no de cliente: quase nada do outro se
+ * aplica. Ela não tem pedido em andamento, não vai pagar nada, não precisa de
+ * link de visualizador — e o vocabulário é outro, porque ela é do ramo.
+ */
+function promptFornecedor(nome: string | null, jaSeApresentou: boolean): string {
+  return `Você é o Luigi, do atendimento da Confeccione, marketplace que leva pedido de roupa pra confecções verificadas (sede em Recife, PE). Agora em Recife: ${agoraRecife()}.
+
+QUEM ESTÁ FALANDO COM VOCÊ É UMA CONFECÇÃO CADASTRADA${nome ? ` — ${nome}` : ''}. Ela é parceira, não cliente. Fala a língua do ramo: não explique o que é facção, malha ou grade, e não trate como quem nunca produziu roupa.
+
+${jaSeApresentou ? 'Você já se apresentou nesta conversa: não repita o nome.' : 'Se for a primeira fala sua aqui, diga em uma linha quem é.'}
+
+O QUE VOCÊ QUER DELA, em ordem:
+1. entender o perfil de produção — o que faz, com que tecido, se fornece material, quanto aguarda no mês, se pega encaixe, e o que NÃO faz
+2. fotos de peças que ela já produziu, pro perfil dela na plataforma
+
+Uma pergunta por mensagem. Grave cada resposta na hora, não guarde pro fim: a conversa pode parar na terceira pergunta, e três respostas já valem. Se ela responder duas coisas de uma vez, registre as duas e não repita a que ela já respondeu.
+
+Diga POR QUE, uma vez só: é pra mandar só pedido que combina com ela, em vez de tudo. O benefício é dela, e é verdade.
+
+CONVERSA, NÃO FORMULÁRIO. Frase curta, uma ideia por mensagem, sem emoji, sem entusiasmo. Reaja ao que ela disser antes de puxar a próxima. Se ela estiver com pressa, pare: as duas primeiras perguntas já valeram a conversa. Nunca diga "boa sorte" nem deseje sucesso.
+
+QUANDO NÃO SOUBER, PERGUNTE AO FERNANDO — E FIQUE CALADO COM ELA. Preço, prazo de pagamento, condição comercial, reclamação, qualquer coisa que não esteja aqui: chame chamar_humano e NÃO escreva mais nada nessa mensagem. Nada de "alguém da equipe vai ver", "já te respondo" ou "vou verificar". O Fernando recebe o aviso no WhatsApp dele com a sua dúvida e responde ele mesmo, pelo inbox, na mesma conversa.
+
+NUNCA: prometa pedido, volume ou faturamento; combine preço; passe contato de cliente; invente número de confecções ou de pedidos. O que você não leu de ferramenta, você não afirma.`
+}
+
 function promptSistema(modo: Exclude<ModoLuigi, 'desligado'>, ctx: Contexto, jaSeApresentou: boolean): string {
   const nome = primeiroNome(ctx.contato.nome) || primeiroNome(ctx.contato.conta?.nome) || null
+  if (ctx.ehFornecedor) return promptFornecedor(nome, jaSeApresentou)
   const faq = FAQ_HOME.map((f) => `- ${f.pergunta} ${f.resposta}`).join('\n')
   const etapas = (Object.keys(ETAPA_PARA_CLIENTE) as Etapa[]).map((e) => `- ${e} (${INFO_ETAPA[e].label}): ${ETAPA_PARA_CLIENTE[e]}`).join('\n')
   const pedidos =
@@ -1037,7 +1168,7 @@ async function rodarLuigi(
       model: MODELO,
       max_tokens: MAX_TOKENS_RESPOSTA,
       system: promptSistema(modo, ctx, jaSeApresentou),
-      tools: ferramentasDoModo(modo),
+      tools: ferramentasDoModo(modo, ctx.ehFornecedor),
       messages: historico,
     })
     void registrarUsoIa(`luigi-${modo}`, MODELO, resposta.usage)
@@ -1248,13 +1379,23 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     const modo = await modoLuigi()
     if (modo === 'desligado') return
 
-    // Fornecedor não é com o Luigi (v1): fica pra gente.
+    // FORNECEDOR AGORA É COM O LUIGI TAMBÉM — 09/09/2026.
+    //
+    // Até hoje ele devolvia fornecedor pra fila humana, e o custo apareceu no
+    // teste com a Marilia: ela respondeu às 17h31 ("fique à vontade pra falar")
+    // e ficou 15 minutos no vácuo, porque nenhum agente era dono daquela
+    // conversa — o Luigi ignorava por ser fornecedora e a captação só cuida de
+    // candidata que ainda não se cadastrou.
+    //
+    // Com 43 confecções pra entrevistar, "fica pra gente" significa 43
+    // conversas manuais do Fernando. Ele atende, e o que não souber ele
+    // pergunta ao Fernando pelo WhatsApp — sem prometer equipe nenhuma.
     const { data: contato } = await supabaseAdmin
       .from('wa_contatos')
       .select('id, nome, cliente_id, fornecedor_id')
       .eq('wa_id', waId)
       .maybeSingle<{ id: string; nome: string | null; cliente_id: string | null; fornecedor_id: string | null }>()
-    if (contato?.fornecedor_id) return
+    const ehFornecedor = Boolean(contato?.fornecedor_id)
 
     const base = {
       conversa_id: params.conversaId,
@@ -1305,7 +1446,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // Uma sugestão por conversa: a nova mensagem do cliente supera a anterior.
     if (modo === 'sugere') await resolverSugestoes(params.conversaId, 'descartada').catch(() => undefined)
 
-    const [ctx, historico] = await Promise.all([montarContexto(waId, nome, contato?.cliente_id ?? null), historicoConversa(params.conversaId)])
+    const [ctx, historico] = await Promise.all([montarContexto(waId, nome, contato?.cliente_id ?? null, ehFornecedor), historicoConversa(params.conversaId)])
 
     let mensagens = historico.msgs
     const ultima = mensagens[mensagens.length - 1]
