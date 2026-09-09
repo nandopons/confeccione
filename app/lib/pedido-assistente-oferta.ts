@@ -88,6 +88,111 @@ export type FornecedorOpcao = {
   status: string | null
   tipos_produto: string[] | null
   pedido_minimo: number | null
+  /** Prazo mínimo que ela aceita. Null = não informou, recebe tudo. */
+  prazo_minimo_dias: number | null
+}
+
+// ---------------------------------------------------------------------------
+// MATCH ENTRE PEDIDO E CONFECÇÃO (09/09/2026)
+//
+// Até hoje a lista de confecções pra ofertar vinha ordenada por NOME. Quem
+// escolhia tinha que achar quem é de SP no meio de 43 nomes — e o Fernando
+// chegou a dizer a um cliente que "colocando endereço de SP o sistema dá
+// preferência à região". Não dava: nada no código olhava UF.
+//
+// O score abaixo é a versão honesta disso. Ele não decide nada sozinho: ordena
+// a tela, e quem escolhe continua sendo pessoa. Se um dia a oferta virar
+// automática, é este mesmo score que decide quem recebe — por isso ele está
+// aqui, separado da tela, e não dentro de um componente.
+//
+// Peso por região é maior que peso por peça de propósito: confecção de outra
+// ponta do país que faz a peça encarece o frete e some no prazo; confecção
+// perto que faz peça parecida costuma topar. Frete e proximidade é o que mais
+// derruba pedido na prática.
+// ---------------------------------------------------------------------------
+
+export type MatchFornecedor = {
+  pontos: number
+  /** Por que ele apareceu no topo — vai pra tela, pra escolha não ser cega. */
+  motivos: string[]
+}
+
+function normalizar(t: string | null | undefined): string {
+  return (t ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim()
+    .toLowerCase()
+}
+
+/**
+ * Quanto essa confecção casa com esse pedido. Maior é melhor; zero é "não vi
+ * nada em comum", não é "ruim" — confecção sem cidade preenchida cai aqui.
+ */
+export function pontuarFornecedor(
+  pedido: { cidade?: string | null; uf?: string | null; categoria?: string | null; pecas?: string[] | null; prazoDias?: number | null },
+  f: Pick<FornecedorOpcao, 'cidade' | 'estado' | 'tipos_produto' | 'pedido_minimo' | 'prazo_minimo_dias' | 'status'>,
+  totalPecas?: number | null
+): MatchFornecedor {
+  const motivos: string[] = []
+  let pontos = 0
+
+  const cidadePedido = normalizar(pedido.cidade)
+  const cidadeForn = normalizar(f.cidade)
+  const ufPedido = normalizar(pedido.uf)
+  const ufForn = normalizar(f.estado)
+
+  if (cidadePedido && cidadeForn && cidadePedido === cidadeForn) {
+    pontos += 50
+    motivos.push('mesma cidade')
+  } else if (ufPedido && ufForn && ufPedido === ufForn) {
+    pontos += 30
+    motivos.push('mesmo estado')
+  }
+
+  // Peça: o que o pedido pede contra o que a confecção declarou fazer.
+  const querPecas = [pedido.categoria, ...(pedido.pecas ?? [])].map(normalizar).filter(Boolean)
+  const fazPecas = (f.tipos_produto ?? []).map(normalizar).filter(Boolean)
+  if (querPecas.length && fazPecas.length) {
+    const bate = querPecas.some((q) => fazPecas.some((p) => p.includes(q) || q.includes(p)))
+    if (bate) {
+      pontos += 20
+      motivos.push('faz esse tipo de peça')
+    }
+  }
+
+  // Pedido mínimo é eliminatório na prática: não adianta ser perto e fazer a
+  // peça se ela só produz a partir de 50 e o pedido tem 16.
+  if (totalPecas != null && f.pedido_minimo != null && totalPecas < f.pedido_minimo) {
+    pontos -= 40
+    motivos.push(`mínimo ${f.pedido_minimo} peças`)
+  }
+
+  // Prazo curto demais pra ela: "encaixe de produção" é pedido que entra no
+  // meio da agenda cheia, e boa parte das confecções não pega. Mandar assim
+  // mesmo gera recusa e queima horas da fila — pesa igual ao pedido mínimo.
+  if (pedido.prazoDias != null && f.prazo_minimo_dias != null && pedido.prazoDias < f.prazo_minimo_dias) {
+    pontos -= 40
+    motivos.push(`só a partir de ${f.prazo_minimo_dias} dias`)
+  }
+
+  if (f.status && f.status !== 'ativo') {
+    pontos -= 15
+    motivos.push(f.status)
+  }
+
+  return { pontos, motivos }
+}
+
+/** A mesma lista, na ordem em que faz sentido olhar pra ESTE pedido. */
+export function ordenarFornecedoresPara<T extends Pick<FornecedorOpcao, 'nome' | 'cidade' | 'estado' | 'tipos_produto' | 'pedido_minimo' | 'prazo_minimo_dias' | 'status'>>(
+  pedido: { cidade?: string | null; uf?: string | null; categoria?: string | null; pecas?: string[] | null; prazoDias?: number | null },
+  fornecedores: T[],
+  totalPecas?: number | null
+): Array<T & { match: MatchFornecedor }> {
+  return fornecedores
+    .map((f) => ({ ...f, match: pontuarFornecedor(pedido, f, totalPecas) }))
+    .sort((a, b) => b.match.pontos - a.match.pontos || (a.nome ?? '').localeCompare(b.nome ?? ''))
 }
 
 // 97% do total (Confeccione fica com 3%).
@@ -228,7 +333,7 @@ export async function listarPedidosPagos(): Promise<{
   // interrompe o disparo automático, não a escolha manual).
   const { data: fornRaw } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pedido_minimo')
+    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pedido_minimo, prazo_minimo_dias')
     .order('nome', { ascending: true })
 
   return {
