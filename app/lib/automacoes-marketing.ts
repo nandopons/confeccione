@@ -104,6 +104,8 @@ export type Automacao = {
   descricao: string | null
   gatilho: Gatilho
   gatilhoDias: number
+  /** Minutos na etapa; quando definido, manda no lugar de gatilhoDias. */
+  gatilhoMinutos: number | null
   publico: FiltroLeads
   maxToques: number
   horaInicio: number
@@ -148,6 +150,7 @@ function daLinha(r: AutomacaoRow, passos: PassoRow[]): Automacao {
     descricao: r.descricao,
     gatilho: r.gatilho,
     gatilhoDias: r.gatilho_dias,
+    gatilhoMinutos: (r as { gatilho_minutos?: number | null }).gatilho_minutos ?? null,
     publico: (r.publico ?? {}) as FiltroLeads,
     maxToques: r.max_toques,
     horaInicio: r.hora_inicio,
@@ -342,10 +345,14 @@ async function mapaDePedidos(): Promise<Map<string, InfoPedido>> {
 export function leadsDoGatilho(
   leads: Lead[],
   pedidos: Map<string, InfoPedido>,
-  a: Pick<Automacao, 'gatilho' | 'gatilhoDias'>,
+  a: Pick<Automacao, 'gatilho' | 'gatilhoDias' | 'gatilhoMinutos'>,
   agoraMs: number
 ): Lead[] {
-  const corte = agoraMs - a.gatilhoDias * 24 * 60 * 60 * 1000
+  // Minutos quando definido; senão o comportamento antigo, em dias. O primeiro
+  // toque da régua de pedido incompleto é de 20 min — o cliente acabou de sair
+  // do site e ainda está com o assunto na cabeça.
+  const espera = a.gatilhoMinutos != null ? a.gatilhoMinutos * 60 * 1000 : a.gatilhoDias * 24 * 60 * 60 * 1000
+  const corte = agoraMs - espera
 
   return leads.filter((l) => {
     if (l.optOut) return false
@@ -800,7 +807,7 @@ export async function previaAutomacao(
     listarLeadsCompleto({ ...publico, incluirOptOut: false }),
     mapaDePedidos(),
   ])
-  const alvo = leadsDoGatilho(leads, pedidos, { gatilho, gatilhoDias }, Date.now())
+  const alvo = leadsDoGatilho(leads, pedidos, { gatilho, gatilhoDias, gatilhoMinutos: null }, Date.now())
   const alcancaveis = canalPrimeiroPasso ? alvo.filter((l) => leadAlcancavel(l, canalPrimeiroPasso)) : alvo
   return {
     total: alvo.length,
