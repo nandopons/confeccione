@@ -83,7 +83,15 @@ const ORCAMENTO_MS = 45_000
 const MAX_TOKENS_RESPOSTA = 600
 const HISTORICO_MENSAGENS = 24
 const LIMITE_TEXTO = 1500
-const ESPERA_MENSAGEM_SEGUINTE_MS = 3000
+/**
+ * Quanto ele espera antes de responder, pra ver se a pessoa ainda está
+ * escrevendo. Eram 3 segundos, e 3 segundos não é como se conversa no WhatsApp:
+ * manda "Oi boa tarde!", pensa, e completa 40 segundos depois. Foi o que o
+ * Nelson fez, e o Luigi respondeu as duas separado, quase igual. 15 segundos
+ * cobre a pausa natural entre duas mensagens da mesma pessoa sem que ela sinta
+ * demora.
+ */
+const ESPERA_MENSAGEM_SEGUINTE_MS = 15_000
 const PEDIDOS_NO_CONTEXTO = 4
 
 // ─── Modo ───────────────────────────────────────────────────────────────────
@@ -176,8 +184,19 @@ function mensagensSeparadas(texto: string): string[] {
   return partes.filter(Boolean).slice(0, 4)
 }
 
-/** Pausa curta entre mensagens, pra chegarem como quem está digitando. */
-const PAUSA_ENTRE_MENSAGENS_MS = 3000
+/**
+ * Pausa entre mensagens, pra chegarem como quem está digitando.
+ *
+ * Sorteada entre 3 e 5 segundos, não fixa: três mensagens com exatamente 3,000
+ * ms de intervalo é assinatura de robô — ninguém digita em compasso. O intervalo
+ * irregular é o que faz parecer alguém do outro lado.
+ */
+const PAUSA_MIN_MS = 3000
+const PAUSA_MAX_MS = 5000
+
+function pausaEntreMensagens(): number {
+  return PAUSA_MIN_MS + Math.floor(Math.random() * (PAUSA_MAX_MS - PAUSA_MIN_MS + 1))
+}
 
 function dormir(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -767,7 +786,13 @@ DESCULPA POR DEMORA: quando demorar, reconheça de forma leve. Pode dizer só "d
 
 O QUE NUNCA INVENTAR: você não tem corpo nem rotina fora daqui. Não diga que estava almoçando, que está com fome, com frio, cansado, doente, no trânsito, em casa ou de folga; não comente como está o tempo aí nem invente qualquer coisa que dependa de ter um corpo ou um dia. Se o cliente falar do tempo ou do dia dele, reaja ao que ele disse sem afirmar o mesmo de você ("imagino", "poxa, complicado"). Isso não é ser seco: o cliente vai te pagar antes de receber a mercadoria, e uma invenção pequena descoberta depois derruba a confiança bem na hora do pagamento. Calor humano vem de prestar atenção e responder rápido e claro, não de fingir uma vida. Se perguntarem se é robô, assuma na hora, sem rodeio, e siga ajudando.
 
-PERGUNTE MAIS: quase toda mensagem sua termina em pergunta. Cliente gosta de ser perguntado — mostra que você quer entender o que ele precisa, e é assim que o pedido fica completo. Puxe o que está por trás do pedido, não só o campo que falta: pra que é a peça (uniforme, evento, revenda, marca própria), pra quando precisa, quantas pessoas vão usar, se já mandou fazer antes, se tem arte ou referência. Uma dessas por mensagem, escolhendo a que mais destrava agora. Quando ele responder, reaja ao que ele disse antes de perguntar a próxima — pergunta em sequência sem reação vira formulário, e formulário cansa. Se ele já deu a informação, não pergunte de novo. ${
+QUANDO O CLIENTE DIZ NÃO, ACABOU — E ESTA REGRA VALE MAIS QUE A DE PERGUNTAR. "Não tenho interesse", "era só uma simulação", "depois eu vejo", "obrigado, mas não": isso é resposta completa, não é abertura pra próxima pergunta. Responda UMA linha curta, sem pergunta nenhuma, e pare. "Entendido, obrigado por avisar. Qualquer coisa é só chamar aqui." Fim.
+
+Nada de perguntar depois disso se ele quer encerrar ou deixar o pedido aberto, se prefere ser avisado depois, se pode entrar em contato mais pra frente. O que fazer com o pedido no nosso sistema é problema NOSSO — quem resolve é a equipe, não o cliente que acabou de dizer que não quer nada. Pedir pra ele decidir isso é transformar a saída dele em mais uma tarefa, e é o que faz a conversa parecer cobrança.
+
+Se ele disse que avisa quando mudar de ideia, acredite e cale. Insistir depois de um não claro não recupera pedido nenhum: só ensina que falar com a gente custa caro.
+
+PERGUNTE MAIS, ENQUANTO ELE ESTIVER INTERESSADO: quase toda mensagem sua termina em pergunta. Cliente gosta de ser perguntado — mostra que você quer entender o que ele precisa, e é assim que o pedido fica completo. Puxe o que está por trás do pedido, não só o campo que falta: pra que é a peça (uniforme, evento, revenda, marca própria), pra quando precisa, quantas pessoas vão usar, se já mandou fazer antes, se tem arte ou referência. Uma dessas por mensagem, escolhendo a que mais destrava agora. Quando ele responder, reaja ao que ele disse antes de perguntar a próxima — pergunta em sequência sem reação vira formulário, e formulário cansa. Se ele já deu a informação, não pergunte de novo. ${
     jaSeApresentou
       ? 'Você já se apresentou nesta conversa (ou a abertura foi uma mensagem sua, como "me chamo Luigi, da Confeccione. Tudo bem?"): não repita "aqui é o Luigi", não cumprimente de novo e não assine. Se o cliente só respondeu o cumprimento ("tudo bem, e você?"), responda em duas ou três palavras e vá direto ao pedido em foco: o que falta pra ele seguir, em uma pergunta.'
       : `Na sua primeira mensagem, apresente-se em uma linha: "Oi${nome ? `, ${nome}` : ''}. Aqui é o Luigi, da Confeccione." Depois disso não repita nem assine.`
@@ -1245,12 +1270,38 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     }
     void marcarComoLida(params.wamid).catch(() => false)
 
+    // RESPOSTA VELHA NÃO SAI (09/09/2026)
+    //
+    // O Nelson mandou "Oi boa tarde!" às 15h12 e "Tudo bem Luigi?" às 15h13.
+    // Duas invocações do Luigi rodaram em paralelo e as duas responderam, com a
+    // mesma frase, no mesmo minuto — e no meio ainda entrou o agente de gestão
+    // pelo MCP. Quatro mensagens nossas seguidas na cara do cliente.
+    //
+    // A trava anterior (esperar e ver se chegou mensagem mais nova) não pega
+    // isso: quando a segunda chega 40 segundos depois, a primeira já passou da
+    // espera. Então o teste correto é no fim, e é sobre o que JÁ FOI DITO: se
+    // alguém — o próprio Luigi, o agente ou uma pessoa no inbox — falou com
+    // esse cliente depois da mensagem que eu estou respondendo, a minha
+    // resposta chegou tarde e não deve sair. Silêncio é melhor que repetição.
+    const { data: ultimaSaida } = await supabaseAdmin
+      .from('wa_mensagens')
+      .select('criado_em')
+      .eq('conversa_id', params.conversaId)
+      .eq('direcao', 'saida')
+      .order('criado_em', { ascending: false })
+      .limit(1)
+      .maybeSingle<{ criado_em: string }>()
+    if (ultimaSaida && new Date(ultimaSaida.criado_em).getTime() > new Date(params.criadoEm).getTime()) {
+      await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'já respondemos depois dessa mensagem' })
+      return
+    }
+
     // Vai em mensagens separadas, com pausa: é assim que gente escreve no
     // WhatsApp, e o link sozinho ganha prévia em vez de sumir no meio do texto.
     const partes = mensagensSeparadas(r.texto)
     let envio: Awaited<ReturnType<typeof enviarTexto>> = { ok: false, erro: 'sem texto pra enviar' }
     for (const [i, parte] of partes.entries()) {
-      if (i > 0) await new Promise((ok) => setTimeout(ok, PAUSA_ENTRE_MENSAGENS_MS))
+      if (i > 0) await new Promise((ok) => setTimeout(ok, pausaEntreMensagens()))
       envio = await enviarTexto(waId, parte)
       if (envio.ok) await registrarSaidaInbox(waId, nome, envio.wamid, parte, null, 'luigi')
       // Se uma parte falha, parar: continuar deixaria a conversa sem sentido.
