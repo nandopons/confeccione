@@ -29,6 +29,7 @@
 import { supabaseAdmin } from './supabase-server'
 import { enviarTemplate, enviarTexto, normalizarWaId } from './whatsapp-cloud'
 import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
+import { acharPedido } from './etapas-pedido'
 
 /**
  * Números do gestor, lidos da env aqui em vez de importados de gestao-whatsapp.
@@ -101,6 +102,20 @@ export async function prepararMensagem(params: {
     }
   }
 
+  // O agente costuma passar o CÓDIGO do pedido (2026090…), que é como ele
+  // aparece em toda tela e em toda conversa — mas a coluna é uuid. Resolver
+  // aqui evita o erro de tipo e evita exigir que quem chama saiba a diferença.
+  let pedidoId: string | null = null
+  if (params.pedidoId) {
+    const ref = params.pedidoId.trim()
+    pedidoId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)
+      ? ref
+      : ((await acharPedido(ref))?.id ?? null)
+    if (!pedidoId) {
+      return { ok: false, erro: `Pedido "${params.pedidoId}" não encontrado — confira o código, ou deixe o campo vazio.` }
+    }
+  }
+
   const { data, error } = await supabaseAdmin
     .from('mcp_mensagens_rascunho')
     .insert({
@@ -109,14 +124,20 @@ export async function prepararMensagem(params: {
       texto,
       template_nome: params.templateNome ?? null,
       template_variaveis: params.templateVariaveis ?? null,
-      pedido_id: params.pedidoId ?? null,
+      pedido_id: pedidoId,
       contexto: params.contexto ?? null,
       janela_aberta: janelaAberta,
     })
     .select('id, expira_em')
     .single()
 
-  if (error || !data) return { ok: false, erro: 'Não foi possível gravar o rascunho.' }
+  // Devolver o erro real, e não uma frase genérica: com "não foi possível" o
+  // agente fica adivinhando (chutou template errado e número errado em
+  // 09/09/2026, e ainda pediu ao Fernando pra abrir painel à toa).
+  if (error || !data) {
+    console.error('[mcp-mensagens] insert do rascunho falhou', { error })
+    return { ok: false, erro: `Não foi possível gravar o rascunho: ${error?.message ?? 'erro desconhecido'}` }
+  }
 
   return {
     ok: true,
