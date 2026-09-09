@@ -899,6 +899,64 @@ async function blocoDaImagem(path: string, mime: string | null): Promise<BlocoIm
   }
 }
 
+/**
+ * O QUE JÁ SAIU HOJE, PELAS MÃOS DELE (09/09/2026)
+ *
+ * O agente disse ao Fernando "não enviei nada de fato, estava inventando" no
+ * mesmo minuto em que a vigésima mensagem saía. Não era mentira: ele não tinha
+ * como saber. Uma mensagem enviada por enviar_rascunho cai na conversa DO
+ * CLIENTE — outra conversa, que ele não lê. O histórico dele é só o que o
+ * Fernando escreveu. Do ponto de vista dele, mandar uma mensagem não deixa
+ * rastro nenhum.
+ *
+ * É o buraco mais perigoso do agente: quem não vê o que fez repete, e repetir
+ * disparo é spam. Por isso o registro do dia entra no contexto de TODA resposta,
+ * antes de ele decidir qualquer coisa — não como ferramenta que ele precisa
+ * lembrar de chamar, porque justamente sob pressão ele não lembra.
+ */
+async function enviosDeHoje(): Promise<string | null> {
+  const agora = new Date()
+  const emRecife = new Date(agora.toLocaleString('en-US', { timeZone: 'America/Recife' }))
+  const inicioDoDia = new Date(agora.getTime() - (emRecife.getHours() * 3600 + emRecife.getMinutes() * 60) * 1000)
+
+  const { data } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('conversa_id, template_nome, corpo, criado_em, autor')
+    .eq('direcao', 'saida')
+    .eq('autor', 'mcp')
+    .gte('criado_em', inicioDoDia.toISOString())
+    .order('criado_em', { ascending: true })
+    .limit(300)
+
+  const linhas = (data ?? []) as Array<{ conversa_id: string; template_nome: string | null; corpo: string | null; criado_em: string }>
+  if (linhas.length === 0) return null
+
+  const convIds = [...new Set(linhas.map((l) => l.conversa_id))]
+  const { data: convs } = await supabaseAdmin.from('wa_conversas').select('id, contato_id').in('id', convIds)
+  const contatoPorConversa = new Map(((convs ?? []) as Array<{ id: string; contato_id: string }>).map((c) => [c.id, c.contato_id]))
+  const { data: contatos } = await supabaseAdmin
+    .from('wa_contatos')
+    .select('id, nome, wa_id')
+    .in('id', [...new Set([...contatoPorConversa.values()])])
+  const nomePorContato = new Map(
+    ((contatos ?? []) as Array<{ id: string; nome: string | null; wa_id: string }>).map((c) => [c.id, c.nome || c.wa_id])
+  )
+
+  const itens = linhas.map((l) => {
+    const quem = nomePorContato.get(contatoPorConversa.get(l.conversa_id) ?? '') ?? 'desconhecido'
+    const hora = new Date(l.criado_em).toLocaleTimeString('pt-BR', { timeZone: 'America/Recife', hour: '2-digit', minute: '2-digit' })
+    const o_que = l.template_nome ? `template ${l.template_nome}` : (l.corpo ?? '').slice(0, 60)
+    return `${hora} ${quem}: ${o_que}`
+  })
+
+  return (
+    `MENSAGENS QUE VOCÊ JÁ MANDOU HOJE (${itens.length}). Isto é registro do banco, não memória sua — ` +
+    `é a lista completa do que saiu pelas suas mãos hoje. Ninguém desta lista pode receber outra mensagem hoje. ` +
+    `Se você acha que não mandou nada e a lista tem gente, a lista está certa e você está errado.\n` +
+    itens.join('\n')
+  )
+}
+
 async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.Messages.MessageParam[]; wamids: Set<string> }> {
   const { data } = await supabaseAdmin
     .from('wa_mensagens')
@@ -1160,6 +1218,16 @@ export async function responderGestao(params: {
       } else {
         mensagens = [...mensagens, { role: 'user', content: atual }]
       }
+    }
+
+    // O que já saiu hoje entra como turno próprio, logo antes da fala do
+    // Fernando: é a única forma de ele enxergar as próprias ações, que moram em
+    // outras conversas. Vai perto do fim de propósito — no começo do histórico
+    // seria lido e esquecido.
+    const enviados = await enviosDeHoje().catch(() => null)
+    const derradeira = mensagens[mensagens.length - 1]
+    if (enviados && derradeira?.role === 'user' && typeof derradeira.content === 'string') {
+      mensagens = [...mensagens.slice(0, -1), { role: 'user', content: `${enviados}\n\n---\n\n${derradeira.content}` }]
     }
 
     // A imagem recém-chegada pode não estar no histórico ainda: o webhook grava
