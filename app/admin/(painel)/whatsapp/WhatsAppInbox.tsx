@@ -462,6 +462,7 @@ export function WhatsAppInbox({
   const [modoLuigi, setModoLuigi] = useState<ModoLuigi | null>(null)
   const [trocandoModo, setTrocandoModo] = useState(false)
   const [sugestao, setSugestao] = useState<SugestaoLuigi | null>(null)
+  const [devolvendoAoLuigi, setDevolvendoAoLuigi] = useState(false)
   // 0 até montar: no primeiro render (servidor e cliente) o relógio precisa
   // dar o mesmo resultado, senão a hidratação reclama.
   const [agora, setAgora] = useState(0)
@@ -592,6 +593,34 @@ export function WhatsAppInbox({
       setModoLuigi(anterior)
     } finally {
       setTrocandoModo(false)
+    }
+  }
+
+  /**
+   * Devolve a conversa pro Luigi: tira a marca e faz ele responder a última
+   * mensagem da pessoa agora. Sem isto, uma conversa escalada só destrava se a
+   * pessoa escrever de novo — e ela não vai, porque ela está esperando.
+   */
+  async function devolverAoLuigi() {
+    if (!ativaId || devolvendoAoLuigi) return
+    setDevolvendoAoLuigi(true)
+    setErro(null)
+    try {
+      const res = await fetch('/api/admin/whatsapp/luigi-assumir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversaId: ativaId }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        setErro(data?.erro ?? 'Não deu pra devolver a conversa pro Luigi')
+        return
+      }
+      await Promise.all([carregarConversas(busca || undefined), carregarMensagens(ativaId)])
+    } catch {
+      setErro('Não deu pra devolver a conversa pro Luigi')
+    } finally {
+      setDevolvendoAoLuigi(false)
     }
   }
 
@@ -972,9 +1001,23 @@ export function WhatsAppInbox({
                   <p className="text-[12px] text-neutral-500">{formatarTelefone(ativa.contato.wa_id)}</p>
                 </div>
                 {ativa.luigi_escalado_em && (
-                  <span className="hidden sm:inline text-[11px] font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-800" title="O Luigi passou esta conversa pra você. Some quando você responder.">
-                    Luigi chamou você
-                  </span>
+                  <>
+                    <span className="hidden sm:inline text-[11px] font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-800" title="O Luigi passou esta conversa pra você. Some quando você responder.">
+                      Luigi chamou você
+                    </span>
+                    <button
+                      onClick={devolverAoLuigi}
+                      disabled={devolvendoAoLuigi || modoLuigi === 'desligado'}
+                      title={
+                        modoLuigi === 'desligado'
+                          ? 'O Luigi está desligado — ligue no seletor acima.'
+                          : 'O Luigi assume de novo e responde a última mensagem da pessoa agora.'
+                      }
+                      className="shrink-0 text-[11px] font-medium px-2.5 py-1 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {devolvendoAoLuigi ? 'Chamando…' : 'Devolver pro Luigi'}
+                    </button>
+                  </>
                 )}
                 <span
                   className={

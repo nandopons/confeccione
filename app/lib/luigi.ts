@@ -823,15 +823,17 @@ QUEM ESTÁ FALANDO COM VOCÊ É UMA CONFECÇÃO CADASTRADA${nome ? ` — ${nome}
 
 ${jaSeApresentou ? 'Você já se apresentou nesta conversa: não repita o nome.' : 'Se for a primeira fala sua aqui, diga em uma linha quem é.'}
 
-O QUE VOCÊ QUER DELA, em ordem:
-1. entender o perfil de produção — o que faz, com que tecido, se fornece material, quanto aguarda no mês, se pega encaixe, e o que NÃO faz
-2. fotos de peças que ela já produziu, pro perfil dela na plataforma
+O QUE VOCÊ QUER DELA: saber o que ela produz, pra mandar só pedido que combina com ela em vez de mandar tudo. É isso. Diga o porquê uma vez e siga — o benefício é dela, e é verdade.
 
-Uma pergunta por mensagem. Grave cada resposta na hora, não guarde pro fim: a conversa pode parar na terceira pergunta, e três respostas já valem. Se ela responder duas coisas de uma vez, registre as duas e não repita a que ela já respondeu.
+Comece perguntando que tipos de peça ela produz. Se vier genérico ("faço de tudo"), pergunte o que ela mais faz no dia a dia e o que ela não pega — é o "não faz" que impede o pedido errado de chegar nela.
 
-Diga POR QUE, uma vez só: é pra mandar só pedido que combina com ela, em vez de tudo. O benefício é dela, e é verdade.
+Grave cada resposta na hora com salvar_perfil_producao. A conversa pode parar na segunda pergunta, e o que ela já disse vale.
 
-CONVERSA, NÃO FORMULÁRIO. Frase curta, uma ideia por mensagem, sem emoji, sem entusiasmo. Reaja ao que ela disser antes de puxar a próxima. Se ela estiver com pressa, pare: as duas primeiras perguntas já valeram a conversa. Nunca diga "boa sorte" nem deseje sucesso.
+NÃO VIRE FORMULÁRIO. Duas ou três perguntas e você já tem o que precisa: agradeça e encerre. Se ela contar tecido, mínimo, capacidade, encaixe ou se fornece material, registre — mas não saia perguntando um por um, e não puxe assunto que ela não abriu. Se ela mandar foto de peça, guarde no portfólio.
+
+UMA MENSAGEM POR VEZ, e curta. Não quebre um pensamento em três balões: quem você é, por que está falando e a pergunta cabem numa mensagem só de duas linhas. Três balões em doze segundos é robô, e a pessoa responde com emoji em vez de responder a pergunta. Sem emoji, sem entusiasmo. Reaja ao que ela disser antes de puxar a próxima. Se ela estiver com pressa, pare. Nunca diga "boa sorte" nem deseje sucesso.
+
+FALE A LÍNGUA DELA, NÃO A NOSSA. "Facção pura, fornece material ou as duas" é jargão nosso e nem toda confecção se enxerga nesses termos — tem gente na base que faz ajuste, bainha, conserto. Pergunte o que ela FAZ, com as palavras dela, e você mesmo traduz pro cadastro depois.
 
 QUANDO NÃO SOUBER, PERGUNTE AO FERNANDO — E FIQUE CALADO COM ELA. Preço, prazo de pagamento, condição comercial, reclamação, qualquer coisa que não esteja aqui: chame chamar_humano e NÃO escreva mais nada nessa mensagem. Nada de "alguém da equipe vai ver", "já te respondo" ou "vou verificar". O Fernando recebe o aviso no WhatsApp dele com a sua dúvida e responde ele mesmo, pelo inbox, na mesma conversa.
 
@@ -1325,6 +1327,61 @@ export async function resolverSugestoes(conversaId: string, status: 'usada' | 'd
   if (apenasId) q = q.eq('id', apenasId)
   const { error } = await q
   if (error) throw new Error(`sugestões do Luigi: ${error.message}`)
+}
+
+/**
+ * O Fernando devolve a conversa pro Luigi pelo inbox.
+ *
+ * Escalar marca a conversa e o Luigi cala a boca, mas ele só volta a falar
+ * quando a PESSOA escreve de novo — e ela não vai, porque ela já escreveu e
+ * está esperando. Aconteceu com a Rafaelle em 09/09/2026: o saldo da API do
+ * Claude acabou no meio da conversa, o Luigi escalou por erro interno, e o
+ * "Faço facção" dela ficou parado sem ninguém pra responder. Sem este botão a
+ * única saída era responder à mão ou pedir pra pessoa mandar outra mensagem.
+ *
+ * Não é só limpar a marca: reprocessa a última mensagem dela como se tivesse
+ * acabado de chegar. As travas de sempre continuam valendo — janela de 24 h,
+ * modo do Luigi, e a de resposta velha (se alguém já respondeu depois dela, o
+ * Luigi descarta em vez de falar por cima).
+ */
+export async function devolverAoLuigi(conversaId: string): Promise<{ ok: boolean; motivo?: string }> {
+  const modo = await modoLuigi()
+  if (modo === 'desligado') return { ok: false, motivo: 'o Luigi está desligado' }
+
+  const { data: conversa } = await supabaseAdmin
+    .from('wa_conversas')
+    .select('id, wa_contatos!inner(wa_id, nome)')
+    .eq('id', conversaId)
+    .maybeSingle<{ id: string; wa_contatos: { wa_id: string; nome: string | null } | Array<{ wa_id: string; nome: string | null }> }>()
+  const contato = Array.isArray(conversa?.wa_contatos) ? conversa?.wa_contatos[0] : conversa?.wa_contatos
+  if (!contato) return { ok: false, motivo: 'não achei o contato desta conversa' }
+
+  // Reação e figurinha o Luigi ignora de propósito: pegar a última mensagem
+  // "de verdade" evita o botão não fazer nada porque a pessoa mandou 👍 por fim.
+  const { data: ultima } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('wamid, corpo, tipo, criado_em')
+    .eq('conversa_id', conversaId)
+    .eq('direcao', 'entrada')
+    .not('tipo', 'in', '("reaction","sticker","contacts","location","unknown")')
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ wamid: string; corpo: string | null; tipo: string; criado_em: string }>()
+  if (!ultima) return { ok: false, motivo: 'esta conversa não tem mensagem da pessoa pra responder' }
+
+  await supabaseAdmin.from('wa_conversas').update({ luigi_escalado_em: null }).eq('id', conversaId)
+  await resolverSugestoes(conversaId, 'descartada').catch(() => undefined)
+
+  await responderCliente({
+    conversaId,
+    waId: contato.wa_id,
+    nome: contato.nome,
+    wamid: ultima.wamid,
+    criadoEm: ultima.criado_em,
+    tipo: ultima.tipo,
+    corpo: ultima.corpo,
+  })
+  return { ok: true }
 }
 
 /** Alguém da equipe respondeu pelo inbox: a escalada está atendida e a sugestão, superada. */

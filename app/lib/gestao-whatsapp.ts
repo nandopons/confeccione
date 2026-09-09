@@ -121,6 +121,19 @@ const HISTORICO_MENSAGENS = 2000
 const ORCAMENTO_HISTORICO_TOKENS = 60_000
 const LIMITE_TEXTO_WHATSAPP = 3500
 
+/**
+ * Quanto esperar antes de responder, pra ver se vem outra mensagem.
+ *
+ * Era 2500 ms e não segurava o jeito real de digitar: em 09/09/2026 o Fernando
+ * mandou "pode continuar alinhar o perfil da rafaella" e emendou "rfaelle" dois
+ * segundos depois. As duas invocações rodaram, ele recebeu a MESMA resposta
+ * duas vezes, e custou 170 mil tokens de entrada em vez de 85 mil. O Luigi
+ * espera 15 s por isso; aqui 10 s bastam, porque o agente já leva de 17 a 28 s
+ * pra responder — a espera some dentro do tempo que ele ia gastar de qualquer
+ * jeito.
+ */
+const ESPERA_MENSAGEM_SEGUINTE_MS = 10_000
+
 /** Template de abertura fora da janela de 24 h: {{1}} = hora, {{2}} = resumo em uma linha. */
 export const TEMPLATE_REUNIAO_GESTAO = 'reuniao_gestao'
 
@@ -927,7 +940,11 @@ VOCÊ LÊ PDF E ESCUTA ÁUDIO. Quando o Fernando encaminhar um PDF — boleto, c
 
 NOME, TELEFONE, CÓDIGO E NÚMERO SÓ SAEM DE FERRAMENTA: se você vai escrever um nome de cliente, um telefone, um código de pedido, um valor ou uma contagem ("são 60 pedidos"), esse dado precisa ter voltado de uma ferramenta NESTA conversa. Não existe estimativa, não existe exemplo ilustrativo, não existe "algo como". Se você ainda não chamou a ferramenta, chame agora; se chamou e não veio, diga que não veio. Uma lista inventada é pior do que nenhuma lista: o Fernando toma decisão em cima dela, manda mensagem pra gente que não existe, e quando descobre não sabe mais o que da sua resposta era real. Você não tem como saber de cabeça quem está parado no funil — isso muda toda hora e mora no banco, não em você.
 
+NOME E NÚMERO SÓ ANDAM JUNTOS SE VIERAM DA MESMA LINHA DA MESMA FERRAMENTA. Não basta cada dado ser verdadeiro em algum lugar: o PAR precisa ser verdadeiro. Não junte um nome que você leu numa chamada com um telefone que leu em outra, não trate dois nomes que apareceram perto na conversa como se fossem a mesma pessoa, e não escreva "fulano (empresa tal)" sem ter lido os dois no mesmo registro. Você já errou assim hoje: chamou o Roger, da Black Gold, em Salvador, de "André (Black Gold)" — o André é outra pessoa, de outro estado, com outro número. Duas pessoas viraram uma, e o Fernando quase mandou mensagem pra fantasma. Se você tem o nome e quer o número, busque de novo por aquele nome e use o que voltar.
+
 E NÃO DIGA QUE NÃO TEM O QUE VOCÊ TEM: pedidos_por_etapa devolve a lista real com nome, telefone e código, até 200 por chamada. O que você não tem é DISPARO EM LOTE — cada mensagem é um preparar_mensagem e um enviar_rascunho, e por isso mandar pra dezenas de pessoas numa conversa não cabe. Essas duas coisas são diferentes: a primeira você faz, a segunda é da régua automática, não sua.
+
+O QUE ABRE A JANELA DE 24 H É A PESSOA ESCREVER PRA GENTE — só isso. Mensagem que SAI daqui não abre nada: template entregue, texto que você mandou, disparo da automação, nada disso conta. Enquanto ela não responder, a janela continua fechada, por mais que a gente tenha mandado coisa hoje. Não conclua "ela recebeu às 18:13, então a janela está aberta": isso é falso e o envio seguinte é recusado pela Meta. Quem responde é preparar_mensagem, que devolve janela_24h aberta ou fechada lendo o banco — se você quer saber, prepare e leia, não deduza.
 
 JANELA FECHADA = CHAME templates_whatsapp: se preparar_mensagem disser que a janela de 24 h está fechada, chame templates_whatsapp, escolha um APROVADO que sirva e prepare de novo com template_nome. Escolha pelo DESTINATÁRIO, não pelo nome do template: pra CLIENTE com pedido em aberto use duvida_pedido_manha, duvida_pedido_tarde ou duvida_pedido_noite conforme a hora aqui (manhã até 11:59, tarde até 17:59, noite depois) — falam do pedido dele. sondagem_producao e luigi_apresentacao são pra abordar CONFECÇÃO ("uma produção com vocês") e soam errados pra cliente. retomar_pedido_v3 leva o cliente de volta ao site; use quando a intenção for que ele preencha lá, não quando você quiser conversar aqui. Nunca peça ao Fernando o nome do template, nunca peça pra ele abrir painel da Meta, e nunca cite Z-API — ela foi desligada na D-1 e não existe mais no sistema. Se um template que você tentou não estiver na lista, é porque não existe: escolha outro da lista, não invente.
 
@@ -1038,13 +1055,18 @@ async function enviosDeHoje(): Promise<string | null> {
   const { data } = await supabaseAdmin
     .from('wa_mensagens')
     .select('conversa_id, template_nome, corpo, criado_em, autor')
+    // SEM FILTRO DE AUTOR — corrigido 09/09/2026. Antes era `.eq('autor','mcp')`,
+    // ou seja, só o que o próprio agente tinha mandado: 49 de 243 mensagens do
+    // dia. O Roger recebeu um template da automação às 14h20, o agente não viu,
+    // disse "nunca recebeu hoje" e propôs mandar de novo. Pra decidir se alguém
+    // já foi abordado, o que importa é ter saído do nosso número — não quem
+    // apertou o botão.
     .eq('direcao', 'saida')
-    .eq('autor', 'mcp')
     .gte('criado_em', inicioDoDia.toISOString())
     .order('criado_em', { ascending: true })
-    .limit(300)
+    .limit(600)
 
-  const linhas = (data ?? []) as Array<{ conversa_id: string; template_nome: string | null; corpo: string | null; criado_em: string }>
+  const linhas = (data ?? []) as Array<{ conversa_id: string; template_nome: string | null; corpo: string | null; criado_em: string; autor: string | null }>
   if (linhas.length === 0) return null
 
   const convIds = [...new Set(linhas.map((l) => l.conversa_id))]
@@ -1058,17 +1080,28 @@ async function enviosDeHoje(): Promise<string | null> {
     ((contatos ?? []) as Array<{ id: string; nome: string | null; wa_id: string }>).map((c) => [c.id, c.nome || c.wa_id])
   )
 
-  const itens = linhas.map((l) => {
-    const quem = nomePorContato.get(contatoPorConversa.get(l.conversa_id) ?? '') ?? 'desconhecido'
+  // Uma linha por PESSOA, não por mensagem: o que decide "posso abordar?" é se
+  // aquele número já ouviu a gente hoje. 243 linhas soltas só gastariam contexto.
+  const porPessoa = new Map<string, { hora: string; o_que: string; quem: string; n: number }>()
+  for (const l of linhas) {
+    const contatoId = contatoPorConversa.get(l.conversa_id) ?? l.conversa_id
+    const quem = nomePorContato.get(contatoId) ?? 'desconhecido'
     const hora = new Date(l.criado_em).toLocaleTimeString('pt-BR', { timeZone: 'America/Recife', hour: '2-digit', minute: '2-digit' })
-    const o_que = l.template_nome ? `template ${l.template_nome}` : (l.corpo ?? '').slice(0, 60)
-    return `${hora} ${quem}: ${o_que}`
-  })
+    const quemMandou = l.autor === 'gestao' || l.autor === 'mcp' ? 'você' : l.autor === 'luigi' ? 'Luigi' : 'automação'
+    const o_que = `${l.template_nome ? `template ${l.template_nome}` : (l.corpo ?? '').slice(0, 60)} (${quemMandou})`
+    const antes = porPessoa.get(contatoId)
+    porPessoa.set(contatoId, { hora, o_que, quem, n: (antes?.n ?? 0) + 1 })
+  }
+  const itens = [...porPessoa.values()].map(
+    (p) => `${p.hora} ${p.quem}: ${p.o_que}${p.n > 1 ? ` — ${p.n}ª de hoje` : ''}`
+  )
 
   return (
-    `MENSAGENS QUE VOCÊ JÁ MANDOU HOJE (${itens.length}). Isto é registro do banco, não memória sua — ` +
-    `é a lista completa do que saiu pelas suas mãos hoje. Se você acha que não mandou nada e a lista tem gente, ` +
-    `a lista está certa e você está errado.\n\n` +
+    `QUEM JÁ RECEBEU MENSAGEM NOSSA HOJE (${itens.length} pessoas, ${linhas.length} mensagens). ` +
+    `Isto é registro do banco, não memória sua, e cobre TUDO que saiu do nosso número hoje — ` +
+    `o que você mandou, o que o Luigi mandou e o que a automação disparou. ` +
+    `Se você acha que fulano não recebeu nada e ele está nesta lista, a lista está certa e você está errado. ` +
+    `A hora mostrada é a da última mensagem que ele recebeu.\n\n` +
     // A REGRA É SOBRE ABORDAGEM FRIA, NÃO SOBRE CONVERSA — corrigido 09/09/2026.
     // A primeira versão dizia "ninguém desta lista pode receber outra mensagem
     // hoje", e o agente aplicou ao pé da letra: a Marilia respondeu às 17h31
@@ -1182,6 +1215,34 @@ function textoDaResposta(content: Anthropic.Messages.ContentBlock[]): string {
     .trim()
 }
 
+/**
+ * Marca o fim do histórico como ponto de cache.
+ *
+ * O histórico é APPEND-ONLY: o turno de agora é o turno anterior mais uma
+ * mensagem, e cada rodada de ferramenta só empilha no fim. Cacheando o último
+ * bloco, a chamada seguinte reaproveita todo o prefixo que já bate — leitura de
+ * cache custa 10% do preço de entrada.
+ *
+ * Sem isto, um "Sim" de três letras custava 85 mil tokens cheios (medido em
+ * 09/09/2026), porque os 60 mil do histórico subiam de novo a cada turno E a
+ * cada uma das até 40 rodadas de ferramenta da MESMA resposta.
+ */
+function comCacheNoFim(mensagens: Anthropic.Messages.MessageParam[]): Anthropic.Messages.MessageParam[] {
+  if (mensagens.length === 0) return mensagens
+  const ultima = mensagens[mensagens.length - 1]
+  const blocos: Anthropic.Messages.ContentBlockParam[] =
+    typeof ultima.content === 'string'
+      ? [{ type: 'text', text: ultima.content }]
+      : [...(ultima.content as Anthropic.Messages.ContentBlockParam[])]
+  if (blocos.length === 0) return mensagens
+  // Só o ÚLTIMO bloco leva a marca: cache_control é um marco de fim de prefixo,
+  // não um atributo do bloco. Espalhar pelos blocos gastaria os 4 pontos que a
+  // Anthropic permite sem ganhar nada.
+  const fim = blocos[blocos.length - 1]
+  blocos[blocos.length - 1] = { ...fim, cache_control: { type: 'ephemeral' } } as Anthropic.Messages.ContentBlockParam
+  return [...mensagens.slice(0, -1), { ...ultima, content: blocos }]
+}
+
 async function rodarAgente(mensagens: Anthropic.Messages.MessageParam[], rota: string): Promise<ResultadoAgente> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY ausente')
@@ -1206,10 +1267,10 @@ async function rodarAgente(mensagens: Anthropic.Messages.MessageParam[], rota: s
       // toda mensagem do dia: sem cache, a gente paga por eles de novo a cada
       // uma das até 40 rodadas de uma única resposta. Marcando o fim do bloco
       // estático, a Anthropic reaproveita o que já processou e cobra uma
-      // fração. O histórico da conversa vem DEPOIS e continua variando.
+      // fração. O histórico leva o segundo ponto de cache — ver comCacheNoFim.
       system: [{ type: 'text', text: promptSistema(), cache_control: { type: 'ephemeral' } }],
       tools: FERRAMENTAS,
-      messages: historico,
+      messages: comCacheNoFim(historico),
     })
     void registrarUsoIa(rota, MODELO, resposta.usage)
     tokensEntrada += resposta.usage?.input_tokens ?? 0
@@ -1322,7 +1383,7 @@ export async function responderGestao(params: {
   // (o histórico dela já contém as duas). Evita resposta dupla. Só cede se a
   // outra é ESTRITAMENTE mais nova: com timestamp igual (mesmo segundo) as
   // duas responderiam, o que é melhor do que nenhuma responder.
-  await dormir(2500)
+  await dormir(ESPERA_MENSAGEM_SEGUINTE_MS)
   const { data: ultimaEntrada } = await supabaseAdmin
     .from('wa_mensagens')
     .select('wamid, criado_em')
