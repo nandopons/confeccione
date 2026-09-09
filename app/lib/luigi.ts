@@ -41,6 +41,7 @@ import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 // descricao. Pra editar a peça de verdade usamos o tipo canônico do produto.
 import { type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
 import { editarLinhasPedidoCliente } from './pedido-linhas-edicao'
+import { conferirPedido, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores } from './pedido-fechamento'
 import { registrarUsoIa } from './uso-ia'
 import { ehNumeroGestao, numerosGestao } from './gestao-whatsapp'
 import {
@@ -407,9 +408,82 @@ const FERRAMENTA_AJUSTAR_PECA: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_DEFINIR_PECAS: Anthropic.Messages.Tool = {
+  name: 'definir_pecas_pedido',
+  description:
+    'Preenche as peças de um pedido que ainda está incompleto ("peça a definir", sem modelo/cor/quantidade), com o que o ' +
+    'cliente disser na conversa. Substitui a lista inteira de peças — use quando o pedido está vazio ou só tem placeholder. ' +
+    'Pra mudar uma peça que já está certa, use ajustar_peca_pedido. Colete uma informação por vez antes de chamar: primeiro ' +
+    'que peça é, depois cor, depois quantidade. Não invente nada que o cliente não disse.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      pedido: { type: 'string', description: 'Código ou id (do contexto). Sem isto, usa o pedido em foco.' },
+      pecas: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 20,
+        items: {
+          type: 'object',
+          properties: {
+            modelo: { type: 'string', maxLength: 120, description: 'Camiseta, moletom, calça…' },
+            cor: { type: 'string', maxLength: 80, description: 'UMA cor por peça. Duas cores = duas peças separadas.' },
+            quantidade: { type: 'number', minimum: 1, maximum: 100000 },
+            publico: { type: 'string', enum: ['feminino', 'masculino', 'infantil', 'unissex'], description: 'Muda a modelagem — pergunte se ele não disser.' },
+            material: { type: 'string', maxLength: 200, description: 'Só se o cliente disser.' },
+            descricao: { type: 'string', maxLength: 500, description: 'Estampa, bordado, detalhes que ele contou.' },
+          },
+          required: ['modelo', 'cor', 'quantidade', 'publico'],
+        },
+      },
+    },
+    required: ['pecas'],
+  },
+}
+
+const FERRAMENTA_RESUMO_PDF: Anthropic.Messages.Tool = {
+  name: 'enviar_resumo_pedido',
+  description:
+    'Manda pro cliente, nesta conversa, o resumo do pedido em PDF. Use quando as peças estiverem completas, ANTES de pedir ' +
+    'a liberação pros fornecedores: ele confere no papel o que vai pro mercado. Depois de mandar, pergunte se está tudo ' +
+    'certo ou se quer ajustar algo.',
+  input_schema: {
+    type: 'object',
+    properties: { pedido: { type: 'string', description: 'Código ou id. Sem isto, usa o pedido em foco.' } },
+  },
+}
+
+const FERRAMENTA_LIBERAR: Anthropic.Messages.Tool = {
+  name: 'liberar_para_fornecedores',
+  description:
+    'Libera o pedido pras confecções — a partir daí ele entra na fila de ofertas e as confecções recebem pra orçar. ' +
+    'SÓ chame depois de o cliente ter visto o resumo e dito de forma clara que pode liberar ("pode", "isso mesmo", ' +
+    '"manda"). Nunca por conta própria e nunca sem ele ter conferido. Se faltar algo na peça, a ferramenta recusa e diz ' +
+    'o que falta — pergunte ao cliente e complete antes.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      pedido: { type: 'string', description: 'Código ou id. Sem isto, usa o pedido em foco.' },
+      cliente_ja_confirmou: {
+        type: 'boolean',
+        description:
+          'Só true se a ferramenta já tiver apontado divergências, você tiver perguntado ao cliente e ele tiver respondido que está do jeito que ele quer.',
+      },
+    },
+  },
+}
+
 function ferramentasDoModo(modo: Exclude<ModoLuigi, 'desligado'>): Anthropic.Messages.Tool[] {
   return modo === 'responde'
-    ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_MOTIVO_PARADA, FERRAMENTA_ENCERRAR, FERRAMENTA_AJUSTAR_PECA]
+    ? [
+        FERRAMENTA_CHAMAR_HUMANO,
+        FERRAMENTA_MOTIVO_PARADA,
+        FERRAMENTA_ENCERRAR,
+        FERRAMENTA_AJUSTAR_PECA,
+        FERRAMENTA_DEFINIR_PECAS,
+        FERRAMENTA_RESUMO_PDF,
+        FERRAMENTA_LIBERAR,
+      ]
     : [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_MOTIVO_PARADA]
 }
 
@@ -488,6 +562,65 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
           : null,
       }
     }
+    case 'definir_pecas_pedido': {
+      const p = acharNoContexto(ctx, str(entrada.pedido))
+      if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+      const lista = Array.isArray(entrada.pecas) ? (entrada.pecas as Array<Record<string, unknown>>) : []
+      if (lista.length === 0) throw new Error('informe ao menos uma peça')
+      const r = await definirPecasPedido(
+        p.id,
+        lista.map((x) => ({
+          modelo: str(x.modelo) ?? null,
+          cor: str(x.cor) ?? null,
+          material: str(x.material) ?? null,
+          quantidade: num(x.quantidade) ?? null,
+          publico: str(x.publico) ?? null,
+          descricao: str(x.descricao) ?? null,
+        }))
+      )
+      if (!r.ok) throw new Error(r.erro)
+      const pronto = await conferirPedido(p.id)
+      return {
+        ok: true,
+        codigo: p.codigo,
+        resumo: r.resumo,
+        pronto_para_liberar: pronto.pronto && pronto.divergencias.length === 0,
+        falta: pronto.pronto ? null : pronto.falta,
+        divergencias: pronto.divergencias,
+        proximo_passo:
+          pronto.divergencias.length > 0
+            ? 'Resolva as divergências com o cliente antes de seguir: pergunte uma por vez, com as palavras da lista.'
+            : pronto.pronto
+              ? 'Mande o resumo com enviar_resumo_pedido e pergunte se está tudo certo antes de liberar.'
+              : 'Pergunte ao cliente o que falta, uma coisa por vez.',
+      }
+    }
+    case 'enviar_resumo_pedido': {
+      const p = acharNoContexto(ctx, str(entrada.pedido))
+      if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+      const r = await enviarResumoParaCliente(p.id)
+      if (!r.ok) throw new Error(r.erro ?? 'não foi possível enviar o resumo')
+      return {
+        ok: true,
+        codigo: p.codigo,
+        aviso: 'PDF enviado. Pergunte se está tudo certo ou se quer ajustar algo, e só libere com o sim dele.',
+      }
+    }
+    case 'liberar_para_fornecedores': {
+      const p = acharNoContexto(ctx, str(entrada.pedido))
+      if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+      const r = await liberarParaFornecedores(p.id, { ignorarDivergencias: entrada.cliente_ja_confirmou === true })
+      if (!r.ok) {
+        const pontos = (r.divergencias ?? []).map((d) => `- ${d.o_que} → pergunte ${d.pergunte}`).join('\n')
+        throw new Error(`${r.erro}${pontos ? `\n${pontos}` : ''}`)
+      }
+      return {
+        ok: true,
+        codigo: p.codigo,
+        ja_estava_liberado: r.jaEstava,
+        aviso: 'Pedido liberado. Diga ao cliente que as confecções já vão receber e que ele recebe o orçamento por aqui. Não prometa prazo nem valor.',
+      }
+    }
     default:
       throw new Error(`ferramenta desconhecida: ${nome}`)
   }
@@ -538,6 +671,10 @@ O QUE VOCÊ NÃO FAZ: não negocia preço nem dá desconto; não promete prazo, 
 ESTILO: WhatsApp, curto — 1 a 3 linhas, no máximo 4. Sem emoji, sem markdown, sem lista com marcadores, sem botão. Tom de gente da equipe: direto, gentil, sem formalidade e sem exclamação demais. Português do Brasil. Valores em reais (R$ 1.234,56).
 
 CONVERSA, NÃO COMUNICADO: isto é uma conversa, então você fala pouco e espera. Uma ideia por mensagem e uma pergunta por vez — mande a pergunta e pare, mesmo que você já saiba tudo o que virá depois. Não junte explicação, situação do pedido e pergunta na mesma mensagem: escolha o que importa agora. Não peça duas ou três informações de uma vez (peça a peça; cor e quantidade vêm depois que ele responder). Não antecipe o próximo passo antes de o cliente dar o passo atual. Não explique o que ele não perguntou. Se a resposta couber em uma linha, use uma linha. Prefira mandar de menos e continuar do que despejar tudo e o cliente sumir.
+
+UMA PEÇA = UM PRODUTO: cada peça do pedido é UM modelo, UMA cor, UM público. Se o cliente falar "3 camisetas, 2 azuis e 1 branca", isso são DUAS peças (azul ×2 e branca ×1), não uma peça "azul e branca" — a confecção orça por cor e não consegue adivinhar a divisão. Sempre pergunte o público (feminino, masculino, infantil ou unissex): muda a modelagem e sem isso o fornecedor chuta. Se as ferramentas devolverem divergências, trate cada uma com o cliente antes de seguir, uma pergunta por mensagem, e só então continue.
+
+FECHAR PEDIDO QUE FICOU PELO MEIO: se o pedido em foco está incompleto (peça a definir, sem modelo, cor ou quantidade), o seu trabalho é terminá-lo com o cliente aqui na conversa. Ordem: (1) descubra a peça — o que ele quer produzir; (2) cor; (3) quantidade; (4) público; uma pergunta por mensagem, esperando a resposta. Puxe o contexto junto (pra que é, pra quando, quantas pessoas) porque isso ajuda a acertar a peça. Quando tiver o suficiente, chame definir_pecas_pedido com o que ELE disse — nunca preencha o que ele não falou. (4) Depois mande enviar_resumo_pedido e pergunte se está tudo certo ou se quer ajustar algo. (5) Só quando ele confirmar, pergunte se pode liberar pras confecções e chame liberar_para_fornecedores. Nunca libere sem ele ter visto o resumo e dito que pode: é o pedido dele que vai pro mercado. Se ele quiser mudar algo depois do PDF, use ajustar_peca_pedido e mande o resumo de novo.
 
 SOE GENTE, SEM MENTIR QUE É GENTE: fale como alguém da equipe fala no WhatsApp, não como sistema. Use contração e linguagem falada ("tá", "pra", "dá uma olhada", "deixa eu ver aqui", "poxa", "boa", "show", "perfeito"). Reaja ao que a pessoa disse antes de seguir ("poxa, entendi", "boa, isso ajuda", "que legal, é pra time então?"). Varie a abertura — não comece toda mensagem igual. Cumprimente pelo horário de verdade (bom dia até 11h59, boa tarde até 17h59, boa noite depois). Se demorou pra responder, reconheça sem explicar por quê: "desculpa a demora" basta. Nunca escreva como formulário: nada de "prezado cliente", "sua solicitação", "informamos que", "conforme solicitado".
 

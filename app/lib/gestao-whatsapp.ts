@@ -61,6 +61,8 @@ import { corrigirOrcamento } from './orcamento-versoes'
 import { enviarRascunho, prepararMensagem } from './mcp-mensagens'
 import { buscarContato, detalhePedido, lerConversa } from './gestao-consulta'
 import { captarParaPedido, REGIOES, type RegiaoBusca } from './captacao-pedido'
+import { editarLinhasPedidoCliente } from './pedido-linhas-edicao'
+import { type LinhaPedido } from './pedido-assistente-oferta'
 
 const MODELO = 'claude-sonnet-4-6'
 const MAX_RODADAS = 6
@@ -388,6 +390,28 @@ const FERRAMENTAS: Anthropic.Messages.Tool[] = [
     },
   },
   {
+    name: 'ajustar_peca_pedido',
+    description:
+      'Altera uma peça do pedido: tecido/material, modelo, cor, quantidade ou descrição. Informe só o que muda. A peça é ' +
+      'identificada pela posição que aparece em detalhe_pedido (1 = primeira). Use quando o Fernando mandar ajustar algo ' +
+      'que o cliente pediu. Pedido pago não altera. Se o orçamento já estava definido, ele volta pro fornecedor refazer e ' +
+      'o fornecedor que aceitou é avisado — diga isso ao Fernando. Confirme o que entendeu antes de chamar.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pedido: { type: 'string', description: 'Código (2026090…), número ou id.' },
+        posicao: { type: 'number', minimum: 1, maximum: 50, description: '1 = primeira peça (veja em detalhe_pedido).' },
+        material: { type: 'string', maxLength: 200 },
+        modelo: { type: 'string', maxLength: 120 },
+        cor: { type: 'string', maxLength: 80 },
+        quantidade: { type: 'number', minimum: 1, maximum: 100000 },
+        descricao: { type: 'string', maxLength: 500 },
+        confirmar: { type: 'boolean', description: 'Precisa ser true — o Fernando confirmou a mudança.' },
+      },
+      required: ['pedido', 'posicao', 'confirmar'],
+    },
+  },
+  {
     name: 'captar_para_pedido',
     description:
       'Sai atrás de confecções pra um pedido que está sem fornecedor: busca candidatas na região, registra e prepara a ' +
@@ -586,6 +610,39 @@ async function executarFerramenta(nome: string, entrada: Entrada): Promise<unkno
       const p = await acharPedido(ref)
       if (!p) throw new Error(`pedido "${ref}" não encontrado`)
       return (await detalhePedido(p.id)) ?? { aviso: 'pedido sem detalhe' }
+    }
+    case 'ajustar_peca_pedido': {
+      const ref = str(entrada.pedido)
+      const posicao = num(entrada.posicao)
+      if (!ref || !posicao) throw new Error('pedido e posicao são obrigatórios')
+      if (entrada.confirmar !== true) throw new Error('ajuste não confirmado: confirme com o Fernando e chame de novo com confirmar=true')
+      const p = await acharPedido(ref)
+      if (!p) throw new Error(`pedido "${ref}" não encontrado`)
+
+      const { data: ped } = await supabaseAdmin
+        .from('pedidos_assistente')
+        .select('linhas')
+        .eq('id', p.id)
+        .maybeSingle<{ linhas: LinhaPedido[] | null }>()
+      const atuais: LinhaPedido[] = Array.isArray(ped?.linhas) ? ped.linhas : []
+      if (posicao > atuais.length) throw new Error(`o pedido tem ${atuais.length} peça(s); não existe a ${posicao}ª`)
+
+      const linhas = atuais.map((l, i) =>
+        i === posicao - 1
+          ? {
+              ...l,
+              origIdx: i,
+              material: str(entrada.material) ?? l.material,
+              modelo: str(entrada.modelo) ?? l.modelo,
+              cor: str(entrada.cor) ?? l.cor,
+              total: num(entrada.quantidade) ?? l.total,
+              descricao: str(entrada.descricao) ?? l.descricao,
+            }
+          : { ...l, origIdx: i }
+      )
+      const r = await editarLinhasPedidoCliente({ pedidoId: p.id, linhas })
+      if (!r.ok) throw new Error(r.erro)
+      return { codigo: p.codigo, mudou: r.mudou, resumo: r.resumo, orcamento_reaberto: r.orcamentoReaberto }
     }
     case 'captar_para_pedido': {
       const ref = str(entrada.pedido)
