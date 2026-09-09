@@ -173,7 +173,14 @@ export async function rodarFilaDeOfertas(): Promise<ResultadoFila> {
 
     const linhas = Array.isArray(p.linhas) ? (p.linhas as LinhaPedido[]) : []
     const { totalPecas } = resumirLinhas(linhas)
-    const escolhido = ordenarFornecedoresPara({ ...p, prazoDias: p.prazo_dias }, disponiveis, totalPecas || null)[0]
+
+    // No automático só entra quem o match considera VIÁVEL: pedido abaixo do
+    // mínimo dela (já com os 20% de margem) ou prazo mais curto do que ela
+    // aceita não vira oferta. A tela manual continua mostrando todo mundo — lá
+    // tem uma pessoa que pode saber de algo que o cadastro não sabe.
+    const escolhido = ordenarFornecedoresPara({ ...p, prazoDias: p.prazo_dias }, disponiveis, totalPecas || null).find(
+      (f) => f.match.viavel
+    )
     if (!escolhido) {
       semCandidato.push(p.codigo ?? p.id)
       continue

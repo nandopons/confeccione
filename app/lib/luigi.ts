@@ -577,7 +577,12 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
     case 'chamar_humano': {
       const motivo = str(entrada.motivo) ?? 'cliente precisa de uma pessoa'
       estado.escalada = { motivo }
-      return { ok: true, aviso: 'Conversa marcada pra equipe. Diga ao cliente, em uma linha, que alguém da equipe continua por aqui.' }
+      return {
+        ok: true,
+        aviso:
+          'Avisei o Fernando. NÃO responda mais nada ao cliente nesta mensagem: ' +
+          'nem "já te respondo", nem "alguém da equipe continua". Encerre sua vez em silêncio.',
+      }
     }
     case 'registrar_motivo_parada': {
       const p = acharNoContexto(ctx, str(entrada.pedido))
@@ -750,7 +755,9 @@ ${etapas}
 
 O QUE VOCÊ FAZ: tira dúvida sobre como funciona; diz em que pé está o pedido e qual é o próximo passo (com o link do pedido quando o passo é do cliente); pergunta o que falta pra ele seguir; registra por que ele parou com registrar_motivo_parada quando ele explicar (esperando data, achou caro, comparando, mudou de ideia). ${encerrar}
 
-O QUE VOCÊ NÃO FAZ: não negocia preço nem dá desconto; não promete prazo, data ou valor que não esteja no contexto; não passa contato, nome de rua ou telefone de fornecedor; não muda orçamento nem pedido; não trata reclamação, reembolso, defeito ou atraso de entrega; não fala de outros clientes; não inventa número. Nesses casos, e quando o cliente pedir pra falar com uma pessoa ou perguntar algo que não está no contexto, chame chamar_humano e responda em uma linha que alguém da equipe continua por aqui (sem prometer hora). Não use chamar_humano pra dúvida simples que o contexto responde.
+O QUE VOCÊ NÃO FAZ: não negocia preço nem dá desconto; não promete prazo, data ou valor que não esteja no contexto; não passa contato, nome de rua ou telefone de fornecedor; não muda orçamento nem pedido; não trata reclamação, reembolso, defeito ou atraso de entrega; não fala de outros clientes; não inventa número. Nesses casos, e quando o cliente pedir pra falar com uma pessoa ou perguntar algo que não está no contexto, chame chamar_humano. Não use chamar_humano pra dúvida simples que o contexto responde.
+
+CHAMOU O HUMANO, VOCÊ PARA — E FICA CALADO. O chamar_humano avisa o Fernando no WhatsApp dele na hora, com o que o cliente perguntou. Depois de chamar, NÃO escreva mais nada ao cliente: nem "alguém da equipe continua por aqui", nem "já te respondo", nem "vou verificar". Quem responde é o Fernando, pelo inbox, e ele responde como se fosse a mesma conversa. Anunciar que "a equipe assume" cria um degrau que o cliente vai cobrar, e o transfere pra uma fila que ele não vê. Silêncio de dois minutos com resposta de gente depois é melhor que aviso educado seguido de espera longa.
 
 QUEM SOMOS, QUANDO DESCONFIAREM: cliente que nunca ouviu falar da Confeccione desconfia, e com razão — vai pagar antes de receber. Se ele perguntar se é sério, se a empresa existe, se é golpe, ou se hesitar por não conhecer, responda com o que é verificável: empresa de Recife, embarcada no Porto Digital desde 28 de maio de 2026 (o distrito de inovação da cidade), CNPJ 49.307.439/0001-50. Se quiser conferir, aponte confeccione.com.br/porto-digital. Diga isso de forma curta e sem defensiva, uma informação por mensagem, e volte ao pedido. Não use isso como argumento de venda quando ninguém desconfiou, e não invente prêmio, investidor, número de clientes nem parceria que não esteja aqui.
 
@@ -1062,7 +1069,8 @@ async function rodarLuigi(
 
   if (!texto) {
     estado.escalada = estado.escalada ?? { motivo: 'o Luigi não conseguiu formular resposta' }
-    texto = 'Vou pedir pra alguém da equipe continuar com você por aqui.'
+    // Sem texto: quando o Luigi escala, quem fala em seguida é o Fernando.
+    texto = ''
   }
   return { texto: paraWhatsApp(texto), ferramentas, rodadas, tokensEntrada, tokensSaida, escalada: estado.escalada }
 }
@@ -1367,7 +1375,17 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       // Se uma parte falha, parar: continuar deixaria a conversa sem sentido.
       if (!envio.ok) break
     }
-    await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: Boolean(r.escalada), motivo_escalada: r.escalada?.motivo ?? null, status: envio.ok ? 'enviada' : 'falhou', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: envio.ok ? null : envio.erro })
+
+    // Escalar sem texto é o comportamento CERTO desde 09/09/2026 — o Luigi
+    // chama o Fernando e cala a boca. Registrar isso como 'falhou' encheria o
+    // log de erro justamente quando o sistema fez o que devia.
+    // 'ignorada' porque é isso que aconteceu do ponto de vista do cliente: o
+    // Luigi não respondeu. O par escalado=true + motivo é o que diz que foi de
+    // propósito. Não inventei um status novo só pra isso — o check do banco
+    // aceita seis, e um sétimo por causa de rótulo é dívida barata de criar e
+    // cara de manter.
+    const soEscalou = partes.length === 0 && Boolean(r.escalada)
+    await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: Boolean(r.escalada), motivo_escalada: r.escalada?.motivo ?? null, status: soEscalou ? 'ignorada' : envio.ok ? 'enviada' : 'falhou', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: soEscalou || envio.ok ? null : envio.erro })
     if (r.escalada) await escalar(params.conversaId, { nome, waId }, r.escalada.motivo, modo)
   } catch (err) {
     const erro = err instanceof Error ? err.message : String(err)

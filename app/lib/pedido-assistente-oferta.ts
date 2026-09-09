@@ -115,7 +115,27 @@ export type MatchFornecedor = {
   pontos: number
   /** Por que ele apareceu no topo — vai pra tela, pra escolha não ser cega. */
   motivos: string[]
+  /**
+   * Se `false`, a fila automática NÃO oferta. A tela manual continua mostrando
+   * (o Fernando pode saber de algo que o banco não sabe) — a diferença é que
+   * ninguém manda no automático o que já se sabe que vai ser recusado.
+   */
+  viavel: boolean
 }
+
+/**
+ * Margem pra baixo no pedido mínimo — 20%.
+ *
+ * Quem diz "mínimo 30" quase sempre pega 25 se o pedido for bom: o número é
+ * uma referência de viabilidade, não uma regra de contrato. Perder um pedido
+ * de 25 peças porque a confecção escreveu 30 no cadastro é jogar fora venda
+ * por causa de arredondamento.
+ *
+ * Mas a margem tem fim. Oferecer 10 pra quem pede 30 não é otimismo, é fazer
+ * a pessoa perder tempo lendo — e cada recusa dessas custa horas da fila e um
+ * pouco da paciência dela com a Confeccione.
+ */
+export const MARGEM_PEDIDO_MINIMO = 0.2
 
 function normalizar(t: string | null | undefined): string {
   return (t ?? '')
@@ -136,6 +156,7 @@ export function pontuarFornecedor(
 ): MatchFornecedor {
   const motivos: string[] = []
   let pontos = 0
+  let viavel = true
 
   const cidadePedido = normalizar(pedido.cidade)
   const cidadeForn = normalizar(f.cidade)
@@ -161,18 +182,28 @@ export function pontuarFornecedor(
     }
   }
 
-  // Pedido mínimo é eliminatório na prática: não adianta ser perto e fazer a
-  // peça se ela só produz a partir de 50 e o pedido tem 16.
+  // Pedido mínimo, com 20% de margem pra baixo. Mínimo 30 aceita a partir de
+  // 24: perto o bastante pra valer a pergunta. Abaixo disso não oferta — não é
+  // pessimismo, é não gastar a paciência dela com pedido que não serve.
   if (totalPecas != null && f.pedido_minimo != null && totalPecas < f.pedido_minimo) {
-    pontos -= 40
-    motivos.push(`mínimo ${f.pedido_minimo} peças`)
+    const piso = Math.ceil(f.pedido_minimo * (1 - MARGEM_PEDIDO_MINIMO))
+    if (totalPecas >= piso) {
+      pontos -= 10
+      motivos.push(`pede ${f.pedido_minimo}, mas dá pra tentar`)
+    } else {
+      viavel = false
+      pontos -= 60
+      motivos.push(`mínimo ${f.pedido_minimo} peças`)
+    }
   }
 
-  // Prazo curto demais pra ela: "encaixe de produção" é pedido que entra no
-  // meio da agenda cheia, e boa parte das confecções não pega. Mandar assim
-  // mesmo gera recusa e queima horas da fila — pesa igual ao pedido mínimo.
+  // Prazo NÃO ganha margem, e a diferença é real: quantidade é negociável (a
+  // confecção decide se compensa), prazo é agenda — ou a peça cabe na fila de
+  // produção dela ou não cabe, e "vai que cola" só gera recusa. Quem declarou
+  // que só pega a partir de 21 dias fica de fora do pedido de 10.
   if (pedido.prazoDias != null && f.prazo_minimo_dias != null && pedido.prazoDias < f.prazo_minimo_dias) {
-    pontos -= 40
+    viavel = false
+    pontos -= 60
     motivos.push(`só a partir de ${f.prazo_minimo_dias} dias`)
   }
 
@@ -181,7 +212,7 @@ export function pontuarFornecedor(
     motivos.push(f.status)
   }
 
-  return { pontos, motivos }
+  return { pontos, motivos, viavel }
 }
 
 /** A mesma lista, na ordem em que faz sentido olhar pra ESTE pedido. */
