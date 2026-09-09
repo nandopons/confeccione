@@ -13,6 +13,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getContaAtual } from '@/app/lib/cliente-auth'
 import { normalizarWhatsApp } from '@/app/lib/phone'
+import { nomeProprio } from '@/app/lib/nome'
 import { pecaValida } from '@/app/lib/pecas'
 
 export const runtime = 'nodejs'
@@ -182,7 +183,10 @@ export async function POST(req: Request) {
       peca,
       pecas,
       peca_outro: pecaOutro,
-      nome: contato.nome,
+      // Como o telefone, o nome é normalizado na entrada: chega do formulário
+      // do jeito que a pessoa digitou (tudo minúsculo ou TUDO MAIÚSCULO) e
+      // depois aparece assim no inbox, no PDF e nas mensagens.
+      nome: nomeProprio(contato.nome) || null,
       telefone: contato.telefone ? normalizarWhatsApp(contato.telefone) : null,
       email: contato.email,
       cep: contato.cep,

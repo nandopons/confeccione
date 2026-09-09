@@ -741,11 +741,21 @@ Certo: "Entendi. Lote pequeno costuma ter fornecedor disponível. Quantas peças
 Errado: "A gente conecta quem precisa produzir a confecções de todo o Brasil. Você descreve o que quer (peça, cor, quantidade, arte), a gente oferece pra fornecedores e quem topar monta o orçamento — você só paga se aprovar. O que você está pensando em produzir?"
 Certo: "A gente leva seu pedido às confecções e elas enviam o orçamento. O que você quer produzir?"
 
+VOCÊ ENXERGA AS IMAGENS: quando o cliente manda foto, você a vê de verdade. Use o que está nela — modelo da peça, cor, estampa, referência que ele mandou — pra preencher o pedido e pra confirmar com ele o que entendeu ("essa camisa é gola careca, certo?"). Nunca peça pra ele descrever o que já está na foto. Diga o que vê de forma concreta, e pergunte só o que a imagem não responde (quantidade, tamanhos, público). Se a foto estiver ruim ou não der pra concluir, diga o que não deu pra ver em vez de adivinhar. Áudio você ainda não escuta.
+
 PEDIDO REPETIDO DO MESMO CLIENTE: se o contexto mostrar que ele tem mais de um pedido incompleto criado quase junto (mesmo dia, ou poucos minutos de diferença), quase sempre é a mesma intenção duplicada, não dois pedidos de verdade. Não trate como dois: pergunte de forma leve se ele quer seguir com os dois ou se foi sem querer, e siga com o que ele disser. Nunca mande a mesma cutucada duas vezes pelo mesmo motivo, nem fale de um pedido como se o outro não existisse — isso mostra que a gente não olha o que tem na mão. Se ele disser que era um só, registre o motivo no que sobrou e encerre o duplicado com encerrar_pedido, quando ele confirmar.
 
 UMA PEÇA = UM PRODUTO: cada peça do pedido é UM modelo, UMA cor, UM público. Se o cliente falar "3 camisetas, 2 azuis e 1 branca", isso são DUAS peças (azul ×2 e branca ×1), não uma peça "azul e branca" — a confecção orça por cor e não consegue adivinhar a divisão. Sempre pergunte o público (feminino, masculino, infantil ou unissex): muda a modelagem e sem isso o fornecedor chuta. Se as ferramentas devolverem divergências, trate cada uma com o cliente antes de seguir, uma pergunta por mensagem, e só então continue.
 
-FECHAR PEDIDO QUE FICOU PELO MEIO: se o pedido em foco está incompleto (peça a definir, sem modelo, cor ou quantidade), o seu trabalho é terminá-lo com o cliente aqui na conversa. Ordem: (1) descubra a peça — o que ele quer produzir; (2) cor; (3) quantidade; (4) público; uma pergunta por mensagem, esperando a resposta. Puxe o contexto junto (pra que é, pra quando, quantas pessoas) porque isso ajuda a acertar a peça. Quando tiver o suficiente, chame definir_pecas_pedido com o que ELE disse — nunca preencha o que ele não falou. (4) Depois mande enviar_resumo_pedido e pergunte se está tudo certo ou se quer ajustar algo. (5) Só quando ele confirmar, pergunte se pode liberar pras confecções e chame liberar_para_fornecedores. Nunca libere sem ele ter visto o resumo e dito que pode: é o pedido dele que vai pro mercado. Se ele quiser mudar algo depois do PDF, use ajustar_peca_pedido e mande o resumo de novo.
+FECHAR PEDIDO QUE FICOU PELO MEIO: se o pedido em foco está incompleto (peça a definir, sem modelo, cor ou quantidade), o seu trabalho é terminá-lo com o cliente aqui na conversa.
+
+COMECE SEM ASSUMIR QUE ELE AINDA QUER. Muita gente já resolveu por outro caminho, e cobrar que complete soa como se a gente não tivesse percebido nada. Abertura: diga que viu que ele fez um pedido de confecção com a gente e pergunte se já conseguiu resolver a demanda. E PARE — espere a resposta.
+- Se disser que já resolveu: não insista nem tente reverter. Agradeça em uma linha e pergunte o que ele acabou fazendo, que serve pra gente melhorar; registre com registrar_motivo_parada.
+- Se disser que ainda precisa: aí sim vá aos detalhes. Se houver mais de um pedido incompleto dele, diga quantos são e pergunte se quer completar um deles ou começar um novo e cancelar os antigos — pedido velho costuma já não valer, e insistir nele atrasa a conversa. Siga com o que ele escolher e encerre os outros com encerrar_pedido quando ele confirmar.
+
+OFEREÇA MONTAR ALI MESMO: deixe claro que ele não precisa voltar ao site — você monta o pedido com ele por ali ("posso montar contigo por aqui mesmo"). É o que tira o pedido do lugar: quem não voltou ao site em três meses não vai voltar agora, mas responde uma pergunta no WhatsApp.
+
+Com o rumo definido, a ordem é: (1) a peça — o que ele quer produzir; (2) cor; (3) quantidade; (4) público; uma pergunta por mensagem, esperando a resposta. Puxe o contexto junto (pra que é, pra quando, quantas pessoas) porque isso ajuda a acertar a peça. Quando tiver o suficiente, chame definir_pecas_pedido com o que ELE disse — nunca preencha o que ele não falou. (4) Depois mande enviar_resumo_pedido e pergunte se está tudo certo ou se quer ajustar algo. (5) Só quando ele confirmar, pergunte se pode liberar pras confecções e chame liberar_para_fornecedores. Nunca libere sem ele ter visto o resumo e dito que pode: é o pedido dele que vai pro mercado. Se ele quiser mudar algo depois do PDF, use ajustar_peca_pedido e mande o resumo de novo.
 
 SOE GENTE, SEM MENTIR QUE É GENTE: escreva como uma pessoa da equipe escreveria — português correto e natural, nem robotizado nem empolgado. Contração do dia a dia pode ("pra", "tá"), gíria e interjeição animada não. Varie a abertura; não comece toda mensagem igual. Cumprimente pelo horário de verdade (bom dia até 11h59, boa tarde até 17h59, boa noite depois). Se demorou, "desculpe a demora" resolve, sem explicar por quê. Também não caia no extremo burocrático: nada de "prezado cliente", "sua solicitação", "informamos que", "conforme solicitado", "estamos à disposição".
 
@@ -764,7 +774,43 @@ PERGUNTE MAIS: quase toda mensagem sua termina em pergunta. Cliente gosta de ser
 
 // ─── Histórico ──────────────────────────────────────────────────────────────
 
-type LinhaMensagem = { wamid: string | null; direcao: string; tipo: string; corpo: string | null; autor: string | null; criado_em: string }
+type LinhaMensagem = {
+  wamid: string | null
+  direcao: string
+  tipo: string
+  corpo: string | null
+  autor: string | null
+  criado_em: string
+  midia_path: string | null
+  midia_mime: string | null
+}
+
+/**
+ * Imagens do cliente que o Luigi realmente enxerga.
+ *
+ * Cliente manda foto de referência, print de estampa, arte da logo. Sem ver, o
+ * Luigi respondia "[imagem]" e pedia pra descrever — o que é exatamente o que a
+ * pessoa quis evitar ao mandar a foto. Duas basta: em geral é a que ele acabou
+ * de mandar mais a anterior; carregar toda a conversa encarece cada turno.
+ */
+const IMAGENS_NO_HISTORICO = 2
+const MIMES_VISAO = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const
+type BlocoImagem = { type: 'image'; source: { type: 'base64'; media_type: (typeof MIMES_VISAO)[number]; data: string } }
+
+async function blocoDaImagem(path: string, mime: string | null): Promise<BlocoImagem | null> {
+  const media_type = (MIMES_VISAO as readonly string[]).includes(mime ?? '')
+    ? (mime as (typeof MIMES_VISAO)[number])
+    : 'image/jpeg'
+  try {
+    const { data, error } = await supabaseAdmin.storage.from('wa-midia').download(path)
+    if (error || !data) return null
+    const buffer = Buffer.from(await data.arrayBuffer())
+    if (buffer.byteLength > 4 * 1024 * 1024) return null
+    return { type: 'image', source: { type: 'base64', media_type, data: buffer.toString('base64') } }
+  } catch {
+    return null
+  }
+}
 
 function textoDaLinha(m: LinhaMensagem): string {
   if (m.corpo && m.corpo.trim()) return m.corpo.trim()
@@ -783,20 +829,37 @@ function textoDaLinha(m: LinhaMensagem): string {
 async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.Messages.MessageParam[]; wamids: Set<string>; luigiFalou: boolean }> {
   const { data } = await supabaseAdmin
     .from('wa_mensagens')
-    .select('wamid, direcao, tipo, corpo, autor, criado_em')
+    .select('wamid, direcao, tipo, corpo, autor, criado_em, midia_path, midia_mime')
     .eq('conversa_id', conversaId)
     .order('criado_em', { ascending: false })
     .limit(HISTORICO_MENSAGENS)
 
   const linhas = ((data ?? []) as LinhaMensagem[]).reverse()
   const wamids = new Set(linhas.map((m) => m.wamid).filter((w): w is string => Boolean(w)))
+
+  const comImagem = linhas.filter((m) => m.direcao === 'entrada' && m.tipo === 'image' && m.midia_path)
+  const blocos = new Map<string, BlocoImagem>()
+  await Promise.all(
+    comImagem.slice(-IMAGENS_NO_HISTORICO).map(async (m) => {
+      const b = await blocoDaImagem(m.midia_path as string, m.midia_mime)
+      if (b) blocos.set(m.midia_path as string, b)
+    })
+  )
   // Já se apresentou se ele mesmo escreveu antes OU se a abertura foi o template
   // luigi_apresentacao / uma mensagem em nome dele mandada pelo inbox ou pela régua.
   const luigiFalou = linhas.some((m) => m.direcao === 'saida' && (m.autor === 'luigi' || /\bluigi\b/i.test(m.corpo ?? '')))
   const msgs: Anthropic.Messages.MessageParam[] = []
   for (const m of linhas) {
     const role: 'user' | 'assistant' = m.direcao === 'entrada' ? 'user' : 'assistant'
-    const texto = textoDaLinha(m)
+    const bloco = m.midia_path ? blocos.get(m.midia_path) : undefined
+    const texto = bloco ? (m.corpo?.trim() || 'Mandei esta imagem.') : textoDaLinha(m)
+
+    // Com imagem o conteúdo é lista de blocos e não concatena como texto.
+    if (bloco) {
+      msgs.push({ role, content: [bloco, { type: 'text', text: texto }] })
+      continue
+    }
+
     const anterior = msgs[msgs.length - 1]
     if (anterior && anterior.role === role && typeof anterior.content === 'string') {
       anterior.content = `${anterior.content}\n\n${texto}`
@@ -806,6 +869,34 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
   }
   if (msgs.length && msgs[0].role !== 'user') msgs.unshift({ role: 'user', content: '[início da conversa]' })
   return { msgs, wamids, luigiFalou }
+}
+
+/**
+ * Junta ao histórico a imagem que acabou de chegar. O webhook grava e responde
+ * quase junto, então a foto do cliente pode não estar na leitura acima — e sem
+ * isto ela apareceria como "[imagem]" logo na mensagem que motivou a resposta.
+ */
+async function comImagemRecente(
+  msgs: Anthropic.Messages.MessageParam[],
+  wamid: string,
+  corpo: string | null,
+  jaNoHistorico: boolean
+): Promise<Anthropic.Messages.MessageParam[]> {
+  if (jaNoHistorico) return msgs
+  const { data } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('midia_path, midia_mime')
+    .eq('wamid', wamid)
+    .maybeSingle<{ midia_path: string | null; midia_mime: string | null }>()
+  if (!data?.midia_path) return msgs
+  const bloco = await blocoDaImagem(data.midia_path, data.midia_mime)
+  if (!bloco) return msgs
+
+  const legenda = (corpo ?? '').trim() || 'Mandei esta imagem.'
+  const fim = msgs[msgs.length - 1]
+  return fim && fim.role === 'user' && typeof fim.content === 'string' && !fim.content.trim()
+    ? [...msgs.slice(0, -1), { role: 'user', content: [bloco, { type: 'text', text: legenda }] }]
+    : [...msgs, { role: 'user', content: [bloco, { type: 'text', text: legenda }] }]
 }
 
 // ─── O loop ─────────────────────────────────────────────────────────────────
@@ -1082,10 +1173,12 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     }
     const nome = params.nome ?? contato?.nome ?? null
 
-    // Sem texto (áudio, foto sem legenda, documento): o Luigi não lê. No modo
-    // responde, o áudio ganha um aviso curto; o resto fica pra gente.
+    // Imagem o Luigi lê (o histórico monta o bloco de visão), mesmo sem
+    // legenda: cliente manda foto de referência, print de estampa ou arte da
+    // logo, e pedir pra descrever é o oposto do que ele quis. Áudio ainda não,
+    // porque exigiria transcrição.
     const temTexto = Boolean(params.corpo && params.corpo.trim())
-    if (!temTexto) {
+    if (!temTexto && params.tipo !== 'image') {
       if (modo === 'responde' && params.tipo === 'audio') {
         const aviso = 'Recebi seu áudio, mas por aqui eu só consigo ler texto. Pode me escrever?'
         const r = await enviarTexto(waId, aviso)
@@ -1128,6 +1221,10 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       } else {
         mensagens = [...mensagens, { role: 'user', content: atual }]
       }
+    }
+
+    if (params.tipo === 'image') {
+      mensagens = await comImagemRecente(mensagens, params.wamid, params.corpo, historico.wamids.has(params.wamid))
     }
 
     const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens)

@@ -29,6 +29,7 @@ import {
   payloadFeedbackNeg,
 } from './whatsapp-cloud'
 import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
+import { nomeProprio } from './nome'
 
 async function vincularContato(waId: string): Promise<{ clienteId: string | null; fornecedorId: string | null }> {
   const last8 = waId.slice(-8)
@@ -82,7 +83,11 @@ async function acharContatoPorNumero(waId: string): Promise<{ id: string; nome: 
   return escolhido ? { id: escolhido.id, nome: escolhido.nome ?? null } : null
 }
 
-async function garantirConversa(waId: string, nome: string | null): Promise<string | null> {
+async function garantirConversa(waId: string, nomeBruto: string | null): Promise<string | null> {
+  // O nome vem do perfil do WhatsApp, como a pessoa escreveu: "nicole",
+  // "JOAQUIM LIMA RABELO". Normaliza na porta de entrada pra não sujar a base
+  // nem aparecer assim no inbox e nas mensagens.
+  const nome = nomeProprio(nomeBruto) || null
   const contatoExistente = await acharContatoPorNumero(waId)
 
   let contatoId = contatoExistente?.id as string | undefined
