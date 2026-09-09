@@ -25,6 +25,7 @@ import { baixarMidia, lerPayloadFeedbackNeg, QUICK_REPLY_ATENDENTE } from '@/app
 import { responderFeedbackNegociacao, responderPedidoAtendente } from '@/app/lib/whatsapp-notify'
 import { ehNumeroGestao, responderGestao } from '@/app/lib/gestao-whatsapp'
 import { responderCliente } from '@/app/lib/luigi'
+import { ehAudioTranscritivel, transcreverAudio } from '@/app/lib/transcricao'
 
 export const dynamic = 'force-dynamic'
 // Os agentes (gestão e Luigi) rodam em after(), depois do 200 pra Meta, e
@@ -243,7 +244,9 @@ function previewDe(tipo: string, corpo: string | null, filename?: string): strin
     case 'video':
       return corpo ? `🎬 ${corpo.slice(0, 100)}` : '🎬 Vídeo'
     case 'audio':
-      return '🎤 Áudio'
+      // Com transcrição, o preview mostra o que a pessoa disse. Vale mais do
+      // que "Áudio" na lista de conversas: dá pra triar sem abrir e sem ouvir.
+      return corpo ? `🎤 ${corpo.slice(0, 100)}` : '🎤 Áudio'
     case 'sticker':
       return 'Figurinha'
     case 'document':
@@ -269,6 +272,10 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
   let midiaPath: string | null = null
   let midiaMime: string | null = null
   let midiaNome: string | null = null
+  // Áudio vira texto AQUI, com o buffer que a gente já baixou — e é gravado em
+  // `corpo`, junto com a mensagem. Assim o inbox, o Luigi e o agente leem a
+  // mesma coisa, e a gente paga a transcrição uma vez só.
+  let corpoFinal = corpo
 
   if (midia?.id) {
     const download = await baixarMidia(midia.id)
@@ -285,6 +292,12 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
         console.error('[wa-webhook] upload storage falhou', { wamid: msg.id, upErr })
         midiaPath = null
       }
+
+      if (tipo === 'audio' && !corpoFinal && ehAudioTranscritivel(midiaMime)) {
+        // O upload já garantiu o áudio no Storage: se a transcrição falhar, o
+        // áudio continua lá e dá pra tentar de novo pelo inbox.
+        corpoFinal = await transcreverAudio(download.buffer, midiaMime)
+      }
     } else {
       console.error('[wa-webhook] download de mídia falhou', { wamid: msg.id, erro: download.erro })
     }
@@ -300,7 +313,7 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
         wamid: msg.id,
         direcao: 'entrada',
         tipo,
-        corpo,
+        corpo: corpoFinal,
         midia_path: midiaPath,
         midia_mime: midiaMime,
         midia_nome: midiaNome,
@@ -325,7 +338,7 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
   await supabaseAdmin
     .from('wa_conversas')
     .update({
-      preview: previewDe(tipo, corpo, midia?.filename),
+      preview: previewDe(tipo, corpoFinal, midia?.filename),
       ultima_mensagem_em: criadoEm,
       ultima_msg_contato_em: criadoEm,
       nao_lidas: (conv?.nao_lidas ?? 0) + 1,
@@ -352,7 +365,7 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
   // deixa pra gente): o Luigi decide sozinho pelo modo ligado no inbox.
   if (ehNumeroGestao(waId)) {
     after(() =>
-      responderGestao({ conversaId, waId, nome: nomePerfil ?? null, wamid: msg.id, criadoEm, tipo, corpo }).catch((err) =>
+      responderGestao({ conversaId, waId, nome: nomePerfil ?? null, wamid: msg.id, criadoEm, tipo, corpo: corpoFinal }).catch((err) =>
         console.error('[wa-webhook] agente de gestão falhou', { err })
       )
     )
@@ -365,7 +378,7 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
         wamid: msg.id,
         criadoEm,
         tipo,
-        corpo,
+        corpo: corpoFinal,
         jaTratada: Boolean(feedback) || pediuAtendente,
       }).catch((err) => console.error('[wa-webhook] Luigi falhou', { err }))
     )

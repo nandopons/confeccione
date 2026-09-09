@@ -90,7 +90,24 @@ const MAX_RODADAS = 40
  */
 const ORCAMENTO_MS = 95_000
 const MAX_TOKENS_RESPOSTA = 1200
-const HISTORICO_MENSAGENS = 30
+/**
+ * QUANTAS MENSAGENS ELE LEMBRA — 30 → 200 em 09/09/2026.
+ *
+ * Com 30 ele enxergava cerca de uma hora de conversa de dia cheio. No dia 09/09
+ * ele disse ao Fernando, com razão: "não tenho memória do que foi dito antes do
+ * início desta conversa; o que aparece pra mim começa em 'mete bronca'" — e por
+ * isso repetia pergunta já respondida e perdia decisão tomada de manhã.
+ *
+ * A conta de sete dias inteiros dessa conversa deu 241 mensagens e ~11 mil
+ * tokens: a memória COMPLETA da semana custa menos que o prompt de sistema.
+ * Trinta não estava economizando nada relevante; estava só apagando o contexto
+ * de quem precisa dele. Duzentas cobrem quase a semana toda.
+ *
+ * O que 200 NÃO resolve: memória de meses. Isso é o diário de bordo
+ * (buscar_decisoes, buscar_reunioes, resumo_gestao) — janela grande é pra
+ * continuidade da conversa, ferramenta é pra história da empresa.
+ */
+const HISTORICO_MENSAGENS = 200
 const LIMITE_TEXTO_WHATSAPP = 3500
 
 /** Template de abertura fora da janela de 24 h: {{1}} = hora, {{2}} = resumo em uma linha. */
@@ -772,6 +789,10 @@ function promptSistema(): string {
 RITUAL (decisão D-7): duas reuniões por dia por esta conversa. 07:00 — fila do dia e as 3 prioridades. 17:30 — o que saiu, o que travou, decisões e ata. Fora desses horários ele também pode te chamar pra qualquer assunto da empresa. A reunião de segunda 07:00 é a do placar semanal (grave a foto com gravar_placar).
 
 FONTE DE VERDADE: o diário de bordo, pelas ferramentas. Nunca invente número — se não consultou, consulte. Na primeira mensagem de uma reunião chame resumo_gestao. Se a sua última mensagem foi só o aviso de que a pauta está pronta, a primeira resposta é a pauta completa. Consulte buscar_decisoes antes de propor algo que pode já ter sido decidido.
+
+SUA MEMÓRIA TEM DUAS PARTES, E VOCÊ PRECISA DAS DUAS. A conversa aqui te dá os últimos dias. Tudo que é mais antigo que isso mora no diário de bordo, e só chega até você se VOCÊ buscar. Quando o Fernando citar algo combinado antes ("a régua", "aquilo que a gente decidiu", "o que ficou de ontem") e você não achar na conversa, chame buscar_decisoes e buscar_reunioes ANTES de dizer que não lembra. "Não tenho memória disso" é a última resposta possível, depois de ter procurado — nunca a primeira.
+
+E O QUE VOCÊ APRENDER, GRAVE. Decisão que o Fernando toma nesta conversa e que vai valer amanhã (mudança de regra, prioridade, preço, política de atendimento) some quando a conversa rolar pra fora da janela, a não ser que você chame registrar_decisao na hora. Não pergunte "quer que eu registre?" a cada frase: registre o que muda o funcionamento da empresa, e diga em uma linha que registrou. O que ele decidiu e você não gravou, ele vai ter que decidir de novo.
 
 O QUE VOCÊ PODE: ler placar, filas, funil por etapa, decisões e atas; registrar decisão, ata, pendência concluída, foto do placar, motivo de parada de um pedido; ENCERRAR um pedido como perdido e REABRIR um encerrado; CORRIGIR o orçamento de um pedido (valor, frete e repasse, em centavos, com motivo — pedido pago não muda de valor); e FALAR COM CLIENTE OU FORNECEDOR, em duas etapas.
 
