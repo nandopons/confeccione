@@ -253,6 +253,43 @@ export async function getPortfolio(fornecedorId: string): Promise<PortfolioItem[
  * descartado de propósito: além de não servir pra nada, nomes de foto de
  * celular às vezes carregam dado do aparelho.
  */
+/**
+ * A foto que a confecção mandou no WhatsApp vira item do portfólio.
+ *
+ * POR QUE ISSO EXISTE (09/09/2026)
+ * O portfólio está construído desde julho e tinha 26 fotos de 3 fornecedores,
+ * de 43 aprovados. Não faltava ferramenta: faltava alguém preencher, e ninguém
+ * vai entrar num painel pra subir foto. Mas a confecção já conversa com a gente
+ * no WhatsApp todo dia — e quando o Luigi pede "manda umas fotos das peças que
+ * vocês fazem", ela manda na hora, porque é o que ela já faz o dia inteiro.
+ *
+ * Foi ELA que mandou, então a licença de uso vem junto com a foto. É a
+ * diferença entre isto e raspar o Instagram dela: mesmo resultado na tela,
+ * origem do direito completamente diferente.
+ *
+ * A imagem já está no bucket wa-midia (o webhook baixou da Meta e guardou).
+ * Aqui a gente só move pro portfólio, passando pelo mesmo tratamento do upload
+ * pelo painel — sem caminho paralelo que um dia diverge.
+ */
+export async function salvarFotoDaConversa(
+  fornecedorId: string,
+  midiaPath: string,
+  legenda?: string | null,
+): Promise<PortfolioItem> {
+  const { data, error } = await supabaseAdmin.storage.from('wa-midia').download(midiaPath)
+  if (error || !data) throw new Error('não achei essa foto no histórico da conversa')
+
+  const bytes = Buffer.from(await data.arrayBuffer())
+  if (bytes.byteLength === 0) throw new Error('a foto veio vazia')
+  if (bytes.byteLength > MAX_PORTFOLIO_BYTES) throw new Error('foto muito grande')
+
+  const mime = data.type || 'image/jpeg'
+  if (!mime.startsWith('image/')) throw new Error('esse arquivo não é uma imagem')
+
+  const nome = `whatsapp.${extensaoDoMime(mime)}`
+  return uploadPortfolio(fornecedorId, new File([new Uint8Array(bytes)], nome, { type: mime }), legenda)
+}
+
 export async function uploadPortfolio(
   fornecedorId: string,
   file: File,

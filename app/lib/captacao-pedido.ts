@@ -27,6 +27,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
+import { salvarFotoDaConversa } from './portfolio-fornecedor'
 import { registrarUsoIa } from './uso-ia'
 import { pedidosPorEtapa, pedidoEtapa, type PedidoEtapa } from './etapas-pedido'
 import { normalizarWaId, enviarTemplate, enviarTexto, enviarMidiaPorId, uploadMidia, marcarComoLida, listarTemplates } from './whatsapp-cloud'
@@ -1044,6 +1045,10 @@ function promptCandidato(cand: CandidatoLinha, perfil: PerfilBusca | null, pdfJa
     : 'pedido não encontrado (o Fernando resolve)'
   return `Você é o Luigi, da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções de todo o Brasil (sede em Recife). Está falando pelo WhatsApp oficial com uma CONFECÇÃO que a gente abordou por causa de um pedido sem fornecedor. A abertura foi só "Oi, tudo bem? Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês." — então, quando ela responder ("oi", "pode falar", "quem é?"), a sua PRIMEIRA mensagem é a dúvida em si, natural e direta: temos um pedido de X pra entregar em Y, vocês produzem esse tipo de peça nessa quantidade? Não se apresente de novo (o nome já foi dito), não repita a dúvida depois. Se perguntarem o que é a Confeccione: em uma linha, marketplace que traz pedidos de roupa pra confecções, com pagamento garantido e sem custo pra entrar, a plataforma só ganha comissão quando o pedido fecha.
 
+PEÇA AS FOTOS DEPOIS DO CADASTRO. Confecção cadastrada e sem foto no perfil é um card vazio: o cliente não escolhe quem ele não vê trabalhar. Quando ela se cadastrar, ou quando disser o que produz, peça em uma linha: "manda 3 ou 4 fotos de peças que vocês já fizeram, coloco no perfil de vocês". Ela manda na hora, porque é o que ela já faz o dia inteiro no Instagram. Cada foto que chegar, chame salvar_no_portfolio com uma legenda curta do que é a peça, nas palavras dela.
+
+Não peça foto antes do cadastro (não existe perfil pra guardar), não peça mais de uma vez na mesma conversa, e não insista se ela não mandar — é bônus, o cadastro é o objetivo. Se ela mandar catálogo em PDF ou link do Instagram em vez de foto, agradeça e siga: por enquanto só a foto entra no perfil.
+
 "BOA SORTE" É PROIBIDO, em qualquer forma e em qualquer momento. "Boa sorte pra vocês", "sucesso aí", "espero que dê tudo certo": soa a dispensa educada, como quem já virou as costas. Quem ouve entende que a conversa acabou e que você não quis nada com ela. Se for pra encerrar, encerre pela porta aberta: "Qualquer coisa é só chamar aqui." Nunca deseje sorte pra ninguém.
 
 FALE COMO DONO DE EMPRESA FALA COM DONO DE EMPRESA. Do outro lado tem alguém no meio da produção, com máquina ligada, que decide em cinco segundos se te responde. Frase curta, assunto na primeira linha, uma pergunta só.
@@ -1097,6 +1102,22 @@ const FERRAMENTAS_CANDIDATO: Anthropic.Messages.Tool[] = [
         },
       },
       required: ['resposta'],
+    },
+  },
+  {
+    name: 'salvar_no_portfolio',
+    description:
+      'Guarda no portfólio da confecção a última foto que ELA mandou nesta conversa. Use quando ela mandar foto de peça que produz. ' +
+      'Só funciona depois que ela está cadastrada — antes disso não existe portfólio pra guardar.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        legenda: {
+          type: 'string',
+          maxLength: 120,
+          description: 'O que é a peça, nas palavras dela. Ex.: "legging suplex cintura alta".',
+        },
+      },
     },
   },
   {
@@ -1215,6 +1236,59 @@ export async function responderCandidato(params: {
             await avisarGestor(`Captação: ${cand.nome ?? waId} respondeu SIM pro pedido ${pedido?.codigo ?? cand.pedido_id ?? ''}${str(entrada.observacao) ? ` — ${str(entrada.observacao)}` : ''}. Falta aprovar o cadastro e ofertar (/admin/whatsapp).`)
           }
           resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify({ ok: true, resposta: v }) })
+        } else if (uso.name === 'salvar_no_portfolio') {
+          // O fornecedor_id vem do contato do WhatsApp, não do que o modelo
+          // diz: portfólio é dado de cadastro e não pode depender de o agente
+          // ter guardado o id certo na cabeça.
+          const { data: contato } = await supabaseAdmin
+            .from('wa_contatos')
+            .select('fornecedor_id')
+            .eq('wa_id', waId)
+            .maybeSingle<{ fornecedor_id: string | null }>()
+
+          if (!contato?.fornecedor_id) {
+            resultados.push({
+              type: 'tool_result',
+              tool_use_id: uso.id,
+              content: JSON.stringify({
+                ok: false,
+                aviso:
+                  'Essa confecção ainda não tem cadastro, então não existe portfólio pra guardar a foto. ' +
+                  'Agradeça a foto, diga que ela aparece no perfil assim que o cadastro sair, e mande o link.',
+              }),
+            })
+          } else {
+            // A última FOTO que ELA mandou. Imagem que saiu daqui não entra.
+            const { data: foto } = await supabaseAdmin
+              .from('wa_mensagens')
+              .select('midia_path, midia_mime')
+              .eq('conversa_id', params.conversaId)
+              .eq('direcao', 'entrada')
+              .eq('tipo', 'image')
+              .not('midia_path', 'is', null)
+              .order('criado_em', { ascending: false })
+              .limit(1)
+              .maybeSingle<{ midia_path: string | null }>()
+
+            if (!foto?.midia_path) {
+              resultados.push({
+                type: 'tool_result',
+                tool_use_id: uso.id,
+                content: JSON.stringify({ ok: false, aviso: 'Não achei foto nenhuma mandada por ela nesta conversa.' }),
+              })
+            } else {
+              try {
+                await salvarFotoDaConversa(contato.fornecedor_id, foto.midia_path, str(entrada.legenda))
+                resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify({ ok: true }) })
+              } catch (e) {
+                resultados.push({
+                  type: 'tool_result',
+                  tool_use_id: uso.id,
+                  content: JSON.stringify({ ok: false, erro: e instanceof Error ? e.message : 'falha ao guardar' }),
+                })
+              }
+            }
+          }
         } else if (uso.name === 'enviar_pdf_pedido') {
           const ok = cand.pedido_id ? await enviarPdfNaConversa(waId, params.nome ?? cand.nome, cand.pedido_id) : false
           if (ok) pdfJaEnviado = true
