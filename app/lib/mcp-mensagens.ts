@@ -30,6 +30,7 @@ import { supabaseAdmin } from './supabase-server'
 import { enviarTemplate, enviarTexto, normalizarWaId } from './whatsapp-cloud'
 import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 import { acharPedido } from './etapas-pedido'
+import { consultarTemplatesWhatsApp } from './whatsapp-templates'
 
 /**
  * Números do gestor, lidos da env aqui em vez de importados de gestao-whatsapp.
@@ -91,6 +92,32 @@ export async function prepararMensagem(params: {
 
   const texto = params.texto.trim()
   if (texto.length < 2) return { ok: false, erro: 'Texto vazio.' }
+
+  // Um template com {{1}}, {{2}}… não sai sem os valores: a Meta responde
+  // "#132000 Number of parameters does not match". Conferir aqui evita que o
+  // erro só apareça no envio, quando quem chamou já acha que está tudo certo.
+  if (params.templateNome) {
+    const r = await consultarTemplatesWhatsApp([params.templateNome])
+    const def = r.ok ? r.templates.find((t) => t.name === params.templateNome) : undefined
+    if (r.ok && !def) {
+      return { ok: false, erro: `O template "${params.templateNome}" não existe na WABA. Veja os aprovados com templates_whatsapp.` }
+    }
+    if (def && def.status !== 'APPROVED') {
+      return { ok: false, erro: `O template "${params.templateNome}" está ${def.status}, não dá pra usar ainda.` }
+    }
+    if (def) {
+      const esperadas = new Set((def.corpo ?? '').match(/\{\{\s*\d+\s*\}\}/g)?.map((m) => m.replace(/\D/g, '')) ?? [])
+      const recebidas = (params.templateVariaveis ?? []).filter((v) => String(v ?? '').trim()).length
+      if (esperadas.size !== recebidas) {
+        return {
+          ok: false,
+          erro:
+            `O template "${params.templateNome}" pede ${esperadas.size} variável(is) e você passou ${recebidas}. ` +
+            `Corpo: "${def.corpo}". Informe template_variaveis na ordem — pra {{1}} costuma ser o primeiro nome de quem recebe.`,
+        }
+      }
+    }
+  }
 
   const janelaAberta = await janela24hAberta(waId)
   if (!janelaAberta && !params.templateNome) {
@@ -207,7 +234,14 @@ export async function enviarRascunho(id: string): Promise<ResultadoEnvio> {
     : await enviarTexto(waId, texto)
 
   if (!resultado.ok) {
-    await supabaseAdmin.from('mcp_mensagens_rascunho').update({ erro: resultado.erro }).eq('id', id)
+    // A Meta recusou, então NADA saiu — devolver o rascunho pra fila em vez de
+    // deixá-lo queimado pela trava anti-duplicata. Sem isto, cada recusa exigia
+    // preparar tudo de novo, e o agente ficava criando rascunho atrás de
+    // rascunho sem corrigir a causa (09/09/2026, erro #132000 de parâmetros).
+    await supabaseAdmin
+      .from('mcp_mensagens_rascunho')
+      .update({ erro: resultado.erro, enviado_em: null })
+      .eq('id', id)
     return { ok: false, erro: `O WhatsApp recusou o envio: ${resultado.erro}` }
   }
 
