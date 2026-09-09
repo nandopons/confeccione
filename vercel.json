@@ -25,6 +25,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/cron/oferta-automatica",
+      "schedule": "*/20 * * * *"
+    },
+    {
       "path": "/api/cron/reuniao-manha",
       "schedule": "0 10 * * *"
     },
