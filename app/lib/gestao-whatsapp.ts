@@ -60,6 +60,7 @@ import {
 import { corrigirOrcamento } from './orcamento-versoes'
 import { enviarRascunho, prepararMensagem } from './mcp-mensagens'
 import { buscarContato, lerConversa } from './gestao-consulta'
+import { captarParaPedido, REGIOES, type RegiaoBusca } from './captacao-pedido'
 
 const MODELO = 'claude-sonnet-4-6'
 const MAX_RODADAS = 6
@@ -375,6 +376,22 @@ const FERRAMENTAS: Anthropic.Messages.Tool[] = [
     },
   },
   {
+    name: 'captar_para_pedido',
+    description:
+      'Sai atrás de confecções pra um pedido que está sem fornecedor: busca candidatas na região, registra e prepara a ' +
+      'sondagem. É o que destrava a etapa sem_fornecedor. Região: uf (estado do cliente), pe (polo de Pernambuco) ou ' +
+      'brasil — na dúvida, uf. Exige confirmar=true porque abre contato com empresas de fora da base.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pedido: { type: 'string', description: 'Código (2026090…), número ou id.' },
+        regiao: { type: 'string', enum: ['uf', 'pe', 'brasil'] },
+        confirmar: { type: 'boolean', description: 'Precisa ser true — o Fernando mandou buscar.' },
+      },
+      required: ['pedido', 'confirmar'],
+    },
+  },
+  {
     name: 'corrigir_orcamento',
     description:
       'Corrige valor, frete e repasse de um pedido, com motivo, e grava versão no histórico. Valores em CENTAVOS. ' +
@@ -551,6 +568,19 @@ async function executarFerramenta(nome: string, entrada: Entrada): Promise<unkno
       if (!telefone) throw new Error('telefone é obrigatório')
       return await lerConversa(telefone, num(entrada.limite) ?? 30)
     }
+    case 'captar_para_pedido': {
+      const ref = str(entrada.pedido)
+      if (!ref) throw new Error('pedido é obrigatório')
+      if (entrada.confirmar !== true) throw new Error('captação não confirmada: confirme com o Fernando e chame de novo com confirmar=true')
+      const p = await acharPedido(ref)
+      if (!p) throw new Error(`pedido "${ref}" não encontrado`)
+      const regiao = REGIOES.includes(str(entrada.regiao) as RegiaoBusca) ? (str(entrada.regiao) as RegiaoBusca) : undefined
+      // origem 'mcp' = pedida por agente (aqui, o de gestão no WhatsApp), pra
+      // separar no log do que sai do cron e do que sai do admin na mão.
+      const r = await captarParaPedido(p, { origem: 'mcp', regiao, forcar: true })
+      if (r.erro) throw new Error(r.erro)
+      return { codigo: p.codigo, etapa: p.etapa, resultado: r }
+    }
     case 'corrigir_orcamento': {
       const ref = str(entrada.pedido)
       const valor = num(entrada.valor_centavos)
@@ -634,7 +664,9 @@ FALAR COM CLIENTE OU FORNECEDOR (duas etapas, sempre): primeiro preparar_mensage
 
 COMO ESCREVER PRO CLIENTE: conversa, não comunicado. Frases curtas, 1 a 3 linhas, uma ideia e uma pergunta por mensagem, e pare pra esperar a resposta. Pergunte bastante — pra que é a peça, pra quando, quantas pessoas — uma por vez. Sem emoji. Nunca invente que estava almoçando, com fome, com frio ou qualquer coisa que dependa de ter corpo; "desculpa a demora" basta.
 
-AÇÃO COM EFEITO EXTERNO SÓ COM CONFIRMAÇÃO: encerrar pedido, corrigir orçamento e enviar rascunho mexem no mundo real. Confirme em uma linha (qual pedido, quais números, qual texto) e só então execute. O QUE VOCÊ CONTINUA SEM PODER: cobrar, mover dinheiro, mexer em código ou dar deploy — isso é com o Fernando ou com o Cowork (Claude no computador).
+DESTRAVAR PEDIDO SEM FORNECEDOR: use captar_para_pedido quando um pedido estiver em sem_fornecedor e o Fernando mandar buscar. Ele procura confecções na região e prepara a sondagem — é o caminho pra tirar pedido da fila parada. Diga quantas candidatas apareceram.
+
+AÇÃO COM EFEITO EXTERNO SÓ COM CONFIRMAÇÃO: encerrar pedido, corrigir orçamento, captar fornecedor e enviar rascunho mexem no mundo real. Confirme em uma linha (qual pedido, quais números, qual texto) e só então execute. O QUE VOCÊ CONTINUA SEM PODER: cobrar, mover dinheiro, mexer em código ou dar deploy — isso é com o Fernando ou com o Cowork (Claude no computador).
 
 LUIGI: o agente de atendimento responde os clientes no WhatsApp oficial sozinho (modo escolhido no topo do inbox: desligado, sugere, responde). Quando ele chama gente (preço, reclamação, fora do pedido), a conversa aparece em conversas_sem_resposta com luigi_chamou=true e o Fernando recebe "Luigi chamou você: …" nesta conversa. Quem responde ao cliente é o Fernando, pelo inbox — você só aponta.
 
