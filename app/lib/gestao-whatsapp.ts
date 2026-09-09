@@ -1545,6 +1545,21 @@ function resumoEmUmaLinha(d: Awaited<ReturnType<typeof dadosDaPauta>>): string {
 export async function enviarPauta(tipo: TipoReuniaoDiaria): Promise<ResultadoPauta> {
   const inicio = Date.now()
   const hora = tipo === 'manha' ? '07:00' : '17:30'
+
+  // REUNIÃO DESLIGADA POR PADRÃO — 09/09/2026.
+  //
+  // As duas pautas do dia abriam conversa que o Fernando não tinha pedido, e
+  // cada resposta dele custa caro: em 09/09 o agente de gestão sozinho foi 92,7%
+  // do gasto de IA do dia (US$ 2,20 de US$ 2,37), contra 12 centavos do Luigi
+  // atendendo cliente e fornecedor de verdade. Pauta é conversa cara puxada por
+  // relógio, não por necessidade. Agora ele só fala quando tem motivo.
+  //
+  // Pra ligar de volta: REUNIAO_GESTAO_ATIVA=1 na Vercel. O cron continua no
+  // vercel.json e bate aqui de graça — não gasta token nenhum enquanto isso.
+  if (process.env.REUNIAO_GESTAO_ATIVA !== '1') {
+    return { tipo, destinos: [], pauta: `reunião das ${hora} desligada (REUNIAO_GESTAO_ATIVA != 1)` }
+  }
+
   const destinos = numerosGestao()
   const dados = await dadosDaPauta()
 
