@@ -417,6 +417,53 @@ export async function conversasQuentes(horas = 24): Promise<Set<string>> {
   return out
 }
 
+/**
+ * Pra quem A GENTE escreveu nas últimas `horas` — não entra em fluxo agora.
+ *
+ * POR QUE ISSO É SEPARADO DE conversasQuentes (09/09/2026)
+ * Em 09/09 o agente de gestão mandou `duvida_pedido_tarde` na mão pra 5 pessoas
+ * paradas em captado, às 14h54. Nenhuma respondeu, então nenhuma entrava em
+ * `conversasQuentes` — que só olha mensagem de ENTRADA. No dia seguinte às 9h a
+ * régua mandaria `duvida_pedido_manha` pras mesmas 5: a mesma pergunta, 18 horas
+ * depois, como se a primeira nunca tivesse existido.
+ *
+ * Lê `wa_mensagens`, que registra o que sai pelo inbox, pelo Luigi e pelo
+ * agente — mas NÃO o que a própria régua manda (isso vai pra contatos_marketing,
+ * via envio-marketing.ts). Por isso essa trava não atrapalha a cadência do
+ * fluxo: ela só impede a ENTRADA de quem acabou de ser abordado por outro
+ * caminho. Depois de dentro, quem manda no ritmo é o fluxo.
+ */
+export async function falamosRecentemente(horas = 48): Promise<Set<string>> {
+  const desde = new Date(Date.now() - horas * 60 * 60 * 1000).toISOString()
+  const out = new Set<string>()
+
+  const msgs = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('conversa_id')
+    .eq('direcao', 'saida')
+    .gte('criado_em', desde)
+    .limit(2000)
+  if (msgs.error) throw new Error(`últimos envios indisponíveis: ${msgs.error.message}`)
+
+  const conversaIds = [...new Set(((msgs.data ?? []) as Array<{ conversa_id: string }>).map((m) => m.conversa_id))]
+  if (conversaIds.length === 0) return out
+
+  const convs = await supabaseAdmin.from('wa_conversas').select('contato_id').in('id', conversaIds)
+  if (convs.error) throw new Error(`últimos envios indisponíveis: ${convs.error.message}`)
+
+  const contatoIds = [...new Set(((convs.data ?? []) as Array<{ contato_id: string }>).map((c) => c.contato_id))]
+  if (contatoIds.length === 0) return out
+
+  const contatos = await supabaseAdmin.from('wa_contatos').select('wa_id').in('id', contatoIds)
+  if (contatos.error) throw new Error(`últimos envios indisponíveis: ${contatos.error.message}`)
+
+  for (const c of (contatos.data ?? []) as Array<{ wa_id: string }>) {
+    const chave = fim8(c.wa_id)
+    if (chave) out.add(chave)
+  }
+  return out
+}
+
 /** Quem, hoje, satisfaz o gatilho do fluxo (antes de checar canal/duplicidade). */
 export function leadsDoGatilho(
   leads: Lead[],
@@ -515,12 +562,16 @@ export async function detalheAutomacao(id: string): Promise<DetalheAutomacao | n
   const a = await obterAutomacao(id)
   if (!a) return null
 
-  const [leads, pedidos, quentes] = await Promise.all([
+  const [leads, pedidos, quentes, jaFalamos] = await Promise.all([
     listarLeadsCompleto({ ...a.publico, incluirOptOut: false }),
     mapaDePedidos(),
     conversasQuentes().catch(() => new Set<string>()),
+    falamosRecentemente().catch(() => new Set<string>()),
   ])
-  const candidatos = leadsDoGatilho(leads, pedidos, a, Date.now(), quentes)
+  const candidatos = leadsDoGatilho(leads, pedidos, a, Date.now(), quentes).filter((l) => {
+    const chave = fim8(l.telefone)
+    return !(chave && jaFalamos.has(chave))
+  })
 
   const dentro = new Map<string, { passo_ordem: number; enviados: number; status: string; proximo_em: string | null }>()
   const { data: execs } = await supabaseAdmin
@@ -575,6 +626,7 @@ export async function detalheAutomacao(id: string): Promise<DetalheAutomacao | n
     `Passos: ${passosAtivos.length === 0 ? 'nenhum com template — não roda' : passosAtivos.map((p) => `${p.esperaDias === 0 ? 'na hora' : `+${p.esperaDias} d`}`).join(' → ')}.`,
     'Só manda com o canal do passo disponível (WhatsApp precisa de telefone; e-mail, de e-mail).',
     `Quem mandou mensagem nas últimas 24h não recebe: o passo espera mais um dia (${quentes.size} ${quentes.size === 1 ? 'pessoa está' : 'pessoas estão'} nessa situação agora).`,
+    `Quem a gente abordou nas últimas 48h pelo inbox, pelo Luigi ou pelo agente não ENTRA agora — entra quando esfriar (${jaFalamos.size} ${jaFalamos.size === 1 ? 'número' : 'números'} nessa situação).`,
   ]
 
   const hora = horaEmRecife()
@@ -654,14 +706,15 @@ export async function rodarAutomacao(id: string, opts?: { forcar?: boolean }): P
   // `conversasQuentes` joga se a leitura falhar: sem saber quem está falando
   // com a gente agora, a rodada inteira para. Uma rodada perdida custa uma hora;
   // escrever por cima de 30 conversas abertas custa a confiança de 30 clientes.
-  const [leads, pedidos, quentes] = await Promise.all([
+  const [leads, pedidos, quentes, jaFalamos] = await Promise.all([
     listarLeadsCompleto({ ...a.publico, incluirOptOut: false }),
     mapaDePedidos(),
     conversasQuentes(),
+    falamosRecentemente(),
   ])
   const porId = new Map(leads.map((l) => [l.id, l]))
 
-  base.inscritos = await inscrever(a, leads, pedidos, passosAtivos[0].esperaDias, quentes)
+  base.inscritos = await inscrever(a, leads, pedidos, passosAtivos[0].esperaDias, quentes, jaFalamos)
   const exec = await executarVencidos(a, porId, pedidos, quentes)
 
   await supabaseAdmin
@@ -678,9 +731,15 @@ async function inscrever(
   leads: Lead[],
   pedidos: Map<string, InfoPedido>,
   esperaPrimeiroPasso: number,
-  quentes: Set<string>
+  quentes: Set<string>,
+  jaFalamos: Set<string>
 ): Promise<number> {
-  const candidatos = leadsDoGatilho(leads, pedidos, a, Date.now(), quentes)
+  const candidatos = leadsDoGatilho(leads, pedidos, a, Date.now(), quentes).filter((l) => {
+    // Abordado nas últimas 48h por outro caminho (inbox, Luigi, agente): não
+    // começa régua em cima disso. Entra na próxima rodada, quando esfriar.
+    const chave = fim8(l.telefone)
+    return !(chave && jaFalamos.has(chave))
+  })
   if (candidatos.length === 0) return 0
 
   // Quem já está no fluxo — consultado em fatias pra não estourar a URL do
