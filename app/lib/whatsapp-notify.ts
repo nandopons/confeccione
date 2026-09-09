@@ -730,7 +730,7 @@ export async function responderFeedbackNegociacao(params: {
       const r = await reabrirPedido(params.pedidoId)
       texto = r.ok
         ? 'Entendido. Vamos buscar outro fornecedor pro seu pedido e te avisamos por aqui assim que tiver novidade.'
-        : 'Entendido. Nossa equipe vai olhar seu pedido e te retorna por aqui em breve.'
+        : 'Entendido. Vou olhar seu pedido e te retorno por aqui.'
       if (!r.ok) console.error('[wa-notify] reabrirPedido via feedback falhou', { pedidoId: params.pedidoId, erro: r.erro })
     } else {
       texto = 'Que bom! Qualquer coisa, é só chamar por aqui.'
@@ -750,9 +750,23 @@ export async function responderFeedbackNegociacao(params: {
 export async function responderPedidoAtendente(waId: string, nome: string | null): Promise<void> {
   try {
     const primeiro = (nome ?? '').trim().split(/\s+/)[0]
-    const texto = `Certo${primeiro ? `, ${primeiro}` : ''}. Um atendente da Confeccione vai falar com você por aqui em instantes.`
+
+    // SEM "UM ATENDENTE VAI FALAR EM INSTANTES" — 09/09/2026.
+    // Era promessa dupla: inventava uma terceira pessoa ("um atendente") e
+    // dava prazo ("em instantes"). Quem responde é o Fernando, e ele responde
+    // quando vê. Aqui só se confirma que o clique chegou — porque o cliente
+    // APERTOU um botão, e sumir depois disso parece que o botão não funciona.
+    const texto = `Certo${primeiro ? `, ${primeiro}` : ''}. Te respondo por aqui.`
     const r = await enviarTexto(waId, texto)
     if (r.ok) await registrarSaidaInbox(waId, nome, r.wamid, texto, null)
+
+    // O AVISO QUE FALTAVA: até agora o cliente clicava em "Falar com atendente"
+    // e ninguém ficava sabendo. O botão existia, respondia bonito e não
+    // chamava ninguém — o pedido de ajuda morria no inbox.
+    const { avisarGestor } = await import('./luigi')
+    await avisarGestor(
+      `${primeiro || waId} pediu pra falar com atendente (${waId}). Responde pelo inbox (/admin/whatsapp).`
+    ).catch(() => false)
   } catch (err) {
     console.error('[wa-notify] responderPedidoAtendente exception', { err })
   }
