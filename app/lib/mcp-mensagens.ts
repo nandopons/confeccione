@@ -69,6 +69,59 @@ export type ResultadoPreparo =
  * preparo com janela fechada e sem template é recusado aqui, e não lá na
  * frente no envio, pra o erro aparecer enquanto ainda dá pra corrigir.
  */
+/**
+ * A gente já falou com esse número hoje? E ele respondeu depois disso?
+ *
+ * Compara pelos 8 últimos dígitos porque o mesmo celular aparece com e sem o
+ * nono dígito, e o contato duplicado é justamente onde o disparo repetido
+ * passaria batido.
+ */
+async function ultimaMensagemDoDia(
+  waId: string
+): Promise<{ hora: string; template: string | null; clienteFalouDepois: boolean } | null> {
+  const fim8 = waId.replace(/\D/g, '').slice(-8)
+  if (fim8.length < 8) return null
+
+  const { data: contatos } = await supabaseAdmin.from('wa_contatos').select('id, wa_id').ilike('wa_id', `%${fim8}`)
+  const ids = ((contatos ?? []) as Array<{ id: string }>).map((c) => c.id)
+  if (ids.length === 0) return null
+
+  const { data: convs } = await supabaseAdmin.from('wa_conversas').select('id').in('contato_id', ids)
+  const convIds = ((convs ?? []) as Array<{ id: string }>).map((c) => c.id)
+  if (convIds.length === 0) return null
+
+  // "Hoje" no fuso de Recife, não no do servidor: às 22h de Recife o servidor
+  // em UTC já virou o dia, e a trava sumiria justo no fim da tarde.
+  const agora = new Date()
+  const emRecife = new Date(agora.toLocaleString('en-US', { timeZone: 'America/Recife' }))
+  const inicioDoDia = new Date(agora.getTime() - (emRecife.getHours() * 3600 + emRecife.getMinutes() * 60) * 1000)
+
+  const { data: msgs } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('direcao, template_nome, criado_em')
+    .in('conversa_id', convIds)
+    .gte('criado_em', inicioDoDia.toISOString())
+    .order('criado_em', { ascending: false })
+    .limit(50)
+
+  const linhas = (msgs ?? []) as Array<{ direcao: string; template_nome: string | null; criado_em: string }>
+  const ultimaSaida = linhas.find((m) => m.direcao === 'saida')
+  if (!ultimaSaida) return null
+
+  const entradaDepois = linhas.some(
+    (m) => m.direcao === 'entrada' && new Date(m.criado_em).getTime() > new Date(ultimaSaida.criado_em).getTime()
+  )
+  return {
+    hora: new Date(ultimaSaida.criado_em).toLocaleTimeString('pt-BR', {
+      timeZone: 'America/Recife',
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+    template: ultimaSaida.template_nome,
+    clienteFalouDepois: entradaDepois,
+  }
+}
+
 export async function prepararMensagem(params: {
   telefone: string
   texto: string
@@ -105,6 +158,23 @@ export async function prepararMensagem(params: {
     if (def && def.status !== 'APPROVED') {
       return { ok: false, erro: `O template "${params.templateNome}" está ${def.status}, não dá pra usar ainda.` }
     }
+    // TEMPLATE DE FORNECEDOR NÃO VAI PRA CLIENTE (09/09/2026)
+    // sondagem_producao diz "uma produção COM VOCÊS" e luigi_apresentacao é a
+    // abertura fria de confecção. Foram os dois que saíram pra Letícia, Nelson,
+    // Bruno, Ramon e Yasmin — clientes com pedido parado, que leram a empresa
+    // deles perguntando se eles fabricam. O prompt já avisava; a lista de 60
+    // apagou o aviso. Aqui não apaga.
+    const SO_PARA_CONFECCAO = new Set(['sondagem_producao', 'luigi_apresentacao', 'oferta_pedido', 'oferta_pedido_v2', 'oferta_pedido_v3', 'oferta_pedido_v4'])
+    if (SO_PARA_CONFECCAO.has(params.templateNome) && params.pedidoId) {
+      return {
+        ok: false,
+        erro:
+          `"${params.templateNome}" é template de abordagem a CONFECÇÃO ("uma produção com vocês") e você está mandando ` +
+          'pra alguém com pedido em aberto, ou seja, um cliente. Pra cliente use duvida_pedido_manha, ' +
+          'duvida_pedido_tarde ou duvida_pedido_noite, conforme a hora — eles falam do pedido dele.',
+      }
+    }
+
     if (def) {
       const esperadas = new Set((def.corpo ?? '').match(/\{\{\s*\d+\s*\}\}/g)?.map((m) => m.replace(/\D/g, '')) ?? [])
       const recebidas = (params.templateVariaveis ?? []).filter((v) => String(v ?? '').trim()).length
@@ -116,6 +186,33 @@ export async function prepararMensagem(params: {
             `Corpo: "${def.corpo}". Informe template_variaveis na ordem — pra {{1}} costuma ser o primeiro nome de quem recebe.`,
         }
       }
+    }
+  }
+
+  // UMA MENSAGEM NOSSA POR DIA, POR PESSOA (09/09/2026)
+  //
+  // O agente mandou duvida_pedido_tarde pra Letícia e pro Nelson às 14h54, e
+  // sondagem_producao pros MESMOS dois às 15h10 — dezesseis minutos depois,
+  // sem que eles tivessem respondido nada. Do lado de lá são duas abordagens
+  // frias da mesma empresa em quinze minutos: isso é spam, e é assim que a
+  // Meta rebaixa a qualidade do número e depois bloqueia o disparo.
+  //
+  // A regra não pode viver no prompt. Quem está no meio de uma lista de 60
+  // perde o fio, e "revisa a conversa antes" é exatamente o tipo de instrução
+  // que se apaga sob pressão. Aqui é consulta ao banco: ou passou o dia, ou
+  // não sai.
+  //
+  // A exceção é a pessoa ter escrito depois: se ela respondeu, a conversa é
+  // dela e responder de novo é atendimento, não abordagem.
+  const ultimo = await ultimaMensagemDoDia(waId)
+  if (ultimo && !ultimo.clienteFalouDepois) {
+    return {
+      ok: false,
+      erro:
+        `Já mandamos mensagem pra esse número hoje às ${ultimo.hora}` +
+        `${ultimo.template ? ` (template ${ultimo.template})` : ''} e ele ainda não respondeu. ` +
+        'Duas abordagens no mesmo dia viram spam e derrubam a qualidade do número na Meta. ' +
+        'Espere a resposta ou deixe pra amanhã — e siga pra próxima pessoa da lista.',
     }
   }
 
