@@ -47,12 +47,43 @@ async function vincularContato(waId: string): Promise<{ clienteId: string | null
 }
 
 /** Garante wa_contatos + wa_conversas pro telefone; retorna conversaId (ou null). */
-async function garantirConversa(waId: string, nome: string | null): Promise<string | null> {
-  const { data: contatoExistente } = await supabaseAdmin
+/**
+ * Acha o contato do número, tolerando o nono dígito.
+ *
+ * No Brasil o mesmo telefone aparece de duas formas: 5581998496055 (como o
+ * cliente cadastra no site) e 558198496055 (como a Meta costuma entregar o
+ * wa_id). Comparando wa_id por igualdade, o mesmo cliente virava dois contatos
+ * e duas conversas — e o Luigi atendia na conversa órfã, sem enxergar o pedido
+ * nem o histórico. Em 09/09/2026 havia 19 números duplicados assim.
+ *
+ * Então: tenta o wa_id exato e, se não achar, procura pelos últimos 8 dígitos
+ * (que não mudam com DDI, nono dígito ou formatação). Preferimos o contato com
+ * mais histórico, que é o que carrega o pedido e as mensagens antigas.
+ */
+async function acharContatoPorNumero(waId: string): Promise<{ id: string; nome: string | null } | null> {
+  const { data: exato } = await supabaseAdmin
     .from('wa_contatos')
     .select('id, nome')
     .eq('wa_id', waId)
     .maybeSingle()
+  if (exato?.id) return { id: exato.id as string, nome: (exato.nome as string | null) ?? null }
+
+  const tel8 = waId.replace(/\D/g, '').slice(-8)
+  if (tel8.length < 8) return null
+
+  const { data: parecidos } = await supabaseAdmin
+    .from('wa_contatos')
+    .select('id, nome, criado_em')
+    .like('wa_id', `%${tel8}`)
+    .order('criado_em', { ascending: true })
+    .limit(5)
+
+  const escolhido = (parecidos ?? [])[0] as { id: string; nome: string | null } | undefined
+  return escolhido ? { id: escolhido.id, nome: escolhido.nome ?? null } : null
+}
+
+async function garantirConversa(waId: string, nome: string | null): Promise<string | null> {
+  const contatoExistente = await acharContatoPorNumero(waId)
 
   let contatoId = contatoExistente?.id as string | undefined
   if (!contatoId) {
@@ -329,15 +360,28 @@ export async function notificarOfertaFornecedor(params: {
  */
 export async function janela24hAberta(waId: string): Promise<boolean> {
   try {
-    const { data: contato } = await supabaseAdmin.from('wa_contatos').select('id').eq('wa_id', waId).maybeSingle()
-    if (!contato?.id) return false
-    const { data: conversa } = await supabaseAdmin.from('wa_conversas').select('id').eq('contato_id', contato.id).maybeSingle()
-    if (!conversa?.id) return false
+    // Todos os contatos do número, não só o wa_id exato: com o nono dígito o
+    // mesmo cliente pode ter dois contatos, e a mensagem que abriu a janela
+    // pode estar na conversa do outro. Olhar só um dava "fechada" com a janela
+    // aberta — e aí a resposta sairia como template (mais cara e mais fria) ou
+    // seria recusada sem necessidade.
+    const tel8 = waId.replace(/\D/g, '').slice(-8)
+    const { data: contatos } = await supabaseAdmin
+      .from('wa_contatos')
+      .select('id')
+      .like('wa_id', tel8.length === 8 ? `%${tel8}` : waId)
+    const ids = (contatos ?? []).map((c) => c.id as string)
+    if (ids.length === 0) return false
+
+    const { data: conversas } = await supabaseAdmin.from('wa_conversas').select('id').in('contato_id', ids)
+    const conversaIds = (conversas ?? []).map((c) => c.id as string)
+    if (conversaIds.length === 0) return false
+
     const desde = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
     const { count } = await supabaseAdmin
       .from('wa_mensagens')
       .select('id', { count: 'exact', head: true })
-      .eq('conversa_id', conversa.id)
+      .in('conversa_id', conversaIds)
       .eq('direcao', 'entrada')
       .gte('criado_em', desde)
     return (count ?? 0) > 0
