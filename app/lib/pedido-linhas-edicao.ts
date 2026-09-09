@@ -268,6 +268,69 @@ export async function avisarClienteEdicaoFornecedor(params: {
   }
 }
 
+/**
+ * Edição pedida pelo CLIENTE na conversa do WhatsApp (Luigi).
+ *
+ * POR QUE ISTO EXISTE
+ * Até 09/09/2026 o cliente só editava pelo visualizador. Quando ele pedia a
+ * troca por mensagem — "pode trocar o pima por algodão penteado 30/1" — o
+ * Luigi não tinha como fazer e respondia "alguém da equipe já ajusta", o que
+ * na prática significava que ninguém ajustava. Aqui o pedido dele vira ação.
+ *
+ * Passa pelas mesmas travas do visualizador (pago não altera, cancelado não
+ * altera, orçamento definido volta a aguardar o fornecedor) e avisa o
+ * fornecedor que aceitou — sem isso ele produziria com a informação velha.
+ */
+export async function editarLinhasPedidoCliente(params: {
+  pedidoId: string
+  linhas: LinhaEditada[]
+}): Promise<ResultadoEdicao> {
+  const { data: antesData } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('linhas')
+    .eq('id', params.pedidoId)
+    .maybeSingle<{ linhas: LinhaPedido[] | null }>()
+  const antes: LinhaPedido[] = Array.isArray(antesData?.linhas) ? antesData.linhas : []
+
+  const r = await salvarLinhasEditadas({ pedidoId: params.pedidoId, linhas: params.linhas, autor: 'cliente' })
+  if (!r.ok || !r.mudou) return r
+
+  // Avisa o fornecedor que aceitou. Failure-soft: o aviso não pode desfazer a
+  // edição que já valeu — a mesma regra do resto do módulo.
+  void registrarEdicaoClienteAviso(params.pedidoId, antes, r.linhas).catch((err) =>
+    console.error('[pedido-linhas] aviso ao fornecedor falhou', { err })
+  )
+  return r
+}
+
+/** Só o aviso ao fornecedor (o histórico já foi gravado por salvarLinhasEditadas). */
+async function registrarEdicaoClienteAviso(pedidoId: string, antes: LinhaPedido[], depois: LinhaPedido[]): Promise<void> {
+  const diff = resumirDiffLinhas(antes, depois)
+  if (!diff.mudou) return
+  const { data: oferta } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id, leads_fornecedores(nome, whatsapp)')
+    .eq('pedido_id', pedidoId)
+    .eq('status', 'aceita')
+    .maybeSingle<{ id: string; leads_fornecedores: { nome: string | null; whatsapp: string | null } | null }>()
+  const tel = oferta?.leads_fornecedores?.whatsapp
+  if (!oferta || !tel) return
+  const { data: ped } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('codigo, nome')
+    .eq('id', pedidoId)
+    .maybeSingle<{ codigo: string | null; nome: string | null }>()
+  const cliente = primeiroNome(ped?.nome ?? '') || 'O cliente'
+  const cod = ped?.codigo ? ` nº ${ped.codigo}` : ''
+  await avisoOficial({
+    telefone: tel,
+    nome: oferta.leads_fornecedores?.nome ?? null,
+    texto: `${cliente} ajustou o pedido${cod} na Confeccione:\n${diff.resumo}\n\nConfira antes de orçar/produzir:\nhttps://www.confeccione.com.br/fornecedor/oferta/${oferta.id}`,
+    resumo: `${cliente} ajustou os produtos do pedido${cod} — confira antes de orçar`,
+    caminhoBotao: `fornecedor/oferta/${oferta.id}`,
+  })
+}
+
 /** Última edição feita pelo fornecedor (pro selo no visualizador do cliente). */
 export async function ultimaEdicaoFornecedor(pedidoId: string): Promise<{ em: string; resumo: string | null; lids: string[] } | null> {
   const { data } = await supabaseAdmin

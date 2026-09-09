@@ -37,6 +37,10 @@ import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
 import { enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
 import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
+// O tipo local LinhaPedido deste arquivo é um recorte antigo, sem material nem
+// descricao. Pra editar a peça de verdade usamos o tipo canônico do produto.
+import { type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
+import { editarLinhasPedidoCliente } from './pedido-linhas-edicao'
 import { registrarUsoIa } from './uso-ia'
 import { ehNumeroGestao, numerosGestao } from './gestao-whatsapp'
 import {
@@ -124,6 +128,10 @@ function dormir(ms: number): Promise<void> {
 }
 
 type Entrada = Record<string, unknown>
+
+function num(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined
+}
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined
@@ -367,9 +375,41 @@ const FERRAMENTA_ENCERRAR: Anthropic.Messages.Tool = {
   },
 }
 
+/**
+ * Ajuste da peça pedido pelo cliente na conversa.
+ *
+ * Antes disto, quando o cliente pedia "troca o pima por algodão penteado", o
+ * Luigi só sabia responder "alguém da equipe já ajusta" — e ninguém ajustava.
+ * A ferramenta age dentro das travas do produto: pago não altera, e mexer numa
+ * peça com orçamento definido devolve o orçamento pro fornecedor refazer, o
+ * que o Luigi precisa avisar ao cliente na mesma conversa.
+ */
+const FERRAMENTA_AJUSTAR_PECA: Anthropic.Messages.Tool = {
+  name: 'ajustar_peca_pedido',
+  description:
+    'Altera uma peça do pedido quando o CLIENTE pedir a mudança nesta conversa: material/tecido, modelo, cor, quantidade ' +
+    'ou descrição. Informe só o que muda. A peça é identificada pela posição (1 = primeira do pedido, como aparece no ' +
+    'contexto). Antes de chamar, repita o que entendeu e espere ele confirmar. Depois de alterar, diga o que ficou. ' +
+    'Se o orçamento já estava definido, ele volta pro fornecedor refazer — avise isso ao cliente. Pedido pago não altera: ' +
+    'nesse caso chame chamar_humano. Não invente valor nem prazo novo.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      pedido: { type: 'string', description: 'Código ou id do pedido (do contexto). Sem isto, usa o pedido em foco.' },
+      posicao: { type: 'number', minimum: 1, maximum: 50, description: '1 = primeira peça do pedido.' },
+      material: { type: 'string', maxLength: 200, description: 'Tecido/material, com as palavras do cliente.' },
+      modelo: { type: 'string', maxLength: 120 },
+      cor: { type: 'string', maxLength: 80 },
+      quantidade: { type: 'number', minimum: 1, maximum: 100000 },
+      descricao: { type: 'string', maxLength: 500 },
+    },
+    required: ['posicao'],
+  },
+}
+
 function ferramentasDoModo(modo: Exclude<ModoLuigi, 'desligado'>): Anthropic.Messages.Tool[] {
   return modo === 'responde'
-    ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_MOTIVO_PARADA, FERRAMENTA_ENCERRAR]
+    ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_MOTIVO_PARADA, FERRAMENTA_ENCERRAR, FERRAMENTA_AJUSTAR_PECA]
     : [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_MOTIVO_PARADA]
 }
 
@@ -405,6 +445,48 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
       if (!motivo || !(MOTIVOS_ENCERRAMENTO as readonly string[]).includes(motivo)) throw new Error('motivo inválido')
       const r = await encerrarPedido(p.id, motivo, 'luigi', str(entrada.observacao) ?? null)
       return { ok: true, codigo: r.codigo, etapa: r.etapa, encerrado_motivo: r.encerrado_motivo }
+    }
+    case 'ajustar_peca_pedido': {
+      const p = acharNoContexto(ctx, str(entrada.pedido))
+      if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+      const posicao = num(entrada.posicao)
+      if (!posicao || posicao < 1) throw new Error('posicao é obrigatória (1 = primeira peça)')
+
+      const { data: ped } = await supabaseAdmin
+        .from('pedidos_assistente')
+        .select('linhas')
+        .eq('id', p.id)
+        .maybeSingle<{ linhas: LinhaPedidoCompleta[] | null }>()
+      const atuais: LinhaPedidoCompleta[] = Array.isArray(ped?.linhas) ? ped.linhas : []
+      if (posicao > atuais.length) throw new Error(`o pedido tem ${atuais.length} peça(s); não existe a ${posicao}ª`)
+
+      // Mantém as outras peças como estão; origIdx preserva lid, preço já
+      // definido pelo fornecedor e a posição dos mockups.
+      const linhas = atuais.map((l, i) => {
+        const base = { ...l, origIdx: i }
+        if (i !== posicao - 1) return base
+        return {
+          ...base,
+          material: str(entrada.material) ?? l.material,
+          modelo: str(entrada.modelo) ?? l.modelo,
+          cor: str(entrada.cor) ?? l.cor,
+          total: num(entrada.quantidade) ?? l.total,
+          descricao: str(entrada.descricao) ?? l.descricao,
+        }
+      })
+
+      const r = await editarLinhasPedidoCliente({ pedidoId: p.id, linhas })
+      if (!r.ok) throw new Error(r.erro)
+      return {
+        ok: true,
+        codigo: p.codigo,
+        mudou: r.mudou,
+        resumo: r.resumo,
+        orcamento_reaberto: r.orcamentoReaberto,
+        aviso: r.orcamentoReaberto
+          ? 'O orçamento voltou pro fornecedor refazer — diga isso ao cliente, sem prometer valor nem prazo novo.'
+          : null,
+      }
     }
     default:
       throw new Error(`ferramenta desconhecida: ${nome}`)
