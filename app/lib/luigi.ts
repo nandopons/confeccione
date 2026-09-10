@@ -326,6 +326,21 @@ type PedidoContexto = {
   orcamento: string | null
   pagamento: string | null
   fornecedor: string | null
+  /**
+   * O que falta pra este pedido poder ir pras confecções, em português.
+   *
+   * POR QUE ISTO ENTRA NO CONTEXTO — 10/09/2026
+   * O Luigi perguntou à Kelly "pra qual e-mail mando o resumo?" quando o
+   * e-mail dela já estava gravado no pedido. Ele não estava desatento: o
+   * contexto não trazia esses campos, então ele não tinha como saber. Perguntar
+   * o que a pessoa já deu é a reclamação mais recorrente do dia, e a causa é
+   * sempre esta — dado existe no banco e não chega ao prompt.
+   *
+   * Vem pronto e negativo de propósito: só o que FALTA. Lista do que já temos
+   * viraria convite pra ele "confirmar" cada item, que é a mesma praga por
+   * outro caminho.
+   */
+  falta_para_liberar: string[]
   link_do_pedido: string
   motivo_parada: string | null
   encerrado_motivo: string | null
@@ -523,6 +538,38 @@ async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | 
   }
 }
 
+/**
+ * O que falta, por pedido, pra ele poder ser liberado às confecções.
+ *
+ * A lista é a MESMA de conferirPedido (pedido-fechamento.ts) — se as duas
+ * divergirem, o Luigi pede uma coisa e a ferramenta exige outra, e o cliente
+ * paga o preço respondendo duas vezes. A view de etapas não traz cep, numero
+ * nem cpf_cnpj, então lê direto da tabela.
+ */
+async function dadosDeEntrega(pedidoIds: string[]): Promise<Map<string, string[]>> {
+  const mapa = new Map<string, string[]>()
+  if (pedidoIds.length === 0) return mapa
+
+  const { data } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, nome, telefone, email, cep, numero, cpf_cnpj')
+    .in('id', pedidoIds)
+
+  for (const p of (data ?? []) as Array<Record<string, string | null>>) {
+    const vazio = (v: string | null | undefined) => !(v ?? '').trim()
+    const falta = [
+      vazio(p.nome) && 'nome de quem recebe',
+      vazio(p.telefone) && 'telefone',
+      vazio(p.email) && 'e-mail',
+      !(p.cep ?? '').replace(/\D/g, '') && 'CEP',
+      vazio(p.numero) && 'número da casa',
+      !(p.cpf_cnpj ?? '').replace(/\D/g, '') && 'CNPJ (ou CPF)',
+    ].filter(Boolean) as string[]
+    mapa.set(p.id as string, falta)
+  }
+  return mapa
+}
+
 async function montarContexto(conversaId: string, waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
   const [pedidos, conta, cadastroFornecedor] = await Promise.all([
     pedidosDoContato(waId, clienteId),
@@ -537,7 +584,11 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
   const fechados = pedidos.filter((p) => !(ETAPAS_ABERTAS as string[]).includes(p.etapa)).slice(0, 2)
   const escolhidos = [...abertos, ...fechados]
   const ids = escolhidos.map((p) => p.id)
-  const [fornecedores, prazos] = await Promise.all([fornecedoresAceitos(ids), prazosDesejados(ids)])
+  const [fornecedores, prazos, dadosCliente] = await Promise.all([
+    fornecedoresAceitos(ids),
+    prazosDesejados(ids),
+    dadosDeEntrega(ids),
+  ])
 
   const lista = escolhidos.map<PedidoContexto>((p) => {
     const emAberto = (ETAPAS_ABERTAS as string[]).includes(p.etapa)
@@ -558,6 +609,7 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
       orcamento: p.orcamento_definido_em && p.valor_centavos ? `${reais(p.valor_centavos)} (definido há ${dias(p.orcamento_definido_em)} dias)` : null,
       pagamento: p.pagamento_status ?? null,
       fornecedor: fornecedores.get(p.id) ?? null,
+      falta_para_liberar: dadosCliente.get(p.id) ?? [],
       link_do_pedido: visualizadorPedidoUrl(p.id),
       motivo_parada: p.motivo_parada,
       encerrado_motivo: p.encerrado_motivo,
@@ -1689,6 +1741,12 @@ PERGUNTE O PRAZO, E PERGUNTE SE ELE TEM FOLGA. O prazo é o campo que mais decid
 Então não pergunte só "pra quando você precisa?". Pergunte se esse prazo tem folga: "Você precisa pra quando? Se der pra esperar um pouco mais, abre mais confecção e costuma sair melhor." Se ele disser uma data apertada, não recuse nem prometa — registre o que ele falou e siga.
 
 Nunca invente prazo de produção nem diga que "dá pra fazer em X dias": quem define isso é a confecção que aceitar, no orçamento. Você pergunta e anota; quem promete é ela.
+
+PEDIDO COM PEÇAS PRONTAS NÃO FICA PARADO. Cada pedido no contexto traz "falta_para_liberar". Se a lista estiver VAZIA, o pedido pode ir pras confecções: mande o resumo, confirme com ele e libere. Se tiver itens, peça o PRIMEIRO da lista — um por mensagem — e siga até zerar.
+
+O QUE NÃO ESTÁ NA LISTA, VOCÊ JÁ TEM. Não pergunte, não confirme, não mencione. A Kelly deu o e-mail dela no cadastro e mesmo assim ouviu "pra qual e-mail mando o resumo?" — do lado dela, isso é a empresa não olhar o que ela já preencheu. Se "falta_para_liberar" não cita e-mail, o e-mail está lá.
+
+E não empurre pro cliente o que você mesmo pode fazer: ele NÃO precisa entrar no site nem clicar em "Buscar fornecedor". Você libera daqui com liberar_para_fornecedores assim que ele disser que está certo. Mandar ele clicar em botão é transferir pra ele um passo que é seu — e é onde a maioria dos pedidos morre.
 
 NÃO ANUNCIE O QUE VOCÊ PODE FAZER AGORA. "Vou definir as peças no pedido", "já monto isso pra você", "agora eu registro" — nada disso. Você não tem um "depois": sua vez termina quando você para de escrever, e só recomeça se o cliente mandar outra mensagem. Se ele não mandar, o que você prometeu simplesmente não acontece, e ele fica achando que aconteceu.
 
