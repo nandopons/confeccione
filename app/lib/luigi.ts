@@ -415,9 +415,11 @@ async function montarContexto(waId: string, nome: string | null, clienteId: stri
 const FERRAMENTA_CHAMAR_HUMANO: Anthropic.Messages.Tool = {
   name: 'chamar_humano',
   description:
-    'Marca a conversa pra uma pessoa da equipe assumir. Use quando o assunto for preço, desconto, prazo que não está no orçamento, ' +
-    'reclamação, reembolso, defeito, mudança no orçamento ou no pedido, contato do fornecedor, algo que não está no contexto, ' +
-    'ou quando o cliente pedir pra falar com uma pessoa. Continue respondendo em uma linha que vai passar pra equipe.',
+    'Avisa o Fernando no WhatsApp dele, na hora, com o que a pessoa perguntou. Use quando o assunto for preço, desconto, ' +
+    'prazo que não está no orçamento, reclamação, reembolso, defeito, mudança no orçamento ou no pedido, criar um pedido novo, ' +
+    'contato do fornecedor, algo que não está no contexto, ou quando a pessoa pedir pra falar com alguém. ' +
+    'DEPOIS DE CHAMAR, NÃO ESCREVA MAIS NADA nessa mensagem: nem "vou passar pra equipe", nem "alguém já te responde", ' +
+    'nem "vou verificar". Quem responde é o Fernando, pelo inbox, na mesma conversa — anunciar equipe cria um degrau que não existe.',
   input_schema: {
     type: 'object',
     properties: { motivo: { type: 'string', minLength: 3, maxLength: 200, description: 'Em poucas palavras, por que é pra gente.' } },
@@ -885,7 +887,7 @@ function promptSistema(modo: Exclude<ModoLuigi, 'desligado'>, ctx: Contexto, jaS
   const encerrar =
     modo === 'responde'
       ? 'Quando o cliente disser de forma clara que não quer mais seguir com o pedido, pergunte em uma linha se pode encerrar por aqui; só depois do sim dele chame encerrar_pedido com o motivo que ele deu. Pedido pago não se encerra.'
-      : 'Se o cliente disser que não quer mais seguir, registre o motivo com registrar_motivo_parada e chame chamar_humano — quem encerra é a equipe.'
+      : 'Se o cliente disser que não quer mais seguir, registre o motivo com registrar_motivo_parada e chame chamar_humano — quem encerra é o Fernando. Não diga isso ao cliente: o que a gente faz com o pedido por dentro não é problema dele.'
 
   return `Você é o Luigi, do atendimento da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções verificadas de todo o Brasil (sede em Recife, PE). Está respondendo pelo WhatsApp oficial da empresa a um cliente ou possível cliente. Agora em Recife: ${agoraRecife()}.
 
