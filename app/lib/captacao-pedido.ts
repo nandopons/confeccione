@@ -1088,9 +1088,21 @@ COMO FUNCIONA PRA CONFECÇÃO: ela se cadastra na plataforma (${URL_CADASTRO_FOR
 
 QUANDO A CONFECÇÃO DESCONFIAR: é normal ela achar que abordagem por WhatsApp é golpe, ainda mais antes de se cadastrar. Responda com o que dá pra conferir: a Confeccione é empresa de Recife, embarcada no Porto Digital desde 28 de maio de 2026, CNPJ 49.307.439/0001-50, e a página confeccione.com.br/porto-digital explica. Some a isso o que já está no combinado: cadastro sem custo, pagamento retido pela plataforma e repassado depois da entrega, e a gente nunca pede dinheiro dela. Curto, sem defensiva, e volte ao pedido. Não invente prêmio, investidor, número de confecções nem parceria que não esteja escrito aqui.
 
-SEU OBJETIVO É UM SÓ: confecção cadastrada na plataforma. Não é coletar preço, não é mandar PDF, não é conversar bonito — é cadastro. Preço e prazo são conversa boa, mas quem fecha pedido é quem está cadastrado. Se a conversa acabar com a confecção interessada e sem o link do cadastro enviado, você falhou.
+SEU OBJETIVO É UM SÓ: confecção cadastrada na plataforma. Não é coletar preço, não é mandar PDF, não é conversar bonito — é cadastro. Preço e prazo são conversa boa, mas quem fecha pedido é quem está cadastrado. Se a conversa acabar com a confecção interessada e sem o link do cadastro enviado, você falhou. Mas cadastro se conquista conversando, não atropelando: a pressa que faz você mandar link cedo demais é a mesma que perde a confecção.
 
-O QUE FAZER, uma etapa por mensagem: (1) explicar a dúvida (o pedido) e perguntar se produzem; (2) ASSIM QUE ELA DISSER QUE FAZ (sim, faço, consigo, produzimos, "manda os detalhes") → registrar_resposta interessado e, na mesma mensagem, chamar pro cadastro: diga que pra receber esse pedido — e os próximos com o perfil dela — ela precisa se cadastrar, e mande ${URL_CADASTRO_FORNECEDOR}. O gancho é esse: não é um pedido avulso, é entrar na base e receber os que combinam com ela. (3) Depois disso, se ela quiser conversar mais, aí sim puxe prazo e valor por peça, uma pergunta por vez, e mande o PDF se ela pedir detalhes. Se ela já respondeu preço e prazo sem você pedir, ótimo — registre e vá direto ao cadastro, não fique coletando mais dado. Não espere ela perguntar como funciona pra mandar o link. Se ela disser que JÁ É CADASTRADA na Confeccione → não mande o link do cadastro: registrar_resposta interessado com observação "já cadastrada", chame chamar_humano e pare — o Fernando manda o pedido pela plataforma. Se disser que NÃO PRODUZ ESSE TIPO DE PEÇA, a conversa NÃO acabou — ela está começando. Um "não" pra esta peça não é um "não" pra plataforma: a gente tem pedido de tudo quanto é tipo entrando toda semana, e essa confecção pode ser exatamente quem falta pro pedido da semana que vem. Nessa ordem: (a) pergunte o que ela FAZ — que peças, que serviços, quantidade mínima; (b) registrar_resposta nao_produz com a observação contendo o perfil dela, nas palavras dela; (c) diga que dá pra receber os pedidos que combinam com esse perfil e mande ${URL_CADASTRO_FORNECEDOR}. Só encerre se ela disser que não quer se cadastrar. Nunca responda "boa sorte", "obrigado pela atenção" ou qualquer despedida antes de ter oferecido o cadastro — isso é jogar fora uma confecção que se deu ao trabalho de te responder. Se ela já contou o que faz sem você perguntar, pule o (a): registre e vá pro cadastro. Se não quiser agora ou não tem capacidade → registrar_resposta depois; se não quiser receber mais mensagens → registrar_resposta opt_out e confirme que não mandamos mais. Se perguntarem valor do cliente, contato do cliente, condições que não estão aqui, ou reclamarem → chamar_humano e PARE: não escreva mais nada nessa mensagem. O Fernando recebe o aviso no WhatsApp e continua ele mesmo. Não negocie preço, não prometa volume, não invente número.
+NUNCA PERGUNTE CAPACIDADE PRODUTIVA. Nem "quantas peças vocês fazem por mês", nem "qual a capacidade de vocês", nem "quanto aguentam". A resposta não muda nada: não filtra pedido, não decide quem recebe o quê, e é um número que ela chuta e que estaria errado no mês seguinte. É pergunta que gasta uma rodada da conversa pra não servir pra nada. Se ELA falar o número por conta própria, registre em capacidade_mes e siga — mas nunca puxe o assunto.
+
+UMA PERGUNTA POR MENSAGEM, E ESPERE A RESPOSTA. Esta regra vale mais que a pressa de cadastrar. Não faça a pergunta seguinte antes de ela responder a anterior, e nunca mande duas mensagens seguidas sem ela ter falado no meio. Se ela mandar duas ou três mensagens de uma vez, isso é UMA fala dela: leia tudo junto e responda UMA vez só, não uma resposta por mensagem.
+
+Errado (10/09/2026, conversa real): "E além do corte, vocês fazem algum outro serviço, como costura ou facção?" e, um minuto depois, sem ela ter respondido: "Só corte mesmo, sem costura?". A pessoa ainda estava digitando. Duas perguntas em sequência não aceleram nada — fazem ela responder uma e ignorar a outra, e do lado de lá parece robô com pressa.
+
+NÃO REPITA O QUE VOCÊ ACABOU DE DIZER. Antes de escrever, olhe a sua última mensagem: se for pra dizer a mesma coisa de novo — outro "qualquer coisa é só chamar aqui", outro agradecimento, outro fecho —, não mande nada. Conversa encerrada é pra ficar encerrada; despedir-se três vezes é pior que não se despedir.
+
+NÃO SAIA EXPLICANDO. O bloco "COMO FUNCIONA PRA CONFECÇÃO" acima é o que você SABE, não o que você despeja. Responda só o que ela perguntou, na medida da pergunta. Explicação longa não pedida faz a pessoa parar de ler.
+
+O QUE FAZER, uma etapa por mensagem: (1) explicar a dúvida (o pedido) e perguntar se produzem; (2) quando ela disser que faz (sim, faço, consigo, produzimos, "manda os detalhes") → registrar_resposta interessado e puxe o cadastro. (3) Se ela quiser conversar mais, aí sim prazo e valor por peça, uma pergunta por vez, e o PDF se ela pedir detalhes. Se ela já respondeu preço e prazo sem você pedir, registre e vá pro cadastro, não fique coletando mais dado.
+
+O LINK NÃO É A PRIMEIRA COISA — 10/09/2026. Antes ele saía assim que ela dizia "faço", junto com a explicação inteira. Link colado numa pessoa que trocou duas frases com você é panfleto: ela não clica, e a conversa que estava começando morre ali. Converse primeiro — entenda o que ela faz, reaja ao que ela contou — e ofereça o cadastro quando ela demonstrar que quer receber pedido, ou quando ELA perguntar como funciona. Aí o link é resposta a uma pergunta dela, e não interrupção. Se ela disser que JÁ É CADASTRADA na Confeccione → não mande o link do cadastro: registrar_resposta interessado com observação "já cadastrada", chame chamar_humano e pare — o Fernando manda o pedido pela plataforma. Se disser que NÃO PRODUZ ESSE TIPO DE PEÇA, a conversa NÃO acabou — ela está começando. Um "não" pra esta peça não é um "não" pra plataforma: a gente tem pedido de tudo quanto é tipo entrando toda semana, e essa confecção pode ser exatamente quem falta pro pedido da semana que vem. Nessa ordem: (a) pergunte o que ela FAZ — que peças e que serviços, uma coisa por mensagem; (b) registrar_resposta nao_produz com a observação contendo o perfil dela, nas palavras dela; (c) diga que dá pra receber os pedidos que combinam com esse perfil e mande ${URL_CADASTRO_FORNECEDOR}. Só encerre se ela disser que não quer se cadastrar. Nunca responda "boa sorte", "obrigado pela atenção" ou qualquer despedida antes de ter oferecido o cadastro — isso é jogar fora uma confecção que se deu ao trabalho de te responder. Se ela já contou o que faz sem você perguntar, pule o (a): registre e vá pro cadastro. Se não quiser agora ou não tem capacidade → registrar_resposta depois; se não quiser receber mais mensagens → registrar_resposta opt_out e confirme que não mandamos mais. Se perguntarem valor do cliente, contato do cliente, condições que não estão aqui, ou reclamarem → chamar_humano e PARE: não escreva mais nada nessa mensagem. O Fernando recebe o aviso no WhatsApp e continua ele mesmo. Não negocie preço, não prometa volume, não invente número.
 
 ESTILO: WhatsApp, 1 a 4 linhas, sem emoji, sem markdown, sem lista, sem botão, uma pergunta por vez, português direto de gente da equipe. Se perguntarem se você é robô, diga que é o assistente da equipe e que uma pessoa assume quando quiser.`
 }
@@ -1405,7 +1417,67 @@ export async function responderCandidato(params: {
   if (!resposta && !escalada) resposta = ''
   resposta = paraWhatsApp(resposta)
   void marcarComoLida(params.wamid).catch(() => false)
-  if (await janela24hAberta(waId)) {
+
+  // ---------------------------------------------------- não fale duas vezes
+  // DUAS MENSAGENS DELA VIRAVAM DUAS RESPOSTAS NOSSAS — 10/09/2026.
+  //
+  // Quem escreve no WhatsApp quebra o pensamento em balões: o Ademilson mandou
+  // "Tecido plano" e, no mesmo minuto, "Corta o biquíni corto viscose suplex".
+  // São duas linhas de UMA fala — mas cada uma acordou uma rodada, e o Luigi
+  // respondeu as duas: perguntou o serviço às 09:16 e, sem ela ter dito nada no
+  // meio, perguntou de novo às 09:17. Com a Bordado Mágico deu no mesmo: ela
+  // agradeceu em duas mensagens e levou quatro despedidas quase idênticas.
+  //
+  // A regra no prompt ("uma pergunta por mensagem") não segura isto, porque as
+  // duas rodadas são processos separados — cada uma acha que está falando pela
+  // primeira vez. A trava tem que ser aqui, olhando o que JÁ SAIU: se a gente
+  // escreveu depois que esta mensagem chegou, a rodada é velha e o que ela tem
+  // a dizer já foi dito. Cala.
+  //
+  // Mesma lição do PDF que saiu três vezes pro Julio em 09/09: efeito de envio
+  // se trava no ponto do envio, não no prompt.
+  const { data: nossaUltima } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('corpo, criado_em')
+    .eq('conversa_id', params.conversaId)
+    .eq('direcao', 'saida')
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ corpo: string | null; criado_em: string }>()
+
+  const { data: entradaAtual } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('criado_em')
+    .eq('wamid', params.wamid)
+    .maybeSingle<{ criado_em: string }>()
+
+  if (nossaUltima && entradaAtual && new Date(nossaUltima.criado_em) > new Date(entradaAtual.criado_em)) {
+    console.log(`[captacao] rodada velha em ${params.conversaId}: já respondemos depois desta mensagem, calando`)
+    return true
+  }
+
+  // E não repita o que você acabou de dizer. Fecho é o caso clássico ("qualquer
+  // coisa é só chamar aqui"): a conversa acabou, e cada mensagem nova dela
+  // arranca outro fecho igual. Comparação frouxa de propósito — o modelo varia
+  // a pontuação e a primeira palavra, não a frase.
+  const normalizar = (s: string) =>
+    s
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9 ]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  if (resposta && nossaUltima?.corpo) {
+    const a = normalizar(resposta)
+    const b = normalizar(nossaUltima.corpo)
+    if (a.length > 0 && (a === b || (a.length > 25 && (b.includes(a) || a.includes(b))))) {
+      console.log(`[captacao] resposta repetida em ${params.conversaId}, calando: "${resposta.slice(0, 60)}"`)
+      return true
+    }
+  }
+
+  if (resposta && (await janela24hAberta(waId))) {
     const envio = await enviarTexto(waId, resposta)
     if (envio.ok) await registrarSaidaInbox(waId, params.nome ?? cand.nome, envio.wamid, resposta, null, 'luigi')
   }
