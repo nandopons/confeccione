@@ -746,7 +746,7 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
       }
     }
     case 'registrar_motivo_parada': {
-      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      const p = acharNoContexto(ctx, str(entrada.pedido))
       const motivo = str(entrada.motivo)
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
       if (!motivo) throw new Error('motivo é obrigatório')
@@ -754,7 +754,7 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
       return { ok: true, codigo: r.codigo, motivo_parada: r.motivo_parada }
     }
     case 'encerrar_pedido': {
-      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      const p = acharNoContexto(ctx, str(entrada.pedido))
       const motivo = str(entrada.motivo) as MotivoEncerramento | undefined
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
       if (!motivo || !(MOTIVOS_ENCERRAMENTO as readonly string[]).includes(motivo)) throw new Error('motivo inválido')
@@ -762,7 +762,7 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
       return { ok: true, codigo: r.codigo, etapa: r.etapa, encerrado_motivo: r.encerrado_motivo }
     }
     case 'ajustar_peca_pedido': {
-      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      const p = acharNoContexto(ctx, str(entrada.pedido))
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
       const posicao = num(entrada.posicao)
       if (!posicao || posicao < 1) throw new Error('posicao é obrigatória (1 = primeira peça)')
@@ -804,7 +804,7 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
       }
     }
     case 'definir_pecas_pedido': {
-      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      const p = acharNoContexto(ctx, str(entrada.pedido))
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
       const lista = Array.isArray(entrada.pecas) ? (entrada.pecas as Array<Record<string, unknown>>) : []
       if (lista.length === 0) throw new Error('informe ao menos uma peça')
@@ -872,7 +872,7 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
       }
     }
     case 'enviar_resumo_pedido': {
-      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      const p = acharNoContexto(ctx, str(entrada.pedido))
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
       const r = await enviarResumoParaCliente(p.id)
       if (!r.ok) throw new Error(r.erro ?? 'não foi possível enviar o resumo')
@@ -888,7 +888,7 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
       }
     }
     case 'liberar_para_fornecedores': {
-      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      const p = acharNoContexto(ctx, str(entrada.pedido))
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
       const r = await liberarParaFornecedores(p.id, { ignorarDivergencias: entrada.cliente_ja_confirmou === true })
       if (!r.ok) {
