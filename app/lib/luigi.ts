@@ -2300,7 +2300,11 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
 
     // Cliente que manda duas mensagens seguidas: responde a última invocação,
     // com o histórico das duas. Só cede se a outra é ESTRITAMENTE mais nova.
-    await dormir(ESPERA_MENSAGEM_SEGUINTE_MS)
+    //
+    // Na devolução manual não há o que esperar: a mensagem dela é de horas
+    // atrás e quem está do outro lado é o Fernando, olhando o botão girar. Os
+    // 30 s aqui eram metade do tempo que ele ficava vendo "Chamando…".
+    if (!params.retomada) await dormir(ESPERA_MENSAGEM_SEGUINTE_MS)
     const { data: ultimaEntrada } = await supabaseAdmin
       .from('wa_mensagens')
       .select('wamid, criado_em')
@@ -2380,7 +2384,24 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       .order('criado_em', { ascending: false })
       .limit(1)
       .maybeSingle<{ criado_em: string; corpo: string | null }>()
-    if (ultimaSaida && new Date(ultimaSaida.criado_em).getTime() > new Date(params.criadoEm).getTime()) {
+    // A DEVOLUÇÃO MANUAL PASSA POR CIMA DESTA TRAVA — 10/09/2026.
+    //
+    // "Devolver pro Luigi" reprocessa a ÚLTIMA mensagem da pessoa, que por
+    // definição é antiga — e por definição existe uma saída depois dela: é
+    // justamente a resposta ruim que fez o Fernando clicar no botão. Então a
+    // trava de resposta velha reprovava 100% das devoluções.
+    //
+    // Aconteceu com a Kelly às 19:47: o Luigi montou as 30 camisetas no pedido
+    // certinho (a ferramenta rodou, o pedido está lá), e o texto "Coloquei as
+    // 30 camisetas no pedido" foi DESCARTADO. O trabalho feito, e a cliente sem
+    // saber — pior que não ter rodado.
+    //
+    // Quando `retomada` está setado, quem mandou falar foi o Fernando, olhando
+    // a conversa. Ele sabe que tem mensagem nossa depois; é por isso que está
+    // devolvendo. A trava existe pra evitar atropelo automático, não pra vetar
+    // ordem humana.
+    const devolucaoManual = Boolean(params.retomada)
+    if (!devolucaoManual && ultimaSaida && new Date(ultimaSaida.criado_em).getTime() > new Date(params.criadoEm).getTime()) {
       await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'já respondemos depois dessa mensagem' })
       return
     }
@@ -2416,7 +2437,10 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       (m) => !AGENTES.has((m.autor ?? '').trim().toLowerCase()),
     )
 
-    if (humanoRecente) {
+    // Mesma exceção da trava acima: se o Fernando clicou "Devolver pro Luigi",
+    // ele É a gente na conversa e está mandando o Luigi falar. Vetar aqui seria
+    // o sistema desobedecendo a ordem que acabou de receber.
+    if (humanoRecente && !devolucaoManual) {
       await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: `gente na conversa (${humanoRecente.autor ?? 'equipe'}) — o Luigi não fala por cima` })
       return
     }
