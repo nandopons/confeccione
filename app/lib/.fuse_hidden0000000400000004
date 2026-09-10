@@ -847,12 +847,19 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
           quantidade: num(x.quantidade) ?? null,
           publico: str(x.publico) ?? null,
           descricao: str(x.descricao) ?? null,
-          // A grade vem estruturada pela ferramenta. Sem isto ela cai na descricao
-          // e a confeccao le "Tamanhos M, G, GG, G1" como observacao solta.
+
+          // A grade vem estruturada da ferramenta; sem isto ela cai na descricao e a
+
+          // confeccao le "Tamanhos M, G, GG, G1" como observacao solta.
+
           tamanhos: Array.isArray(x.tamanhos)
+
             ? (x.tamanhos as Array<Record<string, unknown>>)
+
                 .map((t) => ({ tamanho: (str(t.tamanho) ?? '').trim(), qtd: num(t.qtd) ?? 0 }))
+
                 .filter((t) => t.tamanho.length > 0 && t.qtd > 0)
+
             : null,
         }))
       )
@@ -888,12 +895,19 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
           quantidade: num(x.quantidade) ?? null,
           publico: str(x.publico) ?? null,
           descricao: str(x.descricao) ?? null,
-          // A grade vem estruturada pela ferramenta. Sem isto ela cai na descricao
-          // e a confeccao le "Tamanhos M, G, GG, G1" como observacao solta.
+
+          // A grade vem estruturada da ferramenta; sem isto ela cai na descricao e a
+
+          // confeccao le "Tamanhos M, G, GG, G1" como observacao solta.
+
           tamanhos: Array.isArray(x.tamanhos)
+
             ? (x.tamanhos as Array<Record<string, unknown>>)
+
                 .map((t) => ({ tamanho: (str(t.tamanho) ?? '').trim(), qtd: num(t.qtd) ?? 0 }))
+
                 .filter((t) => t.tamanho.length > 0 && t.qtd > 0)
+
             : null,
         })),
       })
