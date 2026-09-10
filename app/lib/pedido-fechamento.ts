@@ -181,13 +181,48 @@ export async function conferirPedido(pedidoId: string): Promise<ProntoParaLibera
 }
 
 /** Manda o resumo do pedido em PDF pro WhatsApp do cliente conferir. */
-export async function enviarResumoParaCliente(pedidoId: string): Promise<{ ok: boolean; erro?: string }> {
+/**
+ * Manda o resumo em PDF pro cliente — uma vez por versão do pedido.
+ *
+ * A trava é sobre o DOCUMENTO, não sobre o tempo: se o resumo já foi enviado
+ * depois da última alteração do pedido, o PDF que o cliente tem na mão é este
+ * mesmo, e reenviar só polui a conversa. Se o pedido mudou desde o envio, o
+ * documento é outro e vai de novo.
+ *
+ * Em 09/09/2026 o Julio recebeu o mesmo PDF três vezes em três minutos: ele
+ * respondeu "claro", "toop" e "correto", cada uma virou uma rodada do Luigi, e
+ * em todas ele achou que devia mandar o resumo. A trava de resposta velha do
+ * Luigi chegou tarde demais — ela descarta o TEXTO, mas a ferramenta já tinha
+ * rodado e o arquivo já tinha saído. Efeito de ferramenta se trava na
+ * ferramenta.
+ */
+export async function enviarResumoParaCliente(
+  pedidoId: string,
+  opts: { forcar?: boolean } = {}
+): Promise<{ ok: boolean; erro?: string; jaEnviado?: boolean }> {
   const { data: p } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('nome, telefone')
+    .select('nome, telefone, atualizado_em, resumo_enviado_em')
     .eq('id', pedidoId)
-    .maybeSingle<{ nome: string | null; telefone: string | null }>()
+    .maybeSingle<{ nome: string | null; telefone: string | null; atualizado_em: string | null; resumo_enviado_em: string | null }>()
   if (!p?.telefone) return { ok: false, erro: 'pedido sem telefone do cliente' }
+
+  if (!opts.forcar && p.resumo_enviado_em) {
+    const enviado = new Date(p.resumo_enviado_em).getTime()
+    const mudou = p.atualizado_em ? new Date(p.atualizado_em).getTime() > enviado : false
+    if (!mudou) {
+      const hora = new Date(p.resumo_enviado_em).toLocaleTimeString('pt-BR', {
+        timeZone: 'America/Recife',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      return {
+        ok: true,
+        jaEnviado: true,
+        erro: `o resumo já foi enviado às ${hora} e o pedido não mudou desde então — não mande de novo, fale com o cliente sobre o que ele já recebeu`,
+      }
+    }
+  }
 
   const r = await enviarResumoPdfPedido({
     pedidoId,
@@ -199,7 +234,15 @@ export async function enviarResumoParaCliente(pedidoId: string): Promise<{ ok: b
       },
     ],
   })
-  return r.enviados > 0 ? { ok: true } : { ok: false, erro: 'não foi possível enviar o PDF agora' }
+  if (r.enviados === 0) return { ok: false, erro: 'não foi possível enviar o PDF agora' }
+
+  // Gravado só depois do envio confirmado: marcar antes deixaria o cliente sem
+  // PDF nenhum se a entrega falhasse.
+  await supabaseAdmin
+    .from('pedidos_assistente')
+    .update({ resumo_enviado_em: new Date().toISOString() })
+    .eq('id', pedidoId)
+  return { ok: true }
 }
 
 /**

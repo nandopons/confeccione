@@ -526,7 +526,8 @@ const FERRAMENTA_RESUMO_PDF: Anthropic.Messages.Tool = {
   description:
     'Manda pro cliente, nesta conversa, o resumo do pedido em PDF. Use quando as peças estiverem completas, ANTES de pedir ' +
     'a liberação pros fornecedores: ele confere no papel o que vai pro mercado. Depois de mandar, pergunte se está tudo ' +
-    'certo ou se quer ajustar algo.',
+    'certo ou se quer ajustar algo. UMA VEZ SÓ: se o cliente responder "ok", "certo", "top" ou qualquer confirmação, ' +
+    'ele está falando do PDF que já recebeu — NÃO chame de novo. Só reenvie se o pedido tiver mudado depois do envio.',
   input_schema: {
     type: 'object',
     properties: { pedido: { type: 'string', description: 'Código ou id. Sem isto, usa o pedido em foco.' } },
@@ -781,6 +782,11 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
       const r = await enviarResumoParaCliente(p.id)
       if (!r.ok) throw new Error(r.erro ?? 'não foi possível enviar o resumo')
+      // Já enviado não é sucesso silencioso: se o modelo achar que mandou, ele
+      // escreve "PDF enviado" e o cliente procura um arquivo que não chegou.
+      if (r.jaEnviado) {
+        return { ok: true, jaEnviado: true, codigo: p.codigo, aviso: r.erro }
+      }
       return {
         ok: true,
         codigo: p.codigo,
