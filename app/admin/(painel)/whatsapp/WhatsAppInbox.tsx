@@ -1027,23 +1027,13 @@ export function WhatsAppInbox({
                   </p>
                   <p className="text-[12px] text-neutral-500">{formatarTelefone(ativa.contato.wa_id)}</p>
                 </div>
+                {/* A MARCA E O "JÁ RESOLVI" SÓ FAZEM SENTIDO SE ELE TE CHAMOU.
+                    Já o "Devolver pro Luigi" NÃO — ver o bloco abaixo. */}
                 {ativa.luigi_escalado_em && (
                   <>
                     <span className="hidden sm:inline text-[11px] font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-800" title="O Luigi passou esta conversa pra você. Some quando você responder.">
                       Luigi chamou você
                     </span>
-                    <button
-                      onClick={devolverAoLuigi}
-                      disabled={devolvendoAoLuigi || modoLuigi === 'desligado'}
-                      title={
-                        modoLuigi === 'desligado'
-                          ? 'O Luigi está desligado — ligue no seletor acima.'
-                          : 'O Luigi assume de novo e responde a última mensagem da pessoa agora.'
-                      }
-                      className="shrink-0 text-[11px] font-medium px-2.5 py-1 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                    >
-                      {devolvendoAoLuigi ? 'Chamando…' : 'Devolver pro Luigi'}
-                    </button>
                     {/* Pra quando você resolveu por fora — no WhatsApp pessoal,
                         por telefone, pessoalmente. Sem isto a marca ficava acesa
                         pra sempre e a fila enchia de conversa encerrada. */}
@@ -1056,6 +1046,29 @@ export function WhatsAppInbox({
                       {resolvendo ? 'Marcando…' : 'Já resolvi'}
                     </button>
                   </>
+                )}
+
+                {/* DEVOLVER NÃO DEPENDE DE ELE TER ESCALADO — 10/09/2026.
+                    O botão só aparecia com `luigi_escalado_em`, ou seja, só
+                    quando o Luigi tinha PEDIDO ajuda. Mas o caso mais comum é o
+                    contrário: ele parou achando que estava tudo bem. Com a Kelly
+                    ele disse "vou definir as peças no pedido agora", encerrou o
+                    turno e não escalou nada — e não havia como cutucá-lo,
+                    justamente na conversa em que ele mais precisava ser cutucado.
+                    Agora aparece sempre que a janela estiver aberta. */}
+                {janela.aberta && (
+                  <button
+                    onClick={devolverAoLuigi}
+                    disabled={devolvendoAoLuigi || modoLuigi === 'desligado'}
+                    title={
+                      modoLuigi === 'desligado'
+                        ? 'O Luigi está desligado — ligue no seletor acima.'
+                        : 'O Luigi assume de novo e responde a última mensagem da pessoa agora.'
+                    }
+                    className="shrink-0 text-[11px] font-medium px-2.5 py-1 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {devolvendoAoLuigi ? 'Chamando…' : 'Devolver pro Luigi'}
+                  </button>
                 )}
                 <span
                   className={
