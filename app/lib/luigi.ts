@@ -44,7 +44,7 @@ import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 // descricao. Pra editar a peça de verdade usamos o tipo canônico do produto.
 import { type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
 import { editarLinhasPedidoCliente } from './pedido-linhas-edicao'
-import { conferirPedido, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores } from './pedido-fechamento'
+import { conferirPedido, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores } from './pedido-fechamento'
 import { registrarUsoIa } from './uso-ia'
 import { ehNumeroGestao, numerosGestao } from './gestao-whatsapp'
 import {
@@ -523,6 +523,41 @@ const FERRAMENTA_DEFINIR_PECAS: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_CRIAR_PEDIDO: Anthropic.Messages.Tool = {
+  name: 'criar_pedido',
+  description:
+    'Abre um pedido NOVO pra esta pessoa, com as peças que ela descreveu. Use quando ela quiser produzir algo que não cabe ' +
+    'em nenhum pedido que ela já tem — porque não tem nenhum, ou porque o que tem já foi liberado pras confecções e não ' +
+    'pode mais receber peça. NÃO use pra completar pedido vazio (é definir_pecas_pedido) nem pra mudar peça existente ' +
+    '(é ajustar_peca_pedido). O pedido nasce parado: depois de criar, mande o resumo em PDF e só libere com o sim dela. ' +
+    'Endereço e cadastro são copiados do pedido anterior dela — não pergunte de novo o que ela já deu.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      pecas: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 20,
+        items: {
+          type: 'object',
+          properties: {
+            modelo: { type: 'string', maxLength: 120, description: 'Camiseta, moletom, calça…' },
+            cor: { type: 'string', maxLength: 80, description: 'UMA cor por peça. Cinco cores = cinco peças separadas.' },
+            quantidade: { type: 'number', minimum: 1, maximum: 100000, description: 'Quantas peças DESTA cor.' },
+            publico: { type: 'string', enum: ['feminino', 'masculino', 'infantil', 'unissex'], description: 'Muda a modelagem — pergunte se ela não disser.' },
+            material: { type: 'string', maxLength: 200, description: 'Só se ela disser.' },
+            descricao: { type: 'string', maxLength: 500, description: 'Bordado, patch, etiqueta, estampa: tudo que ela detalhou.' },
+          },
+          required: ['modelo', 'cor', 'quantidade', 'publico'],
+        },
+      },
+      prazo_dias: { type: 'number', minimum: 1, maximum: 365, description: 'Prazo que ELA pediu, em dias. Só se ela disser.' },
+      observacoes: { type: 'string', maxLength: 500, description: 'Entrega, referência de pedido anterior, o que não cabe na peça.' },
+    },
+    required: ['pecas'],
+  },
+}
+
 const FERRAMENTA_RESUMO_PDF: Anthropic.Messages.Tool = {
   name: 'enviar_resumo_pedido',
   description:
@@ -606,6 +641,7 @@ function ferramentasDoModo(modo: Exclude<ModoLuigi, 'desligado'>, ehFornecedor =
         FERRAMENTA_ENCERRAR,
         FERRAMENTA_AJUSTAR_PECA,
         FERRAMENTA_DEFINIR_PECAS,
+        FERRAMENTA_CRIAR_PEDIDO,
         FERRAMENTA_RESUMO_PDF,
         FERRAMENTA_LIBERAR,
       ]
@@ -777,6 +813,41 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
             : pronto.pronto
               ? 'Mande o resumo com enviar_resumo_pedido e pergunte se está tudo certo antes de liberar.'
               : 'Pergunte ao cliente o que falta, uma coisa por vez.',
+      }
+    }
+    case 'criar_pedido': {
+      const lista = Array.isArray(entrada.pecas) ? (entrada.pecas as Array<Record<string, unknown>>) : []
+      if (lista.length === 0) throw new Error('informe ao menos uma peça')
+      const r = await criarPedidoParaContato({
+        telefone: ctx.contato.telefone,
+        nome: ctx.contato.nome,
+        prazoDias: num(entrada.prazo_dias) ?? null,
+        observacoes: str(entrada.observacoes) ?? null,
+        pecas: lista.map((x) => ({
+          modelo: str(x.modelo) ?? null,
+          cor: str(x.cor) ?? null,
+          material: str(x.material) ?? null,
+          quantidade: num(x.quantidade) ?? null,
+          publico: str(x.publico) ?? null,
+          descricao: str(x.descricao) ?? null,
+        })),
+      })
+      if (!r.ok) throw new Error(r.erro ?? 'não foi possível abrir o pedido')
+      // Reaproveitado não é criação: sem isto o modelo anuncia "abri seu
+      // pedido" duas vezes e o cliente fica sem saber quantos pedidos tem.
+      if (r.reaproveitado) return { ok: true, reaproveitado: true, codigo: r.codigo, aviso: r.erro }
+      const pronto = await conferirPedido(r.pedidoId!)
+      return {
+        ok: true,
+        codigo: r.codigo,
+        resumo: r.resumo,
+        divergencias: pronto.divergencias,
+        proximo_passo:
+          pronto.divergencias.length > 0
+            ? 'Resolva as divergências com ela antes de seguir: pergunte uma por vez.'
+            : pronto.pronto
+              ? 'Mande o resumo com enviar_resumo_pedido e só libere com o sim dela.'
+              : `Falta: ${pronto.falta}. Pergunte uma coisa por vez.`,
       }
     }
     case 'enviar_resumo_pedido': {

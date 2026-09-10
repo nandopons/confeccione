@@ -37,6 +37,103 @@ export type PecaEntrada = {
 }
 
 /**
+ * Abre um pedido NOVO pra quem já está conversando no WhatsApp.
+ *
+ * Até 09/09/2026 o Luigi só sabia mexer em pedido que já existia. A Cybelle
+ * pediu 20 camisetas com especificação inteira — bordado, patch, etiqueta, 5
+ * cores, 4 tamanhos — e ele teve que devolver pro Fernando, porque o pedido
+ * dela em andamento já estava em buscando_fornecedor e não dava pra empilhar
+ * peça nova lá dentro. O cliente descreveu tudo e a conversa morreu na mão de
+ * gente.
+ *
+ * NASCE PARADO, DE PROPÓSITO. Status 'completo', não 'buscando_fornecedor': o
+ * pedido é criado, o cliente confere pelo PDF e só então liberarParaFornecedores
+ * manda pro mercado. Criar já liberando tiraria a única conferência que existe
+ * antes de o pedido virar oferta pra dezenas de confecções.
+ *
+ * O CADASTRO VEM DO PEDIDO ANTERIOR. Quem já pediu antes não precisa ditar
+ * endereço de novo — nome, e-mail, CEP e endereço saem do pedido mais recente
+ * do mesmo telefone. Se não houver, ficam nulos e o pedido segue incompleto
+ * até alguém preencher, que é o comportamento normal do funil.
+ */
+export async function criarPedidoParaContato(params: {
+  telefone: string
+  nome?: string | null
+  pecas: PecaEntrada[]
+  prazoDias?: number | null
+  observacoes?: string | null
+}): Promise<{ ok: boolean; erro?: string; pedidoId?: string; codigo?: string; resumo?: string; reaproveitado?: boolean }> {
+  const tel = params.telefone.replace(/\D/g, '')
+  if (tel.length < 10) return { ok: false, erro: 'telefone do contato inválido' }
+  if (params.pecas.length === 0) return { ok: false, erro: 'informe ao menos uma peça' }
+
+  // Mesma lição do resumo em PDF: efeito de ferramenta se trava na ferramenta.
+  // Se o modelo chamar duas vezes — porque o cliente mandou duas mensagens, ou
+  // porque a rodada anterior pareceu falhar — o cliente acaba com dois pedidos
+  // iguais e recebe oferta em dobro. Dentro de 15 minutos, devolve o que já foi
+  // criado em vez de abrir outro.
+  const tel8 = tel.slice(-8)
+  const { data: recente } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, codigo')
+    .like('telefone', `%${tel8}`)
+    .eq('origem', 'whatsapp_luigi')
+    .gte('criado_em', new Date(Date.now() - 15 * 60 * 1000).toISOString())
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ id: string; codigo: string | null }>()
+  if (recente) {
+    return {
+      ok: true,
+      reaproveitado: true,
+      pedidoId: recente.id,
+      codigo: recente.codigo ?? undefined,
+      erro: `você já abriu o pedido ${recente.codigo ?? recente.id} pra esta pessoa há poucos minutos — use ajustar_peca_pedido nele em vez de criar outro`,
+    }
+  }
+
+  const { data: anterior } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('nome, email, conta_id, cep, logradouro, numero, complemento, bairro, cidade, uf, cpf_cnpj')
+    .like('telefone', `%${tel8}`)
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle<Record<string, unknown>>()
+
+  const { data: novo, error } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .insert({
+      linhas: [],
+      status: 'completo',
+      origem: 'whatsapp_luigi',
+      telefone: tel,
+      nome: params.nome ?? (anterior?.nome as string | null) ?? null,
+      email: (anterior?.email as string | null) ?? null,
+      conta_id: (anterior?.conta_id as string | null) ?? null,
+      cpf_cnpj: (anterior?.cpf_cnpj as string | null) ?? null,
+      cep: (anterior?.cep as string | null) ?? null,
+      logradouro: (anterior?.logradouro as string | null) ?? null,
+      numero: (anterior?.numero as string | null) ?? null,
+      complemento: (anterior?.complemento as string | null) ?? null,
+      bairro: (anterior?.bairro as string | null) ?? null,
+      cidade: (anterior?.cidade as string | null) ?? null,
+      uf: (anterior?.uf as string | null) ?? null,
+      prazo_dias: params.prazoDias ?? null,
+      observacoes: params.observacoes ?? null,
+    })
+    .select('id, codigo')
+    .single<{ id: string; codigo: string | null }>()
+  if (error || !novo) return { ok: false, erro: error?.message ?? 'não foi possível abrir o pedido' }
+
+  // As peças entram pelo mesmo caminho de sempre, que normaliza linha, calcula
+  // total e devolve o resumo — não existe segunda forma de escrever peça.
+  const r = await definirPecasPedido(novo.id, params.pecas)
+  if (!r.ok) return { ok: false, erro: r.erro, pedidoId: novo.id, codigo: novo.codigo ?? undefined }
+
+  return { ok: true, pedidoId: novo.id, codigo: novo.codigo ?? undefined, resumo: r.resumo }
+}
+
+/**
  * Define as peças do pedido a partir do que o cliente disse na conversa.
  * Substitui a lista inteira — é o caso do pedido que ainda está com "peça a
  * definir" ou vazio. Pra mexer numa peça já existente, o caminho é
