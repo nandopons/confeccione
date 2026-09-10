@@ -714,9 +714,13 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
 const FERRAMENTA_CHAMAR_HUMANO: Anthropic.Messages.Tool = {
   name: 'chamar_humano',
   description:
-    'Avisa o Fernando no WhatsApp dele, na hora, com o que a pessoa perguntou. Use quando o assunto for preço, desconto, ' +
-    'prazo que não está no orçamento, reclamação, reembolso, defeito, mudança no orçamento ou no pedido, criar um pedido novo, ' +
-    'contato do fornecedor, algo que não está no contexto, ou quando a pessoa pedir pra falar com alguém. ' +
+    'Avisa o Fernando no WhatsApp dele, na hora, com o que a pessoa perguntou. ' +
+    'Use quando o assunto for desconto, condição de pagamento, reclamação, reembolso, defeito, ' +
+    'mudança em orçamento já fechado, contato do fornecedor, ou algo que não está no contexto e você não tem como resolver. ' +
+    'NÃO chame pra montar pedido: criar e completar pedido é SEU trabalho, você tem criar_pedido e definir_pecas_pedido. ' +
+    'NÃO chame porque alguém perguntou "quanto fica" sem ter pedido: isso é o começo de um pedido, não uma questão comercial — ' +
+    'explique que o valor sai no orçamento da confecção depois que a peça estiver definida, e comece a montar com ele. ' +
+    'Preço só vira assunto do Fernando quando já existe orçamento e a pessoa quer mexer nele. ' +
     'DEPOIS DE CHAMAR, NÃO ESCREVA MAIS NADA nessa mensagem: nem "vou passar pra equipe", nem "alguém já te responde", ' +
     'nem "vou verificar". Quem responde é o Fernando, pelo inbox, na mesma conversa — anunciar equipe cria um degrau que não existe.',
   input_schema: {
@@ -1199,7 +1203,12 @@ async function fornecedorDoContato(waId: string): Promise<string | null> {
   return null
 }
 
-async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto, estado: { escalada: Escalada }): Promise<unknown> {
+async function executarFerramenta(
+  nome: string,
+  entrada: Entrada,
+  ctx: Contexto,
+  estado: { escalada: Escalada; devolucaoManual: boolean }
+): Promise<unknown> {
   switch (nome) {
     case 'salvar_perfil_producao': {
       const forn = await fornecedorDoContato(ctx.contato.telefone)
@@ -1323,6 +1332,28 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
       return { ok: true, guardadas, aviso: ultimoErro ? `${guardadas} guardada(s); uma falhou: ${ultimoErro}` : undefined }
     }
     case 'chamar_humano': {
+      // DEVOLVIDA À MÃO NÃO VOLTA — 10/09/2026.
+      //
+      // O Fernando clicou "Devolver pro Luigi". Se o Luigi escala de novo, o
+      // botão vira uma máquina de notificação: clique → escala → aviso →
+      // clique → escala. Foi o que aconteceu com o Bruno, que perguntou
+      // "quanto ficaria?" — preço, o gatilho clássico de escalada — e ficou
+      // sem resposta enquanto o Fernando recebia o mesmo aviso em loop.
+      //
+      // Devolver é uma ordem: quem devolveu já sabe que tem gente pedindo
+      // gente. Escalar de volta é recusar a ordem e devolver o problema a
+      // quem acabou de delegá-lo. Aqui o Luigi tem que se virar.
+      if (estado.devolucaoManual) {
+        return {
+          ok: false,
+          erro:
+            'O Fernando acabou de te devolver esta conversa sabendo o que ela tem — então esta é sua. ' +
+            'Não chame ninguém agora: responda você, com o que sabe. ' +
+            'Se for preço, explique que o valor vem do orçamento da confecção e siga montando o pedido; ' +
+            'se for algo que você realmente não pode resolver, diga ao cliente o próximo passo concreto ' +
+            'em vez de prometer que alguém aparece.',
+        }
+      }
       const motivo = str(entrada.motivo) ?? 'cliente precisa de uma pessoa'
       estado.escalada = { motivo }
       return {
@@ -2202,7 +2233,9 @@ async function rodarLuigi(
   modo: Exclude<ModoLuigi, 'desligado'>,
   ctx: Contexto,
   jaSeApresentou: boolean,
-  mensagens: Anthropic.Messages.MessageParam[]
+  mensagens: Anthropic.Messages.MessageParam[],
+  /** O Fernando devolveu esta conversa à mão. Muda o que o Luigi pode recusar. */
+  devolucaoManual = false
 ): Promise<ResultadoAgente> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY ausente')
@@ -2210,7 +2243,7 @@ async function rodarLuigi(
 
   const historico: Anthropic.Messages.MessageParam[] = [...mensagens]
   const ferramentas: ChamadaFerramenta[] = []
-  const estado: { escalada: Escalada } = { escalada: null }
+  const estado: { escalada: Escalada; devolucaoManual: boolean } = { escalada: null, devolucaoManual }
   let tokensEntrada = 0
   let tokensSaida = 0
   let rodadas = 0
@@ -2663,7 +2696,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       mensagens = [...mensagens, { role: 'user', content: `[nota do Fernando, o cliente NÃO vê isto] ${params.retomada}` }]
     }
 
-    const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens)
+    const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada))
     const pedidoId = ctx.pedidoEmFoco?.id ?? null
 
     if (modo === 'sugere') {

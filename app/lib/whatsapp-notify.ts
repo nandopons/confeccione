@@ -860,31 +860,43 @@ export async function responderFeedbackNegociacao(params: {
 }
 
 /**
- * Cliente tocou em "Falar com atendente" (quick reply do lembrete). A mensagem
- * já caiu no inbox como não lida; aqui só confirmamos que alguém vai responder.
- * Texto livre: o clique abriu a janela de 24h. Failure-soft.
+ * Cliente tocou em "Falar com atendente" (quick reply do lembrete).
+ *
+ * O LUIGI PARA, MAS A CONVERSA CONTINUA DELE — 10/09/2026.
+ * Antes daqui saía um "Certo, Fulano. Te respondo por aqui." Era o sistema
+ * falando como se existisse um segundo atendimento atrás do botão, e o efeito
+ * prático era pior: o `jaTratada` desligava o Luigi, e a conversa ficava num
+ * limbo — nem ele nem ninguém. Quem quis gente ficou esperando.
+ *
+ * Agora: ninguém escreve nada, o Fernando é avisado e a conversa fica marcada
+ * como esperando por ele. Não há transferência pra lugar nenhum — é a mesma
+ * conversa do Luigi, com o "Devolver pro Luigi" a um clique.
+ *
+ * Failure-soft: nem o aviso nem a marca podem derrubar o webhook.
  */
 export async function responderPedidoAtendente(waId: string, nome: string | null): Promise<void> {
+  const primeiro = (nome ?? '').trim().split(/\s+/)[0]
+
   try {
-    const primeiro = (nome ?? '').trim().split(/\s+/)[0]
+    // A marca é o que faz a conversa aparecer como "Luigi chamou você" e ganhar
+    // o "Já resolvi" no inbox. Sem ela o pedido de ajuda some no meio da lista.
+    const conversaId = await garantirConversa(waId, nome)
+    if (conversaId) {
+      await supabaseAdmin
+        .from('wa_conversas')
+        .update({ luigi_escalado_em: new Date().toISOString() })
+        .eq('id', conversaId)
+    }
+  } catch (err) {
+    console.error('[wa-notify] marca de escalada falhou', { err })
+  }
 
-    // SEM "UM ATENDENTE VAI FALAR EM INSTANTES" — 09/09/2026.
-    // Era promessa dupla: inventava uma terceira pessoa ("um atendente") e
-    // dava prazo ("em instantes"). Quem responde é o Fernando, e ele responde
-    // quando vê. Aqui só se confirma que o clique chegou — porque o cliente
-    // APERTOU um botão, e sumir depois disso parece que o botão não funciona.
-    const texto = `Certo${primeiro ? `, ${primeiro}` : ''}. Te respondo por aqui.`
-    const r = await enviarTexto(waId, texto)
-    if (r.ok) await registrarSaidaInbox(waId, nome, r.wamid, texto, null)
-
-    // O AVISO QUE FALTAVA: até agora o cliente clicava em "Falar com atendente"
-    // e ninguém ficava sabendo. O botão existia, respondia bonito e não
-    // chamava ninguém — o pedido de ajuda morria no inbox.
+  try {
     const { avisarGestor } = await import('./luigi')
     await avisarGestor(
       `${primeiro || waId} pediu pra falar com atendente (${waId}). Responde pelo inbox (/admin/whatsapp).`
     ).catch(() => false)
   } catch (err) {
-    console.error('[wa-notify] responderPedidoAtendente exception', { err })
+    console.error('[wa-notify] aviso de atendente falhou', { err })
   }
 }
