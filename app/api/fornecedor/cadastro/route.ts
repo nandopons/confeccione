@@ -123,6 +123,33 @@ export async function POST(req: Request) {
     fornecedorId = (novo as { id: string }).id
   }
 
+  // ---------------------------------------------------------------- inbox
+  // AMARRA O CONTATO DE WHATSAPP AO FORNECEDOR — 10/09/2026
+  //
+  // É `wa_contatos.fornecedor_id` que faz o Luigi abrir o prompt de CONFECÇÃO
+  // em vez do de cliente. Quando a pessoa nunca falou com a gente, o webhook
+  // cria o contato e resolve esse vínculo sozinho (`vincularContato`), porque
+  // ela já vai constar em `leads_fornecedores` — este insert acabou de rodar.
+  //
+  // O furo é quem JÁ TEM contato: alguém que escreveu como cliente, ou que
+  // recebeu um template nosso, e só depois se cadastrou como confecção. Esse
+  // contato fica com `fornecedor_id` nulo pra sempre, porque o webhook só
+  // consulta o vínculo na CRIAÇÃO. Foi o que aconteceu com a Marilia em 09/09:
+  // a dona da fábrica foi atendida como se quisesse comprar roupa.
+  //
+  // Aqui é o lugar certo de corrigir — roda uma vez no cadastro, e não a cada
+  // mensagem recebida. Casa pelos últimos 8 dígitos por causa do nono dígito:
+  // o mesmo telefone aparece com 12 ou 13 dígitos dependendo de quem escreveu.
+  const fim8 = numero.replace(/\D/g, '').slice(-8)
+  if (fim8.length === 8) {
+    const { error: erroVinculo } = await supabase
+      .from('wa_contatos')
+      .update({ fornecedor_id: fornecedorId, atualizado_em: new Date().toISOString() })
+      .ilike('wa_id', `%${fim8}`)
+      .is('fornecedor_id', null)
+    if (erroVinculo) console.error('[cadastro] vínculo wa_contatos falhou:', erroVinculo.message)
+  }
+
   // Edição de cadastro (fornecedor já existente e já aprovado no passado):
   // mantém o comportamento antigo — dispara matching retroativo e confirma.
   // Cadastro NOVO entra como PENDENTE: não recebe pedidos até a equipe
@@ -146,6 +173,16 @@ export async function POST(req: Request) {
   } else {
     // Cadastro novo — avisa que o perfil está em análise (não promete bônus
     // nem pedidos ainda; isso vem quando a equipe aprovar no admin).
+    //
+    // ISTO SÓ CHEGA SE A JANELA DE 24 h ESTIVER ABERTA — 10/09/2026.
+    // É texto livre, e texto livre exige que a PESSOA tenha escrito pra gente
+    // nas últimas 24 h. Quem acabou de se cadastrar quase nunca escreveu, então
+    // na prática esta mensagem falha na maioria dos cadastros novos (o erro sai
+    // no log de `enviarTextoSimples`, não é silencioso). Não é bug pra caçar: é
+    // a regra da Meta. Quem carrega este aviso agora é a tela de confirmação,
+    // que mostra o mesmo texto e ainda oferece o botão que ABRE a janela.
+    // Mantido porque, quando a janela está aberta (fornecedor que já conversou),
+    // chega — e aí é bem-vindo.
     await enviarTextoSimples(
       numero,
       `Olá ${nome}! 🙌\n\nRecebemos seu cadastro no *Confeccione*.\n\n🔎 *Seu perfil está em análise.* Nossa equipe revisa cada fornecedor antes de liberar o acesso aos pedidos — isso garante a qualidade da nossa rede.\n\nAssim que aprovarmos (normalmente em até 1 dia útil), você recebe um aviso aqui e já começa a receber pedidos compatíveis com a sua produção. 🚀`

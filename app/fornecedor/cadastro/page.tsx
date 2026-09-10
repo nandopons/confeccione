@@ -6,6 +6,7 @@ import SiteFooter from "@/app/components/SiteFooter";
 import SelectModal from "@/app/components/SelectModal";
 import { formatarCpfCnpj, validarCpfCnpj, apenasDigitos } from "@/app/lib/cpf-cnpj";
 import { PECAS_PRINCIPAIS, PECAS_EXTRAS } from "@/app/lib/pecas";
+import { linkWhatsAppSuporte } from "@/app/lib/contatos";
 
 // PEÇAS, não categorias (05/09/2026). O fornecedor descreve o que faz do jeito
 // dele — "produzimos vestidos, camisas, blusas, top, calças e saias" — e é a
@@ -370,10 +371,47 @@ export default function CadastroFornecedor() {
                   fazia a pessoa esperar por algo que ainda depende de análise —
                   e o WhatsApp que a API dispara já dizia "em análise", em
                   contradição com esta tela. */}
-              <p className="text-gray-500 text-sm max-w-xs mx-auto mb-6 leading-relaxed">
+              <p className="text-gray-500 text-sm max-w-sm mx-auto mb-6 leading-relaxed">
                 Seu perfil vai passar por uma análise rápida da nossa equipe. Assim que for aprovado, você recebe um aviso no WhatsApp e começa a receber pedidos que batem com o que você produz.
               </p>
-              <Link href="/" className="inline-block bg-[#111] hover:opacity-85 text-white font-medium px-6 py-3 rounded-xl text-sm transition-opacity">Voltar pro site</Link>
+
+              {/* ---------------------------------------------------------------
+                  O BOTÃO QUE INVERTE QUEM COMEÇA A CONVERSA — 10/09/2026
+
+                  Quem acaba de se cadastrar nunca escreveu pra gente. Fora da
+                  janela de 24 h a Meta só aceita template, e template de
+                  MARKETING pra quem nunca interagiu ela recusa: "This message
+                  was not delivered to maintain healthy ecosystem engagement"
+                  (erro 131049). Aconteceu com a Lucilaine em 10/09, e é o mesmo
+                  motivo pelo qual a mensagem de boas-vindas que o cadastro
+                  dispara (texto livre, em api/fornecedor/cadastro) nunca chega.
+
+                  A janela de 24 h abre quando a PESSOA escreve. Então em vez de
+                  bater na porta, a gente entrega a chave: ela toca aqui, o
+                  WhatsApp abre com o texto pronto, ela manda — e a partir daí o
+                  Luigi conversa livre, sem template e sem bloqueio nenhum.
+
+                  O texto pré-preenchido não é enfeite: é o que faz o Luigi
+                  saber, na primeira mensagem, que é uma confecção falando.
+                  --------------------------------------------------------------- */}
+              <div className="rounded-xl border border-[#1D9E75]/25 bg-[#F4FBF8] p-5 max-w-sm mx-auto mb-5 text-left">
+                <p className="text-sm text-gray-700 leading-relaxed mb-4">
+                  <strong className="text-gray-900">Fale com a gente agora.</strong> Manda um oi no WhatsApp e conta o que vocês produzem — assim a gente já alinha seu perfil e adianta a análise.
+                </p>
+                <a
+                  href={linkWhatsAppSuporte(
+                    `Oi! Acabei de me cadastrar como confecção no Confeccione${nome.trim() ? `. Sou ${nome.trim()}` : ''}. Quero contar o que a gente produz.`
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 w-full bg-[#25D366] hover:bg-[#1EBE5A] text-white font-medium px-6 py-3 rounded-xl text-sm transition-colors"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.25-.46-2.38-1.47-.88-.78-1.48-1.75-1.65-2.05-.17-.3-.02-.46.13-.61.14-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.08-.15-.67-1.61-.92-2.21-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.22 3.08c.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.69.63.71.22 1.36.19 1.87.12.57-.09 1.76-.72 2.01-1.41.25-.7.25-1.29.17-1.42-.07-.13-.27-.2-.57-.35zM12.04 2.02c-5.5 0-9.97 4.47-9.97 9.97 0 1.76.46 3.48 1.34 5L2 22.02l5.16-1.35a9.93 9.93 0 0 0 4.88 1.27h.01c5.5 0 9.97-4.47 9.97-9.97 0-2.66-1.04-5.17-2.92-7.05a9.9 9.9 0 0 0-7.05-2.9zm0 18.13h-.01a8.28 8.28 0 0 1-4.21-1.15l-.3-.18-3.13.82.84-3.05-.2-.31a8.24 8.24 0 0 1-1.27-4.4c0-4.57 3.72-8.29 8.29-8.29 2.21 0 4.29.86 5.86 2.43a8.23 8.23 0 0 1 2.42 5.87c0 4.57-3.72 8.28-8.29 8.28z"/></svg>
+                  Falar agora no WhatsApp
+                </a>
+              </div>
+
+              <Link href="/" className="inline-block text-sm text-gray-500 hover:text-gray-800 underline underline-offset-4">Voltar pro site</Link>
             </div>
           )}
 
