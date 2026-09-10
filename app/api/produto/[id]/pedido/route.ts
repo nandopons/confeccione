@@ -15,6 +15,7 @@
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { getProdutoPublico } from '@/app/lib/portfolio-fornecedor'
 import { ofertarPedido } from '@/app/lib/pedido-assistente-oferta'
+import { guardarImagens } from '@/app/lib/imagens-pedido-storage'
 
 export const maxDuration = 60 // criar pedido + notificar fornecedor (WhatsApp/e-mail)
 
@@ -130,7 +131,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       cidade,
       uf,
       prazo_dias: produto.prazoDias ?? null,
-      mockups: artes.length ? { '0': { fotos: artes } } : {},
+      // As artes NÃO entram aqui como data URL — ver logo abaixo. O caminho no
+      // bucket precisa do id do pedido, e o id só nasce neste insert.
+      mockups: {},
       observacoes: `Pedido direto pela vitrine para ${produto.fornecedorNome ?? 'fornecedor'}.`,
       status: 'confirmado',
       confirmado_em: new Date().toISOString(),
@@ -142,6 +145,30 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (error || !pedido) {
     console.error('[produto/pedido] falha ao criar pedido:', error)
     return Response.json({ error: 'não consegui registrar seu pedido' }, { status: 500 })
+  }
+
+  // ARTE VAI PRO STORAGE, NÃO PRO BANCO — 10/09/2026.
+  //
+  // Esta rota gravava as data URLs direto em mockups, e era a última torneira
+  // aberta depois da migração de 31/08: três pedidos de 08 e 09/09 entraram com
+  // 1,7 MB de base64 no JSONB. É exatamente o que derrubou a instância em
+  // agosto — 107 MB no TOAST, Disk IO esgotado, consulta cancelada por timeout.
+  //
+  // guardarImagens devolve `storage:pedidos/<id>/<sha>.<ext>`; quem lê passa
+  // por lerImagem, que entende os dois formatos. Se o upload falhar ele mantém
+  // a data URL, então o cliente nunca perde a arte que mandou — no pior caso a
+  // gente volta ao comportamento antigo naquele pedido, e o log diz por quê.
+  if (artes.length > 0) {
+    try {
+      const refs = await guardarImagens(artes, pedido.id)
+      const { error: errArtes } = await supabaseAdmin
+        .from('pedidos_assistente')
+        .update({ mockups: { '0': { fotos: refs } } })
+        .eq('id', pedido.id)
+      if (errArtes) console.error('[produto/pedido] gravar artes falhou:', errArtes)
+    } catch (err) {
+      console.error('[produto/pedido] guardarImagens falhou:', err)
+    }
   }
 
   // Oferta EXCLUSIVA pro dono do produto. Se a notificação falhar, o pedido já
