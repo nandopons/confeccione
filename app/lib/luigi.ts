@@ -979,22 +979,55 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
     case 'salvar_no_portfolio': {
       const forn = await fornecedorDoContato(ctx.contato.telefone)
       if (!forn) return { ok: false, aviso: 'não achei o cadastro de fornecedor desse número' }
-      const { data: foto } = await supabaseAdmin
+
+      // A CONSULTA NÃO FILTRAVA PELA CONVERSA — 10/09/2026.
+      //
+      // Ela pegava a foto de entrada mais recente da tabela INTEIRA. O join com
+      // wa_conversas estava lá, mas nada era comparado com esta conversa. Com
+      // várias conversas abertas ao mesmo tempo — e hoje são muitas — a foto que
+      // outra confecção acabou de mandar ia parar no portfólio desta. Foto de
+      // terceiro no perfil de quem não costurou aquilo é o pior tipo de erro
+      // aqui: aparece pro cliente e ninguém percebe que está errado.
+      //
+      // E SALVAVA UMA SÓ. Confecção manda foto em rajada — a Vanessa mandou
+      // três seguidas. Com limit(1) as outras se perdiam, e chamar a ferramenta
+      // de novo regravava a mesma. Agora pega a leva: tudo o que entrou desta
+      // conversa depois da última foto que já guardamos dela.
+      const { data: ultimaSalva } = await supabaseAdmin
+        .from('portfolio_fornecedores')
+        .select('criado_em')
+        .eq('fornecedor_id', forn)
+        .order('criado_em', { ascending: false })
+        .limit(1)
+        .maybeSingle<{ criado_em: string }>()
+
+      let q = supabaseAdmin
         .from('wa_mensagens')
-        .select('midia_path, conversa_id, wa_conversas!inner(contato_id)')
+        .select('midia_path, criado_em')
+        .eq('conversa_id', ctx.conversaId)
         .eq('direcao', 'entrada')
         .eq('tipo', 'image')
         .not('midia_path', 'is', null)
-        .order('criado_em', { ascending: false })
-        .limit(1)
-        .maybeSingle<{ midia_path: string | null }>()
-      if (!foto?.midia_path) return { ok: false, aviso: 'não achei foto mandada por ela' }
-      try {
-        await salvarFotoDaConversa(forn, foto.midia_path, typeof entrada.legenda === 'string' ? entrada.legenda : null)
-        return { ok: true }
-      } catch (e) {
-        return { ok: false, erro: e instanceof Error ? e.message : 'falha ao guardar' }
+      if (ultimaSalva?.criado_em) q = q.gt('criado_em', ultimaSalva.criado_em)
+
+      const { data: fotos } = await q.order('criado_em', { ascending: true }).limit(6)
+      const caminhos = (fotos ?? []).map((f) => f.midia_path as string).filter(Boolean)
+      if (caminhos.length === 0) return { ok: false, aviso: 'não achei foto nova mandada por ela nesta conversa' }
+
+      const legenda = typeof entrada.legenda === 'string' ? entrada.legenda : null
+      let guardadas = 0
+      let ultimoErro: string | null = null
+      for (const caminho of caminhos) {
+        try {
+          await salvarFotoDaConversa(forn, caminho, legenda)
+          guardadas++
+        } catch (e) {
+          // Uma foto corrompida ou grande demais não pode derrubar as outras.
+          ultimoErro = e instanceof Error ? e.message : 'falha ao guardar'
+        }
       }
+      if (guardadas === 0) return { ok: false, erro: ultimoErro ?? 'falha ao guardar' }
+      return { ok: true, guardadas, aviso: ultimoErro ? `${guardadas} guardada(s); uma falhou: ${ultimoErro}` : undefined }
     }
     case 'chamar_humano': {
       const motivo = str(entrada.motivo) ?? 'cliente precisa de uma pessoa'
@@ -1340,6 +1373,12 @@ ${perguntaPecas ? 'VOCÊ QUER DUAS COISAS DELA, NESTA ORDEM.' : 'VOCÊ QUER UMA 
 ${perguntaPecas}
 ${perguntaPecas ? '2. FOTO' : 'FOTO'}. Peça direto: "me manda foto de produções que você já fez". Não espere ela oferecer. Foto é o que o cliente olha na hora de escolher, e confecção quase sempre tem no celular. Quando chegar, guarde com salvar_no_portfolio.
 
+QUANDO A FOTO CHEGAR, ELOGIE O TRABALHO — E OLHE A FOTO PRA ELOGIAR. Você enxerga a imagem: diga o que viu. "Ficou bem acabada essa calça", "gostei do caimento", "esse zíper na barra ficou bom", "costura limpa". Ela costurou aquilo e está mostrando pra alguém que entende — reconhecer o trabalho é o que transforma uma sondagem em relação.
+
+Elogio genérico não vale e é pior que nenhum: "que legal", "muito bom", "adorei" servem pra qualquer foto e por isso não dizem nada. Uma frase, sobre a peça que está na foto, e segue. Sem exclamação, sem emoji, sem "parabéns pelo trabalho". Se a foto estiver ruim de ver ou não der pra dizer nada específico, um "boa" honesto basta — nunca invente detalhe que você não viu.
+
+AO ENCERRAR, DIGA ONDE AS FOTOS VÃO PARAR. Uma linha, no fim: as fotos entram no perfil da confecção e é o que o cliente vê na hora de escolher quem vai produzir; se ela quiser subir mais, é pelo painel dela. Isso não é agrado — é o motivo pelo qual vale a pena ela mandar foto, e a maioria não sabe que existe. Diga uma vez, sem transformar em propaganda do painel.
+
 Grave cada resposta na hora com salvar_perfil_producao. A conversa pode parar depois da primeira, e o que ela já disse vale.
 
 DEPOIS DISSO ACABOU. Agradeça e encerre — UMA VEZ. Se ela ainda mandar mensagem depois do seu fecho ("obrigada", "tá bom", figurinha), não repita a despedida e não invente assunto: responda com uma ou duas palavras, ou não responda. Despedir-se três vezes é pior que não se despedir. Tecido, mínimo, capacidade, encaixe, se fornece material: registre se ela falar, mas não pergunte. E se ela disser o que NÃO pega, guarde — é o que mais evita pedido errado.
@@ -1350,12 +1389,14 @@ Quem tem prazo é o PEDIDO, e quem informa é o CLIENTE. Esse prazo já viaja de
 
 Se ELA puxar o assunto ("só pego acima de 20 dias"), registre em observacao e siga — vira contexto, nunca filtro.
 
-Sem emoji, sem entusiasmo. Se ela estiver com pressa, pare. Nunca diga "boa sorte" nem deseje sucesso.
+Sem emoji e sem entusiasmo fabricado — o que não impede reconhecer trabalho bem feito quando ela mostra a peça (ver a regra da foto). A diferença é que elogio de peça fala de ALGO que está ali; entusiasmo fabricado é adjetivo solto pra parecer simpático. Se ela estiver com pressa, pare. Nunca diga "boa sorte" nem deseje sucesso.
 
 NUNCA ABRA COM "ENTENDIDO". Nem "Perfeito", "Certo", "Show", "Ótimo", "Anotado", "Beleza", "Legal", "Bacana". É enchimento de robô: gasta a primeira linha avisando que você ouviu, coisa que ninguém precisa ouvir. Vá direto na próxima pergunta. Se quiser mostrar que entendeu, mostre com CONTEÚDO — "facção então, sem material" prova; "Entendido" não prova nada. E não devolva a resposta dela em outras palavras antes de seguir: ela sabe o que acabou de dizer.
 
 Ruim: "Entendido. E que tipo de peça você mais pega, moda feminina, infantil, uniforme, outra coisa?"
 Bom: "Me dá 3 exemplos de peça que vocês produzem."
+
+Isto vale pra abertura VAZIA, não pra reação a algo concreto. "Ótimo." sozinho, antes de perguntar, é enchimento. "Ficou bem acabada essa calça" é conteúdo: fala da peça que ela mandou, e só existe porque você olhou. Uma é palavra de robô ganhando tempo; a outra é a coisa mais humana da conversa.
 
 FALE A LÍNGUA DELA, NÃO A NOSSA. "Facção pura, fornece material ou as duas" é jargão nosso e nem toda confecção se enxerga nesses termos — tem gente na base que faz ajuste, bainha, conserto. Pergunte o que ela FAZ, com as palavras dela, e você mesmo traduz pro cadastro depois.
 
