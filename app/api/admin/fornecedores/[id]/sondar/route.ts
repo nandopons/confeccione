@@ -50,24 +50,42 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   // UMA VEZ SÓ: se já mandamos a sondagem e ela não respondeu, insistir é spam e
   // derruba a qualidade do número na Meta. A busca casa pelos últimos 8 dígitos
   // por causa do nono dígito — o mesmo número aparece com 12 ou 13.
+  // TRÊS CONSULTAS SIMPLES EM VEZ DE UM FILTRO ANINHADO — 10/09/2026.
+  //
+  // A primeira versão filtrava por `wa_conversas.wa_contatos.wa_id` num embed
+  // duplo do PostgREST. Não pegou: a Lucilaine recebeu a mesma sondagem às 06:17
+  // e às 06:18. Filtro aninhado que falha não dá erro, só devolve nada — e
+  // "nada" aqui significa "pode mandar". Trava que falha em silêncio é pior que
+  // trava nenhuma, porque a gente confia nela.
   const fim8 = waId.replace(/\D/g, '').slice(-8)
-  const { data: jaMandou } = await supabaseAdmin
-    .from('wa_mensagens')
-    .select('criado_em, wa_conversas!inner(wa_contatos!inner(wa_id))')
-    .eq('direcao', 'saida')
-    .eq('template_nome', TEMPLATE_SONDAGEM)
-    .ilike('wa_conversas.wa_contatos.wa_id', `%${fim8}`)
-    .order('criado_em', { ascending: false })
-    .limit(1)
-    .maybeSingle<{ criado_em: string }>()
-  if (jaMandou) {
-    const quando = new Date(jaMandou.criado_em).toLocaleString('pt-BR', {
-      timeZone: 'America/Recife', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-    })
-    return NextResponse.json(
-      { erro: `A sondagem já foi enviada em ${quando}. Se ela não respondeu, insistir vira spam.` },
-      { status: 409 },
-    )
+  const { data: contatos } = await supabaseAdmin.from('wa_contatos').select('id').ilike('wa_id', `%${fim8}`)
+  const idsContato = (contatos ?? []).map((c) => c.id as string)
+  if (idsContato.length > 0) {
+    const { data: conversas } = await supabaseAdmin.from('wa_conversas').select('id').in('contato_id', idsContato)
+    const idsConversa = (conversas ?? []).map((c) => c.id as string)
+    if (idsConversa.length > 0) {
+      const { data: jaMandou } = await supabaseAdmin
+        .from('wa_mensagens')
+        .select('criado_em, status')
+        .in('conversa_id', idsConversa)
+        .eq('direcao', 'saida')
+        .eq('template_nome', TEMPLATE_SONDAGEM)
+        .order('criado_em', { ascending: false })
+        .limit(1)
+        .maybeSingle<{ criado_em: string; status: string | null }>()
+      if (jaMandou) {
+        const quando = new Date(jaMandou.criado_em).toLocaleString('pt-BR', {
+          timeZone: 'America/Recife', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+        })
+        // Entrega recusada pela Meta merece explicação diferente: reenviar não
+        // resolve, porque o bloqueio é do lado de quem recebe.
+        const motivo =
+          jaMandou.status === 'falhou'
+            ? `A sondagem foi tentada em ${quando} e a Meta recusou a entrega — ela nunca falou com a gente no WhatsApp, então template de marketing não passa. Reenviar não resolve: peça pra ela mandar um "oi" no nosso número.`
+            : `A sondagem já foi enviada em ${quando}. Se ela não respondeu, insistir vira spam.`
+        return NextResponse.json({ erro: motivo }, { status: 409 })
+      }
+    }
   }
 
   const r = await enviarTemplate(waId, TEMPLATE_SONDAGEM, 'pt_BR', [
