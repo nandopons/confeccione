@@ -1677,6 +1677,12 @@ export async function devolverAoLuigi(conversaId: string): Promise<{ ok: boolean
     criadoEm: ultima.criado_em,
     tipo: ultima.tipo,
     corpo: ultima.corpo,
+    retomada:
+      'Estou te devolvendo esta conversa. Olhe o pedido dela e veja o que está faltando, na ordem: ' +
+      'e-mail, CEP, número da casa, e foto de referência em cada modelo (se ela mandou foto na conversa, ' +
+      'prenda no modelo certo — pergunte de qual peça é quando não estiver claro). ' +
+      'Peça UMA coisa por vez, retomando com naturalidade — não repita o que ela já deu nem trate como formulário. ' +
+      'Se estiver tudo completo, me diga em uma linha e não escreva pra ela.',
   })
   return { ok: true }
 }
@@ -1706,6 +1712,17 @@ export type MensagemCliente = {
   corpo: string | null
   /** true quando o webhook já respondeu (botão de feedback, "Falar com atendente"). */
   jaTratada?: boolean
+  /**
+   * Nota interna quando o Fernando devolve a conversa pelo inbox. O cliente
+   * nunca vê — entra como turno de contexto, não como fala dele.
+   *
+   * Existe porque devolver reprocessando a última mensagem só funciona quando
+   * ela é uma pergunta pendente. Em 10/09/2026 a conversa da Ias estava
+   * encerrada ("Ok"), o Luigi rodou duas vezes, não teve o que responder e
+   * gravou 'sem texto pra enviar'. Ele estava certo: ninguém perguntou nada. O
+   * que faltava era um MOTIVO pra voltar a falar, e é isso que vai aqui.
+   */
+  retomada?: string
 }
 
 /**
@@ -1815,6 +1832,12 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
 
     if (params.tipo === 'image' || params.tipo === 'document') {
       mensagens = await comAnexoRecente(mensagens, params.wamid, params.corpo, historico.wamids.has(params.wamid))
+    }
+
+    // A nota de retomada entra por último, depois de todo o histórico: é a
+    // última coisa que ele lê antes de decidir o que fazer.
+    if (params.retomada) {
+      mensagens = [...mensagens, { role: 'user', content: `[nota do Fernando, o cliente NÃO vê isto] ${params.retomada}` }]
     }
 
     const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens)

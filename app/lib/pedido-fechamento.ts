@@ -22,6 +22,7 @@
 
 import { supabaseAdmin } from './supabase-server'
 import { buscarEnderecoCep } from './cep'
+import { garanteContaPorEmail } from './cliente-auth'
 import { guardarImagem } from './imagens-pedido-storage'
 import { salvarLinhasEditadas, type LinhaEditada } from './pedido-linhas-edicao'
 import { enviarResumoPdfPedido } from './whatsapp-notify'
@@ -67,7 +68,7 @@ export async function salvarDadosDoCliente(params: {
 }): Promise<{ ok: boolean; erro?: string; endereco?: string; falta?: string[] }> {
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, nome, email, cep, logradouro, numero, complemento, bairro, cidade, uf, cpf_cnpj')
+    .select('id, nome, email, telefone, conta_id, cep, logradouro, numero, complemento, bairro, cidade, uf, cpf_cnpj')
     .eq('id', params.pedidoId)
     .maybeSingle<Record<string, string | null>>()
   if (!pedido) return { ok: false, erro: 'pedido não encontrado' }
@@ -104,6 +105,53 @@ export async function salvarDadosDoCliente(params: {
     .update({ ...patch, atualizado_em: new Date().toISOString() })
     .eq('id', params.pedidoId)
   if (error) return { ok: false, erro: error.message }
+
+  // O MESMO DADO VAI PRO CADASTRO DO CLIENTE — 10/09/2026.
+  //
+  // Sem isto, cada pedido recomeça do zero: a pessoa dita o endereço de novo, e
+  // a Confeccione não sabe que já falou com ela. O e-mail é a chave (é por ele
+  // que o cliente entra no painel), então a conta só nasce quando ele aparece.
+  //
+  // Criar a conta não compromete ninguém: o login é por e-mail e ela só existe
+  // pra guardar o que a pessoa já nos deu. O ganho é o próximo pedido nascer com
+  // endereço pronto e ela conseguir acompanhar o que pediu.
+  //
+  // Falhar aqui NÃO derruba o pedido: os dados do pedido já estão salvos, que é
+  // o que trava o frete. O cadastro é o extra.
+  const emailConta = patch.email ?? pedido.email
+  if (emailConta) {
+    try {
+      const conta = await garanteContaPorEmail(emailConta)
+      const doPedido = { ...pedido, ...patch }
+      // Só preenche o que a conta ainda não tem: o que a pessoa cadastrou no
+      // painel vale mais que o que ela ditou no WhatsApp com pressa.
+      const patchConta: Record<string, string | null> = {}
+      const talvez = (campo: string, valor: string | null | undefined) => {
+        if (valor && !(conta as unknown as Record<string, unknown>)[campo]) patchConta[campo] = valor
+      }
+      talvez('nome', doPedido.nome)
+      talvez('whatsapp', doPedido.telefone)
+      talvez('cep', doPedido.cep)
+      talvez('logradouro', doPedido.logradouro)
+      talvez('numero', doPedido.numero)
+      talvez('complemento', doPedido.complemento)
+      talvez('bairro', doPedido.bairro)
+      talvez('cidade', doPedido.cidade)
+      talvez('uf', doPedido.uf)
+      if (Object.keys(patchConta).length > 0) {
+        await supabaseAdmin
+          .from('contas_clientes')
+          .update({ ...patchConta, atualizado_em: new Date().toISOString() })
+          .eq('id', conta.id)
+      }
+      // Amarra o pedido à conta pra ele aparecer no painel dela.
+      if (!doPedido.conta_id) {
+        await supabaseAdmin.from('pedidos_assistente').update({ conta_id: conta.id }).eq('id', params.pedidoId)
+      }
+    } catch (err) {
+      console.error('[pedido-fechamento] cadastro do cliente falhou (pedido segue salvo):', err)
+    }
+  }
 
   const fim = { ...pedido, ...patch }
   const falta = [
