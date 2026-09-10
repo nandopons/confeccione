@@ -91,11 +91,18 @@ const LIMITE_TEXTO = 1500
  * Quanto ele espera antes de responder, pra ver se a pessoa ainda está
  * escrevendo. Eram 3 segundos, e 3 segundos não é como se conversa no WhatsApp:
  * manda "Oi boa tarde!", pensa, e completa 40 segundos depois. Foi o que o
- * Nelson fez, e o Luigi respondeu as duas separado, quase igual. 15 segundos
- * cobre a pausa natural entre duas mensagens da mesma pessoa sem que ela sinta
- * demora.
+ * Nelson fez, e o Luigi respondeu as duas separado, quase igual.
+ *
+ * 15 s não bastou — 10/09/2026. O Ademilson mandou "Tecido plano" e depois
+ * "Corta o biquíni corto viscose suplex de galinha": a segunda é longa, e
+ * escrever isso no celular leva mais de 15 segundos. O Luigi respondeu a
+ * primeira enquanto ele ainda digitava a segunda, e aí perguntou duas vezes.
+ *
+ * 30 s cobre a pausa de quem está pensando e digitando a frase seguinte. O
+ * custo é responder meio minuto depois, o que ninguém estranha no WhatsApp — a
+ * pessoa não está olhando a tela esperando. Responder atropelado, sim, estranha.
  */
-const ESPERA_MENSAGEM_SEGUINTE_MS = 15_000
+const ESPERA_MENSAGEM_SEGUINTE_MS = 30_000
 const PEDIDOS_NO_CONTEXTO = 4
 
 // ─── Modo ───────────────────────────────────────────────────────────────────
@@ -191,15 +198,31 @@ function mensagensSeparadas(texto: string): string[] {
 /**
  * Pausa entre mensagens, pra chegarem como quem está digitando.
  *
- * Sorteada entre 3 e 5 segundos, não fixa: três mensagens com exatamente 3,000
- * ms de intervalo é assinatura de robô — ninguém digita em compasso. O intervalo
- * irregular é o que faz parecer alguém do outro lado.
+ * Sorteada, não fixa: três mensagens com exatamente 3.000 ms de intervalo é
+ * assinatura de robô — ninguém digita em compasso.
+ *
+ * E PROPORCIONAL AO TAMANHO — 10/09/2026. Antes eram 3 a 5 segundos pra
+ * qualquer mensagem, e a Vanessa recebeu três balões no mesmo minuto, um deles
+ * com quarenta palavras. Ninguém manda uma mensagem e, dois segundos depois,
+ * uma mensagem grande: quem digita leva o tempo de digitar. A pausa curta era
+ * justamente o que entregava que não havia gente do outro lado.
+ *
+ * Uns 250 caracteres por 10 s equivale a digitar rápido no celular sem parecer
+ * transcrição. O teto de 12 s existe porque, passando disso, o silêncio deixa
+ * de parecer digitação e vira conversa travada.
  */
-const PAUSA_MIN_MS = 3000
-const PAUSA_MAX_MS = 5000
+const PAUSA_MIN_MS = 4000
+const PAUSA_MAX_MS = 12_000
+/** ms por caractere — ~150 caracteres a cada 6 s. */
+const MS_POR_CARACTERE = 40
 
-function pausaEntreMensagens(): number {
-  return PAUSA_MIN_MS + Math.floor(Math.random() * (PAUSA_MAX_MS - PAUSA_MIN_MS + 1))
+function pausaEntreMensagens(proxima = ''): number {
+  const digitando = PAUSA_MIN_MS + proxima.length * MS_POR_CARACTERE
+  const base = Math.min(digitando, PAUSA_MAX_MS)
+  // ±20% de variação: o intervalo irregular é o que faz parecer alguém do
+  // outro lado, e vale mais que o número exato.
+  const jitter = base * 0.2
+  return Math.round(base - jitter + Math.random() * jitter * 2)
 }
 
 function dormir(ms: number): Promise<void> {
@@ -1238,7 +1261,14 @@ ${
 
 QUEM ESTÁ FALANDO COM VOCÊ É UMA CONFECÇÃO CADASTRADA${nome ? ` — ${nome}` : ''}. Ela é parceira, não cliente. Fala a língua do ramo: não explique o que é facção, malha ou grade, e não trate como quem nunca produziu roupa.
 
-SE ELA PERGUNTAR "QUE PEDIDO?", NÃO EXISTE PEDIDO — E VOCÊ ASSUME ISSO NA HORA. Pra abrir conversa fora da janela de 24 h a Meta só aceita template aprovado, e o único que temos hoje fala em "seu pedido na Confeccione". É o nosso limite, não uma promessa: NÃO existe pedido aguardando ela, e inventar um pra justificar a mensagem é mentira que ela descobre na frase seguinte. Diga a verdade em uma linha e emende com o motivo real — "na verdade não é um pedido específico; queria atualizar o que vocês produzem hoje pra te mandar só o que combina". Nunca diga que tem pedido, nem "tenho um pedido que pode te interessar", nem deixe no ar.
+SE ELA PERGUNTAR "QUE PEDIDO?", NÃO EXISTE PEDIDO. Não invente um, e não explique por quê. Uma linha e siga: "Não é um pedido específico — queria atualizar o que vocês produzem. Me dá 3 exemplos de peça?" Só isso.
+
+NÃO CONTE A NOSSA COZINHA. Template, Meta, janela de 24 h, "o único formato aprovado", categoria que não filtra, como o match funciona, o que falta no cadastro dela pra pontuar: nada disso interessa a quem está costurando. É problema nosso. Explicar isso não soa transparente, soa confuso — e faz ela achar que vai dar trabalho falar com a gente. Peça o que você precisa e pronto; se ela quiser saber pra quê, uma frase resolve ("é pra te mandar só o que combina com o que vocês fazem").
+
+POUCAS PALAVRAS. Uma mensagem, uma ou duas linhas, uma pergunta. Não abra com "Luigi aqui" num balão e o assunto noutro — junte. Não peça desculpa por confusão que ela não teve. Se der pra cortar metade e a frase continuar de pé, corte.
+
+Ruim (três balões, 10/09/2026): "Luigi aqui, do atendimento da Confeccione." / "Na verdade não existe um pedido específico, o template que a gente usa pra abrir conversa menciona pedido mas é o único formato que a Meta aprova. Me desculpa pela confusão." / "O motivo real: seu cadastro ainda não tem peças com nome, só categorias, e isso limita o match..."
+Bom: "Aqui é o Luigi, da Confeccione. Não é um pedido específico — queria atualizar o que vocês produzem pra te mandar só o que combina. Me dá 3 exemplos de peça?"
 ${jaSabemos}
 
 ${jaSeApresentou ? 'Você já se apresentou nesta conversa: não repita o nome.' : 'Se for a primeira fala sua aqui, diga em uma linha quem é.'}
@@ -2082,7 +2112,8 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     const partes = mensagensSeparadas(r.texto)
     let envio: Awaited<ReturnType<typeof enviarTexto>> = { ok: false, erro: 'sem texto pra enviar' }
     for (const [i, parte] of partes.entries()) {
-      if (i > 0) await new Promise((ok) => setTimeout(ok, pausaEntreMensagens()))
+      // A pausa é do tamanho do que VEM — quem digita leva o tempo de digitar.
+      if (i > 0) await dormir(pausaEntreMensagens(parte))
       envio = await enviarTexto(waId, parte)
       if (envio.ok) await registrarSaidaInbox(waId, nome, envio.wamid, parte, null, 'luigi')
       // Se uma parte falha, parar: continuar deixaria a conversa sem sentido.

@@ -1,10 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
-import { avisarGestor } from '@/app/lib/luigi'
 import { NextResponse } from 'next/server'
 import { estaEmHorarioComercial, estaEmJanelaRetryPassivo } from '@/app/lib/horario'
-import { criarEDispararOferta } from '@/app/lib/ofertas'
-import { enviarTextoSimples } from '@/app/lib/whatsapp-cloud'
-import { emailAdminFornecedorExpirou } from '@/app/lib/email'
+// criarEDispararOferta, avisarGestor, enviarTextoSimples e
+// emailAdminFornecedorExpirou saíram em 10/09/2026 junto com o reenvio da era
+// antiga (ver TAREFA 1). Quem oferta hoje é app/lib/oferta-automatica.ts.
 import {
   dispararToqueCaptacao,
   proximoAgendamento,
@@ -83,56 +82,32 @@ export async function GET(req: Request) {
 
       resumo.ofertas_expiradas += 1
 
-      // Notifica admin SOMENTE em ofertas normais expiradas.
-      // Ofertas sem_credito que expiram não geram alerta (esperado: fornecedor
-      // não decidiu comprar, segue o jogo).
-      if (oferta.tipo_oferta === 'normal') {
-        try {
-          const [{ data: fornecedor }, { data: pedido }] = await Promise.all([
-            supabase
-              .from('leads_fornecedores')
-              .select('id, nome, whatsapp')
-              .eq('id', oferta.fornecedor_id)
-              .single(),
-            supabase
-              .from('pedidos')
-              .select('id, nome, tipo')
-              .eq('id', oferta.pedido_id)
-              .single(),
-          ])
-
-          if (fornecedor && pedido) {
-            await Promise.allSettled([
-              // Era whatsappAdminFornecedorExpirou(), da Z-API desligada.
-              avisarGestor(
-                `Fornecedor não respondeu em 4h: ${fornecedor.nome} (${fornecedor.whatsapp}). ` +
-                  `Pedido ${pedido.tipo} de ${pedido.nome}. Ofereço pro próximo automaticamente.`
-              ),
-              emailAdminFornecedorExpirou({
-                fornecedorId: fornecedor.id,
-                nomeFornecedor: fornecedor.nome,
-                whatsappFornecedor: fornecedor.whatsapp,
-                pedidoId: pedido.id,
-                nomeCliente: pedido.nome,
-                tipo: pedido.tipo,
-              }),
-            ])
-            resumo.notificacoes_expiracao += 1
-          }
-        } catch (err) {
-          // Não interrompe o reenvio se a notificação falhar
-          console.error('[scheduler] notificação expiração falhou:', err)
-        }
-      }
-
-      try {
-        await criarEDispararOferta(oferta.pedido_id)
-        resumo.ofertas_reenviadas += 1
-      } catch (err) {
-        resumo.erros.push(
-          `reenvio pedido ${oferta.pedido_id}: ${err instanceof Error ? err.message : String(err)}`
-        )
-      }
+      // =========================================================
+      // O REENVIO AUTOMÁTICO DA ERA ANTIGA SAIU DAQUI — 10/09/2026
+      //
+      // Esta tarefa reofertava pedidos da tabela `pedidos`, que é a primeira
+      // era do produto. Ela NÃO RECEBE UM PEDIDO DESDE 28/06/2026 — zero nos
+      // últimos 30 dias, contra 73 em `pedidos_assistente`, que é o que o
+      // painel mostra hoje. O cron continuou rodando a cada 15 minutos por
+      // dois meses e meio reofertando um acervo parado.
+      //
+      // E reofertava mal: `criarEDispararOferta` manda TEXTO LIVRE, sem
+      // template (ofertas.ts, linhas 150 e 252). Fora da janela de 24 h isso
+      // não é entregue, e só 3 das 42 confecções têm janela aberta num dia
+      // qualquer — ou seja, a mensagem quase sempre morria no caminho, sem
+      // erro visível. O texto ainda oferecia "upgrade pro plano" com preço
+      // mensal, produto encerrado em 25/08.
+      //
+      // O QUE FICOU: a marcação de expirada logo acima. Ela não escreve pra
+      // ninguém, só mantém o estado coerente pra quem lê o histórico.
+      //
+      // O QUE ASSUMIU: `oferta-automatica.ts` (cron próprio, 20 min), que
+      // roda sobre `pedidos_assistente` e manda pelo template `oferta_pedido_v4`
+      // antes de tentar texto livre. Liga com OFERTA_AUTOMATICA_ATIVA=1.
+      //
+      // As rotas manuais da era antiga (/api/admin/ofertar, fila.ts) seguem
+      // no lugar, inertes: quem dispara sozinho era só este ponto.
+      // =========================================================
     }
   }
 
@@ -160,14 +135,11 @@ export async function GET(req: Request) {
         continue
       }
 
-      try {
-        await criarEDispararOferta(pedido.id)
-        resumo.pedidos_buscar_apos += 1
-      } catch (err) {
-        resumo.erros.push(
-          `disparo pedido ${pedido.id}: ${err instanceof Error ? err.message : String(err)}`
-        )
-      }
+      // O DISPARO SAIU DAQUI TAMBÉM — 10/09/2026, mesma razão da TAREFA 1.
+      // Continua limpando `buscar_apos` acima pra não deixar pedido preso num
+      // agendamento vencido; o que não acontece mais é o envio por texto livre
+      // sobre a tabela `pedidos`, parada desde 28/06.
+      resumo.pedidos_buscar_apos += 1
     }
   }
 

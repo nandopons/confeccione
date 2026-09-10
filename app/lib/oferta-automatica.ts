@@ -56,6 +56,29 @@ export const MAX_OFERTAS_ABERTAS = 2
 /** Teto de pedidos tratados por rodada — cron roda a cada 10 min. */
 const MAX_POR_RODADA = 10
 
+/**
+ * Pedido parado além disto não entra na fila automática.
+ *
+ * POR QUE ISTO EXISTE — 10/09/2026
+ * A fila ordena do mais antigo pro mais novo, o que é justo enquanto ela roda.
+ * Só que ela nunca rodou: no dia em que ligarmos, há 32 pedidos represados e os
+ * dez primeiros seriam de JUNHO, parados há 85 dias. A primeira coisa que a
+ * automação faria seria oferecer a uma confecção um pedido que o cliente fez há
+ * três meses — e empurrar os de hoje (a Ias, de 200 peças) pro fim da fila.
+ *
+ * Isso queima os dois lados: a confecção gasta atenção com algo que o cliente
+ * provavelmente já resolveu em outro lugar, e a gente aparece desorganizado
+ * logo na mensagem que devia abrir relação.
+ *
+ * Pedido antigo não fica órfão: ele continua no painel e o botão "Ofertar"
+ * manual segue funcionando. O que a automação não faz é ressuscitar sozinha um
+ * acervo parado — quem decide que vale a pena reabrir é o Fernando, olhando.
+ *
+ * Se um dia a fila estiver rodando em dia, este número pode subir sem medo:
+ * ele existe pro represamento inicial, não pro regime normal.
+ */
+const MAX_DIAS_PARADO = 30
+
 export type ResultadoFila = {
   expiradas: number
   ofertados: Array<{ pedido: string; fornecedor: string }>
@@ -93,10 +116,16 @@ type PedidoFila = {
 
 /** Pedidos confirmados que ainda não têm confecção nem oferta em aberto. */
 async function pedidosNaFila(): Promise<PedidoFila[]> {
+  // O corte por idade vai no banco pra não gastar a janela de 60 lendo pedido
+  // de junho que seria descartado depois — sem ele, os represados ocupariam a
+  // consulta inteira e os de hoje nem apareceriam.
+  const limite = new Date(Date.now() - MAX_DIAS_PARADO * 24 * 60 * 60 * 1000).toISOString()
+
   const { data } = await supabaseAdmin
     .from('pedidos_assistente_etapas')
     .select('id, codigo, cidade, uf, categoria, pecas, linhas, prazo_dias, etapa, desde')
     .in('etapa', ['buscando_fornecedor', 'sem_fornecedor'])
+    .gte('desde', limite)
     .order('desde', { ascending: true })
     .limit(60)
 
