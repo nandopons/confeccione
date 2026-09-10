@@ -15,7 +15,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ColunaContato } from '../ColunaContato'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
 import { PECAS_PRINCIPAIS, PECAS_EXTRAS, pecaLabel } from '@/app/lib/pecas'
-import { BadgePlano, BadgeStatusFornecedor } from './_helpers'
+import { BadgeStatusFornecedor } from './_helpers'
 import { calcularDiasInatividade, formatarUltimaOferta } from './_format'
 import FornecedorOverlay from './FornecedorOverlay'
 
@@ -29,7 +29,7 @@ import FornecedorOverlay from './FornecedorOverlay'
 const CHIPS_VISIVEIS = 3
 
 type Status = 'ativo' | 'pausado' | 'todos'
-type Ordem = 'nome' | 'pedido_minimo' | 'ultimo_lead_em' | 'cidade' | 'plano'
+type Ordem = 'nome' | 'pedido_minimo' | 'ultimo_lead_em' | 'cidade'
 type Dir = 'asc' | 'desc'
 
 interface Fornecedor {
@@ -170,6 +170,34 @@ export default function FornecedoresTabela() {
     }
   }
 
+  /**
+   * Manda o Luigi puxar o assunto "o que vocês produzem hoje, tem foto nova?".
+   *
+   * A rota é que decide COMO: janela aberta → o Luigi fala agora; janela
+   * fechada mas ela já escreveu um dia → template de sondagem; nunca escreveu
+   * → recusa e explica, porque a Meta bloqueia marketing pra quem nunca
+   * interagiu e cada recusa conta contra o número. Por isso o erro aqui é
+   * informação, não falha — vale mostrar inteiro.
+   */
+  const atualizarCadastro = async (f: Fornecedor) => {
+    if (!confirm(`Pedir atualização de cadastro a ${f.nome ?? 'este fornecedor'} pelo WhatsApp?`)) return
+    setAcaoLoading(f.id)
+    try {
+      const r = await fetch(`/api/admin/fornecedores/${f.id}/atualizar-cadastro`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.erro || `HTTP ${r.status}`)
+      alert(j.aviso ?? 'Pedido de atualização enviado.')
+      await carregar()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Erro desconhecido')
+    } finally {
+      setAcaoLoading(null)
+    }
+  }
+
   const exportar = () => {
     const qs = queryString()
     window.location.href = `/api/admin/fornecedores/exportar?${qs}`
@@ -301,13 +329,12 @@ export default function FornecedoresTabela() {
                 >
                   Contato
                 </Th>
-                <Th
-                  onClick={() => toggleOrdem('plano')}
-                  ativo={ordem === 'plano'}
-                  dir={dir}
-                >
-                  Plano
-                </Th>
+                {/* A coluna PLANO saiu em 10/09/2026. O plano Pro foi encerrado
+                    em 25/08 — a monetização passou a ser % no orçamento — e o
+                    cadastro parou de gravar `plano_expira_em`. O badge continuava
+                    exibindo "Pro" pra todo mundo por causa do DEFAULT da coluna:
+                    ocupava uma coluna inteira pra mostrar sempre a mesma palavra,
+                    e ainda sugeria uma distinção comercial que não existe mais. */}
                 <Th
                   onClick={() => toggleOrdem('cidade')}
                   ativo={ordem === 'cidade'}
@@ -344,6 +371,7 @@ export default function FornecedoresTabela() {
                   onPausar={() => pausar(f)}
                   onReativar={() => reativar(f)}
                   onAbrir={() => setFornecedorAberto(f.id)}
+                  onAtualizarCadastro={() => atualizarCadastro(f)}
                 />
               ))}
             </tbody>
@@ -395,12 +423,14 @@ function Linha({
   onPausar,
   onReativar,
   onAbrir,
+  onAtualizarCadastro,
 }: {
   fornecedor: Fornecedor
   carregandoAcao: boolean
   onPausar: () => void
   onReativar: () => void
   onAbrir: () => void
+  onAtualizarCadastro: () => void
 }) {
   const pausado = fornecedor.status === 'pausado'
   const diasInatividade = calcularDiasInatividade(fornecedor.ultimo_lead_em)
@@ -421,9 +451,6 @@ function Linha({
           nome={fornecedor.nome ?? '(sem nome)'}
           whatsapp={fornecedor.whatsapp}
         />
-      </td>
-      <td className="px-3 py-2.5">
-        <BadgePlano plano={fornecedor.plano} />
       </td>
       <td className="px-3 py-2.5 text-gray-700">{local}</td>
       <td className="px-3 py-2.5 align-top">
@@ -478,6 +505,16 @@ function Linha({
       </td>
       <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
         {/* stopPropagation: botão de ação não deve abrir o overlay */}
+        <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onAtualizarCadastro}
+          disabled={carregandoAcao}
+          title="O Luigi pergunta o que ela produz hoje e pede foto nova, e grava no perfil. Se a janela estiver fechada, manda a sondagem; se ela nunca escreveu, avisa em vez de mandar."
+          className="rounded-md border border-[#1D9E75] px-2 py-1 text-xs text-[#1D9E75] hover:bg-emerald-50 disabled:opacity-40"
+        >
+          {carregandoAcao ? '...' : 'Atualizar cadastro'}
+        </button>
         {pausado ? (
           <button
             type="button"
@@ -497,6 +534,7 @@ function Linha({
             {carregandoAcao ? '...' : 'Pausar'}
           </button>
         )}
+        </div>
       </td>
     </tr>
   )

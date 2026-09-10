@@ -597,7 +597,10 @@ const FERRAMENTA_DADOS_CLIENTE: Anthropic.Messages.Tool = {
     'Grava no pedido os dados de contato e entrega que o cliente disser. Chame A CADA dado novo, não junte tudo pro fim — ' +
     'a conversa pode parar no meio e o que já veio vale. Campo que você não passar fica como está, então dá pra ir ' +
     'preenchendo aos poucos. O CEP traz rua, bairro, cidade e UF sozinho: você só precisa de CEP, NÚMERO e COMPLEMENTO. ' +
-    'Sem CEP não sai frete e sem número a transportadora não entrega — são esses dois que travam o pedido.',
+    'CINCO DADOS SÃO OBRIGATÓRIOS pra liberar o pedido: nome, e-mail, CEP, número da casa e CPF/CNPJ. ' +
+    'Sem CEP e número não sai cotação de frete; sem CPF/CNPJ não se emite nota fiscal; sem e-mail não vai o orçamento. ' +
+    'A ferramenta de liberar RECUSA enquanto faltar qualquer um deles — então colete durante a conversa, ' +
+    'uma coisa por vez e sem virar formulário, em vez de descobrir no fim.',
   input_schema: {
     type: 'object',
     properties: {
@@ -607,7 +610,7 @@ const FERRAMENTA_DADOS_CLIENTE: Anthropic.Messages.Tool = {
       cep: { type: 'string', maxLength: 12, description: '8 dígitos. Traz rua, bairro, cidade e UF juntos.' },
       numero: { type: 'string', maxLength: 20, description: 'Número da casa. "s/n" se não tiver.' },
       complemento: { type: 'string', maxLength: 120, description: 'Apto, bloco, referência. Só se ele disser.' },
-      cpf_cnpj: { type: 'string', maxLength: 20, description: 'Só se ELE oferecer, ou se for pra nota fiscal. Nunca insista.' },
+      cpf_cnpj: { type: 'string', maxLength: 20, description: 'CPF ou CNPJ. Obrigatório: é o que permite emitir a nota fiscal. Peça explicando pra quê.' },
     },
   },
 }
@@ -649,7 +652,10 @@ const FERRAMENTA_LIBERAR: Anthropic.Messages.Tool = {
     'Libera o pedido pras confecções — a partir daí ele entra na fila de ofertas e as confecções recebem pra orçar. ' +
     'SÓ chame depois de o cliente ter visto o resumo e dito de forma clara que pode liberar ("pode", "isso mesmo", ' +
     '"manda"). Nunca por conta própria e nunca sem ele ter conferido. Se faltar algo na peça, a ferramenta recusa e diz ' +
-    'o que falta — pergunte ao cliente e complete antes.',
+    'o que falta — pergunte ao cliente e complete antes. ' +
+    'Ela TAMBÉM recusa enquanto faltar nome, e-mail, CEP, número da casa ou CPF/CNPJ do cliente: são os dados de ' +
+    'frete e nota fiscal. Se ela recusar por isso, não tente de novo nem avise o cliente que "deu erro" — ' +
+    'peça o dado que falta, grave com salvar_dados_do_cliente e só então libere.',
   input_schema: {
     type: 'object',
     properties: {
@@ -914,7 +920,14 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
             ? 'Resolva as divergências com o cliente antes de seguir: pergunte uma por vez, com as palavras da lista.'
             : pronto.pronto
               ? 'Mande o resumo com enviar_resumo_pedido e pergunte se está tudo certo antes de liberar.'
-              : 'Pergunte ao cliente o que falta, uma coisa por vez.',
+              : pronto.pecasCompletas
+                // As peças estão de pé — o que falta são dados de frete e nota.
+                // O PDF pode ir agora: ele confere as peças enquanto passa o
+                // resto. Segurar o resumo aqui deixaria a conversa parada num
+                // "me manda o CEP" sem o cliente ter visto nada do pedido.
+                ? 'As peças estão completas. Mande o resumo com enviar_resumo_pedido pra ele conferir e, enquanto isso, ' +
+                  'colete o que falta pra liberar — uma coisa por vez, sem virar formulário.'
+                : 'Pergunte ao cliente o que falta, uma coisa por vez.',
       }
     }
     case 'criar_pedido': {
@@ -956,7 +969,9 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
             ? 'Resolva as divergências com ela antes de seguir: pergunte uma por vez.'
             : pronto.pronto
               ? 'Mande o resumo com enviar_resumo_pedido e só libere com o sim dela.'
-              : `Falta: ${pronto.falta}. Pergunte uma coisa por vez.`,
+              : pronto.pecasCompletas
+                ? `As peças estão completas — mande o resumo com enviar_resumo_pedido pra ela conferir. ${pronto.falta}`
+                : `Falta: ${pronto.falta}. Pergunte uma coisa por vez.`,
       }
     }
     case 'salvar_dados_do_cliente': {
@@ -1643,7 +1658,23 @@ export async function resolverSugestoes(conversaId: string, status: 'usada' | 'd
  * modo do Luigi, e a de resposta velha (se alguém já respondeu depois dela, o
  * Luigi descarta em vez de falar por cima).
  */
-export async function devolverAoLuigi(conversaId: string): Promise<{ ok: boolean; motivo?: string }> {
+export const RETOMADA_PADRAO =
+  'Estou te devolvendo esta conversa. Olhe o pedido dela e veja o que está faltando, na ordem: ' +
+  'e-mail, CEP, número da casa, e foto de referência em cada modelo (se ela mandou foto na conversa, ' +
+  'prenda no modelo certo — pergunte de qual peça é quando não estiver claro). ' +
+  'Peça UMA coisa por vez, retomando com naturalidade — não repita o que ela já deu nem trate como formulário. ' +
+  'Se estiver tudo completo, me diga em uma linha e não escreva pra ela.'
+
+/**
+ * @param retomada instrução do Fernando pra esta retomada específica. O botão
+ *   "Devolver pro Luigi" do inbox usa o padrão (pedido incompleto); o painel de
+ *   fornecedores manda a dele (atualizar perfil de produção e fotos). A máquina
+ *   é a mesma — o que muda é o que ele tem que fazer ao reabrir a boca.
+ */
+export async function devolverAoLuigi(
+  conversaId: string,
+  retomada: string = RETOMADA_PADRAO,
+): Promise<{ ok: boolean; motivo?: string }> {
   const modo = await modoLuigi()
   if (modo === 'desligado') return { ok: false, motivo: 'o Luigi está desligado' }
 
@@ -1679,12 +1710,7 @@ export async function devolverAoLuigi(conversaId: string): Promise<{ ok: boolean
     criadoEm: ultima.criado_em,
     tipo: ultima.tipo,
     corpo: ultima.corpo,
-    retomada:
-      'Estou te devolvendo esta conversa. Olhe o pedido dela e veja o que está faltando, na ordem: ' +
-      'e-mail, CEP, número da casa, e foto de referência em cada modelo (se ela mandou foto na conversa, ' +
-      'prenda no modelo certo — pergunte de qual peça é quando não estiver claro). ' +
-      'Peça UMA coisa por vez, retomando com naturalidade — não repita o que ela já deu nem trate como formulário. ' +
-      'Se estiver tudo completo, me diga em uma linha e não escreva pra ela.',
+    retomada,
   })
   return { ok: true }
 }

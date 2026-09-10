@@ -154,10 +154,14 @@ export async function salvarDadosDoCliente(params: {
   }
 
   const fim = { ...pedido, ...patch }
+  // Mesma lista que trava o liberar em conferirPedido. Aqui ela volta a cada
+  // gravação pro Luigi saber o que ainda falta pedir, em vez de descobrir só
+  // quando tentar liberar e levar a recusa.
   const falta = [
     !fim.email ? 'e-mail' : null,
     !fim.cep ? 'CEP' : null,
     !fim.numero ? 'número' : null,
+    !fim.cpf_cnpj ? 'CPF/CNPJ' : null,
   ].filter((x): x is string => x !== null)
 
   const endereco = fim.cep
@@ -439,9 +443,20 @@ export function revisarPecas(linhas: LinhaPedido[]): Divergencia[] {
   return achados
 }
 
+/**
+ * `pecasCompletas` separa DUAS faltas que pedem reações diferentes.
+ *
+ * Peça sem cor ou sem quantidade impede tudo: não dá nem pra mostrar o resumo,
+ * porque o resumo estaria errado. Já cliente sem CEP ou sem CPF impede LIBERAR,
+ * mas não impede conferir — o PDF do que ele pediu está correto e mandar cedo
+ * ajuda, porque ele confere as peças enquanto passa os dados.
+ *
+ * Sem essa distinção, a trava de dados de frete/nota seguraria também o PDF, e
+ * a conversa ficaria parada num "me passa o CEP" sem o cliente ter visto nada.
+ */
 export type ProntoParaLiberar =
-  | { pronto: true; pecas: LinhaPedido[]; divergencias: Divergencia[] }
-  | { pronto: false; falta: string; divergencias: Divergencia[] }
+  | { pronto: true; pecas: LinhaPedido[]; divergencias: Divergencia[]; pecasCompletas: true }
+  | { pronto: false; falta: string; divergencias: Divergencia[]; pecasCompletas: boolean }
 
 /**
  * O pedido está em pé pra ir aos fornecedores? Verificação explícita, e não
@@ -450,21 +465,25 @@ export type ProntoParaLiberar =
 export async function conferirPedido(pedidoId: string): Promise<ProntoParaLiberar> {
   const { data } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('linhas, nome, telefone, status, pagamento_status')
+    .select('linhas, nome, telefone, email, cep, numero, cpf_cnpj, status, pagamento_status')
     .eq('id', pedidoId)
     .maybeSingle<{
       linhas: LinhaPedido[] | null
       nome: string | null
       telefone: string | null
+      email: string | null
+      cep: string | null
+      numero: string | null
+      cpf_cnpj: string | null
       status: string | null
       pagamento_status: string | null
     }>()
-  if (!data) return { pronto: false, falta: 'pedido não encontrado', divergencias: [] }
-  if (data.pagamento_status === 'pago') return { pronto: false, falta: 'pedido já pago', divergencias: [] }
-  if (data.status === 'cancelado') return { pronto: false, falta: 'pedido cancelado', divergencias: [] }
+  if (!data) return { pronto: false, falta: 'pedido não encontrado', divergencias: [], pecasCompletas: false }
+  if (data.pagamento_status === 'pago') return { pronto: false, falta: 'pedido já pago', divergencias: [], pecasCompletas: false }
+  if (data.status === 'cancelado') return { pronto: false, falta: 'pedido cancelado', divergencias: [], pecasCompletas: false }
 
   const linhas = Array.isArray(data.linhas) ? data.linhas : []
-  if (linhas.length === 0) return { pronto: false, falta: 'nenhuma peça definida', divergencias: [] }
+  if (linhas.length === 0) return { pronto: false, falta: 'nenhuma peça definida', divergencias: [], pecasCompletas: false }
 
   const divergencias = revisarPecas(linhas)
 
@@ -475,10 +494,48 @@ export async function conferirPedido(pedidoId: string): Promise<ProntoParaLibera
       const faltando = [!l.modelo && 'modelo', !l.cor && 'cor', !(l.total ?? 0) && 'quantidade'].filter(Boolean)
       return `peça ${i + 1} sem ${faltando.join(' e ')}`
     })
-  if (incompletas.length > 0) return { pronto: false, falta: incompletas.join('; '), divergencias }
-  if (!data.nome || !data.telefone) return { pronto: false, falta: 'contato do cliente incompleto', divergencias }
+  if (incompletas.length > 0) return { pronto: false, falta: incompletas.join('; '), divergencias, pecasCompletas: false }
 
-  return { pronto: true, pecas: linhas, divergencias }
+  // -------------------------------------------------- dados do cliente
+  // NÃO DÁ PRA LIBERAR SEM ISTO — 10/09/2026.
+  //
+  // Estes quatro campos não são burocracia de cadastro: cada um trava uma
+  // etapa que vem DEPOIS, quando o cliente já está esperando.
+  //   cep + número → sem endereço completo não sai cotação de frete, e a
+  //                  confecção precisa do frete pra fechar preço.
+  //   cpf/cnpj     → sem isso não se emite nota fiscal.
+  //   e-mail       → é por onde vai o orçamento e a nota.
+  //
+  // A trava mora AQUI, e não no prompt, de propósito. Prompt é intenção: o
+  // Luigi lê "peça o CEP", acha que já pediu, e libera assim mesmo — foi o que
+  // aconteceu com a Ias em 09/09, pedido fechado sem e-mail, sem CEP e sem
+  // número. Efeito de ferramenta se trava dentro da ferramenta.
+  //
+  // O texto é escrito pro Luigi ler e repassar: diz o que falta em português,
+  // na ordem em que convém perguntar, pra ele voltar pro cliente com UMA
+  // pergunta em vez de despejar um formulário.
+  const faltaDado = [
+    !data.nome?.trim() && 'o nome de quem recebe',
+    !data.telefone?.trim() && 'o telefone',
+    !data.email?.trim() && 'o e-mail (pra onde vai o orçamento e a nota)',
+    !data.cep?.replace(/\D/g, '') && 'o CEP (sem ele não sai cotação de frete)',
+    !data.numero?.trim() && 'o número da casa (a transportadora não entrega sem)',
+    !data.cpf_cnpj?.replace(/\D/g, '') && 'o CPF ou CNPJ (sem ele não se emite nota fiscal)',
+  ].filter(Boolean) as string[]
+
+  if (faltaDado.length > 0) {
+    return {
+      pronto: false,
+      falta:
+        `ainda falta ${faltaDado.join(', ')}. ` +
+        'Peça ao cliente UMA coisa por vez, com naturalidade, e grave com salvar_dados_do_cliente ' +
+        'a cada resposta. Só libere quando tudo isto estiver preenchido.',
+      divergencias,
+      pecasCompletas: true,
+    }
+  }
+
+  return { pronto: true, pecas: linhas, divergencias, pecasCompletas: true }
 }
 
 /** Manda o resumo do pedido em PDF pro WhatsApp do cliente conferir. */
