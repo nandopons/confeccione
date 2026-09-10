@@ -83,7 +83,33 @@ export type Diagnostico = {
  * pelo mesmo cano, nada que os contatos escreverem entra aqui.
  */
 export function diagnosticar(m: Medida, agora: number): Diagnostico {
-  const recibosOk = m.presas < PRESAS_PARA_ACUSAR
+  // SINAL DE VIDA MANDA MAIS QUE MENSAGEM PRESA — 10/09/2026.
+  //
+  // Antes o veredito era só `presas < 3`, e os dois campos abaixo — que são a
+  // prova direta de que o webhook está chegando — ficavam só enfeitando a
+  // frase da interface. O resultado foi um alarme de pânico às 11h27 dizendo
+  // que "nada que os contatos escreverem aparece aqui", com 39 mensagens
+  // recebidas na última hora e 197 no dia.
+  //
+  // As três presas que dispararam o alarme eram avisos internos pro número do
+  // Fernando ("Luigi chamou você"), de um total de 181 — 1,7%, que é celular
+  // fora do ar, não Meta caída. No mesmo período, cliente e fornecedor tinham
+  // 289 lidas e 109 entregues, com ZERO presas.
+  //
+  // O erro de fundo: 3 é limiar absoluto numa janela de 7 dias. Numa operação
+  // com centenas de envios, três recibos perdidos é ruído; foi limiar bom
+  // quando o volume era outro. Em vez de calibrar o número — que envelhece de
+  // novo — o teste passa a ser o que importa: chegou QUALQUER coisa da Meta
+  // agora há pouco? Se chegou, o cano está aberto e mensagem presa é caso
+  // isolado. Alarme que grita com o sistema funcionando ensina a ignorar
+  // alarme, e o próximo é de verdade.
+  const recente = (iso: string | null) => {
+    if (!iso) return false
+    const t = Date.parse(iso)
+    return Number.isFinite(t) && agora - t < MINUTOS_SEM_CONFIRMACAO * 60_000
+  }
+  const webhookVivo = recente(m.ultimaEntrada) || recente(m.ultimoRecibo)
+  const recibosOk = webhookVivo || m.presas < PRESAS_PARA_ACUSAR
 
   const marcos = [m.ultimaEntrada, m.ultimoRecibo]
     .filter((s): s is string => Boolean(s))
