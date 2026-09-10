@@ -336,8 +336,10 @@ type Contexto = {
 type CadastroFornecedor = {
   /** Linhas "campo: valor" do que já temos. Vazio = cadastro realmente vazio. */
   sabemos: string[]
-  /** Peças com NOME que já constam. É o que a entrevista existe pra descobrir. */
+  /** Peças com NOME já estruturadas (cadastro ou perfil). Encerra a pergunta 1. */
   temPecasComNome: boolean
+  /** Peças escritas em prosa no `descricao_livre`, ainda não estruturadas. */
+  descricaoTemPecas: boolean
   aprovado: boolean
 }
 
@@ -459,7 +461,9 @@ async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | 
   if (local) sabemos.push(`Fica em ${local}`)
   if (naoVazio(f.raio_atendimento)) sabemos.push(`Atende: ${f.raio_atendimento}`)
   if (f.pedido_minimo != null) sabemos.push(`Pedido mínimo: ${f.pedido_minimo} peça(s)`)
-  if (naoVazio(f.email)) sabemos.push(`E-mail: ${f.email}`)
+  // O e-mail dela NÃO entra: não é assunto da conversa, e listar dado de
+  // contato aqui só convida o modelo a "confirmar seu e-mail?", que é
+  // exatamente o tipo de pergunta-formulário que esta lista existe pra evitar.
 
   if (perfil) {
     if ((perfil.servicos ?? []).length > 0) sabemos.push(`Serviços: ${perfil.servicos.join(', ')}`)
@@ -473,9 +477,26 @@ async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | 
     if (naoVazio(perfil.observacao)) sabemos.push(`Observação: ${perfil.observacao}`)
   }
 
+  // PEÇA COM NOME MORA EM TRÊS LUGARES, NÃO EM UM — 10/09/2026.
+  //
+  // A checagem olhava só `pecas` e `pecas_outro` (o cadastro do site). Mas a
+  // resposta que o próprio Luigi arranca em conversa é gravada em
+  // `perfil_producao.servicos` — e é lá que estão as peças da maioria de quem
+  // já foi entrevistado. A Vanessa tinha OITO peças com nome em `servicos`
+  // (camiseta, scrub, camisa polo, calça de brim...) e ainda assim levou um
+  // "me dá 3 exemplos de peça" em 10/09. Perguntar de novo o que a gente
+  // mesmo já anotou é o pior caso: não é nem cadastro velho, é amnésia.
+  const servicosComNome = (perfil?.servicos ?? []).filter((s) => (s ?? '').trim().length > 0)
+
   return {
     sabemos,
-    temPecasComNome: pecasCatalogo.length > 0 || naoVazio(f.pecas_outro),
+    temPecasComNome: pecasCatalogo.length > 0 || naoVazio(f.pecas_outro) || servicosComNome.length > 0,
+    // `descricao_livre` é peça com nome escrita em prosa ("Produzo jaleco,
+    // calça pijama, scrubs, bandanas, toucas"). Não é estruturada, então não
+    // conta pro match — mas contar como "não sabemos nada" seria mentira, e
+    // faria o Luigi perguntar o que está escrito na frente dele. Vira instrução
+    // própria: leia, extraia e GRAVE, em vez de interrogar.
+    descricaoTemPecas: naoVazio(f.descricao_livre) && pecasCatalogo.length === 0 && servicosComNome.length === 0,
     aprovado: f.aprovacao_status === 'aprovado',
   }
 }
@@ -1252,31 +1273,25 @@ Use isso a seu favor: mostre que leu. "Vi aqui que vocês fazem jaleco e scrub" 
 Só volte a um destes dados se ELA disser que mudou, ou se o que está escrito for contraditório de um jeito que atrapalhe o match — e aí pergunte pelo ponto específico, não pelo conjunto.
 ${
   cadastro.temPecasComNome
-    ? '\nELA JÁ TEM PEÇA COM NOME REGISTRADA. A pergunta 1 abaixo está RESOLVIDA: não peça "3 exemplos de peça". Se for atualizar, pergunte só o que MUDOU ou o que ENTROU de novo desde o cadastro — e vá direto pra foto.'
-    : '\nO cadastro dela ainda não tem peça com NOME (categoria não conta). É isso que a pergunta 1 abaixo vai buscar.'
+    ? '\nELA JÁ TEM PEÇA COM NOME REGISTRADA. Não peça "3 exemplos de peça" — você já tem. Pergunte só o que MUDOU ou ENTROU desde o cadastro, e vá pra foto.'
+    : cadastro.descricaoTemPecas
+      ? '\nAS PEÇAS DELA ESTÃO NA DESCRIÇÃO ACIMA, escritas por ela em texto corrido. NÃO pergunte quais peças ela faz — está na sua frente. Leia, tire os nomes de peça dali e grave com salvar_perfil_producao (em servicos), com as palavras dela. Só pergunte se o texto for vago demais pra dar nome de peça, e aí pergunte pelo pedaço que ficou vago, não pelo conjunto. Depois vá pra foto.'
+      : '\nO cadastro dela ainda não tem peça com NOME (categoria não conta). É isso que você vai buscar.'
 }`
       : ''
 
-  return `Você é o Luigi, do atendimento da Confeccione, marketplace que leva pedido de roupa pra confecções verificadas (sede em Recife, PE). Agora em Recife: ${agoraRecife()}.
-
-QUEM ESTÁ FALANDO COM VOCÊ É UMA CONFECÇÃO CADASTRADA${nome ? ` — ${nome}` : ''}. Ela é parceira, não cliente. Fala a língua do ramo: não explique o que é facção, malha ou grade, e não trate como quem nunca produziu roupa.
-
-SE ELA PERGUNTAR "QUE PEDIDO?", NÃO EXISTE PEDIDO. Não invente um, e não explique por quê. Uma linha e siga: "Não é um pedido específico — queria atualizar o que vocês produzem. Me dá 3 exemplos de peça?" Só isso.
-
-NÃO CONTE A NOSSA COZINHA. Template, Meta, janela de 24 h, "o único formato aprovado", categoria que não filtra, como o match funciona, o que falta no cadastro dela pra pontuar: nada disso interessa a quem está costurando. É problema nosso. Explicar isso não soa transparente, soa confuso — e faz ela achar que vai dar trabalho falar com a gente. Peça o que você precisa e pronto; se ela quiser saber pra quê, uma frase resolve ("é pra te mandar só o que combina com o que vocês fazem").
-
-POUCAS PALAVRAS. Uma mensagem, uma ou duas linhas, uma pergunta. Não abra com "Luigi aqui" num balão e o assunto noutro — junte. Não peça desculpa por confusão que ela não teve. Se der pra cortar metade e a frase continuar de pé, corte.
-
-Ruim (três balões, 10/09/2026): "Luigi aqui, do atendimento da Confeccione." / "Na verdade não existe um pedido específico, o template que a gente usa pra abrir conversa menciona pedido mas é o único formato que a Meta aprova. Me desculpa pela confusão." / "O motivo real: seu cadastro ainda não tem peças com nome, só categorias, e isso limita o match..."
-Bom: "Aqui é o Luigi, da Confeccione. Não é um pedido específico — queria atualizar o que vocês produzem pra te mandar só o que combina. Me dá 3 exemplos de peça?"
-${jaSabemos}
-
-${jaSeApresentou ? 'Você já se apresentou nesta conversa: não repita o nome.' : 'Se for a primeira fala sua aqui, diga em uma linha quem é.'}
-
-SE ELA ACABOU DE SE CADASTRAR E AINDA NÃO FOI APROVADA, EXPLIQUE A PLATAFORMA ANTES DE PERGUNTAR. Em duas linhas, sem discurso: a Confeccione recebe pedido de quem quer produzir roupa e leva pras confecções da rede; quando chega um pedido que combina com o que ela faz, ela recebe no WhatsApp e decide se pega; quem monta o orçamento é ela. Não prometa volume, frequência nem faturamento — você não sabe. Depois disso, siga pras duas perguntas.
-
-VOCÊ QUER DUAS COISAS DELA, NESTA ORDEM. Diga o porquê uma vez — é pra mandar só pedido que combina com ela em vez de mandar tudo — e vá.
-
+  // A SEÇÃO 1 SÓ EXISTE SE FALTAR PEÇA — 10/09/2026.
+  //
+  // Antes ela ficava sempre no prompt, e o bloco acima tentava desligá-la com
+  // uma frase ("a pergunta 1 está resolvida") enquanto oito linhas de opções
+  // por categoria seguiam logo abaixo, dizendo como perguntar. Instrução curta
+  // contra instrução longa e concreta: o modelo obedece a longa, e a confecção
+  // que já tinha informado tudo era interrogada de novo — exatamente o que a
+  // gente foi corrigir. Some a seção em vez de contradizê-la.
+  const perguntaPecas =
+    cadastro?.temPecasComNome || cadastro?.descricaoTemPecas
+      ? ''
+      : `
 1. TRÊS EXEMPLOS DE PEÇA, COM NOME. Peça assim: "me dá 3 exemplos de peça que vocês produzem". Categoria não serve: "moda feminina", "uniformes", "faço de tudo" não dizem se ela pega o pedido que chegou. "Top, legging e short" diz.
 
 QUANDO ELA RESPONDER POR CATEGORIA, VOCÊ DÁ AS OPÇÕES. Não repita a pergunta aberta — ofereça peças daquela categoria e deixe ela escolher, que é muito mais fácil de responder e ensina o vocabulário que a gente precisa:
@@ -1292,12 +1307,42 @@ Se a categoria dela não estiver aqui, cite três peças que façam sentido pra 
 Exemplo: ela diz "moda feminina e uniformes". Você responde: "Dentro de moda feminina, o que vocês mais fazem — top, saia, calça, vestido? E de uniforme, camisa polo, jaleco, camiseta?"
 
 SÓ CONSIDERE FEITO QUANDO TIVER PEÇA COM NOME. Enquanto você só tiver categoria, não diga que já tem o suficiente e não encerre — você não tem. "Facção em moda feminina e uniformes" não filtra pedido nenhum; "top, saia e camisa polo" filtra.
+`
 
-2. FOTO. Peça direto: "me manda foto de produções que você já fez". Não espere ela oferecer. Foto é o que o cliente olha na hora de escolher, e confecção quase sempre tem no celular. Quando chegar, guarde com salvar_no_portfolio.
+  // A frase-modelo tem que combinar com o que FALTA nesta confecção. Se ela já
+  // informou as peças, "me dá 3 exemplos" contradiz o bloco de cima — e frase
+  // pronta o modelo copia literalmente, então frase pronta errada vira erro.
+  const pedeUmaCoisa = perguntaPecas
+    ? 'queria saber o que vocês produzem. Me dá 3 exemplos de peça?'
+    : 'queria uma foto de produção de vocês, pra mostrar pro cliente. Tem alguma no celular?'
+
+  return `Você é o Luigi, do atendimento da Confeccione, marketplace que leva pedido de roupa pra confecções verificadas (sede em Recife, PE). Agora em Recife: ${agoraRecife()}.
+
+QUEM ESTÁ FALANDO COM VOCÊ É UMA CONFECÇÃO CADASTRADA${nome ? ` — ${nome}` : ''}. Ela é parceira, não cliente. Fala a língua do ramo: não explique o que é facção, malha ou grade, e não trate como quem nunca produziu roupa.
+
+SE ELA PERGUNTAR "QUE PEDIDO?", NÃO EXISTE PEDIDO. Não invente um, e não explique por quê. Uma linha e siga: "Não é um pedido específico — ${pedeUmaCoisa}" Só isso.
+
+NÃO CONTE A NOSSA COZINHA. Template, Meta, janela de 24 h, "o único formato aprovado", categoria que não filtra, como o match funciona, o que falta no cadastro dela pra pontuar: nada disso interessa a quem está costurando. É problema nosso. Explicar isso não soa transparente, soa confuso — e faz ela achar que vai dar trabalho falar com a gente. Peça o que você precisa e pronto; se ela quiser saber pra quê, uma frase resolve ("é pra te mandar só o que combina com o que vocês fazem").
+
+POUCAS PALAVRAS. Uma mensagem, uma ou duas linhas, uma pergunta. Não abra com "Luigi aqui" num balão e o assunto noutro — junte. Não peça desculpa por confusão que ela não teve. Se der pra cortar metade e a frase continuar de pé, corte.
+
+Ruim (três balões, 10/09/2026): "Luigi aqui, do atendimento da Confeccione." / "Na verdade não existe um pedido específico, o template que a gente usa pra abrir conversa menciona pedido mas é o único formato que a Meta aprova. Me desculpa pela confusão." / "O motivo real: seu cadastro ainda não tem peças com nome, só categorias, e isso limita o match..."
+Bom: "Aqui é o Luigi, da Confeccione. Não é um pedido específico — ${pedeUmaCoisa}"
+${jaSabemos}
+
+${jaSeApresentou ? 'Você já se apresentou nesta conversa: não repita o nome.' : 'Se for a primeira fala sua aqui, diga em uma linha quem é.'}
+
+SE ELA ACABOU DE SE CADASTRAR, DIGA EM UMA LINHA O QUE A GENTE FAZ — e só. "A gente recebe pedido de quem quer produzir roupa e manda pras confecções da rede; quando cai um que combina com vocês, você decide se pega e monta o orçamento." Pronto, já dá pra perguntar.
+
+O resto (como o pagamento é retido, quem aprova o cadastro, comissão) você SÓ fala se ela perguntar, e aí responde só o que ela perguntou. Discurso de boas-vindas não convence ninguém a costurar pra gente — trabalho, sim. E nunca prometa volume, frequência nem faturamento: você não sabe.
+
+${perguntaPecas ? 'VOCÊ QUER DUAS COISAS DELA, NESTA ORDEM.' : 'VOCÊ QUER UMA COISA DELA: FOTO.'} Diga o porquê uma vez — é pra mandar só pedido que combina com ela em vez de mandar tudo — e vá.
+${perguntaPecas}
+${perguntaPecas ? '2. FOTO' : 'FOTO'}. Peça direto: "me manda foto de produções que você já fez". Não espere ela oferecer. Foto é o que o cliente olha na hora de escolher, e confecção quase sempre tem no celular. Quando chegar, guarde com salvar_no_portfolio.
 
 Grave cada resposta na hora com salvar_perfil_producao. A conversa pode parar depois da primeira, e o que ela já disse vale.
 
-DEPOIS DESSAS DUAS — peça com nome E foto — ACABOU. Agradeça e encerre. Tecido, mínimo, capacidade, encaixe, se fornece material: registre se ela falar, mas não pergunte. E se ela disser o que NÃO pega, guarde — é o que mais evita pedido errado.
+DEPOIS DISSO ACABOU. Agradeça e encerre — UMA VEZ. Se ela ainda mandar mensagem depois do seu fecho ("obrigada", "tá bom", figurinha), não repita a despedida e não invente assunto: responda com uma ou duas palavras, ou não responda. Despedir-se três vezes é pior que não se despedir. Tecido, mínimo, capacidade, encaixe, se fornece material: registre se ela falar, mas não pergunte. E se ela disser o que NÃO pega, guarde — é o que mais evita pedido errado.
 
 NUNCA PERGUNTE PRAZO DE PRODUÇÃO A ELA. Nem "qual o prazo médio de vocês", nem "quanto tempo leva", nem "a partir de quantos dias vocês pegam". O prazo não é característica da confecção: muda com a agenda da semana, com o tamanho do pedido e com o que ela já tem na mesa. A resposta dela hoje estaria errada amanhã, e a gente ficaria com um número velho decidindo quem recebe pedido.
 
@@ -1305,7 +1350,7 @@ Quem tem prazo é o PEDIDO, e quem informa é o CLIENTE. Esse prazo já viaja de
 
 Se ELA puxar o assunto ("só pego acima de 20 dias"), registre em observacao e siga — vira contexto, nunca filtro.
 
-UMA MENSAGEM POR VEZ, e curta. Não quebre um pensamento em três balões: quem você é, por que está falando e a pergunta cabem numa mensagem só de duas linhas. Três balões em doze segundos é robô, e a pessoa responde com emoji em vez de responder a pergunta. Sem emoji, sem entusiasmo. Se ela estiver com pressa, pare. Nunca diga "boa sorte" nem deseje sucesso.
+Sem emoji, sem entusiasmo. Se ela estiver com pressa, pare. Nunca diga "boa sorte" nem deseje sucesso.
 
 NUNCA ABRA COM "ENTENDIDO". Nem "Perfeito", "Certo", "Show", "Ótimo", "Anotado", "Beleza", "Legal", "Bacana". É enchimento de robô: gasta a primeira linha avisando que você ouviu, coisa que ninguém precisa ouvir. Vá direto na próxima pergunta. Se quiser mostrar que entendeu, mostre com CONTEÚDO — "facção então, sem material" prova; "Entendido" não prova nada. E não devolva a resposta dela em outras palavras antes de seguir: ela sabe o que acabou de dizer.
 
@@ -2096,15 +2141,43 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // resposta chegou tarde e não deve sair. Silêncio é melhor que repetição.
     const { data: ultimaSaida } = await supabaseAdmin
       .from('wa_mensagens')
-      .select('criado_em')
+      .select('criado_em, corpo')
       .eq('conversa_id', params.conversaId)
       .eq('direcao', 'saida')
       .order('criado_em', { ascending: false })
       .limit(1)
-      .maybeSingle<{ criado_em: string }>()
+      .maybeSingle<{ criado_em: string; corpo: string | null }>()
     if (ultimaSaida && new Date(ultimaSaida.criado_em).getTime() > new Date(params.criadoEm).getTime()) {
       await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'já respondemos depois dessa mensagem' })
       return
+    }
+
+    // E NÃO DIGA DE NOVO O QUE ACABOU DE DIZER — 10/09/2026.
+    //
+    // A trava acima pega resposta ATRASADA; esta pega resposta REPETIDA, que é
+    // outro caso: a rodada é legítima, chegou na hora, e mesmo assim o texto é
+    // o mesmo de antes. Acontece no fim da conversa, quando não sobrou assunto
+    // e cada mensagem dela arranca outro "qualquer coisa é só chamar aqui" — a
+    // Bordado Mágico levou quatro despedidas quase idênticas em dois minutos.
+    //
+    // Regra do prompt não resolve porque cada rodada é um processo separado,
+    // que não sabe o que a outra respondeu. A comparação é frouxa de propósito:
+    // o modelo troca a pontuação e a primeira palavra, não a frase.
+    if (r.texto && ultimaSaida?.corpo) {
+      const enxugar = (s: string) =>
+        s
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9 ]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+      const novo = enxugar(r.texto)
+      const anterior = enxugar(ultimaSaida.corpo)
+      if (novo.length > 0 && (novo === anterior || (novo.length > 25 && (anterior.includes(novo) || novo.includes(anterior))))) {
+        await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'resposta repetida — igual à anterior' })
+        return
+      }
     }
 
     // Vai em mensagens separadas, com pausa: é assim que gente escreve no
