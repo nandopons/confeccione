@@ -36,7 +36,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
 import { blocoDoPdf, ehPdf, type BlocoPdf } from './anexo-pdf'
-import { salvarPerfil } from './perfil-producao'
+import { salvarPerfil, lerPerfil } from './perfil-producao'
+import { pecaLabel } from './pecas'
 import { salvarFotoDaConversa } from './portfolio-fornecedor'
 import { enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
 import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
@@ -293,6 +294,28 @@ type Contexto = {
   pedidoEmFoco: PedidoEtapa | null
   /** true = é confecção cadastrada, não cliente. Muda o prompt inteiro. */
   ehFornecedor: boolean
+  /** O que a confecção JÁ nos deu. Null quando não é fornecedor. */
+  cadastroFornecedor: CadastroFornecedor | null
+}
+
+/**
+ * O que já está gravado sobre a confecção, em linhas prontas pro prompt.
+ *
+ * POR QUE ISTO EXISTE — 10/09/2026
+ * O prompt de fornecedor recebia só o nome. Então o Luigi abria perguntando o
+ * que ela produz mesmo quando o cadastro já dizia: em 10/09, 16 dos 42
+ * cadastros tinham as peças escritas à mão em `descricao_livre` (a Keylla
+ * listou "jaleco, calça pijama, bermuda pijama, scrubs, bandanas, toucas,
+ * blusas kimono"). Perguntar de novo o que a pessoa já preencheu é a coisa que
+ * mais faz o atendimento parecer burocracia — ela responde uma vez no site e
+ * outra no WhatsApp, e conclui que ninguém leu.
+ */
+type CadastroFornecedor = {
+  /** Linhas "campo: valor" do que já temos. Vazio = cadastro realmente vazio. */
+  sabemos: string[]
+  /** Peças com NOME que já constam. É o que a entrevista existe pra descobrir. */
+  temPecasComNome: boolean
+  aprovado: boolean
 }
 
 async function pedidosDoContato(waId: string, clienteId: string | null): Promise<PedidoEtapa[]> {
@@ -364,12 +387,83 @@ async function prazosDesejados(pedidoIds: string[]): Promise<Map<string, number>
   return mapa
 }
 
+/**
+ * Lê o cadastro + o perfil de produção da confecção e monta as linhas do "você
+ * já sabe". Só o que EXISTE entra: campo vazio não vira "não informado", senão
+ * a lista do que já sabemos vira uma lista do que falta e o Luigi lê como
+ * pauta de perguntas.
+ */
+async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | null> {
+  const fornecedorId = await fornecedorDoContato(waId)
+  if (!fornecedorId) return null
+
+  const [{ data: f }, perfil] = await Promise.all([
+    supabaseAdmin
+      .from('leads_fornecedores')
+      .select('nome, cidade, estado, raio_atendimento, pedido_minimo, pecas, pecas_outro, descricao_livre, tipos_produto, email, aprovacao_status')
+      .eq('id', fornecedorId)
+      .maybeSingle<{
+        nome: string | null
+        cidade: string | null
+        estado: string | null
+        raio_atendimento: string | null
+        pedido_minimo: number | null
+        pecas: string[] | null
+        pecas_outro: string | null
+        descricao_livre: string | null
+        tipos_produto: string[] | null
+        email: string | null
+        aprovacao_status: string | null
+      }>(),
+    lerPerfil(fornecedorId).catch(() => null),
+  ])
+  if (!f) return null
+
+  const sabemos: string[] = []
+  const naoVazio = (v: string | null | undefined) => (v ?? '').trim().length > 0
+
+  const pecasCatalogo = (f.pecas ?? []).map((p) => pecaLabel(p)).filter(Boolean)
+  if (pecasCatalogo.length > 0) sabemos.push(`Peças no cadastro: ${pecasCatalogo.join(', ')}`)
+  if (naoVazio(f.pecas_outro)) sabemos.push(`Peças que ela escreveu à mão: ${f.pecas_outro!.trim()}`)
+  // descricao_livre é o campo mais rico do cadastro e o mais ignorado: é onde a
+  // confecção descreve com as palavras dela o que faz.
+  if (naoVazio(f.descricao_livre)) sabemos.push(`Ela descreveu assim: "${f.descricao_livre!.trim()}"`)
+  if (pecasCatalogo.length === 0 && (f.tipos_produto ?? []).length > 0) {
+    sabemos.push(`Categorias antigas (NÃO servem pra filtrar pedido): ${(f.tipos_produto ?? []).join(', ')}`)
+  }
+
+  const local = [f.cidade, f.estado].filter(Boolean).join('/')
+  if (local) sabemos.push(`Fica em ${local}`)
+  if (naoVazio(f.raio_atendimento)) sabemos.push(`Atende: ${f.raio_atendimento}`)
+  if (f.pedido_minimo != null) sabemos.push(`Pedido mínimo: ${f.pedido_minimo} peça(s)`)
+  if (naoVazio(f.email)) sabemos.push(`E-mail: ${f.email}`)
+
+  if (perfil) {
+    if ((perfil.servicos ?? []).length > 0) sabemos.push(`Serviços: ${perfil.servicos.join(', ')}`)
+    if ((perfil.tecidos ?? []).length > 0) sabemos.push(`Tecidos: ${perfil.tecidos.join(', ')}`)
+    if ((perfil.maquinas ?? []).length > 0) sabemos.push(`Máquinas: ${perfil.maquinas.join(', ')}`)
+    if (perfil.fornece_material !== null) sabemos.push(`Fornece material: ${perfil.fornece_material ? 'sim' : 'não (facção)'}`)
+    if (perfil.capacidade_mes != null) sabemos.push(`Capacidade: ${perfil.capacidade_mes} peças/mês`)
+    if (perfil.aceita_encaixe !== null) sabemos.push(`Aceita encaixe: ${perfil.aceita_encaixe ? 'sim' : 'não'}`)
+    if (perfil.faz_desenvolvimento !== null) sabemos.push(`Faz desenvolvimento: ${perfil.faz_desenvolvimento ? 'sim' : 'não'}`)
+    if (naoVazio(perfil.nao_faz)) sabemos.push(`NÃO faz: ${perfil.nao_faz}`)
+    if (naoVazio(perfil.observacao)) sabemos.push(`Observação: ${perfil.observacao}`)
+  }
+
+  return {
+    sabemos,
+    temPecasComNome: pecasCatalogo.length > 0 || naoVazio(f.pecas_outro),
+    aprovado: f.aprovacao_status === 'aprovado',
+  }
+}
+
 async function montarContexto(conversaId: string, waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
-  const [pedidos, conta] = await Promise.all([
+  const [pedidos, conta, cadastroFornecedor] = await Promise.all([
     pedidosDoContato(waId, clienteId),
     clienteId
       ? supabaseAdmin.from('contas_clientes').select('nome, email').eq('id', clienteId).maybeSingle<{ nome: string | null; email: string | null }>()
       : Promise.resolve({ data: null }),
+    ehFornecedor ? cadastroDoFornecedor(waId) : Promise.resolve(null),
   ])
 
   // Em aberto primeiro (mais recente no topo); fechados só os 2 últimos.
@@ -407,6 +501,7 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
   return {
     conversaId,
     ehFornecedor,
+    cadastroFornecedor,
     contato: { nome, telefone: waId, conta: conta.data ? { nome: conta.data.nome, email: conta.data.email } : null },
     pedidos: lista,
     pedidoEmFoco: abertos[0] ?? null,
@@ -769,14 +864,46 @@ async function acharNoContexto(ctx: Contexto, ref: string | undefined): Promise<
 
 type Escalada = { motivo: string } | null
 
-/** id do fornecedor a partir do número — o contato é a fonte, não o modelo. */
+/**
+ * id do fornecedor a partir do número — o contato é a fonte, não o modelo.
+ *
+ * TOLERA O NONO DÍGITO — 10/09/2026.
+ *
+ * Antes casava `wa_id` exato, e no Brasil o mesmo telefone tem duas formas: com
+ * e sem o 9 depois do DDD. Quando a gente manda primeiro (registrarSaidaInbox
+ * grava o número do cadastro, 5581984782237) e ela responde (a Meta entrega
+ * 55819984782237), as duas formas convivem — o webhook já sabe reconciliar isso
+ * pro contato, mas aqui o `waId` que desce é o da Meta, que podia não bater com
+ * o gravado.
+ *
+ * O estrago era silencioso e caía justo nas ferramentas de fornecedor:
+ * salvar_perfil_producao e salvar_no_portfolio devolviam "não achei o cadastro
+ * de fornecedor desse número" com o cadastro existindo, e o bloco do que já
+ * sabemos sumia do prompt. Ela responde tudo direitinho e nada é gravado.
+ *
+ * O casamento exige MESMO DDI+DDD e mesmos 8 finais: só os 8 finais juntaria
+ * 5581 9xxxx-1234 com 5511 9xxxx-1234, que são pessoas diferentes.
+ */
 async function fornecedorDoContato(waId: string): Promise<string | null> {
-  const { data } = await supabaseAdmin
+  const { data: exato } = await supabaseAdmin
     .from('wa_contatos')
     .select('fornecedor_id')
     .eq('wa_id', waId)
     .maybeSingle<{ fornecedor_id: string | null }>()
-  return data?.fornecedor_id ?? null
+  if (exato?.fornecedor_id) return exato.fornecedor_id
+
+  const so = waId.replace(/\D/g, '')
+  if (so.length < 12) return null
+  const { data: candidatos } = await supabaseAdmin
+    .from('wa_contatos')
+    .select('wa_id, fornecedor_id')
+    .ilike('wa_id', `%${so.slice(-8)}`)
+    .not('fornecedor_id', 'is', null)
+  for (const c of (candidatos ?? []) as Array<{ wa_id: string; fornecedor_id: string }>) {
+    const outro = c.wa_id.replace(/\D/g, '')
+    if (outro.slice(0, 4) === so.slice(0, 4)) return c.fornecedor_id
+  }
+  return null
 }
 
 async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto, estado: { escalada: Escalada }): Promise<unknown> {
@@ -1079,10 +1206,38 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
  * aplica. Ela não tem pedido em andamento, não vai pagar nada, não precisa de
  * link de visualizador — e o vocabulário é outro, porque ela é do ramo.
  */
-function promptFornecedor(nome: string | null, jaSeApresentou: boolean): string {
+function promptFornecedor(nome: string | null, jaSeApresentou: boolean, cadastro: CadastroFornecedor | null): string {
+  // O BLOCO DO QUE JÁ SABEMOS — 10/09/2026.
+  //
+  // Sem ele o Luigi abria a conversa perguntando o que a confecção já tinha
+  // escrito no cadastro. Ela responde duas vezes a mesma coisa e conclui, com
+  // razão, que ninguém leu o que ela preencheu. A regra que acompanha a lista é
+  // mais importante que a lista: CONFIRMAR também é perguntar de novo. "Vocês
+  // fazem moda íntima, certo?" custa o mesmo tempo dela que a pergunta aberta e
+  // ainda soa a formulário — use o que já sabemos pra PULAR a pergunta, não pra
+  // fazer uma versão educada dela.
+  const jaSabemos =
+    cadastro && cadastro.sabemos.length > 0
+      ? `
+O QUE VOCÊ JÁ SABE SOBRE ELA — NÃO PERGUNTE ISTO DE NOVO:
+${cadastro.sabemos.map((l) => `- ${l}`).join('\n')}
+
+Isto veio do cadastro que ELA preencheu. Não pergunte, não peça pra confirmar e não devolva em forma de pergunta. "Vocês fazem X, certo?" É PERGUNTAR DE NOVO — do lado dela, ter que responder duas vezes a mesma coisa é sinal de que ninguém leu o que ela escreveu. Trate como sabido e comece do que falta.
+
+Use isso a seu favor: mostre que leu. "Vi aqui que vocês fazem jaleco e scrub" abre a conversa melhor que qualquer pergunta, e ela já sente que a gente conhece a fábrica dela.
+
+Só volte a um destes dados se ELA disser que mudou, ou se o que está escrito for contraditório de um jeito que atrapalhe o match — e aí pergunte pelo ponto específico, não pelo conjunto.
+${
+  cadastro.temPecasComNome
+    ? '\nELA JÁ TEM PEÇA COM NOME REGISTRADA. A pergunta 1 abaixo está RESOLVIDA: não peça "3 exemplos de peça". Se for atualizar, pergunte só o que MUDOU ou o que ENTROU de novo desde o cadastro — e vá direto pra foto.'
+    : '\nO cadastro dela ainda não tem peça com NOME (categoria não conta). É isso que a pergunta 1 abaixo vai buscar.'
+}`
+      : ''
+
   return `Você é o Luigi, do atendimento da Confeccione, marketplace que leva pedido de roupa pra confecções verificadas (sede em Recife, PE). Agora em Recife: ${agoraRecife()}.
 
 QUEM ESTÁ FALANDO COM VOCÊ É UMA CONFECÇÃO CADASTRADA${nome ? ` — ${nome}` : ''}. Ela é parceira, não cliente. Fala a língua do ramo: não explique o que é facção, malha ou grade, e não trate como quem nunca produziu roupa.
+${jaSabemos}
 
 ${jaSeApresentou ? 'Você já se apresentou nesta conversa: não repita o nome.' : 'Se for a primeira fala sua aqui, diga em uma linha quem é.'}
 
@@ -1134,7 +1289,7 @@ NUNCA: prometa pedido, volume ou faturamento; combine preço; passe contato de c
 
 function promptSistema(modo: Exclude<ModoLuigi, 'desligado'>, ctx: Contexto, jaSeApresentou: boolean): string {
   const nome = primeiroNome(ctx.contato.nome) || primeiroNome(ctx.contato.conta?.nome) || null
-  if (ctx.ehFornecedor) return promptFornecedor(nome, jaSeApresentou)
+  if (ctx.ehFornecedor) return promptFornecedor(nome, jaSeApresentou, ctx.cadastroFornecedor)
   const faq = FAQ_HOME.map((f) => `- ${f.pergunta} ${f.resposta}`).join('\n')
   const etapas = (Object.keys(ETAPA_PARA_CLIENTE) as Etapa[]).map((e) => `- ${e} (${INFO_ETAPA[e].label}): ${ETAPA_PARA_CLIENTE[e]}`).join('\n')
   const pedidos =
