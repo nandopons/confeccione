@@ -436,10 +436,39 @@ export async function ofertarPedido(
   if (pedido.status === 'cancelado') return { ok: false, criadas: 0, notificadas: 0, erro: 'Pedido cancelado pelo cliente — não dá pra ofertar.' }
   const pago = pedido.pagamento_status === 'pago'
   const linhas = Array.isArray(pedido.linhas) ? pedido.linhas : []
-  // Oferta manual pelo admin é permitida em qualquer pedido com itens — não
-  // exige pagamento/confirmação (o fornecedor define o orçamento final).
   if (linhas.length === 0) {
     return { ok: false, criadas: 0, notificadas: 0, erro: 'Pedido sem itens' }
+  }
+
+  // AGORA EXIGE QUE O CLIENTE TENHA LIBERADO — 10/09/2026.
+  //
+  // Até hoje a oferta manual era permitida em qualquer pedido com itens, de
+  // propósito: o fornecedor define o orçamento final mesmo, então parecia
+  // inofensivo adiantar. Não era, por dois motivos que só apareceram na prática.
+  //
+  // 1. A confecção recebe um pedido que o cliente pode nunca soltar. O Joaquim
+  //    aceitou o 20260900274 e foi montar orçamento de algo que a cliente não
+  //    tinha liberado. Isso gasta o tempo de quem a gente quer na rede.
+  // 2. Uma oferta manual fazia o pedido PARECER liberado pro resto do sistema:
+  //    a view de etapas classifica por `status='confirmado' OR ofertas_total>0`,
+  //    então bastava um clique aqui pra a fila automática adotar o pedido e
+  //    seguir ofertando sozinha. Foi assim que 24 pedidos foram ofertados sem
+  //    `confirmado_em`.
+  //
+  // Pedido PAGO passa: se o dinheiro entrou, a liberação é fato consumado —
+  // pedido antigo pago antes desta regra não pode ficar preso.
+  //
+  // O erro diz COMO destravar, porque quem lê é você no meio da operação.
+  if (!pago && !pedido.confirmado_em) {
+    return {
+      ok: false,
+      criadas: 0,
+      notificadas: 0,
+      erro:
+        'O cliente ainda não liberou este pedido, então ele não pode ir pras confecções. ' +
+        'Peça pra ele tocar em "Buscar fornecedor" no link do pedido — ou, se ele já confirmou por WhatsApp, ' +
+        'devolva a conversa pro Luigi que ele libera com o sim dele.',
+    }
   }
 
   // Repasse: pago → 97% do valor cobrado; confirmado → 97% do preço SUGERIDO
