@@ -597,8 +597,8 @@ const FERRAMENTA_DADOS_CLIENTE: Anthropic.Messages.Tool = {
     'Grava no pedido os dados de contato e entrega que o cliente disser. Chame A CADA dado novo, não junte tudo pro fim — ' +
     'a conversa pode parar no meio e o que já veio vale. Campo que você não passar fica como está, então dá pra ir ' +
     'preenchendo aos poucos. O CEP traz rua, bairro, cidade e UF sozinho: você só precisa de CEP, NÚMERO e COMPLEMENTO. ' +
-    'CINCO DADOS SÃO OBRIGATÓRIOS pra liberar o pedido: nome, e-mail, CEP, número da casa e CPF/CNPJ. ' +
-    'Sem CEP e número não sai cotação de frete; sem CPF/CNPJ não se emite nota fiscal; sem e-mail não vai o orçamento. ' +
+    'CINCO DADOS SÃO OBRIGATÓRIOS pra liberar o pedido: nome, e-mail, CEP, número da casa e CNPJ (ou CPF). ' +
+    'Sem CEP e número não sai cotação de frete; sem CNPJ/CPF não se emite nota fiscal; sem e-mail não vai o orçamento. ' +
     'A ferramenta de liberar RECUSA enquanto faltar qualquer um deles — então colete durante a conversa, ' +
     'uma coisa por vez e sem virar formulário, em vez de descobrir no fim.',
   input_schema: {
@@ -610,7 +610,17 @@ const FERRAMENTA_DADOS_CLIENTE: Anthropic.Messages.Tool = {
       cep: { type: 'string', maxLength: 12, description: '8 dígitos. Traz rua, bairro, cidade e UF juntos.' },
       numero: { type: 'string', maxLength: 20, description: 'Número da casa. "s/n" se não tiver.' },
       complemento: { type: 'string', maxLength: 120, description: 'Apto, bloco, referência. Só se ele disser.' },
-      cpf_cnpj: { type: 'string', maxLength: 20, description: 'CPF ou CNPJ. Obrigatório: é o que permite emitir a nota fiscal. Peça explicando pra quê.' },
+      cpf_cnpj: {
+        type: 'string',
+        maxLength: 20,
+        description:
+          'CNPJ ou CPF — o que ele tiver. Obrigatório: é o que permite emitir a nota fiscal. ' +
+          'PERGUNTE PELO CNPJ PRIMEIRO, e ofereça o CPF na MESMA frase: ' +
+          '"me passa o CNPJ pra nota — ou o CPF, se for no seu nome mesmo". ' +
+          'Nunca pergunte só "CPF ou CNPJ?" e nunca peça o CPF depois, como segunda opção: ' +
+          'quem não tem CNPJ fica com a sensação de que devia ter. As duas formas são normais e ' +
+          'a frase tem que deixar isso claro de saída.',
+      },
     },
   },
 }
@@ -653,7 +663,7 @@ const FERRAMENTA_LIBERAR: Anthropic.Messages.Tool = {
     'SÓ chame depois de o cliente ter visto o resumo e dito de forma clara que pode liberar ("pode", "isso mesmo", ' +
     '"manda"). Nunca por conta própria e nunca sem ele ter conferido. Se faltar algo na peça, a ferramenta recusa e diz ' +
     'o que falta — pergunte ao cliente e complete antes. ' +
-    'Ela TAMBÉM recusa enquanto faltar nome, e-mail, CEP, número da casa ou CPF/CNPJ do cliente: são os dados de ' +
+    'Ela TAMBÉM recusa enquanto faltar nome, e-mail, CEP, número da casa ou CNPJ/CPF do cliente: são os dados de ' +
     'frete e nota fiscal. Se ela recusar por isso, não tente de novo nem avise o cliente que "deu erro" — ' +
     'peça o dado que falta, grave com salvar_dados_do_cliente e só então libere.',
   input_schema: {

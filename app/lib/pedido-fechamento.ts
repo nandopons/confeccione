@@ -22,6 +22,7 @@
 
 import { supabaseAdmin } from './supabase-server'
 import { buscarEnderecoCep } from './cep'
+import { validarCpfCnpj, apenasDigitos } from './cpf-cnpj'
 import { garanteContaPorEmail } from './cliente-auth'
 import { guardarImagem } from './imagens-pedido-storage'
 import { salvarLinhasEditadas, type LinhaEditada } from './pedido-linhas-edicao'
@@ -82,7 +83,20 @@ export async function salvarDadosDoCliente(params: {
   if (limpo(params.email)) patch.email = limpo(params.email)!.toLowerCase()
   if (limpo(params.numero)) patch.numero = limpo(params.numero)
   if (limpo(params.complemento)) patch.complemento = limpo(params.complemento)
-  if (limpo(params.cpfCnpj)) patch.cpf_cnpj = limpo(params.cpfCnpj)!.replace(/\D/g, '')
+  // CPF OU CNPJ — tanto faz qual, mas tem que ser um de verdade.
+  //
+  // Mesma postura do CEP logo abaixo: número que não fecha o dígito verificador
+  // NÃO vira campo preenchido, volta como erro pro Luigi confirmar. Gravar o que
+  // veio errado é pior que não gravar — o pedido passa pela trava de liberar
+  // parecendo completo e o erro só aparece na emissão da nota, com o cliente já
+  // esperando. E CPF ditado no WhatsApp erra: vem por áudio transcrito, com
+  // dígito trocado ou faltando.
+  const doc = limpo(params.cpfCnpj)
+  if (doc) {
+    const v = validarCpfCnpj(apenasDigitos(doc))
+    if (!v.valido) return { ok: false, erro: `${v.erro ?? 'documento inválido'} — confirme o número com ele` }
+    patch.cpf_cnpj = apenasDigitos(doc)
+  }
 
   // CEP só entra se tiver 8 dígitos, e traz o resto do endereço junto. CEP
   // inválido não vira campo vazio: volta como erro, pra ele perguntar de novo.
@@ -161,7 +175,7 @@ export async function salvarDadosDoCliente(params: {
     !fim.email ? 'e-mail' : null,
     !fim.cep ? 'CEP' : null,
     !fim.numero ? 'número' : null,
-    !fim.cpf_cnpj ? 'CPF/CNPJ' : null,
+    !fim.cpf_cnpj ? 'CNPJ (ou CPF, se for no nome dele — ofereça os dois juntos)' : null,
   ].filter((x): x is string => x !== null)
 
   const endereco = fim.cep
@@ -520,7 +534,10 @@ export async function conferirPedido(pedidoId: string): Promise<ProntoParaLibera
     !data.email?.trim() && 'o e-mail (pra onde vai o orçamento e a nota)',
     !data.cep?.replace(/\D/g, '') && 'o CEP (sem ele não sai cotação de frete)',
     !data.numero?.trim() && 'o número da casa (a transportadora não entrega sem)',
-    !data.cpf_cnpj?.replace(/\D/g, '') && 'o CPF ou CNPJ (sem ele não se emite nota fiscal)',
+    // CNPJ primeiro, CPF na mesma frase. Perguntar "CPF ou CNPJ?" faz quem não
+    // tem empresa sentir que devia ter — e é a maioria dos clientes.
+    !data.cpf_cnpj?.replace(/\D/g, '') &&
+      'o CNPJ pra nota fiscal — ou o CPF, se a compra for no nome dele (ofereça os dois na mesma frase)',
   ].filter(Boolean) as string[]
 
   if (faltaDado.length > 0) {
