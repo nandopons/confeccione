@@ -24,11 +24,37 @@ import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { enviarTemplate, normalizarWaId } from '@/app/lib/whatsapp-cloud'
 import { registrarSaidaInbox } from '@/app/lib/whatsapp-notify'
+import { templateDuvidaPedidoAgora, TEMPLATES_DUVIDA_PEDIDO } from '@/app/lib/whatsapp-templates'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-const TEMPLATE_SONDAGEM = 'sondagem_producao'
+// POR QUE NÃO USAMOS MAIS O `sondagem_producao` AQUI — 10/09/2026
+//
+// Ele é MARKETING, e a Meta recusa marketing pra quem nunca escreveu pra gente.
+// A prova é do mesmo dia e da mesma pessoa: a Lucilaine levou `sondagem_producao`
+// às 06:17 e 06:18 (as duas recusadas, "healthy ecosystem engagement") e
+// `duvida_pedido_manha` às 06:24 — ENTREGUE. Mesma manhã, mesmo número, mesmo
+// destinatário sem histórico. O que mudou foi a categoria: UTILITY passa.
+//
+// O texto ("Sobre seu pedido na Confeccione, posso tirar uma dúvida?") nasceu
+// pra cliente e serve de empréstimo aqui: ele abre a conversa, que é tudo o que
+// precisamos — quando ela responde, a janela de 24 h abre e o Luigi conduz em
+// texto livre, sem template nenhum.
+//
+// É EMPRÉSTIMO, NÃO SOLUÇÃO. Template UTILITY tem que falar de uma transação da
+// pessoa, e confecção não tem pedido; a Meta pode reclassificar na revisão e aí
+// a tarifa vira a de marketing (R$ 0,3217 contra R$ 0,035) e o bloqueio volta.
+// Vale enquanto o UTILITY próprio de fornecedor não é aprovado.
+const TEMPLATE_ABORDAGEM = templateDuvidaPedidoAgora
+
+/** Qualquer um destes já é "a gente abordou" — a trava conta todos. */
+const TEMPLATES_DE_ABORDAGEM = [
+  'sondagem_producao',
+  TEMPLATES_DUVIDA_PEDIDO.manha,
+  TEMPLATES_DUVIDA_PEDIDO.tarde,
+  TEMPLATES_DUVIDA_PEDIDO.noite,
+]
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   if (!ehTokenAdminValido(req.cookies.get(COOKIE_ADMIN)?.value)) {
@@ -69,7 +95,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         .select('criado_em, status')
         .in('conversa_id', idsConversa)
         .eq('direcao', 'saida')
-        .eq('template_nome', TEMPLATE_SONDAGEM)
+        .in('template_nome', TEMPLATES_DE_ABORDAGEM)
         .order('criado_em', { ascending: false })
         .limit(1)
         .maybeSingle<{ criado_em: string; status: string | null }>()
@@ -81,20 +107,21 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         // resolve, porque o bloqueio é do lado de quem recebe.
         const motivo =
           jaMandou.status === 'falhou'
-            ? `A sondagem foi tentada em ${quando} e a Meta recusou a entrega — ela nunca falou com a gente no WhatsApp, então template de marketing não passa. Reenviar não resolve: peça pra ela mandar um "oi" no nosso número.`
-            : `A sondagem já foi enviada em ${quando}. Se ela não respondeu, insistir vira spam.`
+            ? `A abordagem de ${quando} foi recusada pela Meta. Agora usamos template UTILITY, que passa mesmo pra quem nunca escreveu — vale tentar de novo depois de 24 h, ou peça pra ela mandar um "oi" no nosso número.`
+            : `Já abordamos ela em ${quando}. Se não respondeu, insistir vira spam.`
         return NextResponse.json({ erro: motivo }, { status: 409 })
       }
     }
   }
 
-  const r = await enviarTemplate(waId, TEMPLATE_SONDAGEM, 'pt_BR', [
+  const template = TEMPLATE_ABORDAGEM()
+  const r = await enviarTemplate(waId, template, 'pt_BR', [
     { type: 'body', parameters: [{ type: 'text', text: primeiroNome }] },
   ])
   if (!r.ok) return NextResponse.json({ erro: `A Meta recusou: ${r.erro}` }, { status: 502 })
 
   // registrarSaidaInbox cria contato e conversa se não existirem.
-  await registrarSaidaInbox(waId, f.nome, r.wamid, `[template] ${TEMPLATE_SONDAGEM}`, TEMPLATE_SONDAGEM, 'mcp')
+  await registrarSaidaInbox(waId, f.nome, r.wamid, `[template] ${template}`, template, 'mcp')
 
   // O fornecedor_id é o que faz o Luigi usar o prompt de CONFECÇÃO em vez do de
   // cliente quando ela responder. Sem isto ele trata a dona da fábrica como

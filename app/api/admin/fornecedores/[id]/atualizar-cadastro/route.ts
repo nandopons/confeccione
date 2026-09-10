@@ -35,11 +35,22 @@ import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { enviarTemplate, normalizarWaId } from '@/app/lib/whatsapp-cloud'
 import { registrarSaidaInbox } from '@/app/lib/whatsapp-notify'
 import { devolverAoLuigi } from '@/app/lib/luigi'
+import { templateDuvidaPedidoAgora, TEMPLATES_DUVIDA_PEDIDO } from '@/app/lib/whatsapp-templates'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-const TEMPLATE_SONDAGEM = 'sondagem_producao'
+// UTILITY, NÃO MARKETING — 10/09/2026.
+// A Lucilaine recebeu `sondagem_producao` (MARKETING) às 06:17 e 06:18: recusado
+// nas duas. `duvida_pedido_manha` (UTILITY) às 06:24: entregue. Mesma pessoa,
+// mesma manhã, sem histórico nenhum de conversa. Empréstimo até o UTILITY
+// próprio de fornecedor sair — ver comentário longo em ../sondar/route.ts.
+const TEMPLATES_DE_ABORDAGEM = [
+  'sondagem_producao',
+  TEMPLATES_DUVIDA_PEDIDO.manha,
+  TEMPLATES_DUVIDA_PEDIDO.tarde,
+  TEMPLATES_DUVIDA_PEDIDO.noite,
+]
 
 /** Duas abordagens na mesma semana é assédio, não follow-up. */
 const CARENCIA_DIAS = 30
@@ -113,7 +124,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         .select('criado_em')
         .in('conversa_id', idsConversa)
         .eq('direcao', 'saida')
-        .eq('template_nome', TEMPLATE_SONDAGEM)
+        .in('template_nome', TEMPLATES_DE_ABORDAGEM)
         .order('criado_em', { ascending: false })
         .limit(1)
         .maybeSingle<{ criado_em: string }>(),
@@ -140,25 +151,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     })
   }
 
-  // --------------------------------------------------- 2. nunca escreveu
-  // A Meta recusa marketing pra quem nunca interagiu. Não adianta tentar: a
-  // recusa conta contra o número. Quem abre a janela é ela, e o convite pra
-  // isso vai por e-mail.
-  if (ultimaEntrada === null) {
-    const ondeMandar = f.email ? `no e-mail dela (${f.email})` : 'no e-mail dela'
-    return NextResponse.json(
-      {
-        erro:
-          `${f.nome ?? 'Ela'} nunca escreveu pra gente no WhatsApp. A Meta recusa template de marketing ` +
-          `nesse caso ("healthy ecosystem engagement"), então mandar só gastaria uma recusa. ` +
-          `O caminho é ${ondeMandar}: peça pra ela mandar um oi no nosso número. ` +
-          `Quando ela mandar, a janela abre e o Luigi conduz o resto.`,
-      },
-      { status: 409 },
-    )
-  }
-
-  // ------------------------------------------ 3. já escreveu, janela fechada
+  // ------------------------------------------------ 2. janela fechada
+  // ATÉ 10/09/2026 ISTO AQUI RECUSAVA quem nunca tinha escrito, porque a Meta
+  // barra MARKETING pra destinatário sem histórico. Com o template UTILITY isso
+  // deixou de ser verdade — os 31 aprovados que nunca falaram com a gente
+  // passaram de inalcançáveis a alcançáveis. A recusa saiu; o que fica é a
+  // carência, que vale pra todo mundo.
   if (jaAbordado && agora - new Date(jaAbordado).getTime() < CARENCIA_DIAS * 24 * 60 * 60 * 1000) {
     const quando = new Date(jaAbordado).toLocaleString('pt-BR', {
       timeZone: 'America/Recife',
@@ -173,12 +171,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     )
   }
 
-  const r = await enviarTemplate(waId, TEMPLATE_SONDAGEM, 'pt_BR', [
+  const template = templateDuvidaPedidoAgora()
+  const r = await enviarTemplate(waId, template, 'pt_BR', [
     { type: 'body', parameters: [{ type: 'text', text: primeiroNome }] },
   ])
   if (!r.ok) return NextResponse.json({ erro: `A Meta recusou: ${r.erro}` }, { status: 502 })
 
-  await registrarSaidaInbox(waId, f.nome, r.wamid, `[template] ${TEMPLATE_SONDAGEM}`, TEMPLATE_SONDAGEM, 'mcp')
+  await registrarSaidaInbox(waId, f.nome, r.wamid, `[template] ${template}`, template, 'mcp')
 
   // Sem isto o Luigi atende a dona da fábrica como se ela quisesse comprar
   // roupa — foi o que aconteceu com a Marilia em 09/09.
@@ -190,6 +189,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   return NextResponse.json({
     ok: true,
     via: 'template',
-    aviso: 'A janela estava fechada, então mandei a sondagem. Quando ela responder, o Luigi assume e atualiza o perfil.',
+    aviso:
+      `A janela estava fechada, então mandei o "${template}" pra abrir conversa. ` +
+      'Quando ela responder, o Luigi assume, lê o cadastro que ela já preencheu e pergunta só o que falta.',
   })
 }
