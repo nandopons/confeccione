@@ -44,7 +44,7 @@ import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 // descricao. Pra editar a peça de verdade usamos o tipo canônico do produto.
 import { type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
 import { editarLinhasPedidoCliente } from './pedido-linhas-edicao'
-import { conferirPedido, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores } from './pedido-fechamento'
+import { anexarFotoDaConversaAoModelo, conferirPedido, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores } from './pedido-fechamento'
 import { registrarUsoIa } from './uso-ia'
 import { ehNumeroGestao, numerosGestao } from './gestao-whatsapp'
 import {
@@ -286,6 +286,8 @@ type PedidoContexto = {
 }
 
 type Contexto = {
+  /** Conversa do inbox — é por ela que a ferramenta acha a foto que ELE mandou. */
+  conversaId: string
   contato: { nome: string | null; telefone: string; conta: { nome: string | null; email: string | null } | null }
   pedidos: PedidoContexto[]
   pedidoEmFoco: PedidoEtapa | null
@@ -362,7 +364,7 @@ async function prazosDesejados(pedidoIds: string[]): Promise<Map<string, number>
   return mapa
 }
 
-async function montarContexto(waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
+async function montarContexto(conversaId: string, waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
   const [pedidos, conta] = await Promise.all([
     pedidosDoContato(waId, clienteId),
     clienteId
@@ -403,6 +405,7 @@ async function montarContexto(waId: string, nome: string | null, clienteId: stri
   })
 
   return {
+    conversaId,
     ehFornecedor,
     contato: { nome, telefone: waId, conta: conta.data ? { nome: conta.data.nome, email: conta.data.email } : null },
     pedidos: lista,
@@ -588,6 +591,24 @@ const FERRAMENTA_CRIAR_PEDIDO: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_FOTO_MODELO: Anthropic.Messages.Tool = {
+  name: 'anexar_foto_ao_modelo',
+  description:
+    'Prende a foto que o cliente acabou de mandar a UM modelo do pedido, como referência pra confecção produzir. ' +
+    'Use sempre que ele mandar foto de peça, arte, estampa ou print de referência. Sem isto a foto morre na conversa e ' +
+    'quem vai produzir nunca vê. Diga a POSIÇÃO do modelo como ele conta: 1 = Modelo 1. ' +
+    'Se o pedido tem mais de um modelo e você não tem certeza de qual é a foto, PERGUNTE antes ' +
+    '("essa foto é da camiseta preta ou da branca?") — foto na peça errada faz a confecção produzir errado.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      modelo: { type: 'number', minimum: 1, maximum: 50, description: 'Posição do modelo: 1 = Modelo 1, 2 = Modelo 2…' },
+      pedido: { type: 'string', description: 'Código ou id. Sem isto, usa o pedido em foco.' },
+    },
+    required: ['modelo'],
+  },
+}
+
 const FERRAMENTA_RESUMO_PDF: Anthropic.Messages.Tool = {
   name: 'enviar_resumo_pedido',
   description:
@@ -672,6 +693,7 @@ function ferramentasDoModo(modo: Exclude<ModoLuigi, 'desligado'>, ehFornecedor =
         FERRAMENTA_AJUSTAR_PECA,
         FERRAMENTA_DEFINIR_PECAS,
         FERRAMENTA_CRIAR_PEDIDO,
+        FERRAMENTA_FOTO_MODELO,
         FERRAMENTA_RESUMO_PDF,
         FERRAMENTA_LIBERAR,
       ]
@@ -915,6 +937,33 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
               : `Falta: ${pronto.falta}. Pergunte uma coisa por vez.`,
       }
     }
+    case 'anexar_foto_ao_modelo': {
+      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+      const posicao = num(entrada.modelo)
+      if (!posicao) throw new Error('diga a posição do modelo (1 = Modelo 1)')
+      // A foto é a última que ELE mandou nesta conversa — nunca de outra pessoa.
+      const { data: foto } = await supabaseAdmin
+        .from('wa_mensagens')
+        .select('midia_path')
+        .eq('conversa_id', ctx.conversaId)
+        .eq('direcao', 'entrada')
+        .eq('tipo', 'image')
+        .not('midia_path', 'is', null)
+        .order('criado_em', { ascending: false })
+        .limit(1)
+        .maybeSingle<{ midia_path: string | null }>()
+      if (!foto?.midia_path) throw new Error('não achei foto que ele tenha mandado nesta conversa')
+      const r = await anexarFotoDaConversaAoModelo({ pedidoId: p.id, posicao, midiaPath: foto.midia_path })
+      if (!r.ok) throw new Error(r.erro ?? 'não deu pra anexar a foto')
+      return {
+        ok: true,
+        codigo: p.codigo,
+        modelo: r.modelo,
+        fotos_neste_modelo: r.totalFotos,
+        aviso: `Foto presa a ${r.modelo}. Confirme em uma linha e siga — não peça a mesma foto de novo.`,
+      }
+    }
     case 'enviar_resumo_pedido': {
       const p = await acharNoContexto(ctx, str(entrada.pedido))
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
@@ -1084,6 +1133,8 @@ Certo: "Entendi. Lote pequeno costuma ter fornecedor disponível. Quantas peças
 
 Errado: "A gente conecta quem precisa produzir a confecções de todo o Brasil. Você descreve o que quer (peça, cor, quantidade, arte), a gente oferece pra fornecedores e quem topar monta o orçamento — você só paga se aprovar. O que você está pensando em produzir?"
 Certo: "A gente leva seu pedido às confecções e elas enviam o orçamento. O que você quer produzir?"
+
+FOTO QUE ELE MANDA VOCÊ PRENDE NA PEÇA. Toda foto de referência — a peça que ele quer, a arte, a estampa, o print de um concorrente — vale pra quem vai PRODUZIR, não só pra você entender. Chame anexar_foto_ao_modelo com a posição do modelo (1 = Modelo 1). Sem isso a foto fica só na conversa e a confecção produz às cegas, com a descrição em texto. Se o pedido tem mais de um modelo e a foto pode ser de qualquer um, pergunte curto antes: "essa foto é da preta ou da branca?" — foto na peça errada é pior que foto nenhuma. Depois de prender, confirme em uma linha e siga; não peça a mesma foto de novo.
 
 VOCÊ ENXERGA AS IMAGENS: quando o cliente manda foto, você a vê de verdade. Use o que está nela — modelo da peça, cor, estampa, referência que ele mandou — pra preencher o pedido e pra confirmar com ele o que entendeu ("essa camisa é gola careca, certo?"). Nunca peça pra ele descrever o que já está na foto. Diga o que vê de forma concreta, e pergunte só o que a imagem não responde (quantidade, tamanhos, público). Se a foto estiver ruim ou não der pra concluir, diga o que não deu pra ver em vez de adivinhar.
 
@@ -1698,7 +1749,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // Uma sugestão por conversa: a nova mensagem do cliente supera a anterior.
     if (modo === 'sugere') await resolverSugestoes(params.conversaId, 'descartada').catch(() => undefined)
 
-    const [ctx, historico] = await Promise.all([montarContexto(waId, nome, contato?.cliente_id ?? null, ehFornecedor), historicoConversa(params.conversaId)])
+    const [ctx, historico] = await Promise.all([montarContexto(params.conversaId, waId, nome, contato?.cliente_id ?? null, ehFornecedor), historicoConversa(params.conversaId)])
 
     let mensagens = historico.msgs
     const ultima = mensagens[mensagens.length - 1]

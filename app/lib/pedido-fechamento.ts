@@ -21,6 +21,7 @@
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
+import { guardarImagem } from './imagens-pedido-storage'
 import { salvarLinhasEditadas, type LinhaEditada } from './pedido-linhas-edicao'
 import { enviarResumoPdfPedido } from './whatsapp-notify'
 import type { LinhaPedido } from './pedido-assistente-oferta'
@@ -34,6 +35,80 @@ export type PecaEntrada = {
   /** feminino | masculino | infantil | unissex — muda a modelagem, não é detalhe. */
   publico?: string | null
   tamanhos?: Array<{ tamanho: string; qtd: number }> | null
+}
+
+/** Teto por foto: o que passa disso é print de tela cheia, não referência de peça. */
+const MAX_FOTO_BYTES = 8 * 1024 * 1024
+
+/**
+ * Prende uma foto que chegou pelo WhatsApp a UM modelo do pedido.
+ *
+ * O chat do site já fazia isso pelo `fotosPorLinha`, e é o que faz a confecção
+ * ver a referência do lado da peça certa em vez de uma pilha de imagens soltas.
+ * Pelo WhatsApp não existia: o cliente mandava a foto da camisa que ele quer, o
+ * Luigi via a imagem e sabia descrever, mas ela morria na conversa — não chegava
+ * em quem vai produzir.
+ *
+ * O destino é `mockups[índice da linha].fotos`, o MESMO lugar que o site usa.
+ * Nada de estrutura paralela: o visualizador, a oferta ao fornecedor e o PDF já
+ * leem dali, então a foto do WhatsApp aparece nos três sem tocar em nenhum.
+ */
+export async function anexarFotoDaConversaAoModelo(params: {
+  pedidoId: string
+  /** Posição do modelo como o cliente conta: 1 = Modelo 1. */
+  posicao: number
+  /** Caminho no bucket wa-midia, da mensagem que o cliente mandou. */
+  midiaPath: string
+}): Promise<{ ok: boolean; erro?: string; modelo?: string; totalFotos?: number }> {
+  const { data: pedido } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, linhas, mockups')
+    .eq('id', params.pedidoId)
+    .maybeSingle<{ id: string; linhas: unknown; mockups: Record<string, unknown> | null }>()
+  if (!pedido) return { ok: false, erro: 'pedido não encontrado' }
+
+  const linhas = Array.isArray(pedido.linhas) ? (pedido.linhas as LinhaPedido[]) : []
+  const i = Math.round(params.posicao) - 1
+  if (i < 0 || i >= linhas.length) {
+    return { ok: false, erro: `este pedido tem ${linhas.length} modelo(s); não existe modelo ${params.posicao}` }
+  }
+
+  const { data: arquivo, error: erroDownload } = await supabaseAdmin.storage.from('wa-midia').download(params.midiaPath)
+  if (erroDownload || !arquivo) return { ok: false, erro: 'não achei essa foto no histórico da conversa' }
+
+  const bytes = Buffer.from(await arquivo.arrayBuffer())
+  if (bytes.byteLength === 0) return { ok: false, erro: 'a foto veio vazia' }
+  if (bytes.byteLength > MAX_FOTO_BYTES) return { ok: false, erro: 'foto muito grande' }
+  const mime = arquivo.type || 'image/jpeg'
+  if (!mime.startsWith('image/')) return { ok: false, erro: 'esse arquivo não é uma imagem' }
+
+  // guardarImagem fala data URL e devolve a referência de storage que o resto
+  // do sistema entende — é o ponto único onde imagem de pedido é gravada.
+  const ref = await guardarImagem(`data:${mime};base64,${bytes.toString('base64')}`, pedido.id)
+
+  type Mockup = { fotos?: string[]; ia?: unknown[]; liso?: string; arte?: string }
+  const mapa: Record<string, Mockup> =
+    pedido.mockups && typeof pedido.mockups === 'object' ? { ...(pedido.mockups as Record<string, Mockup>) } : {}
+  const chave = String(i)
+  const atual = mapa[chave] ?? {}
+  const fotos = Array.isArray(atual.fotos) ? [...atual.fotos] : []
+  // Mesma foto duas vezes acontece quando o cliente reenvia; não duplica.
+  if (!fotos.includes(ref)) fotos.push(ref)
+  // O campo legado liso/arte sai quando o modelo passa a ter lista de fotos —
+  // é o que a rota de mockup do site faz, e os dois formatos não convivem.
+  mapa[chave] = { ...atual, fotos }
+  delete mapa[chave].liso
+  delete mapa[chave].arte
+
+  const { error } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .update({ mockups: mapa, atualizado_em: new Date().toISOString() })
+    .eq('id', pedido.id)
+  if (error) return { ok: false, erro: error.message }
+
+  const l = linhas[i]
+  const nome = [l?.modelo, l?.cor].filter(Boolean).join(' ') || `modelo ${params.posicao}`
+  return { ok: true, modelo: nome, totalFotos: fotos.length }
 }
 
 /**
