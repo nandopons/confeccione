@@ -12,7 +12,7 @@
 // ============================================================================
 
 import { useState } from 'react'
-import type { Automacao, EstatisticaFluxo, Gatilho, StatusAutomacao } from '@/app/lib/automacoes-marketing'
+import type { AcaoPasso, Automacao, EstatisticaFluxo, Gatilho, StatusAutomacao } from '@/app/lib/automacoes-marketing'
 import type { FiltroLeads } from '@/app/lib/leads-marketing'
 import type { TemplateMarketing } from '@/app/lib/templates-marketing'
 
@@ -84,7 +84,10 @@ const STATUS_BADGE: Record<StatusAutomacao, string> = {
 const CAMPO =
   'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#1D9E75]'
 
-type PassoForm = { esperaDias: number; templateId: string | null }
+// `acao` viaja no formulário mesmo sem campo na tela: sem isto, abrir e salvar
+// um fluxo transformaria o passo que ENCERRA o pedido num passo de mensagem sem
+// template — quebrado e calado. O editor não cria passo de ação; só não destrói.
+type PassoForm = { esperaDias: number; templateId: string | null; acao: AcaoPasso }
 
 type Rascunho = {
   id: string | null
@@ -110,7 +113,7 @@ function novoRascunho(): Rascunho {
     maxToques: 3,
     horaInicio: 9,
     horaFim: 20,
-    passos: [{ esperaDias: 0, templateId: null }],
+    passos: [{ esperaDias: 0, templateId: null, acao: 'mensagem' as AcaoPasso }],
   }
 }
 
@@ -125,7 +128,7 @@ function doFluxo(a: Automacao): Rascunho {
     maxToques: a.maxToques,
     horaInicio: a.horaInicio,
     horaFim: a.horaFim,
-    passos: a.passos.map((p) => ({ esperaDias: p.esperaDias, templateId: p.templateId })),
+    passos: a.passos.map((p) => ({ esperaDias: p.esperaDias, templateId: p.templateId, acao: p.acao })),
   }
 }
 
@@ -272,7 +275,10 @@ export default function Automacoes({
                             key={p.id}
                             className="text-[11px] border border-gray-200 rounded-full px-2.5 py-1 text-gray-600"
                           >
-                            {p.esperaDias === 0 ? 'na hora' : `+${p.esperaDias}d`} · {t?.nome ?? '⚠ sem template'}
+                            {p.esperaDias === 0 ? 'na hora' : `+${p.esperaDias}d`} ·{' '}
+                            {p.acao === 'encerrar_pedido'
+                              ? 'encerra o pedido, sem mensagem'
+                              : (t?.nome ?? '⚠ sem template')}
                           </span>
                         )
                       })}
@@ -590,18 +596,24 @@ function EditorFluxo({
                     />
                     dias
                   </label>
-                  <select
-                    value={p.templateId ?? ''}
-                    onChange={(e) => mudaPasso(i, { templateId: e.target.value || null })}
-                    className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-900 bg-white flex-1 min-w-[180px]"
-                  >
-                    <option value="">— escolha o template —</option>
-                    {usaveis.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        [{t.canal === 'email' ? 'e-mail' : t.canal === 'whatsapp' ? 'zap' : 'mala'}] {t.nome}
-                      </option>
-                    ))}
-                  </select>
+                  {p.acao === 'encerrar_pedido' ? (
+                    <span className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 flex-1 min-w-[180px]">
+                      encerra o pedido incompleto, sem mandar mensagem
+                    </span>
+                  ) : (
+                    <select
+                      value={p.templateId ?? ''}
+                      onChange={(e) => mudaPasso(i, { templateId: e.target.value || null })}
+                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-gray-900 bg-white flex-1 min-w-[180px]"
+                    >
+                      <option value="">— escolha o template —</option>
+                      {usaveis.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          [{t.canal === 'email' ? 'e-mail' : t.canal === 'whatsapp' ? 'zap' : 'mala'}] {t.nome}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   {f.passos.length > 1 && (
                     <button
                       type="button"
@@ -617,7 +629,9 @@ function EditorFluxo({
             {f.passos.length < 8 && (
               <button
                 type="button"
-                onClick={() => setF((v) => ({ ...v, passos: [...v.passos, { esperaDias: 7, templateId: null }] }))}
+                onClick={() =>
+                  setF((v) => ({ ...v, passos: [...v.passos, { esperaDias: 7, templateId: null, acao: 'mensagem' }] }))
+                }
                 className="text-xs text-[#0F6E56] underline mt-2"
               >
                 + adicionar passo

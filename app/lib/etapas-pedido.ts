@@ -121,11 +121,22 @@ export async function contagemPorEtapa(): Promise<Array<{ etapa: Etapa; grupo: G
 
 // ─── Fatos novos: encerrar e motivo de parada ───────────────────────────────
 
-export type QuemEncerra = 'admin' | 'luigi' | 'gestor_whatsapp' | 'mcp'
+export type QuemEncerra = 'admin' | 'luigi' | 'gestor_whatsapp' | 'mcp' | 'regua'
 
 /**
- * Dá o pedido como perdido, com motivo. Só gente (ou o Luigi com o "não" do
- * cliente) chama isto — nunca um cron. Pedido pago ou finalizado não se encerra.
+ * Dá o pedido como perdido, com motivo. Pedido pago ou finalizado não se encerra.
+ *
+ * ATÉ 10/09/2026 A REGRA ERA "NUNCA UM CRON" — e mudou de propósito.
+ * A ideia original era boa: encerrar é um julgamento sobre a intenção de alguém,
+ * e máquina não julga intenção. O que aprendemos é que NÃO encerrar também é um
+ * julgamento, e pior: o pedido fica no funil pra sempre e a pessoa segue
+ * recebendo lembrete de um pedido que ela abandonou em três dias.
+ *
+ * Então a régua de pedido incompleto encerra, com duas amarras que a máquina
+ * consegue respeitar: só depois de três toques sem UMA interação, e sempre com
+ * motivo `sumiu`, que é literalmente o fato observado — não uma leitura do que
+ * a pessoa quis. Quem disse qualquer coisa sai da régua antes disso, e quem
+ * pediu tempo é silenciado pelo Luigi sem perder o pedido.
  */
 export async function encerrarPedido(
   id: string,

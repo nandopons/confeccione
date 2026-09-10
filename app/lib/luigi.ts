@@ -40,12 +40,19 @@ import { salvarPerfil, lerPerfil } from './perfil-producao'
 import { pecaLabel, pecaValida, legadoDasPecas, PECAS } from './pecas'
 import { salvarFotoDaConversa } from './portfolio-fornecedor'
 import { enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
-import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
+import { enviarImagemDoPedido, janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 // O tipo local LinhaPedido deste arquivo é um recorte antigo, sem material nem
 // descricao. Pra editar a peça de verdade usamos o tipo canônico do produto.
 import { type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
 import { editarLinhasPedidoCliente } from './pedido-linhas-edicao'
-import { anexarFotoDaConversaAoModelo, conferirPedido, salvarDadosDoCliente, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores } from './pedido-fechamento'
+import { anexarFotoDaConversaAoModelo, conferirPedido, salvarDadosDoCliente, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores, pausarLembretesDoPedido } from './pedido-fechamento'
+import {
+  faltaParaMockup,
+  fotosDoModelo,
+  gerarMockupDoModelo,
+  type LinhaMockup,
+  type MapaMockups,
+} from './mockup-pedido'
 import { registrarUsoIa } from './uso-ia'
 import { ehNumeroGestao, numerosGestao } from './gestao-whatsapp'
 import {
@@ -341,6 +348,24 @@ type PedidoContexto = {
    * outro caminho.
    */
   falta_para_liberar: string[]
+  /**
+   * Modelos que vão pro cliente SEM imagem nenhuma — e já dá pra gerar.
+   *
+   * POR QUE ISTO ENTRA NO CONTEXTO — 10/09/2026
+   * Dos 104 pedidos dos últimos 45 dias, 67 não têm uma única imagem: nem foto
+   * do cliente, nem mockup. O cliente aprova um pedido lendo "camiseta oversized
+   * preta, algodão fio 30, 120 peças" e imaginando o resto — e a confecção
+   * produz a partir da mesma frase. Toda diferença entre o que ele imaginou e o
+   * que chegou nasce aí.
+   *
+   * A lista só traz o que o Luigi pode resolver AGORA: modelo sem imagem cujos
+   * dados já bastam pra gerar. Modelo incompleto não entra — o que falta nele
+   * já está sendo perseguido pelo fluxo das peças, e ver o mesmo modelo em duas
+   * listas faria ele cobrar duas vezes.
+   *
+   * Vazia significa "todo mundo tem imagem": não é convite pra gerar mais uma.
+   */
+  modelos_para_gerar_mockup: number[]
   link_do_pedido: string
   motivo_parada: string | null
   encerrado_motivo: string | null
@@ -354,6 +379,20 @@ type Contexto = {
   pedidoEmFoco: PedidoEtapa | null
   /** true = é confecção cadastrada, não cliente. Muda o prompt inteiro. */
   ehFornecedor: boolean
+  /**
+   * Quantos mockups ele já gerou NESTA rodada. Mutável de propósito.
+   *
+   * POR QUE UM CONTADOR E NÃO UMA FRASE NO PROMPT — 10/09/2026
+   * Um pedido de seis modelos sem imagem faria o Luigi gerar seis e despejar
+   * seis imagens seguidas no WhatsApp do cliente — o mesmo excesso de mensagem
+   * que o Fernando cobrou hoje, agora com anexo. E gerar tudo antes da primeira
+   * reação é o pior momento pra gastar: se ele disser "eu queria mais folgada",
+   * as outras cinco já nasceram erradas.
+   *
+   * Um por vez, então. A regra também está no prompt, mas de dentro da conversa
+   * gerar parece sempre útil — e o que segura efeito de ferramenta é código.
+   */
+  mockupsNestaRodada: number
   /** O que a confecção JÁ nos deu. Null quando não é fornecedor. */
   cadastroFornecedor: CadastroFornecedor | null
 }
@@ -570,6 +609,44 @@ async function dadosDeEntrega(pedidoIds: string[]): Promise<Map<string, string[]
   return mapa
 }
 
+/**
+ * Os mapas de mockup dos pedidos em contexto, pra saber quem está sem imagem.
+ *
+ * Consulta separada porque a view de etapas não traz `mockups`. É leve: desde a
+ * migração de 31/08 esse campo guarda só referências curtas de bucket, não mais
+ * a foto em base64 — antes disso a mesma consulta puxaria megabytes por pedido.
+ */
+async function mockupsDosPedidos(pedidoIds: string[]): Promise<Map<string, MapaMockups>> {
+  const mapa = new Map<string, MapaMockups>()
+  if (pedidoIds.length === 0) return mapa
+  const { data } = await supabaseAdmin.from('pedidos_assistente').select('id, mockups').in('id', pedidoIds)
+  for (const p of (data ?? []) as Array<{ id: string; mockups: MapaMockups | null }>) {
+    mapa.set(p.id, p.mockups && typeof p.mockups === 'object' ? p.mockups : {})
+  }
+  return mapa
+}
+
+/**
+ * Posições (1 = Modelo 1) que não têm imagem nenhuma e já podem virar mockup.
+ *
+ * "Imagem nenhuma" inclui os campos legados `liso`/`arte`: pedido antigo guarda
+ * a referência ali, e ignorá-los faria o Luigi gerar mockup pra modelo que já
+ * tem — desperdício visível pro cliente, que recebe duas versões da mesma peça.
+ */
+function modelosParaGerarMockup(linhas: unknown, mockups: MapaMockups): number[] {
+  const arr = Array.isArray(linhas) ? (linhas as LinhaMockup[]) : []
+  const alvos: number[] = []
+  arr.forEach((linha, i) => {
+    const mk = mockups[String(i)]
+    const temImagem =
+      fotosDoModelo(mk).length > 0 ||
+      (Array.isArray(mk?.ia) && mk.ia.length > 0) ||
+      Boolean(mk?.liso || mk?.arte)
+    if (!temImagem && faltaParaMockup(linha, mk).length === 0) alvos.push(i + 1)
+  })
+  return alvos
+}
+
 async function montarContexto(conversaId: string, waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
   const [pedidos, conta, cadastroFornecedor] = await Promise.all([
     pedidosDoContato(waId, clienteId),
@@ -584,10 +661,11 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
   const fechados = pedidos.filter((p) => !(ETAPAS_ABERTAS as string[]).includes(p.etapa)).slice(0, 2)
   const escolhidos = [...abertos, ...fechados]
   const ids = escolhidos.map((p) => p.id)
-  const [fornecedores, prazos, dadosCliente] = await Promise.all([
+  const [fornecedores, prazos, dadosCliente, mockups] = await Promise.all([
     fornecedoresAceitos(ids),
     prazosDesejados(ids),
     dadosDeEntrega(ids),
+    mockupsDosPedidos(ids),
   ])
 
   const lista = escolhidos.map<PedidoContexto>((p) => {
@@ -610,6 +688,10 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
       pagamento: p.pagamento_status ?? null,
       fornecedor: fornecedores.get(p.id) ?? null,
       falta_para_liberar: dadosCliente.get(p.id) ?? [],
+      // Só faz sentido perseguir imagem em pedido que ainda vai pro cliente.
+      // Pedido pago/produzindo já foi aprovado como está; mexer nele agora só
+      // criaria diferença entre o que a confecção recebeu e o que está na tela.
+      modelos_para_gerar_mockup: emAberto ? modelosParaGerarMockup(p.linhas, mockups.get(p.id) ?? {}) : [],
       link_do_pedido: visualizadorPedidoUrl(p.id),
       motivo_parada: p.motivo_parada,
       encerrado_motivo: p.encerrado_motivo,
@@ -623,6 +705,7 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
     contato: { nome, telefone: waId, conta: conta.data ? { nome: conta.data.nome, email: conta.data.email } : null },
     pedidos: lista,
     pedidoEmFoco: abertos[0] ?? null,
+    mockupsNestaRodada: 0,
   }
 }
 
@@ -856,11 +939,79 @@ const FERRAMENTA_FOTO_MODELO: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_PAUSAR_LEMBRETES: Anthropic.Messages.Tool = {
+  name: 'pausar_lembretes_do_pedido',
+  description:
+    'Silencia os lembretes automáticos deste pedido pelo tempo que o cliente pediu, SEM apagar o pedido — ele fica ' +
+    'guardado do jeito que está. ' +
+    'CHAME sempre que ele sinalizar que não é agora: "vou ver com meu sócio", "to pesquisando ainda", "só mês que vem", ' +
+    '"me chama em janeiro", "agora não dá". ' +
+    'Sem isto ele continua recebendo cobrança automática em 24h e 48h de um pedido que ele acabou de dizer que vai ' +
+    'demorar — e quem parece chato somos nós, não o robô. ' +
+    'Não use quando ele só está devagar respondendo: é pra quando ele DIZ que vai levar tempo. ' +
+    'Depois de chamar, confirme em uma linha, no tom de quem está guardando e não cobrando: ' +
+    '"tranquilo, deixo seu pedido guardado e não te encho — quando quiser é só me chamar."',
+  input_schema: {
+    type: 'object',
+    properties: {
+      motivo: {
+        type: 'string',
+        maxLength: 300,
+        description: 'O que ele falou, nas palavras dele. Ex.: "vai decidir com a sócia", "só compra em janeiro".',
+      },
+      dias: {
+        type: 'number',
+        minimum: 1,
+        maximum: 120,
+        description:
+          'Quantos dias de silêncio, a partir do que ELE disse: "semana que vem" = 7, "mês que vem" = 30, ' +
+          '"depois do carnaval" = conte até lá. Deixe vazio se ele não deu prazo nenhum — aí vira 30.',
+      },
+      pedido: { type: 'string', description: 'Código ou id. Sem isto, usa o pedido em foco.' },
+    },
+    required: ['motivo'],
+  },
+}
+
+const FERRAMENTA_MOCKUP_IA: Anthropic.Messages.Tool = {
+  name: 'gerar_mockup_do_modelo',
+  description:
+    'Gera com IA uma imagem do modelo dentro do pedido, a partir do que já está definido (tipo da peça, cor, tecido, ' +
+    'estampa) e da arte/foto que o cliente tiver anexado. A imagem entra no pedido e aparece no resumo em PDF, no ' +
+    'visualizador e na oferta que a confecção recebe. ' +
+    'USE ANTES de enviar_resumo_pedido, nos modelos que o contexto listar em "modelos_para_gerar_mockup". ' +
+    'Pedido sem imagem é aprovado no escuro: o cliente lê a frase e imagina o resto, a confecção produz a partir da ' +
+    'mesma frase, e a diferença entre as duas imaginações aparece só na entrega. ' +
+    'NÃO é foto real de produção e você não deve dizer que é: ao mostrar, diga que é uma prévia gerada pra ele conferir ' +
+    'a ideia, e pergunte se é isso que ele tem em mente. ' +
+    'Se ele pedir mudança ("a logo maior", "quero na cor vinho", "põe nas costas"), chame de novo passando ' +
+    '`instrucoes` com o que ele falou.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      modelo: { type: 'number', minimum: 1, maximum: 50, description: 'Posição do modelo: 1 = Modelo 1, 2 = Modelo 2…' },
+      pedido: { type: 'string', description: 'Código ou id. Sem isto, usa o pedido em foco.' },
+      instrucoes: {
+        type: 'string',
+        maxLength: 600,
+        description:
+          'O que o cliente falou sobre como a peça deve ficar, nas palavras dele — onde vai a logo, tamanho, ' +
+          'se é frente ou costas, detalhe de modelagem. Deixe vazio na primeira geração se ele não pediu nada ' +
+          'específico. Não invente instrução que ele não deu: a IA obedece e o mockup sai diferente do pedido.',
+      },
+    },
+    required: ['modelo'],
+  },
+}
+
 const FERRAMENTA_RESUMO_PDF: Anthropic.Messages.Tool = {
   name: 'enviar_resumo_pedido',
   description:
     'Manda pro cliente, nesta conversa, o resumo do pedido em PDF. Use quando as peças estiverem completas, ANTES de pedir ' +
-    'a liberação pros fornecedores: ele confere no papel o que vai pro mercado. Depois de mandar, pergunte se está tudo ' +
+    'a liberação pros fornecedores: ele confere no papel o que vai pro mercado. ' +
+    'ANTES DE CHAMAR: se o contexto do pedido listar posições em "modelos_para_gerar_mockup", gere os mockups com ' +
+    'gerar_mockup_do_modelo primeiro — o resumo carrega as imagens do pedido, e mandado sem elas o cliente aprova ' +
+    'no escuro e a confecção produz de uma frase. Depois de mandar, pergunte se está tudo ' +
     'certo ou se quer ajustar algo. UMA VEZ SÓ: se o cliente responder "ok", "certo", "top" ou qualquer confirmação, ' +
     'ele está falando do PDF que já recebeu — NÃO chame de novo. Só reenvie se o pedido tiver mudado depois do envio.',
   input_schema: {
@@ -965,6 +1116,8 @@ function ferramentasDoModo(modo: Exclude<ModoLuigi, 'desligado'>, ehFornecedor =
         FERRAMENTA_DEFINIR_PECAS,
         FERRAMENTA_CRIAR_PEDIDO,
         FERRAMENTA_FOTO_MODELO,
+        FERRAMENTA_MOCKUP_IA,
+        FERRAMENTA_PAUSAR_LEMBRETES,
         FERRAMENTA_DADOS_CLIENTE,
         FERRAMENTA_RESUMO_PDF,
         FERRAMENTA_LIBERAR,
@@ -1377,6 +1530,98 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
         aviso: `Foto presa a ${r.modelo}. Confirme em uma linha e siga — não peça a mesma foto de novo.`,
       }
     }
+    case 'pausar_lembretes_do_pedido': {
+      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+      const motivo = (str(entrada.motivo) ?? '').trim()
+      if (!motivo) throw new Error('diga em poucas palavras o que ele falou')
+      const r = await pausarLembretesDoPedido({ pedidoId: p.id, motivo, dias: num(entrada.dias) ?? null })
+      if (!r.ok) throw new Error(r.erro ?? 'não deu pra pausar os lembretes')
+      return {
+        ok: true,
+        codigo: p.codigo,
+        dias_de_silencio: r.dias,
+        aviso:
+          'Pedido guardado e lembretes desligados. Confirme em UMA linha, como quem guarda e não como quem cobra, ' +
+          'e não fale em "sistema", "lembrete automático" nem prazo de silêncio — do lado dele isso é você avisando ' +
+          'que existe uma máquina cobrando. Também não peça mais nenhum dado agora.',
+      }
+    }
+    case 'gerar_mockup_do_modelo': {
+      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+      const posicao = num(entrada.modelo)
+      if (!posicao) throw new Error('diga a posição do modelo (1 = Modelo 1)')
+      const instrucoes = (str(entrada.instrucoes) ?? '').trim()
+
+      // Um por rodada: o cliente vê, reage, e só então vem o próximo.
+      if (ctx.mockupsNestaRodada >= 1) {
+        throw new Error(
+          'você já mandou um mockup nesta resposta. Um por vez: mostre esse, espere o cliente reagir e gere o ' +
+            'próximo quando ele responder. Não gere os outros modelos agora.'
+        )
+      }
+
+      // A TRAVA DE REPETIÇÃO É CÓDIGO, NÃO REGRA DE PROMPT — 10/09/2026.
+      //
+      // Efeito de ferramenta se trava dentro da ferramenta. De dentro da
+      // conversa, gerar parece sempre útil: o cliente diz "ok" e o modelo lê
+      // isso como permissão pra gerar outro. Cada geração é uma chamada paga e,
+      // pior, o cliente recebe duas versões da mesma peça e passa a escolher
+      // entre elas — quando o que a gente queria era ele aprovar uma.
+      const { data: atual } = await supabaseAdmin
+        .from('pedidos_assistente')
+        .select('mockups')
+        .eq('id', p.id)
+        .maybeSingle<{ mockups: MapaMockups | null }>()
+      const mk = (atual?.mockups ?? {})[String(posicao - 1)]
+      if (Array.isArray(mk?.ia) && mk.ia.length > 0 && !instrucoes) {
+        throw new Error(
+          `Modelo ${posicao} já tem mockup gerado e o cliente já viu. Não gere de novo: pergunte se está do jeito ` +
+            'que ele quer. Se ele pedir mudança, chame outra vez passando em `instrucoes` o que ele falou.'
+        )
+      }
+
+      const r = await gerarMockupDoModelo({ pedidoId: p.id, index: posicao - 1, instrucoes })
+      if (!r.ok && r.tipo === 'indisponivel') {
+        // Provedor sem crédito não é assunto do cliente: seguir o pedido sem
+        // imagem é pior que ter imagem, e muito melhor que explicar a ele que
+        // uma peça interna nossa está fora do ar.
+        throw new Error(
+          `a geração de imagem está indisponível agora (${r.motivo}). Siga o pedido normalmente SEM o mockup e ` +
+            'não comente isso com o cliente.'
+        )
+      }
+      if (!r.ok) throw new Error(r.erro)
+      ctx.mockupsNestaRodada += 1
+
+      const imagem = r.ia[r.ia.length - 1]
+      const legenda = `Modelo ${posicao} — ${r.modelo}. Prévia gerada por IA a partir do que você descreveu, pra conferir a ideia.`
+      const envio = imagem
+        ? await enviarImagemDoPedido({
+            waId: ctx.contato.telefone,
+            nome: ctx.contato.nome,
+            pedidoId: p.id,
+            ref: imagem.url,
+            legenda,
+            autor: 'luigi',
+          })
+        : { ok: false as const, erro: 'mockup gerado sem imagem' }
+
+      return {
+        ok: true,
+        codigo: p.codigo,
+        modelo: r.modelo,
+        usou_arte_do_cliente: r.referenciasUsadas > 0,
+        enviado_no_whatsapp: envio.ok,
+        aviso: envio.ok
+          ? 'A imagem JÁ FOI para o WhatsApp dele com legenda dizendo que é prévia de IA — não descreva a imagem ' +
+            'nem repita a legenda. Pergunte em uma linha se é isso que ele tem em mente ou se quer ajustar algo. ' +
+            'Nunca diga que é foto de produção.'
+          : 'O mockup entrou no pedido e vai aparecer no resumo, mas NÃO consegui mandar a imagem aqui. ' +
+            'Não avise o cliente de falha nenhuma: siga a conversa e mande o resumo normalmente.',
+      }
+    }
     case 'enviar_resumo_pedido': {
       const p = await acharNoContexto(ctx, str(entrada.pedido))
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
@@ -1745,6 +1990,14 @@ Nunca invente prazo de produção nem diga que "dá pra fazer em X dias": quem d
 PEDIDO COM PEÇAS PRONTAS NÃO FICA PARADO. Cada pedido no contexto traz "falta_para_liberar". Se a lista estiver VAZIA, o pedido pode ir pras confecções: mande o resumo, confirme com ele e libere. Se tiver itens, peça o PRIMEIRO da lista — um por mensagem — e siga até zerar.
 
 O QUE NÃO ESTÁ NA LISTA, VOCÊ JÁ TEM. Não pergunte, não confirme, não mencione. A Kelly deu o e-mail dela no cadastro e mesmo assim ouviu "pra qual e-mail mando o resumo?" — do lado dela, isso é a empresa não olhar o que ela já preencheu. Se "falta_para_liberar" não cita e-mail, o e-mail está lá.
+
+QUANDO ELE DIZ QUE NÃO É AGORA, GUARDE O PEDIDO E CALE OS LEMBRETES. "Vou ver com meu sócio", "to pesquisando ainda", "só mês que vem", "me chama depois" — chame pausar_lembretes_do_pedido com o prazo que ele deu. O pedido continua inteiro, esperando por ele. Se você não chamar, ele recebe cobrança automática em 24h e de novo em 48h de um pedido que ele acabou de dizer que vai demorar, e do lado dele quem está sendo chato é a Confeccione. Isso não vale pra quem só está devagar respondendo — é pra quem DIZ que vai levar tempo.
+
+FOTO QUE ELE MANDA É REFERÊNCIA DE PRODUÇÃO — PRENDA NA PEÇA. Sempre que o cliente mandar imagem de peça, arte, estampa ou print, chame anexar_foto_ao_modelo na hora. Você vê a imagem, então elogie ou comente o que viu em uma linha — mas o que faz diferença é ela ficar grudada no modelo: é assim que quem vai costurar enxerga a referência do lado da peça certa. Foto que fica só na conversa não chega em ninguém. Se o pedido tem mais de um modelo e não está claro de qual ela é, pergunte antes ("essa é da preta ou da branca?"): foto na peça errada faz produzir errado.
+
+PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos_para_gerar_mockup". Se tiver posição nessa lista, gere o mockup com gerar_mockup_do_modelo ANTES de mandar o resumo — um por vez, esperando ele reagir a cada um. O cliente aprova lendo "camiseta oversized preta, algodão fio 30, 120 peças" e imaginando o resto; a confecção produz a partir da mesma frase. Toda diferença entre o que ele imaginou e o que chegou nasce aí, e o mockup é onde ela aparece a tempo de ser corrigida.
+
+A imagem sai por aqui com legenda dizendo que é prévia de IA. Não descreva a imagem que ele está vendo, não repita a legenda e NUNCA diga que é foto de produção nossa ou de peça pronta — é uma prévia do que ele descreveu. Pergunte se é isso que ele tem em mente. Se ele pedir mudança, chame de novo com "instrucoes" no que ele falou; se ele disser que está certo, siga pro resumo. E se a lista vier vazia, não gere nada: já existe imagem naquele modelo.
 
 E não empurre pro cliente o que você mesmo pode fazer: ele NÃO precisa entrar no site nem clicar em "Buscar fornecedor". Você libera daqui com liberar_para_fornecedores assim que ele disser que está certo. Mandar ele clicar em botão é transferir pra ele um passo que é seu — e é onde a maioria dos pedidos morre.
 

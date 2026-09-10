@@ -258,6 +258,52 @@ export async function anexarFotoDaConversaAoModelo(params: {
   return { ok: true, modelo: nome, totalFotos: fotos.length }
 }
 
+/** Teto do silêncio: nem o cliente que diz "ano que vem" some pra sempre. */
+const MAX_DIAS_PAUSA = 120
+/** Quando ele pede tempo sem dizer quanto. Um mês é o "depois" mais comum. */
+const DIAS_PAUSA_PADRAO = 30
+
+/**
+ * Silencia os lembretes deste pedido até uma data, sem perder o pedido.
+ *
+ * POR QUE ISTO EXISTE — 10/09/2026
+ * A régua de pedido incompleto cobra em 15 min, 24h e 48h. Pra quem está
+ * decidindo agora, isso é atendimento. Pra quem disse "vou ver com meu sócio" ou
+ * "só mês que vem", é a mesma empresa cutucando três vezes em dois dias — e o
+ * cliente não separa a régua do Luigi: quem está sendo chato somos nós.
+ *
+ * Pausa em vez de encerrar porque o pedido é trabalho dele: peça, cor, grade,
+ * às vezes uma hora de conversa. Jogar isso fora pra "limpar o funil" faz o
+ * cliente recomeçar do zero quando voltar, e recomeçar do zero é onde ele
+ * desiste.
+ *
+ * A data é o que ELE disse. Sem data, 30 dias — e nunca mais que 120, porque
+ * silêncio eterno também é abandono, só que com cara de educação.
+ */
+export async function pausarLembretesDoPedido(params: {
+  pedidoId: string
+  /** O que ele falou, nas palavras dele. Vira a justificativa no admin. */
+  motivo: string
+  /** Quantos dias de silêncio. Sem isto, 30. */
+  dias?: number | null
+}): Promise<{ ok: boolean; erro?: string; ate?: string; dias?: number }> {
+  const pedidos = Math.round(params.dias ?? DIAS_PAUSA_PADRAO)
+  const dias = Math.min(MAX_DIAS_PAUSA, Math.max(1, Number.isFinite(pedidos) ? pedidos : DIAS_PAUSA_PADRAO))
+  const ate = new Date(Date.now() + dias * 24 * 60 * 60 * 1000)
+
+  const { error } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .update({
+      lembretes_pausados_em: new Date().toISOString(),
+      lembretes_pausados_ate: ate.toISOString(),
+      lembretes_pausados_motivo: params.motivo.slice(0, 300),
+    })
+    .eq('id', params.pedidoId)
+  if (error) return { ok: false, erro: error.message }
+
+  return { ok: true, ate: ate.toISOString(), dias }
+}
+
 /**
  * Abre um pedido NOVO pra quem já está conversando no WhatsApp.
  *

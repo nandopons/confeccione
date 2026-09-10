@@ -57,10 +57,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!automacao) return NextResponse.json({ erro: 'Fluxo não encontrado' }, { status: 404 })
 
   if (parsed.data.acao === 'ativar') {
-    const semTemplate = automacao.passos.filter((p) => p.ativo && !p.templateId).length
+    // Passo de AÇÃO (encerrar o pedido) não manda mensagem e por isso não tem
+    // template — exigir um aqui impediria reativar a régua de pedido incompleto
+    // depois de qualquer pausa.
+    const semTemplate = automacao.passos.filter((p) => p.ativo && p.acao === 'mensagem' && !p.templateId).length
     if (automacao.passos.length === 0 || semTemplate > 0) {
       return NextResponse.json(
-        { erro: 'Antes de ativar, todo passo do fluxo precisa de um template escolhido.' },
+        { erro: 'Antes de ativar, todo passo que manda mensagem precisa de um template escolhido.' },
         { status: 400 }
       )
     }

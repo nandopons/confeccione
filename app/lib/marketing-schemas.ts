@@ -97,6 +97,9 @@ export const AutomacaoSchema = z.object({
       z.object({
         esperaDias: z.number().int().min(0).max(365),
         templateId: z.string().uuid().nullable(),
+        // Sem isto o zod descarta a ação e o passo que ENCERRA o pedido volta
+        // do editor como mensagem sem template — quebrado, e em silêncio.
+        acao: z.enum(['mensagem', 'encerrar_pedido']).optional(),
         ativo: z.boolean().optional(),
       })
     )

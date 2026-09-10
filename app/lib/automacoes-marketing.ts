@@ -31,6 +31,7 @@ import {
   leadAlcancavel,
   type CanalEnvio,
 } from './envio-marketing'
+import { encerrarPedido } from './etapas-pedido'
 import { conteudoDoTemplate, obterTemplate, type TemplateMarketing } from './templates-marketing'
 import { listarLeadsCompleto, registrarToque, type FiltroLeads, type Lead } from './leads-marketing'
 
@@ -90,11 +91,21 @@ export const GATILHO_AJUDA: Record<Gatilho, string> = {
   etapa_em_negociacao: 'Entra quem tem fornecedor aceito há X dias sem orçamento (D-9: aos 3 dias, perguntar se a conversa deu certo). Sai quando o orçamento é definido.',
 }
 
+/**
+ * O que o passo faz quando vence.
+ *
+ * `encerrar_pedido` existe porque o fim de uma régua de pedido incompleto não é
+ * uma mensagem — é parar. Mandar um quarto toque pra dizer "vamos parar de
+ * insistir" é insistir mais uma vez com quem já ignorou três.
+ */
+export type AcaoPasso = 'mensagem' | 'encerrar_pedido'
+
 export type PassoAutomacao = {
   id: string
   ordem: number
   esperaDias: number
   templateId: string | null
+  acao: AcaoPasso
   ativo: boolean
 }
 
@@ -106,6 +117,16 @@ export type Automacao = {
   gatilhoDias: number
   /** Minutos na etapa; quando definido, manda no lugar de gatilhoDias. */
   gatilhoMinutos: number | null
+  /**
+   * Idade MÁXIMA na etapa pra entrar no fluxo, em dias. Nulo = sem teto.
+   *
+   * O gatilho diz "faz pelo menos X que está parado"; isto diz "mas não faz
+   * tanto tempo assim". Sem ele, ligar um fluxo novo varre o acervo inteiro na
+   * primeira rodada — a pessoa que abriu pedido em junho recebe hoje uma
+   * cobrança pra terminar, e a estreia da automação vira o dia em que a gente
+   * incomodou a base toda de uma vez.
+   */
+  gatilhoMaxDias: number | null
   publico: FiltroLeads
   maxToques: number
   horaInicio: number
@@ -122,6 +143,13 @@ type AutomacaoRow = {
   descricao: string | null
   gatilho: Gatilho
   gatilho_dias: number
+  // Existiam no banco e faltavam AQUI e no SELECT — e por isso o gatilho de 20
+  // minutos da régua virava 0 na prática: `daLinha` lia undefined, caía em
+  // gatilhoDias (0) e o corte era "agora". A régua nunca rodou, então ninguém
+  // recebeu nada; se tivesse rodado, teria cobrado no segundo em que o cliente
+  // saísse do site. Coluna no banco só vale se alguém a seleciona.
+  gatilho_minutos: number | null
+  gatilho_max_dias: number | null
   publico: unknown
   max_toques: number
   hora_inicio: number
@@ -137,11 +165,12 @@ type PassoRow = {
   ordem: number
   espera_dias: number
   template_id: string | null
+  acao: AcaoPasso | null
   ativo: boolean
 }
 
 const COLS_AUTO =
-  'id, nome, descricao, gatilho, gatilho_dias, publico, max_toques, hora_inicio, hora_fim, status, ultima_rodada_em, criado_em'
+  'id, nome, descricao, gatilho, gatilho_dias, gatilho_minutos, gatilho_max_dias, publico, max_toques, hora_inicio, hora_fim, status, ultima_rodada_em, criado_em'
 
 function daLinha(r: AutomacaoRow, passos: PassoRow[]): Automacao {
   return {
@@ -150,7 +179,8 @@ function daLinha(r: AutomacaoRow, passos: PassoRow[]): Automacao {
     descricao: r.descricao,
     gatilho: r.gatilho,
     gatilhoDias: r.gatilho_dias,
-    gatilhoMinutos: (r as { gatilho_minutos?: number | null }).gatilho_minutos ?? null,
+    gatilhoMinutos: r.gatilho_minutos ?? null,
+    gatilhoMaxDias: r.gatilho_max_dias ?? null,
     publico: (r.publico ?? {}) as FiltroLeads,
     maxToques: r.max_toques,
     horaInicio: r.hora_inicio,
@@ -161,7 +191,14 @@ function daLinha(r: AutomacaoRow, passos: PassoRow[]): Automacao {
     passos: passos
       .filter((p) => p.automacao_id === r.id)
       .sort((a, b) => a.ordem - b.ordem)
-      .map((p) => ({ id: p.id, ordem: p.ordem, esperaDias: p.espera_dias, templateId: p.template_id, ativo: p.ativo })),
+      .map((p) => ({
+        id: p.id,
+        ordem: p.ordem,
+        esperaDias: p.espera_dias,
+        templateId: p.template_id,
+        acao: p.acao ?? 'mensagem',
+        ativo: p.ativo,
+      })),
   }
 }
 
@@ -179,7 +216,7 @@ export async function listarAutomacoes(): Promise<Automacao[]> {
 
   const { data: passos } = await supabaseAdmin
     .from('automacao_passos')
-    .select('id, automacao_id, ordem, espera_dias, template_id, ativo')
+    .select('id, automacao_id, ordem, espera_dias, template_id, acao, ativo')
     .in('automacao_id', linhas.map((a) => a.id))
   return linhas.map((a) => daLinha(a, (passos ?? []) as PassoRow[]))
 }
@@ -189,7 +226,7 @@ export async function obterAutomacao(id: string): Promise<Automacao | null> {
   if (!data) return null
   const { data: passos } = await supabaseAdmin
     .from('automacao_passos')
-    .select('id, automacao_id, ordem, espera_dias, template_id, ativo')
+    .select('id, automacao_id, ordem, espera_dias, template_id, acao, ativo')
     .eq('automacao_id', id)
   return daLinha(data, (passos ?? []) as PassoRow[])
 }
@@ -221,12 +258,14 @@ export type DadosAutomacao = {
   descricao?: string | null
   gatilho: Gatilho
   gatilhoDias: number
+  gatilhoMinutos?: number | null
+  gatilhoMaxDias?: number | null
   publico: FiltroLeads
   maxToques: number
   horaInicio?: number
   horaFim?: number
   status?: StatusAutomacao
-  passos: Array<{ esperaDias: number; templateId: string | null; ativo?: boolean }>
+  passos: Array<{ esperaDias: number; templateId: string | null; acao?: AcaoPasso; ativo?: boolean }>
 }
 
 export async function salvarAutomacao(id: string | null, d: DadosAutomacao): Promise<string> {
@@ -239,6 +278,12 @@ export async function salvarAutomacao(id: string | null, d: DadosAutomacao): Pro
     max_toques: d.maxToques,
     hora_inicio: d.horaInicio ?? 9,
     hora_fim: d.horaFim ?? 20,
+    // Só grava quando veio no payload. O editor do admin não tem campo pra
+    // estes dois, e escrever `null` por omissão apagaria o gatilho de minutos e
+    // o teto de idade da régua no primeiro "salvar" — a mesma classe de bug que
+    // o passo de ação teria tido.
+    ...(d.gatilhoMinutos !== undefined ? { gatilho_minutos: d.gatilhoMinutos } : {}),
+    ...(d.gatilhoMaxDias !== undefined ? { gatilho_max_dias: d.gatilhoMaxDias } : {}),
     ...(d.status ? { status: d.status } : {}),
     atualizado_em: new Date().toISOString(),
   }
@@ -265,6 +310,7 @@ export async function salvarAutomacao(id: string | null, d: DadosAutomacao): Pro
       ordem: i + 1,
       espera_dias: Math.max(0, p.esperaDias),
       template_id: p.templateId,
+      acao: p.acao ?? 'mensagem',
       ativo: p.ativo ?? true,
     }))
     const { error } = await supabaseAdmin.from('automacao_passos').insert(linhas)
@@ -295,6 +341,8 @@ type InfoPedido = {
   etapa: string | null
   /** Quando entrou na etapa atual (ms). */
   desdeMs: number
+  /** O cliente pediu tempo. Nenhum fluxo aborda enquanto isto for true. */
+  lembretesPausados: boolean
 }
 
 /** Estado dos pedidos do chat, indexado por id — base dos gatilhos de pedido.
@@ -302,6 +350,17 @@ type InfoPedido = {
  *  etapa simplesmente não casam com ninguém nessa rodada. */
 async function mapaDePedidos(): Promise<Map<string, InfoPedido>> {
   const m = new Map<string, InfoPedido>()
+
+  // Consulta à parte porque a view de etapas não expõe a coluna nova. É curta:
+  // traz só quem está silenciado, que é a minoria.
+  const pausados = new Set<string>()
+  const { data: silenciados } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id')
+    .gt('lembretes_pausados_ate', new Date().toISOString())
+    .limit(5000)
+  for (const p of (silenciados ?? []) as Array<{ id: string }>) pausados.add(p.id)
+
   const view = await supabaseAdmin
     .from('pedidos_assistente_etapas')
     .select('id, pagamento_status, atualizado_em, criado_em, etapa, desde')
@@ -320,6 +379,7 @@ async function mapaDePedidos(): Promise<Map<string, InfoPedido>> {
         mexidoEm: new Date(p.atualizado_em ?? p.criado_em).getTime(),
         etapa: p.etapa,
         desdeMs: new Date(p.desde).getTime(),
+        lembretesPausados: pausados.has(p.id),
       })
     }
     return m
@@ -336,7 +396,13 @@ async function mapaDePedidos(): Promise<Map<string, InfoPedido>> {
     criado_em: string
   }>) {
     const mexidoEm = new Date(p.atualizado_em ?? p.criado_em).getTime()
-    m.set(p.id, { pago: p.pagamento_status === 'pago', mexidoEm, etapa: null, desdeMs: mexidoEm })
+    m.set(p.id, {
+      pago: p.pagamento_status === 'pago',
+      mexidoEm,
+      etapa: null,
+      desdeMs: mexidoEm,
+      lembretesPausados: pausados.has(p.id),
+    })
   }
   return m
 }
@@ -468,7 +534,7 @@ export async function falamosRecentemente(horas = 48): Promise<Set<string>> {
 export function leadsDoGatilho(
   leads: Lead[],
   pedidos: Map<string, InfoPedido>,
-  a: Pick<Automacao, 'gatilho' | 'gatilhoDias' | 'gatilhoMinutos'>,
+  a: Pick<Automacao, 'gatilho' | 'gatilhoDias' | 'gatilhoMinutos' | 'gatilhoMaxDias'>,
   agoraMs: number,
   quentes?: Set<string>
 ): Lead[] {
@@ -485,6 +551,9 @@ export function leadsDoGatilho(
     if (quentes && chave && quentes.has(chave)) return false
     const criadoMs = new Date(l.criadoEm).getTime()
     const pedido = l.pedidoId ? pedidos.get(l.pedidoId) : undefined
+    // Pediu tempo ("só mês que vem", "to vendo ainda"): nenhum fluxo entra.
+    // Insistir com quem já disse quando volta é o que faz a gente parecer chato.
+    if (pedido?.lembretesPausados) return false
     const ultimoContatoMs = l.ultimoContatoEm ? new Date(l.ultimoContatoEm).getTime() : 0
 
     switch (a.gatilho) {
@@ -507,9 +576,13 @@ export function leadsDoGatilho(
         )
 
       default: {
-        // Gatilhos por etapa: está na etapa e entrou nela há pelo menos X dias.
+        // Gatilhos por etapa: está na etapa, entrou nela há pelo menos X — e,
+        // quando há teto, não faz mais tempo do que o teto. O teto é o que
+        // impede a estreia de um fluxo de varrer o acervo parado de uma vez.
         const etapa = ETAPA_DO_GATILHO[a.gatilho]
-        return !!etapa && !!pedido && pedido.etapa === etapa && pedido.desdeMs <= corte
+        if (!etapa || !pedido || pedido.etapa !== etapa || pedido.desdeMs > corte) return false
+        if (a.gatilhoMaxDias == null) return true
+        return pedido.desdeMs >= agoraMs - a.gatilhoMaxDias * 24 * 60 * 60 * 1000
       }
     }
   })
@@ -528,6 +601,8 @@ function continuaElegivel(
   const chave = fim8(l.telefone)
   if (quentes && chave && quentes.has(chave)) return 'adiar_conversa_aberta'
   const pedido = l.pedidoId ? pedidos.get(l.pedidoId) : undefined
+  // Pediu tempo depois de já estar no fluxo: sai agora, no meio da régua.
+  if (pedido?.lembretesPausados) return 'cliente pediu pra falar depois'
   if ((gatilho === 'pedido_parado' || gatilho === 'lead_frio') && (pedido?.pago || l.status === 'cliente')) {
     return 'comprou'
   }
@@ -622,6 +697,16 @@ export async function detalheAutomacao(id: string): Promise<DetalheAutomacao | n
       : 'Sai do fluxo quando compra, vira cliente ou se descadastra.',
     `Público: ${descreverPublico(a.publico)}.`,
     `Janela de envio: ${a.horaInicio}h às ${a.horaFim}h (Recife); o robô roda de hora em hora e manda no máximo ${MAX_POR_RODADA} por rodada.`,
+    ...(a.passos.some((p) => p.ativo && p.esperaDias === 0)
+      ? ['O passo "na hora" sai a QUALQUER hora: quem acabou de mexer no pedido ainda está ali. Os passos em dias esperam a janela.']
+      : []),
+    ...(a.gatilhoMaxDias != null
+      ? [`Só entra quem está parado há no máximo ${a.gatilhoMaxDias} dias — pedido mais velho que isso a automação não reabre.`]
+      : []),
+    ...(a.passos.some((p) => p.ativo && p.acao === 'encerrar_pedido')
+      ? ['O último passo ENCERRA o pedido incompleto, sem mandar mensagem nenhuma.']
+      : []),
+    'Quem pediu tempo ("só mês que vem") sai do fluxo: o Luigi silencia o pedido pelo prazo que o cliente deu.',
     `Teto: ${a.maxToques} ${a.maxToques === 1 ? 'toque' : 'toques'} por pessoa neste fluxo; ninguém entra duas vezes.`,
     `Passos: ${passosAtivos.length === 0 ? 'nenhum com template — não roda' : passosAtivos.map((p) => `${p.esperaDias === 0 ? 'na hora' : `+${p.esperaDias} d`}`).join(' → ')}.`,
     'Só manda com o canal do passo disponível (WhatsApp precisa de telefone; e-mail, de e-mail).',
@@ -694,12 +779,30 @@ export async function rodarAutomacao(id: string, opts?: { forcar?: boolean }): P
   if (a.status !== 'ativa' && !opts?.forcar) {
     return { ...base, observacao: 'fluxo não está ativo' }
   }
-  const passosAtivos = a.passos.filter((p) => p.ativo && p.templateId)
+  const passosAtivos = a.passos.filter((p) => p.ativo && (p.templateId || p.acao === 'encerrar_pedido'))
   if (passosAtivos.length === 0) {
     return { ...base, observacao: 'fluxo sem passos com template' }
   }
+
+  // A JANELA NÃO VALE PRO PASSO IMEDIATO — 10/09/2026.
+  //
+  // Até aqui a janela barrava a rodada inteira, e com isso o primeiro toque de
+  // 15 minutos era uma ficção: quem parasse de responder às 15h05 só ouvia algo
+  // às 14h do dia seguinte, quase 23 horas depois.
+  //
+  // O raciocínio do Fernando resolve isso e tem limite: quem abriu o pedido de
+  // madrugada ESTÁ ali de madrugada, então o toque imediato pode sair a
+  // qualquer hora — é continuação da sessão, não interrupção. Mas isso vale só
+  // pro passo imediato. O lembrete de 24h cairia na mesma hora da noite
+  // seguinte, quando a pessoa está dormindo, e aí é interrupção mesmo.
+  //
+  // Então: passo com espera 0 sai a qualquer hora; passo com espera em dias
+  // espera a janela. Quem não pôde sair fica com `proximo_em` no passado e sai
+  // na primeira rodada dentro do horário — nada se perde.
   const hora = horaEmRecife()
-  if (hora < a.horaInicio || hora >= a.horaFim) {
+  const dentroDaJanela = hora >= a.horaInicio && hora < a.horaFim
+  const temPassoImediato = passosAtivos.some((p) => p.esperaDias === 0)
+  if (!dentroDaJanela && !temPassoImediato) {
     return { ...base, observacao: `fora da janela de envio (${a.horaInicio}h–${a.horaFim}h)` }
   }
 
@@ -715,7 +818,7 @@ export async function rodarAutomacao(id: string, opts?: { forcar?: boolean }): P
   const porId = new Map(leads.map((l) => [l.id, l]))
 
   base.inscritos = await inscrever(a, leads, pedidos, passosAtivos[0].esperaDias, quentes, jaFalamos)
-  const exec = await executarVencidos(a, porId, pedidos, quentes)
+  const exec = await executarVencidos(a, porId, pedidos, quentes, dentroDaJanela)
 
   await supabaseAdmin
     .from('automacoes_marketing')
@@ -782,7 +885,8 @@ async function executarVencidos(
   a: Automacao,
   leadsPorId: Map<string, Lead>,
   pedidos: Map<string, InfoPedido>,
-  quentes: Set<string>
+  quentes: Set<string>,
+  dentroDaJanela: boolean
 ): Promise<{ enviados: number; erros: number; sairam: number; adiados: number; pendentes: number }> {
   const agora = new Date().toISOString()
   const { data: vencidas } = await supabaseAdmin
@@ -837,8 +941,29 @@ async function executarVencidos(
       continue
     }
 
-    const passo = a.passos.find((p) => p.ordem > e.passo_ordem && p.ativo && p.templateId)
-    if (!passo || !passo.templateId) {
+    const passo = a.passos.find(
+      (p) => p.ordem > e.passo_ordem && p.ativo && (p.templateId || p.acao === 'encerrar_pedido')
+    )
+    if (!passo) {
+      await encerrar(e.id, 'concluida', 'chegou ao fim do fluxo')
+      continue
+    }
+
+    // Passo com espera em dias só sai em horário decente. O imediato já saiu
+    // acima, a qualquer hora, porque é continuação da sessão do cliente.
+    if (passo.esperaDias > 0 && !dentroDaJanela) continue
+
+    // Fim de régua que ENCERRA em vez de escrever. Silencioso de propósito:
+    // quem ignorou os toques anteriores não quer mais um avisando que paramos.
+    if (passo.acao === 'encerrar_pedido') {
+      if (lead.pedidoId) {
+        await encerrarPedidoDaRegua(lead.pedidoId, a.nome)
+      }
+      await encerrar(e.id, 'concluida', 'pedido incompleto encerrado pela régua')
+      sairam++
+      continue
+    }
+    if (!passo.templateId) {
       await encerrar(e.id, 'concluida', 'chegou ao fim do fluxo')
       continue
     }
@@ -908,13 +1033,34 @@ async function executarVencidos(
   return { enviados, erros, sairam, adiados, pendentes: count ?? 0 }
 }
 
+/**
+ * Encerra o pedido incompleto no fim da régua. Nunca lança.
+ *
+ * `encerrarPedido` recusa pedido pago ou já encerrado, e essa recusa aqui não é
+ * erro: significa que a pessoa resolveu por outro caminho entre o último toque
+ * e agora — que é o desfecho que a gente queria. Derrubar a rodada por causa
+ * disso pararia a régua dos outros.
+ */
+async function encerrarPedidoDaRegua(pedidoId: string, fluxo: string): Promise<void> {
+  try {
+    await encerrarPedido(pedidoId, 'sumiu', 'regua', `encerrado pela régua "${fluxo}" após os toques sem resposta`)
+  } catch (err) {
+    console.error('[automacoes] não deu pra encerrar o pedido da régua', { pedidoId, err })
+  }
+}
+
 function rotuloCanal(c: CanalEnvio): string {
   return c === 'email' ? 'e-mail' : c === 'mala_direta' ? 'endereço' : 'WhatsApp'
 }
 
 /** Marca o passo como feito e agenda o próximo (ou fecha o fluxo pro lead). */
 async function avancar(a: Automacao, e: ExecucaoRow, ordemFeita: number, enviados: number): Promise<void> {
-  const proximoPasso = a.passos.find((p) => p.ordem > ordemFeita && p.ativo && p.templateId)
+  // O passo seguinte pode ser uma AÇÃO em vez de uma mensagem — filtrar só por
+  // template daria o fluxo por concluído antes do passo que encerra o pedido, e
+  // a régua terminaria sem nunca encerrar nada.
+  const proximoPasso = a.passos.find(
+    (p) => p.ordem > ordemFeita && p.ativo && (p.templateId || p.acao === 'encerrar_pedido')
+  )
   const agora = new Date().toISOString()
 
   if (!proximoPasso || enviados >= a.maxToques) {
@@ -996,7 +1142,13 @@ export async function previaAutomacao(
   // Prévia não manda nada, então se a leitura das conversas falhar ela só
   // deixa de descontar quem está conversando — mostra a mais, nunca a menos.
   const quentes = await conversasQuentes().catch(() => new Set<string>())
-  const alvo = leadsDoGatilho(leads, pedidos, { gatilho, gatilhoDias, gatilhoMinutos: null }, Date.now(), quentes)
+  const alvo = leadsDoGatilho(
+    leads,
+    pedidos,
+    { gatilho, gatilhoDias, gatilhoMinutos: null, gatilhoMaxDias: null },
+    Date.now(),
+    quentes
+  )
   const alcancaveis = canalPrimeiroPasso ? alvo.filter((l) => leadAlcancavel(l, canalPrimeiroPasso)) : alvo
   return {
     total: alvo.length,

@@ -29,6 +29,7 @@ import {
   payloadFeedbackNeg,
 } from './whatsapp-cloud'
 import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
+import { lerImagem } from './imagens-pedido-storage'
 import { nomeProprio } from './nome'
 
 async function vincularContato(waId: string): Promise<{ clienteId: string | null; fornecedorId: string | null }> {
@@ -646,6 +647,99 @@ export async function registrarSaidaInbox(
       .eq('id', conversaId)
   } catch (err) {
     console.error('[wa-notify] registro inbox saída falhou', { err })
+  }
+}
+
+/**
+ * Manda pro cliente, no WhatsApp, uma imagem que já está dentro do pedido.
+ *
+ * POR QUE A IMAGEM TEM QUE SAIR DO PEDIDO — 10/09/2026
+ * Gerar o mockup e deixá-lo só no visualizador é resolver metade: a conversa
+ * acontece no WhatsApp e é ali que o cliente aprova. Mandar "olha no link" pra
+ * ver uma imagem transfere pra ele um clique que é nosso — o mesmo erro do
+ * "clique em Buscar fornecedor", que é onde a maioria dos pedidos morre.
+ *
+ * Aceita os dois formatos de referência porque passa por `lerImagem`: data URI
+ * de pedido antigo e `storage:` de pedido novo.
+ *
+ * Failure-soft por fora e por dentro: se o espelho no inbox falhar, o cliente
+ * já recebeu — e engolir o envio por causa do espelho seria trocar o essencial
+ * pelo acessório.
+ */
+export async function enviarImagemDoPedido(params: {
+  waId: string
+  nome: string | null
+  pedidoId: string
+  /** Referência da imagem como o pedido guarda: `storage:...` ou data URI. */
+  ref: string
+  legenda: string
+  autor?: AutorSaida | null
+}): Promise<{ ok: boolean; erro?: string }> {
+  try {
+    const img = await lerImagem(params.ref)
+    if (!img) return { ok: false, erro: 'imagem não encontrada no pedido' }
+
+    const ext = (img.mime.split('/')[1] || 'png').replace('jpeg', 'jpg')
+    const nomeArquivo = `confeccione-${params.pedidoId.slice(0, 8)}.${ext}`
+    // Uint8Array é uma janela sobre o buffer: o slice recorta exatamente a imagem.
+    const arquivo = img.bytes.buffer.slice(
+      img.bytes.byteOffset,
+      img.bytes.byteOffset + img.bytes.byteLength
+    ) as ArrayBuffer
+
+    const up = await uploadMidia(arquivo, img.mime, nomeArquivo)
+    if (!up.ok) return { ok: false, erro: up.erro ?? 'upload da imagem falhou' }
+
+    const legenda = params.legenda.slice(0, 1024)
+    const r = await enviarMidiaPorId(params.waId, 'image', up.mediaId, { caption: legenda })
+    if (!r.ok) return { ok: false, erro: r.erro ?? 'envio da imagem falhou' }
+
+    try {
+      const conversaId = await garantirConversa(params.waId, params.nome)
+      if (conversaId) {
+        const agora = new Date().toISOString()
+        // Mesmo bucket e mesma convenção da mídia que CHEGA, então o inbox
+        // serve as duas pelo mesmo lugar. Sem isto o Fernando lê o cliente
+        // dizendo "gostei" sobre uma imagem que não aparece do lado dele.
+        let midiaPath: string | null = `${conversaId}/${Date.now()}_mockup_${params.pedidoId.slice(0, 8)}.${ext}`
+        const { error: upErr } = await supabaseAdmin.storage
+          .from('wa-midia')
+          .upload(midiaPath, arquivo, { contentType: img.mime, upsert: true })
+        if (upErr) {
+          console.error('[wa-notify] storage da imagem do pedido falhou', { erro: upErr })
+          midiaPath = null
+        }
+
+        const autor = params.autor ?? null
+        await supabaseAdmin.from('wa_mensagens').insert({
+          conversa_id: conversaId,
+          wamid: r.wamid,
+          direcao: 'saida',
+          tipo: 'image',
+          corpo: legenda,
+          midia_path: midiaPath,
+          midia_mime: img.mime,
+          midia_nome: nomeArquivo,
+          status: 'enviando',
+          autor,
+          criado_em: agora,
+        })
+        await supabaseAdmin
+          .from('wa_conversas')
+          .update({
+            preview: `${autor ? PREFIXO_PREVIEW[autor] : 'Você'}: ${legenda.slice(0, 110)}`,
+            ultima_mensagem_em: agora,
+          })
+          .eq('id', conversaId)
+      }
+    } catch (err) {
+      console.error('[wa-notify] espelho da imagem no inbox falhou', { err })
+    }
+
+    return { ok: true }
+  } catch (err) {
+    console.error('[wa-notify] envio de imagem do pedido falhou', { err })
+    return { ok: false, erro: 'falha ao enviar a imagem' }
   }
 }
 
