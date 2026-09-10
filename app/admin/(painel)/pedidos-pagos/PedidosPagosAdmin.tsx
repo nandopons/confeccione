@@ -546,6 +546,9 @@ export default function PedidosPagosAdmin() {
                     <li key={i}>
                       • {l.total ?? '?'}× {l.modelo || 'peça'}{l.cor ? ` ${l.cor}` : ''}{l.material ? ` · ${l.material}` : ''}{estampado ? ' (estampado)' : ''}
                       {tam ? <span className="text-gray-500"> — {tam}</span> : null}
+                      {/* Sem a descrição, duas linhas de "Calça jeans country Azul escuro"
+                          parecem repetidas quando na verdade são Modelo 01 e Modelo 02. */}
+                      {l.descricao ? <div className="text-xs text-gray-500 ml-3">{l.descricao}</div> : null}
                     </li>
                   )
                 })}

@@ -277,9 +277,22 @@ export function resumirLinhas(linhas: LinhaPedido[]): { totalPecas: number; text
     const estampado = (l.estampas?.length ?? 0) > 0 ? ' (estampado)' : ''
     const cor = l.cor ? ` ${l.cor}` : ''
     const material = l.material ? ` · ${l.material}` : ''
+    // A DESCRIÇÃO É O QUE DISTINGUE DUAS LINHAS PARECIDAS — 09/09/2026.
+    //
+    // O pedido 20260900271 tinha quatro linhas de "Calça jeans country" em duas
+    // cores: azul, preta, azul, preta. Parecia linha repetida, e o Fernando
+    // perguntou se era duplicata. Não era — a descrição dizia "Modelo 01" nas
+    // duas primeiras e "Modelo 02" nas duas últimas. São modelos diferentes.
+    //
+    // Isto aqui não é enfeite: é a mesma tela que a confecção vê na oferta. Ela
+    // ia orçar quatro linhas achando que duas estavam repetidas, ou desistir de
+    // orçar. Grade, numeração e detalhe de arte moram nesse campo quando o
+    // pedido vem do chat do site, que não tem campo próprio pra eles.
+    const descricao = l.descricao?.trim() ? `\n   ${l.descricao.trim()}` : ''
     partes.push(
       `• ${qtd || '?'}x ${l.modelo ?? 'peça'}${cor}${material}${estampado}` +
-        (tamanhos ? `\n   tamanhos: ${tamanhos}` : '')
+        (tamanhos ? `\n   tamanhos: ${tamanhos}` : '') +
+        descricao
     )
   }
   return { totalPecas, texto: partes.join('\n') }
@@ -302,8 +315,16 @@ export function resumirLinhasEmail(linhas: LinhaPedido[]): { totalPecas: number;
     const cor = l.cor ? ` ${l.cor}` : ''
     const material = l.material ? ` · ${l.material}` : ''
     const base = `${qtd || '?'}× ${l.modelo ?? 'peça'}${cor}${material}${estampado}`
-    htmlPartes.push(`<div style=\"padding:4px 0;border-bottom:1px solid #f0f0f0;\">${escHtml(base)}${tamanhos ? `<br><span style=\"color:#888;font-size:13px;\">tamanhos: ${escHtml(tamanhos)}</span>` : ''}</div>`)
-    txtPartes.push(`- ${base}${tamanhos ? ` (${tamanhos})` : ''}`)
+    // Mesma razão de resumirLinhas: sem a descrição, "Modelo 01" e "Modelo 02"
+    // viram duas linhas idênticas aos olhos de quem vai orçar.
+    const descricao = l.descricao?.trim() ?? ''
+    htmlPartes.push(
+      `<div style=\"padding:4px 0;border-bottom:1px solid #f0f0f0;\">${escHtml(base)}` +
+        (tamanhos ? `<br><span style=\"color:#888;font-size:13px;\">tamanhos: ${escHtml(tamanhos)}</span>` : '') +
+        (descricao ? `<br><span style=\"color:#555;font-size:13px;\">${escHtml(descricao)}</span>` : '') +
+        `</div>`
+    )
+    txtPartes.push(`- ${base}${tamanhos ? ` (${tamanhos})` : ''}${descricao ? `\n  ${descricao}` : ''}`)
   }
   return { totalPecas, html: htmlPartes.join(''), texto: txtPartes.join('\n') }
 }
