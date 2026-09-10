@@ -1011,8 +1011,9 @@ const FERRAMENTA_RESUMO_PDF: Anthropic.Messages.Tool = {
     'a liberação pros fornecedores: ele confere no papel o que vai pro mercado. ' +
     'ANTES DE CHAMAR: se o contexto do pedido listar posições em "modelos_para_gerar_mockup", gere os mockups com ' +
     'gerar_mockup_do_modelo primeiro — o resumo carrega as imagens do pedido, e mandado sem elas o cliente aprova ' +
-    'no escuro e a confecção produz de uma frase. Depois de mandar, pergunte se está tudo ' +
-    'certo ou se quer ajustar algo. UMA VEZ SÓ: se o cliente responder "ok", "certo", "top" ou qualquer confirmação, ' +
+    'no escuro e a confecção produz de uma frase. Depois de mandar, pergunte DIRETO se pode confirmar ' +
+    'e mandar pras confecções — pergunta fechada, que se responde com sim. ' +
+    'UMA VEZ SÓ: se o cliente responder "ok", "certo", "top" ou qualquer confirmação, ' +
     'ele está falando do PDF que já recebeu — NÃO chame de novo. Só reenvie se o pedido tiver mudado depois do envio.',
   input_schema: {
     type: 'object',
@@ -1635,7 +1636,11 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
       return {
         ok: true,
         codigo: p.codigo,
-        aviso: 'PDF enviado. Pergunte se está tudo certo ou se quer ajustar algo, e só libere com o sim dele.',
+        aviso:
+          'PDF enviado. Agora faça UMA pergunta de fechamento, fechada: "posso confirmar seu pedido e mandar ' +
+          'pras confecções?". Não pergunte "está tudo certo?" — pergunta aberta convida a olhar depois, e é aí ' +
+          'que o pedido para. Com o sim, chame liberar_para_fornecedores na mesma vez. Se ele quiser mudar algo, ' +
+          'ajuste e pergunte de novo do mesmo jeito.',
       }
     }
     case 'liberar_para_fornecedores': {

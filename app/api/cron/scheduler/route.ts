@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { estaEmHorarioComercial, estaEmJanelaRetryPassivo } from '@/app/lib/horario'
+import { rodarCutucadaPosResumo } from '@/app/lib/cutucada-pos-resumo'
 // criarEDispararOferta, avisarGestor, enviarTextoSimples e
 // emailAdminFornecedorExpirou saíram em 10/09/2026 junto com o reenvio da era
 // antiga (ver TAREFA 1). Quem oferta hoje é app/lib/oferta-automatica.ts.
@@ -305,9 +306,24 @@ export async function GET(req: Request) {
     }
   }
 
+  // TAREFA 8: a pergunta que faltou depois do resumo (10/09/2026)
+  //
+  // O Luigi só fala quando alguém escreve pra ele — então o cliente que recebe
+  // o PDF e some deixa o pedido completo parado pra sempre. Esta tarefa é a
+  // única parte do sistema que faz o Luigi puxar assunto: uma vez, uma hora
+  // depois, e só se o cliente não escreveu nada nesse meio-tempo.
+  let cutucada: Awaited<ReturnType<typeof rodarCutucadaPosResumo>> | { erro: string }
+  try {
+    cutucada = await rodarCutucadaPosResumo()
+  } catch (e) {
+    // Falhar aqui não pode derrubar as sete tarefas acima.
+    cutucada = { erro: e instanceof Error ? e.message : String(e) }
+  }
+
   return NextResponse.json({
     ok: true,
     duracao_ms: Date.now() - inicio,
     ...resumo,
+    cutucada_pos_resumo: cutucada,
   })
 }
