@@ -37,7 +37,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
 import { blocoDoPdf, ehPdf, type BlocoPdf } from './anexo-pdf'
 import { salvarPerfil, lerPerfil } from './perfil-producao'
-import { pecaLabel } from './pecas'
+import { pecaLabel, pecaValida, legadoDasPecas, PECAS } from './pecas'
 import { salvarFotoDaConversa } from './portfolio-fornecedor'
 import { enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
 import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
@@ -823,11 +823,32 @@ const FERRAMENTA_PERFIL_PRODUCAO: Anthropic.Messages.Tool = {
   description:
     'Grava o que a confecção contou sobre a produção dela. Chame A CADA resposta, não só no fim — ' +
     'a conversa pode parar no meio e três respostas gravadas já melhoram o match. ' +
-    'Campo que você não passar fica como estava.',
+    'Campo que você não passar fica como estava. ' +
+    'SEMPRE que ela citar peça que produz, mande TAMBÉM `pecas` — é esse campo, e só ele, que faz o pedido ' +
+    'chegar até ela. Sem `pecas`, você anotou a conversa e ela continua sem receber nada.',
   input_schema: {
     type: 'object',
     properties: {
-      servicos: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'facção, corte, modelagem, pilotagem, estamparia, bordado…' },
+      // ESTE CAMPO É O QUE LIGA A ENTREVISTA À OPERAÇÃO — 10/09/2026.
+      // Sem ele, `servicos` guardava "camiseta, scrub, calça de brim" numa
+      // tabela que o matching não lê, e a confecção seguia invisível.
+      pecas: {
+        type: 'array',
+        items: {
+          type: 'string',
+          enum: PECAS.map((p) => p.id),
+        },
+        maxItems: 12,
+        description:
+          'As peças dela TRADUZIDAS pro catálogo. É o único campo que o sistema de match consulta — ' +
+          'sem ele a confecção não recebe pedido. Traduza o que ela disse pro id mais próximo: ' +
+          PECAS.map((p) => `${p.id} (${p.label}: ${p.sub})`).join('; ') +
+          '. Exemplos: "regata" e "cropped" → blusa_top; "calça de brim" e "alfaiataria" → calca; ' +
+          '"scrub" e "jaleco" → jaleco_avental; "camisa UV" → uv; "fardamento" → uniforme. ' +
+          'Mande a lista COMPLETA do que ela faz a cada chamada, não só o que é novo. ' +
+          'Na dúvida entre dois ids, mande os dois; peça que não tem id próximo fica só em `servicos`.',
+      },
+      servicos: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'As palavras DELA, como ela falou — "regata com vivo", "calça de brim", facção, corte, estamparia. Isto é memória da conversa; quem faz o match é `pecas`.' },
       tecidos: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'malha, plana, suplex, moletom, jeans…' },
       maquinas: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'reta, overloque, galoneira, travete…' },
       fornece_material: { type: 'boolean', description: 'true = fornece tecido e aviamento; false = facção pura.' },
@@ -970,11 +991,55 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
         naoFaz: typeof entrada.nao_faz === 'string' ? entrada.nao_faz : null,
         observacao: typeof entrada.observacao === 'string' ? entrada.observacao : null,
       })
+      // ---------------------------------------------- o que a operação lê
+      // A ENTREVISTA ESCREVIA NUM LUGAR QUE NINGUÉM CONSULTA — 10/09/2026.
+      //
+      // `perfil_producao.servicos` guardava as peças com nome, e o matching
+      // (app/lib/matching.ts) nunca ouviu falar dessa tabela: ele lê
+      // `leads_fornecedores.pecas` e `tipos_produto`. A Vanessa foi
+      // entrevistada, contou doze peças, o Luigi respondeu "cadastro
+      // atualizado" — e `pecas` continuou `[]`. Ela não receberia um pedido a
+      // mais por causa daquela conversa, e o painel mostrava tudo desmarcado.
+      //
+      // Agora a tradução pro catálogo vem junto e é gravada onde decide.
+      // `tipos_produto` sai de legadoDasPecas pra que o match antigo, que ainda
+      // roda em parte da base, também enxergue.
+      const patchLead: Record<string, unknown> = {}
+
       const minimo = inteiro(entrada.pedido_minimo)
-      if (minimo != null) {
-        await supabaseAdmin.from('leads_fornecedores').update({ pedido_minimo: minimo }).eq('id', forn)
+      if (minimo != null) patchLead.pedido_minimo = minimo
+
+      const pecasNovas = Array.isArray(entrada.pecas)
+        ? [...new Set((entrada.pecas as unknown[]).map((x) => String(x).trim()).filter(pecaValida))]
+        : []
+
+      if (pecasNovas.length > 0) {
+        // Une com o que já existe: se ela contar mais peças numa segunda
+        // conversa, somar é certo — sobrescrever apagaria o que ela já disse.
+        const { data: atual } = await supabaseAdmin
+          .from('leads_fornecedores')
+          .select('pecas')
+          .eq('id', forn)
+          .maybeSingle<{ pecas: string[] | null }>()
+        const uniao = [...new Set([...(atual?.pecas ?? []), ...pecasNovas])]
+        patchLead.pecas = uniao
+        patchLead.tipos_produto = legadoDasPecas(uniao)
       }
-      return { ok: true }
+
+      if (Object.keys(patchLead).length > 0) {
+        await supabaseAdmin.from('leads_fornecedores').update(patchLead).eq('id', forn)
+      }
+
+      // O retorno diz o que FOI PRO MATCH, não só "ok" — assim o Luigi não
+      // anuncia "cadastro atualizado" quando só anotou a conversa.
+      return {
+        ok: true,
+        pecas_no_match: (patchLead.pecas as string[] | undefined) ?? null,
+        aviso:
+          pecasNovas.length === 0
+            ? 'Gravei o que ela contou, mas NENHUMA peça foi pro match — só `pecas` faz o pedido chegar nela. Se ela citou peça, chame de novo com `pecas`. Não diga a ela que o cadastro está atualizado enquanto isso não acontecer.'
+            : undefined,
+      }
     }
     case 'salvar_no_portfolio': {
       const forn = await fornecedorDoContato(ctx.contato.telefone)
