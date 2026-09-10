@@ -26,6 +26,28 @@ export default function PendentesLista({ inicial }: { inicial: FornecedorPendent
   const [lista, setLista] = useState(inicial)
   const [ocupado, setOcupado] = useState<string | null>(null)
   const [erro, setErro] = useState<string | null>(null)
+  const [sondados, setSondados] = useState<Record<string, string>>({})
+
+  /**
+   * Conversa ANTES de aprovar. O cadastro diz pouco — quase todo mundo marca
+   * categoria e nada mais. O Luigi abre a janela, explica a plataforma e
+   * levanta o que ela produz de verdade; você aprova lendo a resposta.
+   */
+  async function sondar(id: string) {
+    setErro(null)
+    if (!window.confirm('Mandar a sondagem no WhatsApp? O Luigi vai explicar a plataforma e levantar o perfil de produção. Isso NÃO aprova o cadastro.')) return
+    setOcupado(id)
+    try {
+      const r = await fetch(`/api/admin/fornecedores/${id}/sondar`, { method: 'POST' })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.erro || 'Falha ao sondar')
+      setSondados((s) => ({ ...s, [id]: j.aviso ?? 'Sondagem enviada.' }))
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Erro')
+    } finally {
+      setOcupado(null)
+    }
+  }
 
   async function agir(id: string, acao: 'aprovar' | 'reprovar') {
     setErro(null)
@@ -89,8 +111,22 @@ export default function PendentesLista({ inicial }: { inicial: FornecedorPendent
               </div>
             )}
             {f.descricao_livre && <p className="text-sm text-gray-500 mt-2 whitespace-pre-wrap">{f.descricao_livre}</p>}
+            {sondados[f.id] && (
+              <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 mt-2">
+                {sondados[f.id]}
+              </p>
+            )}
           </div>
           <div className="flex gap-2 mt-3 sm:mt-0 shrink-0">
+            <button
+              type="button"
+              onClick={() => void sondar(f.id)}
+              disabled={ocupado === f.id || Boolean(sondados[f.id])}
+              title="O Luigi explica a plataforma e levanta o perfil de produção. Não aprova nada."
+              className="border border-[#1D9E75] text-[#1D9E75] hover:bg-emerald-50 text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {sondados[f.id] ? 'Sondado' : 'Conversar antes'}
+            </button>
             <button
               type="button"
               onClick={() => void agir(f.id, 'aprovar')}
