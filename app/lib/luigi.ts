@@ -82,6 +82,17 @@ const MODELO = 'claude-sonnet-4-6'
  */
 const MAX_RODADAS = 20
 
+/**
+ * Frases em que o Luigi ANUNCIA que vai agir, em vez de agir.
+ *
+ * Só entram promessas de ação NOSSA no sistema — "vou definir", "já monto",
+ * "vou liberar". Ficam de fora "vou verificar" e "vou perguntar ao Fernando",
+ * que são escalada e têm caminho próprio, e qualquer coisa no passado ("defini",
+ * "montei"), que é relato de algo já feito.
+ */
+const PROMESSA_DE_ACAO =
+  /\b(vou|vamos|já vou|agora vou|posso já|deixa que eu)\s+(definir|montar|criar|adicionar|colocar|incluir|registrar|gravar|atualizar|abrir|liberar|anexar|salvar|preencher|ajustar|corrigir|lançar|mandar o resumo|enviar o resumo|gerar)\b|\b(já|agora)\s+(defino|monto|crio|adiciono|coloco|incluo|registro|gravo|atualizo|abro|libero|anexo|salvo|preencho|ajusto|corrijo|lanço)\b/i
+
 /** Fecha a resposta antes de a Vercel matar a função, com folga pro envio. */
 const ORCAMENTO_MS = 45_000
 const MAX_TOKENS_RESPOSTA = 600
@@ -1679,6 +1690,13 @@ Então não pergunte só "pra quando você precisa?". Pergunte se esse prazo tem
 
 Nunca invente prazo de produção nem diga que "dá pra fazer em X dias": quem define isso é a confecção que aceitar, no orçamento. Você pergunta e anota; quem promete é ela.
 
+NÃO ANUNCIE O QUE VOCÊ PODE FAZER AGORA. "Vou definir as peças no pedido", "já monto isso pra você", "agora eu registro" — nada disso. Você não tem um "depois": sua vez termina quando você para de escrever, e só recomeça se o cliente mandar outra mensagem. Se ele não mandar, o que você prometeu simplesmente não acontece, e ele fica achando que aconteceu.
+
+Chame a ferramenta na MESMA vez e só então fale, no passado: "Coloquei as 30 camisetas no seu pedido, 10 de cada cor." Se faltar um dado pra chamar, pergunte esse dado — não prometa.
+
+Errado (10/09/2026, e o pedido ficou vazio): "Isso fecha 10 por cor, perfeito. Vou definir as peças no pedido agora."
+Certo: [chama definir_pecas_pedido] "Pronto, coloquei as 30 no pedido: 10 preta, 10 azul marinho, 10 cinza mescla, na grade que você passou."
+
 PEDIDO CLARO SE EXECUTA, NÃO SE CONFIRMA. "Pode encerrar", "manda o link", "pode seguir": isso é ordem, não sinal de que ele quer conversar sobre a ordem. Faça e diga em uma linha que está feito. Perguntar "confirmo o encerramento? pode fechar?" depois de ele ter dito "pode encerrar" é pedir a mesma autorização duas vezes, e do lado de lá parece que você não escutou.
 
 Ruim: "Confirmo o encerramento do pedido 20260600082. Pode fechar?"
@@ -1880,6 +1898,8 @@ async function rodarLuigi(
   let tokensEntrada = 0
   let tokensSaida = 0
   let rodadas = 0
+  /** Já cobramos uma promessa não cumprida nesta rodada? Só vale uma vez. */
+  let cobrouPromessa = false
   let texto = ''
   const limite = Date.now() + ORCAMENTO_MS
 
@@ -1900,7 +1920,37 @@ async function rodarLuigi(
     const parcial = textoDaResposta(resposta.content)
     if (parcial) texto = parcial
 
-    if (resposta.stop_reason !== 'tool_use' || usos.length === 0) break
+    // PROMETEU E NÃO FEZ? O TURNO NÃO ACABA — 10/09/2026.
+    //
+    // A Kelly fechou o pedido dela às 15:55 e o Luigi respondeu "Isso fecha 10
+    // por cor, perfeito. Vou definir as peças no pedido agora." — e parou. Dez
+    // rodadas naquela conversa, `ferramentas: []` em TODAS. O pedido
+    // 20260900276 ficou como nasceu: uma linha vazia, cor "a definir",
+    // tamanhos [], `atualizado_em` igual ao `criado_em`.
+    //
+    // O "agora" nunca chega. Cada mensagem dela abre uma rodada; se ela não
+    // escreve de novo, não há próxima rodada onde executar o que ele prometeu.
+    // E ela não escreveu, porque do lado dela estava tudo resolvido.
+    //
+    // Regra de prompt não conserta isso: o modelo não está desobedecendo, está
+    // acreditando que vai continuar. Quem sabe que o turno morreu é o código.
+    // Então aqui a gente devolve a promessa pra ele e força mais uma rodada —
+    // uma vez só, pra não virar laço se ele insistir em conversar.
+    if (resposta.stop_reason !== 'tool_use' || usos.length === 0) {
+      if (!cobrouPromessa && parcial && PROMESSA_DE_ACAO.test(parcial)) {
+        cobrouPromessa = true
+        historico.push({ role: 'assistant', content: resposta.content })
+        historico.push({
+          role: 'user',
+          content:
+            '[nota do sistema, o cliente NÃO vê isto] Você disse que ia fazer isso agora, mas não chamou ferramenta nenhuma — ' +
+            'e este turno acaba aqui. Se ninguém escrever de novo, não existe "depois". Chame a ferramenta AGORA. ' +
+            'Se faltar algum dado pra chamar, pergunte a coisa que falta em vez de prometer.',
+        })
+        continue
+      }
+      break
+    }
 
     historico.push({ role: 'assistant', content: resposta.content })
     const resultados: Anthropic.Messages.ToolResultBlockParam[] = []
