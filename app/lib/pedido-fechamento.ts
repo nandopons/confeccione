@@ -21,6 +21,7 @@
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
+import { buscarEnderecoCep } from './cep'
 import { guardarImagem } from './imagens-pedido-storage'
 import { salvarLinhasEditadas, type LinhaEditada } from './pedido-linhas-edicao'
 import { enviarResumoPdfPedido } from './whatsapp-notify'
@@ -39,6 +40,86 @@ export type PecaEntrada = {
 
 /** Teto por foto: o que passa disso é print de tela cheia, não referência de peça. */
 const MAX_FOTO_BYTES = 8 * 1024 * 1024
+
+/**
+ * Grava os dados de entrega e contato que o cliente deu na conversa.
+ *
+ * O pedido nasce com o telefone (é o WhatsApp dele) e mais nada. Sem CEP não
+ * dá pra calcular frete, e sem número de casa a transportadora não entrega —
+ * por isso o admin tem um botão "Lançar CEP/endereço", que é trabalho manual
+ * pra cada pedido. Em 10/09/2026 os dois pedidos mais novos estavam sem CEP.
+ *
+ * O CEP se explica sozinho: com os 8 dígitos, buscarEnderecoCep devolve rua,
+ * bairro, cidade e UF. Então a conversa precisa arrancar só três coisas —
+ * CEP, número e complemento — em vez de ditar o endereço inteiro.
+ *
+ * NÃO APAGA O QUE JÁ EXISTE: campo que vier vazio fica como está. O cliente
+ * corrige uma coisa sem perder o resto.
+ */
+export async function salvarDadosDoCliente(params: {
+  pedidoId: string
+  nome?: string | null
+  email?: string | null
+  cep?: string | null
+  numero?: string | null
+  complemento?: string | null
+  cpfCnpj?: string | null
+}): Promise<{ ok: boolean; erro?: string; endereco?: string; falta?: string[] }> {
+  const { data: pedido } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, nome, email, cep, logradouro, numero, complemento, bairro, cidade, uf, cpf_cnpj')
+    .eq('id', params.pedidoId)
+    .maybeSingle<Record<string, string | null>>()
+  if (!pedido) return { ok: false, erro: 'pedido não encontrado' }
+
+  const limpo = (v: string | null | undefined) => {
+    const t = (v ?? '').trim()
+    return t.length > 0 ? t : null
+  }
+  const patch: Record<string, string | null> = {}
+  if (limpo(params.nome)) patch.nome = limpo(params.nome)
+  if (limpo(params.email)) patch.email = limpo(params.email)!.toLowerCase()
+  if (limpo(params.numero)) patch.numero = limpo(params.numero)
+  if (limpo(params.complemento)) patch.complemento = limpo(params.complemento)
+  if (limpo(params.cpfCnpj)) patch.cpf_cnpj = limpo(params.cpfCnpj)!.replace(/\D/g, '')
+
+  // CEP só entra se tiver 8 dígitos, e traz o resto do endereço junto. CEP
+  // inválido não vira campo vazio: volta como erro, pra ele perguntar de novo.
+  const cepDigitos = (params.cep ?? '').replace(/\D/g, '')
+  if (params.cep != null && params.cep !== '') {
+    if (cepDigitos.length !== 8) return { ok: false, erro: 'esse CEP não tem 8 dígitos — confirme com ele' }
+    const end = await buscarEnderecoCep(cepDigitos)
+    if (!end) return { ok: false, erro: `não achei o CEP ${cepDigitos} — confirme o número com ele` }
+    patch.cep = cepDigitos
+    patch.logradouro = end.logradouro
+    patch.bairro = end.bairro
+    patch.cidade = end.cidade
+    patch.uf = end.uf
+  }
+
+  if (Object.keys(patch).length === 0) return { ok: false, erro: 'nada pra gravar' }
+
+  const { error } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .update({ ...patch, atualizado_em: new Date().toISOString() })
+    .eq('id', params.pedidoId)
+  if (error) return { ok: false, erro: error.message }
+
+  const fim = { ...pedido, ...patch }
+  const falta = [
+    !fim.email ? 'e-mail' : null,
+    !fim.cep ? 'CEP' : null,
+    !fim.numero ? 'número' : null,
+  ].filter((x): x is string => x !== null)
+
+  const endereco = fim.cep
+    ? [fim.logradouro, fim.numero, fim.complemento, fim.bairro, [fim.cidade, fim.uf].filter(Boolean).join('/')]
+        .filter(Boolean)
+        .join(', ')
+    : undefined
+
+  return { ok: true, endereco, falta }
+}
 
 /**
  * Prende uma foto que chegou pelo WhatsApp a UM modelo do pedido.

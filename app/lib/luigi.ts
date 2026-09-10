@@ -44,7 +44,7 @@ import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 // descricao. Pra editar a peça de verdade usamos o tipo canônico do produto.
 import { type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
 import { editarLinhasPedidoCliente } from './pedido-linhas-edicao'
-import { anexarFotoDaConversaAoModelo, conferirPedido, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores } from './pedido-fechamento'
+import { anexarFotoDaConversaAoModelo, conferirPedido, salvarDadosDoCliente, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores } from './pedido-fechamento'
 import { registrarUsoIa } from './uso-ia'
 import { ehNumeroGestao, numerosGestao } from './gestao-whatsapp'
 import {
@@ -591,6 +591,27 @@ const FERRAMENTA_CRIAR_PEDIDO: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_DADOS_CLIENTE: Anthropic.Messages.Tool = {
+  name: 'salvar_dados_do_cliente',
+  description:
+    'Grava no pedido os dados de contato e entrega que o cliente disser. Chame A CADA dado novo, não junte tudo pro fim — ' +
+    'a conversa pode parar no meio e o que já veio vale. Campo que você não passar fica como está, então dá pra ir ' +
+    'preenchendo aos poucos. O CEP traz rua, bairro, cidade e UF sozinho: você só precisa de CEP, NÚMERO e COMPLEMENTO. ' +
+    'Sem CEP não sai frete e sem número a transportadora não entrega — são esses dois que travam o pedido.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      pedido: { type: 'string', description: 'Código ou id. Sem isto, usa o pedido em foco.' },
+      nome: { type: 'string', maxLength: 120, description: 'Nome de quem recebe, se ele corrigir ou completar.' },
+      email: { type: 'string', maxLength: 160, description: 'Pra onde vai o orçamento e a nota.' },
+      cep: { type: 'string', maxLength: 12, description: '8 dígitos. Traz rua, bairro, cidade e UF juntos.' },
+      numero: { type: 'string', maxLength: 20, description: 'Número da casa. "s/n" se não tiver.' },
+      complemento: { type: 'string', maxLength: 120, description: 'Apto, bloco, referência. Só se ele disser.' },
+      cpf_cnpj: { type: 'string', maxLength: 20, description: 'Só se ELE oferecer, ou se for pra nota fiscal. Nunca insista.' },
+    },
+  },
+}
+
 const FERRAMENTA_FOTO_MODELO: Anthropic.Messages.Tool = {
   name: 'anexar_foto_ao_modelo',
   description:
@@ -694,6 +715,7 @@ function ferramentasDoModo(modo: Exclude<ModoLuigi, 'desligado'>, ehFornecedor =
         FERRAMENTA_DEFINIR_PECAS,
         FERRAMENTA_CRIAR_PEDIDO,
         FERRAMENTA_FOTO_MODELO,
+        FERRAMENTA_DADOS_CLIENTE,
         FERRAMENTA_RESUMO_PDF,
         FERRAMENTA_LIBERAR,
       ]
@@ -937,6 +959,29 @@ async function executarFerramenta(nome: string, entrada: Entrada, ctx: Contexto,
               : `Falta: ${pronto.falta}. Pergunte uma coisa por vez.`,
       }
     }
+    case 'salvar_dados_do_cliente': {
+      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+      const r = await salvarDadosDoCliente({
+        pedidoId: p.id,
+        nome: str(entrada.nome),
+        email: str(entrada.email),
+        cep: str(entrada.cep),
+        numero: str(entrada.numero),
+        complemento: str(entrada.complemento),
+        cpfCnpj: str(entrada.cpf_cnpj),
+      })
+      if (!r.ok) throw new Error(r.erro ?? 'não deu pra gravar os dados')
+      return {
+        ok: true,
+        codigo: p.codigo,
+        endereco: r.endereco,
+        ainda_falta: r.falta?.length ? r.falta : null,
+        proximo_passo: r.falta?.length
+          ? `Falta: ${r.falta.join(', ')}. Peça UM de cada vez, sem repetir o que ele já deu.`
+          : 'Contato e entrega completos. Não pergunte mais dado nenhum.',
+      }
+    }
     case 'anexar_foto_ao_modelo': {
       const p = await acharNoContexto(ctx, str(entrada.pedido))
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
@@ -1133,6 +1178,12 @@ Certo: "Entendi. Lote pequeno costuma ter fornecedor disponível. Quantas peças
 
 Errado: "A gente conecta quem precisa produzir a confecções de todo o Brasil. Você descreve o que quer (peça, cor, quantidade, arte), a gente oferece pra fornecedores e quem topar monta o orçamento — você só paga se aprovar. O que você está pensando em produzir?"
 Certo: "A gente leva seu pedido às confecções e elas enviam o orçamento. O que você quer produzir?"
+
+CONTATO E ENTREGA SÃO PARTE DO PEDIDO, NÃO BUROCRACIA. Todo pedido precisa de quatro coisas além das peças: E-MAIL, CEP, NÚMERO da casa e COMPLEMENTO quando houver. Sem CEP não sai frete; sem número a transportadora não entrega. Grave com salvar_dados_do_cliente A CADA dado que ele der — nunca junte tudo pro fim, porque a conversa morre no meio e o que ficou na sua cabeça se perde.
+
+O CEP FAZ O TRABALHO PESADO: com os 8 dígitos vêm rua, bairro, cidade e UF. Então NÃO peça endereço por extenso, não pergunte rua nem bairro nem cidade. Peça o CEP, depois o número, e o complemento só se fizer sentido ("tem apartamento, bloco, alguma referência?").
+
+UMA COISA POR VEZ, e no ritmo da conversa — isso não é formulário no fim do papo. Quando ele terminar de descrever as peças, o e-mail é a próxima pergunta natural ("pra qual e-mail eu mando o orçamento?"), e o endereço vem quando falar de entrega. Se ele já deu algo antes, NÃO pergunte de novo: a ferramenta te diz o que ainda falta. CPF/CNPJ você só grava se ELE oferecer ou se pedir nota fiscal — nunca peça por conta própria.
 
 FOTO QUE ELE MANDA VOCÊ PRENDE NA PEÇA. Toda foto de referência — a peça que ele quer, a arte, a estampa, o print de um concorrente — vale pra quem vai PRODUZIR, não só pra você entender. Chame anexar_foto_ao_modelo com a posição do modelo (1 = Modelo 1). Sem isso a foto fica só na conversa e a confecção produz às cegas, com a descrição em texto. Se o pedido tem mais de um modelo e a foto pode ser de qualquer um, pergunte curto antes: "essa foto é da preta ou da branca?" — foto na peça errada é pior que foto nenhuma. Depois de prender, confirme em uma linha e siga; não peça a mesma foto de novo.
 
