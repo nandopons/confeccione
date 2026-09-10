@@ -463,6 +463,7 @@ export function WhatsAppInbox({
   const [trocandoModo, setTrocandoModo] = useState(false)
   const [sugestao, setSugestao] = useState<SugestaoLuigi | null>(null)
   const [devolvendoAoLuigi, setDevolvendoAoLuigi] = useState(false)
+  const [resolvendo, setResolvendo] = useState(false)
   // 0 até montar: no primeiro render (servidor e cliente) o relógio precisa
   // dar o mesmo resultado, senão a hidratação reclama.
   const [agora, setAgora] = useState(0)
@@ -621,6 +622,32 @@ export function WhatsAppInbox({
       setErro('Não deu pra devolver a conversa pro Luigi')
     } finally {
       setDevolvendoAoLuigi(false)
+    }
+  }
+
+  /**
+   * Baixa a marca "Luigi chamou você" sem responder por aqui.
+   *
+   * Boa parte das conversas o Fernando resolve pelo WhatsApp pessoal, e nesse
+   * caminho o sistema não fica sabendo — a marca ficava acesa pra sempre. Em
+   * 10/09 eram 8 acesas e 7 já estavam encerradas, o que escondeu a única real.
+   */
+  async function marcarResolvida() {
+    if (!ativaId || resolvendo) return
+    setResolvendo(true)
+    setErro(null)
+    try {
+      const res = await fetch(`/api/admin/whatsapp/conversas/${ativaId}/resolvida`, { method: 'POST' })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        setErro(data?.erro ?? 'Não deu pra marcar como resolvida')
+        return
+      }
+      await Promise.all([carregarConversas(busca || undefined), carregarMensagens(ativaId)])
+    } catch {
+      setErro('Não deu pra marcar como resolvida')
+    } finally {
+      setResolvendo(false)
     }
   }
 
@@ -1016,6 +1043,17 @@ export function WhatsAppInbox({
                       className="shrink-0 text-[11px] font-medium px-2.5 py-1 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       {devolvendoAoLuigi ? 'Chamando…' : 'Devolver pro Luigi'}
+                    </button>
+                    {/* Pra quando você resolveu por fora — no WhatsApp pessoal,
+                        por telefone, pessoalmente. Sem isto a marca ficava acesa
+                        pra sempre e a fila enchia de conversa encerrada. */}
+                    <button
+                      onClick={marcarResolvida}
+                      disabled={resolvendo}
+                      title="Some com a marca sem escrever nada pra pessoa. Use quando você já tratou por fora."
+                      className="shrink-0 text-[11px] font-medium px-2.5 py-1 rounded-full border border-neutral-300 text-neutral-700 hover:bg-neutral-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {resolvendo ? 'Marcando…' : 'Já resolvi'}
                     </button>
                   </>
                 )}
