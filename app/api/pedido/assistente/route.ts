@@ -179,8 +179,18 @@ const CARDS: Record<CampoComCard, Array<{ titulo: string; nota?: string }>> = {
     { titulo: 'Lisa', nota: 'Sem estampa nem bordado' },
     { titulo: 'Personalizada', nota: 'Estampa, bordado ou DTF' },
   ],
+  // GRADE NÃO É SÓ P/M/G — 09/09/2026.
+  //
+  // O card dizia só "P, M, G, GG, XG". A Cybelle pediu calça jeans country na
+  // grade 38 ao 48, 1 unidade por numeração: grade legítima, sem lugar
+  // estruturado pra ir. O modelo escreveu na `descricao`, `tamanhos` ficou
+  // vazio, e a confecção recebeu a grade como texto solto no meio de outras
+  // observações. Peça de baixo (calça, jeans, alfaiataria) é numerada; infantil
+  // é por idade — o próprio card de público já fala em "grade 2 a 14".
   tamanhos: [
-    { titulo: 'Dividir agora', nota: 'P, M, G, GG, XG' },
+    { titulo: 'Por letra', nota: 'P, M, G, GG, XG' },
+    { titulo: 'Por numeração', nota: '36, 38, 40… calça e jeans' },
+    { titulo: 'Infantil por idade', nota: '2, 4, 6… até 14' },
     { titulo: 'Depois, no WhatsApp', nota: 'A gente te chama' },
   ],
 }
@@ -267,7 +277,8 @@ ESTRUTURA POR LINHA DE PRODUTO. Cada "linha" é um produto homogêneo: mesmo mod
 - COR / TONALIDADE: quando o cliente mencionar uma cor que NÃO seja exatamente preto ou branco (ex.: vermelho, azul, verde, rosa, cinza…), NÃO assuma o tom — confecção é cheia de variação (pediu vermelho e vem vinho). Ofereça 5 TONALIDADES bem espaçadas, do mais claro ao mais escuro, preenchendo o campo "cores": {"termo": "<a cor que ele falou>", "opcoes": [5x {"nome": "<nome curto do tom>", "hex": "#RRGGBB"}]}. Use hexes REAIS e bem distribuídos na escala daquela cor (não tons quase iguais). Na "mensagem", peça pra ele escolher um tom (ou descrever melhor). Quando ele escolher (ou disser o tom), registre em "cor" da linha o nome do tom + o hex, ex.: "vermelho carmim (#9B1B30)". Use "cores" SOMENTE no turno em que está oferecendo a escolha de tom; nos demais turnos deixe null.
 - ESTAMPA/BORDADO — DOIS CAMINHOS DO VISUALIZADOR: quando a peça for estampada ou bordada (ou o brinde levar arte/logo), além da POSIÇÃO (frente/costas/mangas) e da COR da estampa/bordado, ofereça os DOIS caminhos numa ÚNICA pergunta amigável, sempre amarrada ÀQUELE modelo específico: (a) o cliente JÁ TEM a ARTE / um VISUALIZADOR pronto dessa peça (uma imagem da peça com a estampa já aplicada), OU (b) prefere que a gente MONTE um visualizador junto (a IA gera a partir da descrição). Ex.: "Essa [peça] é estampada — você já tem a arte/um visualizador pronto (imagem com a estampa aplicada), ou quer que a gente monte um visualizador com IA a partir da descrição?". Se ele JÁ TEM a arte/visualizador → acolha e oriente que ele pode ENVIAR a imagem (a foto/visualizador) DESSA peça; registre em "descricao" que o cliente já tem a arte/visualizador pronto; ainda assim capture a COR e a POSIÇÃO da estampa se fizer sentido. Se ele quer MONTAR com IA → siga capturando a DESCRIÇÃO da estampa (o que é + cor + posição) pra IA gerar. Registre tudo em "descricao" (ex.: "estampa logo no peito, cor branca; cliente tem arte/visualizador pronto" ou "bordado nas costas, cor dourada; montar visualizador com IA a partir da descrição"). Se já dá pra inferir (o cliente descreveu a arte ou mandou foto), NÃO repita a pergunta. No máximo um par de perguntas curtas — não interrogue. NÃO trave o pedido por causa disso — siga o fluxo normalmente. (Brindes/gráfica seguem como sempre, mas a lógica de "já tem a arte/arquivo ou montamos junto" também vale pra eles de forma natural.)
 - ASSOCIAR A FOTO/ARTE AO MODELO CERTO: toda foto/visualizador que o cliente enviar pertence a UM produto específico. Use o "fotosPorLinha" pra mapear a imagem à LINHA correta — nunca chute nem misture imagens entre produtos. Quando houver mais de um modelo ou mais de uma foto e ficar AMBÍGUO de qual peça é a imagem, PERGUNTE de forma curta "essa imagem é de qual peça? (ex.: a [modelo A] ou a [modelo B])" ANTES de associar. Se o cliente mandou uma imagem logo no COMEÇO da conversa (antes de definir os modelos), NÃO assuma automaticamente: quando chegar no produto correspondente, confirme de leve ("aquela imagem que você enviou é o visualizador/arte final dessa [peça]? posso usar como referência dela?") e só então associe via "fotosPorLinha". Cuidado pra não repetir a pergunta nem confundir qual imagem é de qual peça. Mantenha LEVE — no máximo uma pergunta por vez, não trave a conversa.
-- Tamanhos (SÓ vestuário): pergunte primeiro QUANTAS peças no total dessa linha, depois quantas de cada tamanho (P, M, G, GG, etc.). Confira se a soma dos tamanhos bate com o total; se não bater, avise gentil e ajuste. Em brindes/gráfica: só o total ("tamanhos": []).
+- Tamanhos (SÓ vestuário): pergunte primeiro QUANTAS peças no total dessa linha, depois quantas de cada tamanho. Confira se a soma dos tamanhos bate com o total; se não bater, avise gentil e ajuste. Em brindes/gráfica: só o total ("tamanhos": []).
+- GRADE NÃO É SÓ LETRA. "tamanho" é texto livre: aceita letra (P, M, G, GG, XG), NUMERAÇÃO (36, 38, 40, 42, 44, 46, 48 — calça, jeans, alfaiataria, sapato) e IDADE (2, 4, 6, 8, 10, 12, 14 — infantil). Peça de baixo quase sempre é numerada; se o cliente falar em numeração, use a numeração dele, não converta pra letra. "Grade 38 ao 48, 1 por numeração" são SEIS itens em "tamanhos" — {38:1},{40:1},{42:1},{44:1},{46:1},{48:1} —, não uma frase na descrição. Grade que vai pra "descricao" é grade que a confecção lê como observação solta e erra ao orçar.
 - Quando uma linha ficar completa, pergunte se ele quer adicionar outro produto/cor ou se o pedido está completo.
 
 FLUXO EM DUAS FASES:
