@@ -121,10 +121,30 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
   // consulta inteira e os de hoje nem apareceriam.
   const limite = new Date(Date.now() - MAX_DIAS_PARADO * 24 * 60 * 60 * 1000).toISOString()
 
+  // A ETAPA NÃO BASTA: EXIGIMOS O ACEITE DO CLIENTE — 10/09/2026.
+  //
+  // A view de etapas classifica como `buscando_fornecedor` quem tem
+  // `status = 'confirmado'` OU `ofertas_total > 0` (migration 20260908010000,
+  // linha 160). Esse OR é uma porta dos fundos: basta UMA oferta manual pra o
+  // pedido passar a parecer liberado, e a fila automática assumir o volante de
+  // um pedido que o cliente nunca autorizou.
+  //
+  // Foi o que houve com o 20260900274: oferta manual às 10:26 e, sem ninguém
+  // pedir, a fila mandou pro Rodolfo às 11:48 e pro Joaquim às 15:57 — três
+  // confecções vendo um pedido que a cliente não tinha soltado. Em 10/09 havia
+  // 24 pedidos ofertados sem `confirmado_em`.
+  //
+  // A trava vai aqui, e não na view: a view serve o painel, onde mostrar o
+  // pedido no grupo "fornecedor" depois de ofertado está CERTO — é onde ele
+  // está de fato. Quem não pode agir sozinha sem autorização é a automação.
+  //
+  // `confirmado_em` é gravado por liberarParaFornecedores, que é o que o
+  // cliente aciona no "Buscar fornecedor" e o Luigi chama com o sim dele.
   const { data } = await supabaseAdmin
     .from('pedidos_assistente_etapas')
-    .select('id, codigo, cidade, uf, categoria, pecas, linhas, prazo_dias, etapa, desde')
+    .select('id, codigo, cidade, uf, categoria, pecas, linhas, prazo_dias, etapa, desde, confirmado_em')
     .in('etapa', ['buscando_fornecedor', 'sem_fornecedor'])
+    .not('confirmado_em', 'is', null)
     .gte('desde', limite)
     .order('desde', { ascending: true })
     .limit(60)
