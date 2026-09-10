@@ -2288,7 +2288,26 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
 
     // Vai em mensagens separadas, com pausa: é assim que gente escreve no
     // WhatsApp, e o link sozinho ganha prévia em vez de sumir no meio do texto.
-    const partes = mensagensSeparadas(r.texto)
+    // ESCALOU, CALOU — E ISSO SE TRAVA AQUI, NÃO NO PROMPT. 10/09/2026.
+    //
+    // A regra "chame o Fernando e não escreva mais nada" existia no prompt e na
+    // resposta da ferramenta chamar_humano desde 09/09. O código, porém, só
+    // ROTULAVA o log (`soEscalou`) — se o modelo escalasse E escrevesse, o texto
+    // saía do mesmo jeito. Regra sem trava é sugestão.
+    //
+    // O custo apareceu com a Rafaella em 08/09: ela disse "já paguei e não foi
+    // esse", e o Luigi respondeu QUATRO vezes "alguém da equipe já vai verificar
+    // pra você, pode aguardar". Ninguém verificou por 43 horas. Cada uma dessas
+    // frases é uma promessa que a gente não tinha como cumprir, feita a quem
+    // está reclamando de dinheiro — o pior lugar possível pra prometer errado.
+    //
+    // Calar não é abandonar: `escalar()` logo abaixo avisa o Fernando no
+    // WhatsApp dele. O cliente prefere um silêncio curto seguido de resposta de
+    // gente a uma promessa automática que ninguém honra.
+    const partes = r.escalada ? [] : mensagensSeparadas(r.texto)
+    if (r.escalada && r.texto.trim()) {
+      console.log(`[luigi] escalou e tentou falar; texto descartado em ${params.conversaId}: "${r.texto.slice(0, 80)}"`)
+    }
     let envio: Awaited<ReturnType<typeof enviarTexto>> = { ok: false, erro: 'sem texto pra enviar' }
     for (const [i, parte] of partes.entries()) {
       // A pausa é do tamanho do que VEM — quem digita leva o tempo de digitar.
