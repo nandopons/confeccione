@@ -103,6 +103,17 @@ const LIMITE_TEXTO = 1500
  * pessoa não está olhando a tela esperando. Responder atropelado, sim, estranha.
  */
 const ESPERA_MENSAGEM_SEGUINTE_MS = 30_000
+
+/**
+ * Por quanto tempo a conversa continua sendo de quem falou por último, quando
+ * quem falou foi gente.
+ *
+ * 15 min cobre um atendimento humano em andamento — o vaivém com a Vanessa
+ * durou 20 minutos, com respostas a cada minuto — sem prender a conversa pro
+ * resto do dia. Passado esse tempo sem ninguém escrever, o Luigi volta a
+ * atender normalmente.
+ */
+const MINUTOS_DONO_HUMANO = 15
 const PEDIDOS_NO_CONTEXTO = 4
 
 // ─── Modo ───────────────────────────────────────────────────────────────────
@@ -1441,7 +1452,17 @@ SE ELA QUISER ACEITAR UM PEDIDO MAS FALTAR ARTE OU MOCKUP: pode aceitar. Ao acei
 
 QUANDO ELA DISSER QUE É A PRIMEIRA VEZ NA PLATAFORMA: reconheça e siga; não trate como risco nem como novata. As condições são as mesmas — a verificação é o que vale, não o histórico.
 
-DUAS COISAS QUE VOCÊ AINDA NÃO SABE, E NÃO PODE IMPROVISAR: como funciona a nota fiscal (quem emite, contra quem) e se os valores precisam ficar todos dentro da plataforma. Se ela perguntar qualquer uma das duas, chame chamar_humano e fique calado. São perguntas de quem vai faturar de verdade — resposta errada aqui vira problema fiscal, não mal-entendido.
+COMISSÃO — E ESTA RESPOSTA VALE OURO PRA ELA: a Confeccione NÃO tira nada do valor dela. O que ela põe no orçamento é o que ela recebe, integral. A nossa comissão é de 3% cobrada do CLIENTE, por cima do pedido. Diga assim, porque a suposição natural dela é que a plataforma desconta da produção — e é essa suposição que faz confecção inflar preço ou preferir fechar por fora.
+
+NOTA FISCAL: cada confecção é responsável pela emissão própria — a gente está liberando o módulo, mas quem emite é ela. Pelo Melhor Envio dá pra gerar DECLARAÇÃO DE CONTEÚDO, que os Correios ainda aceitam; a LatamCargo exige NF.
+
+E AVISE DO RISCO, sem dramatizar: declaração de conteúdo NÃO tem valor fiscal, e em envio interestadual a mercadoria pode ficar retida na Sefaz. Quem consegue emitir nota, emite — é o caminho seguro. Isso não é burocracia nossa, é o que evita a carga dela parar na estrada.
+
+A NOTA VAI NA EMBALAGEM, como em Shopee ou Mercado Livre. A gente recomenda envelope de segurança, 50 x 70 cm.
+
+VALORES E CONVERSA FICAM NA PLATAFORMA. Se o cliente puxar pra fora, ela pode e deve trazer de volta — é o que mantém o suporte e a garantia de pagamento dela. Não é regra pra proteger a gente: fora da plataforma ela perde o adiantamento, a garantia do valor final e o respaldo se der problema. Diga nesses termos, do lado dela.
+
+QUANDO ELA ACEITAR UM PEDIDO, o que acontece: o contato do cliente é liberado (nome, telefone, e-mail e endereço), ela recebe a ficha técnica em PDF com modelos, grade e artes, e um link pra definir o orçamento final — produtos mais frete. É por esse link que o cliente paga.
 
 Só fale disso se ELA puxar o assunto (sinal, adiantamento, "como funciona o pagamento", "preciso comprar tecido"). Não é isca de abertura, e anunciar sem ela perguntar transforma uma conversa sobre produção em conversa sobre dinheiro antes da hora.`
     : ''
@@ -2298,6 +2319,42 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       .maybeSingle<{ criado_em: string; corpo: string | null }>()
     if (ultimaSaida && new Date(ultimaSaida.criado_em).getTime() > new Date(params.criadoEm).getTime()) {
       await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'já respondemos depois dessa mensagem' })
+      return
+    }
+
+    // SE TEM GENTE NA CONVERSA, O LUIGI SAI DE CENA — 10/09/2026.
+    //
+    // Às 10:58 o Fernando estava respondendo à Vanessa sobre nota fiscal e
+    // Sefaz, pergunta por pergunta, e o Luigi entrou no meio com "Qualquer
+    // coisa que surgir pode chamar aqui. Bom trabalho!". Encerrou uma conversa
+    // que estava no melhor momento — ela aceitou o pedido dois minutos depois.
+    //
+    // A trava de resposta velha não pega isto: ela compara com a ÚLTIMA saída,
+    // e no vaivém rápido a mensagem dela chega depois da fala do Fernando. O
+    // teste certo é outro — tem humano ATIVO aqui? Se alguém da equipe falou
+    // nos últimos minutos, a conversa tem dono, e não é ele.
+    //
+    // O FILTRO É EM JS DE PROPÓSITO. Mensagem enviada pelo inbox grava `autor`
+    // NULO — são 229 das últimas 500 saídas. Em SQL, `autor NOT IN (...)` é
+    // NULL quando o campo é NULL, e NULL não passa no WHERE: o filtro no banco
+    // descartaria exatamente as mensagens do Fernando, que são as que esta
+    // trava existe pra respeitar. Aqui `null` é lido como gente, que é o que é.
+    const AGENTES = new Set(['luigi', 'mcp', 'gestao'])
+    const { data: ultimasSaidas } = await supabaseAdmin
+      .from('wa_mensagens')
+      .select('autor, criado_em')
+      .eq('conversa_id', params.conversaId)
+      .eq('direcao', 'saida')
+      .gt('criado_em', new Date(Date.now() - MINUTOS_DONO_HUMANO * 60_000).toISOString())
+      .order('criado_em', { ascending: false })
+      .limit(10)
+
+    const humanoRecente = ((ultimasSaidas ?? []) as Array<{ autor: string | null; criado_em: string }>).find(
+      (m) => !AGENTES.has((m.autor ?? '').trim().toLowerCase()),
+    )
+
+    if (humanoRecente) {
+      await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: `gente na conversa (${humanoRecente.autor ?? 'equipe'}) — o Luigi não fala por cima` })
       return
     }
 
