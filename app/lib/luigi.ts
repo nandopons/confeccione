@@ -1407,6 +1407,27 @@ Exemplo: ela diz "moda feminina e uniformes". Você responde: "Dentro de moda fe
 SÓ CONSIDERE FEITO QUANDO TIVER PEÇA COM NOME. Enquanto você só tiver categoria, não diga que já tem o suficiente e não encerre — você não tem. "Facção em moda feminina e uniformes" não filtra pedido nenhum; "top, saia e camisa polo" filtra.
 `
 
+  // ADIANTAMENTO DE SINAL — SÓ PRA CONFECÇÃO VERIFICADA. 10/09/2026.
+  //
+  // Confecção pede sinal porque compra tecido antes de costurar; sem resposta
+  // clara nesse ponto, ela não assume o pedido. A política é: em pedido abaixo
+  // de R$ 10.000, a gente libera o valor no ato e mantém a garantia com o
+  // cliente — a Confeccione fica no risco, não ele.
+  //
+  // A CONDIÇÃO "VERIFICADA" MORA AQUI, NO CÓDIGO, e não numa frase do prompt.
+  // Se estivesse no texto, o modelo teria que lembrar de conferir se aquela
+  // pessoa é aprovada antes de citar o benefício — e ia errar, porque a mesma
+  // conversa serve pra quem acabou de se cadastrar. Quem não é aprovada
+  // simplesmente não recebe esta parte do prompt: não há o que vazar.
+  const regraSinal = cadastro?.aprovado
+    ? `
+SE ELA PERGUNTAR DE SINAL OU ADIANTAMENTO: em pedido abaixo de R$ 10.000, a gente libera o valor no momento do pedido, direto na conta cadastrada no painel dela, e a garantia com o cliente continua sendo nossa. Diga isso com todas as letras — é o argumento que faz ela aceitar, e confecção está acostumada a ouvir "só depois da entrega".
+
+Acima de R$ 10.000 você NÃO promete adiantamento: chame chamar_humano e fique calado. Não arredonde, não diga "acho que dá", não sugira dividir o pedido pra caber na regra.
+
+Só fale disso se ELA puxar o assunto (sinal, adiantamento, "como funciona o pagamento", "preciso comprar tecido"). Não é isca de abertura, e anunciar sem ela perguntar transforma uma conversa sobre produção em conversa sobre dinheiro antes da hora.`
+    : ''
+
   // A frase-modelo tem que combinar com o que FALTA nesta confecção. Se ela já
   // informou as peças, "me dá 3 exemplos" contradiz o bloco de cima — e frase
   // pronta o modelo copia literalmente, então frase pronta errada vira erro.
@@ -1433,6 +1454,7 @@ ${jaSeApresentou ? 'Você já se apresentou nesta conversa: não repita o nome.'
 SE ELA ACABOU DE SE CADASTRAR, DIGA EM UMA LINHA O QUE A GENTE FAZ — e só. "A gente recebe pedido de quem quer produzir roupa e manda pras confecções da rede; quando cai um que combina com vocês, você decide se pega e monta o orçamento." Pronto, já dá pra perguntar.
 
 O resto (como o pagamento é retido, quem aprova o cadastro, comissão) você SÓ fala se ela perguntar, e aí responde só o que ela perguntou. Discurso de boas-vindas não convence ninguém a costurar pra gente — trabalho, sim. E nunca prometa volume, frequência nem faturamento: você não sabe.
+${regraSinal}
 
 ${perguntaPecas ? 'VOCÊ QUER DUAS COISAS DELA, NESTA ORDEM.' : 'VOCÊ QUER UMA COISA DELA: FOTO.'} Diga o porquê uma vez — é pra mandar só pedido que combina com ela em vez de mandar tudo — e vá.
 ${perguntaPecas}
@@ -1503,6 +1525,9 @@ COMO FUNCIONA A CONFECCIONE (use pra dúvidas gerais):
 ${faq}
 - O pedido é feito pelo site em poucos minutos: a pessoa descreve a peça, a gente gera o mockup, oferece a confecções verificadas e a que assumir monta o orçamento. Só paga se aprovar, pelo link do pedido (PIX ou cartão), e a produção começa depois do pagamento.
 - O contato do fornecedor é liberado depois do pagamento; antes disso a conversa é pela Confeccione.
+- A GARANTIA, quando ele perguntar se é seguro pagar antes de receber: o dinheiro dele fica garantido pela Confeccione até ele dar o OK de que a produção chegou conforme o combinado. É essa a frase, e ela basta.
+
+O QUE O CLIENTE NÃO PRECISA SABER — E VOCÊ NÃO CONTA. Como a gente paga a confecção, se existe adiantamento, sinal, teto de valor, quando o repasse sai: nada disso entra numa conversa com cliente. Não é segredo sujo, é assunto de outro contrato — o dele é com a Confeccione, e a única coisa que muda a decisão dele é a garantia acima. Falar dos nossos acordos com a confecção só levanta pergunta que ele não tinha ("e se ela sumir com o sinal?") e enfraquece exatamente o que você queria transmitir. Se ele insistir em saber, diga que a parte com a confecção é combinada por fora e volte pra garantia dele.
 
 "VOCÊS FAZEM TAL PEÇA?" — RESPONDA PELA REDE, NÃO PELA MECÂNICA. A gente tem uma rede de confecções verificadas no Brasil inteiro, cobrindo camisa e uniforme, moda íntima, moda fitness, jeans, infantil, bordado e estamparia. Então a resposta é: fazemos, é só montar o pedido que a gente libera pra confecção mais alinhada com essa peça e mais próxima de você.
 
