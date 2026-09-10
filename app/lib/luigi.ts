@@ -1279,8 +1279,28 @@ async function gravarLog(l: Log): Promise<string | null> {
  * Fernando no WhatsApp (fora dela, a marca no inbox e a pauta cobrem).
  */
 async function escalar(conversaId: string, contato: { nome: string | null; waId: string }, motivo: string, modo: ModoLuigi): Promise<void> {
+  // UM AVISO POR CONVERSA ABERTA — 09/09/2026.
+  //
+  // A Cybelle mandou seis mensagens em dez minutos e o Fernando recebeu SEIS
+  // avisos, todos dizendo a mesma coisa com palavras trocadas: "quer adicionar
+  // camisetas Golden Farm ao pedido 20260900271". A escalada é por MENSAGEM, mas
+  // a coisa que o Fernando precisa fazer é por CONVERSA — ele vai abrir o inbox
+  // uma vez e ler tudo. Seis avisos não fazem ele abrir seis vezes; fazem ele
+  // parar de ler os avisos.
+  //
+  // A marca no inbox continua sendo atualizada sempre (é ela que mantém a
+  // conversa no topo). O que é uma vez só é o toque no WhatsApp dele, enquanto
+  // a escalada anterior seguir aberta — some quando ele responde, e aí a
+  // próxima dúvida avisa de novo.
+  const { data: antes } = await supabaseAdmin
+    .from('wa_conversas')
+    .select('luigi_escalado_em')
+    .eq('id', conversaId)
+    .maybeSingle<{ luigi_escalado_em: string | null }>()
+  const jaAvisado = Boolean(antes?.luigi_escalado_em)
+
   await marcarEscalada(conversaId)
-  if (modo !== 'responde') return
+  if (modo !== 'responde' || jaAvisado) return
   const quem = contato.nome ? `${contato.nome} (${contato.waId})` : contato.waId
   await avisarGestor(`Luigi chamou você: ${quem} — ${motivo}. Responde pelo inbox (/admin/whatsapp).`)
 }

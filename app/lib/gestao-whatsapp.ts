@@ -1368,6 +1368,21 @@ export async function responderGestao(params: {
   const waId = normalizarWaId(params.waId)
   if (!ehNumeroGestao(waId)) return
 
+  // AGENTE DE GESTÃO DESLIGADO POR PADRÃO — 09/09/2026, a pedido do Fernando.
+  //
+  // Em 09/09 ele foi 92,7% do gasto de IA do dia (US$ 2,20 de US$ 2,37) contra
+  // 12 centavos do Luigi, que atendia cliente e fornecedor de verdade. E o que
+  // saiu desse gasto foi loop: o mesmo rascunho oferecido três vezes, "mais
+  // alguma coisa?" no fim de toda resposta, e afirmação errada sobre quem tinha
+  // recebido o quê. Caro e sem trabalho entregue.
+  //
+  // O que continua funcionando sem ele: o Luigi atende cliente e fornecedor, a
+  // automação dispara a régua, e as escalações chegam no WhatsApp do Fernando —
+  // nada disso passa por aqui.
+  //
+  // Pra ligar de volta: AGENTE_GESTAO_ATIVO=1 na Vercel.
+  if (process.env.AGENTE_GESTAO_ATIVO !== '1') return
+
   const base: Omit<Log, 'resposta' | 'ferramentas' | 'rodadas' | 'tokens_entrada' | 'tokens_saida' | 'duracao_ms' | 'enviado' | 'erro'> = {
     conversa_id: params.conversaId,
     wa_id: waId,
