@@ -486,12 +486,35 @@ export async function enviarResumoPdfPedido(params: {
         const conversaId = await garantirConversa(waId, destino.nome)
         if (conversaId) {
           const agora = new Date().toISOString()
+
+          // O PDF TAMBÉM VAI PRO STORAGE — 09/09/2026.
+          //
+          // Até aqui os bytes iam pra Meta e eram jogados fora: a linha no inbox
+          // ficava com nome e mime, e midia_path null. O cliente recebia o
+          // arquivo no WhatsApp dele e o Fernando via só o nome, sem conseguir
+          // abrir o que a gente tinha acabado de mandar — cego justamente no
+          // documento que o cliente ia usar pra aprovar o pedido.
+          //
+          // Mesmo bucket e mesma convenção de caminho da mídia que CHEGA, então
+          // o inbox serve os dois pelo mesmo lugar.
+          let midiaPath: string | null = `${conversaId}/${Date.now()}_resumo_${pedido.id.slice(0, 8)}.pdf`
+          const { error: upErr } = await supabaseAdmin.storage
+            .from('wa-midia')
+            .upload(midiaPath, arquivo, { contentType: 'application/pdf', upsert: true })
+          if (upErr) {
+            // Guardar é o extra; o cliente já recebeu. Falhar aqui não pode
+            // derrubar o envio nem sumir com a linha no inbox.
+            console.error('[wa-notify] storage do resumo em PDF falhou', { erro: upErr })
+            midiaPath = null
+          }
+
           await supabaseAdmin.from('wa_mensagens').insert({
             conversa_id: conversaId,
             wamid: r.wamid,
             direcao: 'saida',
             tipo: 'document',
             corpo: destino.legenda,
+            midia_path: midiaPath,
             midia_mime: 'application/pdf',
             midia_nome: nomeArquivo,
             status: 'enviando',
