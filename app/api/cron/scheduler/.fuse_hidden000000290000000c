@@ -1,9 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
-import { avisarGestor } from '@/app/lib/luigi'
 import { NextResponse } from 'next/server'
 import { estaEmHorarioComercial, estaEmJanelaRetryPassivo } from '@/app/lib/horario'
 import { criarEDispararOferta } from '@/app/lib/ofertas'
-import { enviarTextoSimples } from '@/app/lib/whatsapp-cloud'
+import { enviarMensagem, whatsappAdminFornecedorExpirou } from '@/app/lib/zapi'
 import { emailAdminFornecedorExpirou } from '@/app/lib/email'
 import {
   dispararToqueCaptacao,
@@ -103,11 +102,14 @@ export async function GET(req: Request) {
 
           if (fornecedor && pedido) {
             await Promise.allSettled([
-              // Era whatsappAdminFornecedorExpirou(), da Z-API desligada.
-              avisarGestor(
-                `Fornecedor não respondeu em 4h: ${fornecedor.nome} (${fornecedor.whatsapp}). ` +
-                  `Pedido ${pedido.tipo} de ${pedido.nome}. Ofereço pro próximo automaticamente.`
-              ),
+              whatsappAdminFornecedorExpirou({
+                fornecedorId: fornecedor.id,
+                nomeFornecedor: fornecedor.nome,
+                whatsappFornecedor: fornecedor.whatsapp,
+                pedidoId: pedido.id,
+                nomeCliente: pedido.nome,
+                tipo: pedido.tipo,
+              }),
               emailAdminFornecedorExpirou({
                 fornecedorId: fornecedor.id,
                 nomeFornecedor: fornecedor.nome,

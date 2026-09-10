@@ -5,7 +5,7 @@ import { emailConfirmacaoCliente } from '@/app/lib/email'
 import { normalizarWhatsApp, validarWhatsApp } from '@/app/lib/phone'
 import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
 import { getContaSessao } from '@/lib/mobileAuth'
-import { enviarTextoSimples } from '@/app/lib/whatsapp-cloud'
+import { enviarMensagem } from '@/app/lib/zapi'
 import { notificarPedidoRecebido } from '@/app/lib/whatsapp-notify'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
 import { loginComEmailUrl } from '@/app/lib/url'
@@ -175,7 +175,7 @@ export async function POST(req: Request) {
         `🔗 ${loginComEmailUrl(email)}\n\n` +
         `— Confeccione`
       try {
-        await enviarTextoSimples(normalizarWhatsApp(whatsapp), mensagemCliente)
+        await enviarMensagem(normalizarWhatsApp(whatsapp), mensagemCliente)
       } catch (err) {
         console.error('whatsapp confirmação cliente falhou:', err)
       }

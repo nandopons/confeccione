@@ -100,6 +100,25 @@ export async function enviarTexto(waId: string, texto: string): Promise<EnvioRes
   })
 }
 
+/**
+ * Manda texto e devolve só "deu certo?".
+ *
+ * Existe pra substituir o enviarMensagem() da Z-API, que tinha esta mesma
+ * assinatura e ficou espalhado por onze arquivos. A Z-API foi desligada em
+ * 07/09/2026 e essas chamadas passaram a retornar false em silêncio: o fluxo de
+ * ofertas antigo seguiu montando a mensagem, "mandando" pro fornecedor e
+ * registrando sucesso, enquanto nada saía.
+ *
+ * Quem precisa saber POR QUE falhou usa enviarTexto direto — este atalho é pra
+ * quem só decide entre "consegui" e "não consegui", que era o contrato antigo.
+ * O erro real vai pro log em vez de sumir.
+ */
+export async function enviarTextoSimples(telefone: string, texto: string): Promise<boolean> {
+  const r = await enviarTexto(telefone, texto)
+  if (!r.ok) console.error('[wa-cloud] enviarTextoSimples falhou', { telefone, erro: r.erro })
+  return r.ok
+}
+
 export type BotaoResposta = { id: string; titulo: string }
 
 /**

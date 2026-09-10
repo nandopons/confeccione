@@ -1,7 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
-import { avisarGestor } from './luigi'
 import { buscarFornecedorCompativel, type Pedido, type Fornecedor } from './matching'
-import { enviarTextoSimples } from './whatsapp-cloud'
+import { enviarMensagem, whatsappAdminSemFornecedor } from './zapi'
 import { emailOfertaFornecedor, emailAdminSemFornecedor } from './email'
 import {
   PLANOS_CONFIG,
@@ -147,7 +146,7 @@ async function dispararOfertaNormal(
   mensagem +=
     '\n\nQuer atender este cliente? Responde Sim ou Não.'
 
-  await enviarTextoSimples(fornecedor.whatsapp, mensagem)
+  await enviarMensagem(fornecedor.whatsapp, mensagem)
 
   if (fornecedor.email) {
     try {
@@ -249,7 +248,7 @@ async function dispararOfertaSemCredito(
 
   mensagem += `\n*5* — Não tenho interesse neste pedido\n\n⏰ Você tem 3 horas pra responder. Se não responder, ofereço pra outro fornecedor.`
 
-  await enviarTextoSimples(fornecedor.whatsapp, mensagem)
+  await enviarMensagem(fornecedor.whatsapp, mensagem)
 }
 
 // ============================================================
@@ -274,14 +273,14 @@ async function notificarAdminSemFornecedor(
   })
 
   await Promise.allSettled([
-    // Era whatsappAdminSemFornecedor(), da Z-API: montava um alerta bonito com
-    // link do Supabase e mandava por um serviço desligado desde 07/09/2026.
-    // avisarGestor usa a Cloud API e resolve a janela de 24 h sozinho.
-    avisarGestor(
-      `Pedido sem fornecedor: ${pedido.nome} — ${tipoFmt}` +
-        (pedido.quantidade ? ` (${pedido.quantidade} peças)` : '') +
-        ` em ${pedido.estado}. ${count ?? 0} tentativas. Pedido ${pedidoId}.`
-    ),
+    whatsappAdminSemFornecedor({
+      pedidoId,
+      nomeCliente: pedido.nome,
+      tipo: tipoFmt,
+      quantidade: pedido.quantidade,
+      estado: pedido.estado,
+      totalTentativas: count ?? 0,
+    }),
     emailAdminSemFornecedor({
       pedidoId,
       nomeCliente: pedido.nome,

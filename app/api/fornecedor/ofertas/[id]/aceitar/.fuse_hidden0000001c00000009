@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getFornecedorAtual } from '@/app/lib/auth-server'
 import { getFornecedorSessao } from '@/lib/mobileAuth'
-import { enviarTextoSimples } from '@/app/lib/whatsapp-cloud'
+import { enviarMensagem } from '@/app/lib/zapi'
 import { emailContatoFornecedor } from '@/app/lib/email'
 import { tipoLabel } from '@/app/lib/ofertas'
 import { consumirCreditoAvulso, contarOfertasMesAtual, planoEfetivo, PLANOS_CONFIG } from '@/app/lib/planos'
@@ -204,7 +204,7 @@ export async function POST(
 
   try {
     const resumoCota = await montarResumoCotaMes(fornecedor.id)
-    await enviarTextoSimples(
+    await enviarMensagem(
       fornecedorCompleto.whatsapp,
       `Perfeito! Aqui estão os dados do cliente:\n\nNome: ${pedido.nome}\nWhatsApp: ${formatarWhatsappBR(pedido.whatsapp)}\nE-mail: ${pedido.email}\n\n👉 Falar com o cliente: ${linkWhatsApp(pedido.whatsapp)}\n\nEntre em contato direto pra combinar detalhes. Boa venda!\n\n${resumoCota}`
     )
@@ -230,7 +230,7 @@ export async function POST(
     `— Confeccione`
 
   try {
-    await enviarTextoSimples(pedido.whatsapp, mensagemCliente)
+    await enviarMensagem(pedido.whatsapp, mensagemCliente)
   } catch (err) {
     console.error('aceitar: aviso cliente whatsapp falhou:', err)
   }

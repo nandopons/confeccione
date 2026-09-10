@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js'
-import { avisarGestor } from './luigi'
 import { buscarFornecedorCompativel, type Pedido, type Fornecedor } from './matching'
 import { enviarTextoSimples } from './whatsapp-cloud'
 import { emailOfertaFornecedor, emailAdminSemFornecedor } from './email'

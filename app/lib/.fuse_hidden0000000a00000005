@@ -24,7 +24,7 @@
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
-import { enviarTextoSimples } from './whatsapp-cloud'
+import { enviarMensagem } from './zapi'
 import { corpoRetomadaPedido, enviarTemplateRetomadaPedido } from './whatsapp-cloud'
 import { visualizadorPedidoUrl } from './url'
 import { listarLeadsMarketing, type FaseLead, type LeadMarketing } from './marketing'
@@ -276,7 +276,7 @@ export async function executarDisparo(filtro: FiltroDisparo, mensagem: string): 
     const msg = aplicarTemplate(mensagem, l.nome, visualizadorPedidoUrl(l.id))
     let ok = false
     try {
-      ok = await enviarTextoSimples(l.telefone!, msg)
+      ok = await enviarMensagem(l.telefone!, msg)
     } catch {
       ok = false
     }

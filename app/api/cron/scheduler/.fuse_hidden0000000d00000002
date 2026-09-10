@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js'
-import { avisarGestor } from '@/app/lib/luigi'
 import { NextResponse } from 'next/server'
 import { estaEmHorarioComercial, estaEmJanelaRetryPassivo } from '@/app/lib/horario'
 import { criarEDispararOferta } from '@/app/lib/ofertas'

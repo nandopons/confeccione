@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse, after } from 'next/server'
 import { normalizarWhatsApp } from '@/app/lib/phone'
 import { legadoDasPecas, pecaValida } from '@/app/lib/pecas'
-import { enviarTextoSimples } from '@/app/lib/whatsapp-cloud'
+import { enviarMensagem } from '@/app/lib/zapi'
 import { emailBoasVindasFornecedor } from '@/app/lib/email'
 import { validarCpfCnpj, apenasDigitos } from '@/app/lib/cpf-cnpj'
 import { matchingRetroativo } from '@/app/lib/orfaos'
@@ -146,7 +146,7 @@ export async function POST(req: Request) {
   } else {
     // Cadastro novo — avisa que o perfil está em análise (não promete bônus
     // nem pedidos ainda; isso vem quando a equipe aprovar no admin).
-    await enviarTextoSimples(
+    await enviarMensagem(
       numero,
       `Olá ${nome}! 🙌\n\nRecebemos seu cadastro no *Confeccione*.\n\n🔎 *Seu perfil está em análise.* Nossa equipe revisa cada fornecedor antes de liberar o acesso aos pedidos — isso garante a qualidade da nossa rede.\n\nAssim que aprovarmos (normalmente em até 1 dia útil), você recebe um aviso aqui e já começa a receber pedidos compatíveis com a sua produção. 🚀`
     )

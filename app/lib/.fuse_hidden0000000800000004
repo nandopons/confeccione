@@ -25,7 +25,7 @@ import { pedidoTemListaAbertaIncompleta } from '@/app/lib/listas-externas'
 
 import { supabaseAdmin } from './supabase-server'
 import { registrarVersaoOrcamento } from './orcamento-versoes'
-import { enviarTextoSimples } from './whatsapp-cloud'
+import { enviarMensagem } from './zapi'
 import { avisoOficial, notificarOfertaFornecedor, enviarResumoPdfPedido } from './whatsapp-notify'
 import { refPedido } from './mensagens-whatsapp'
 import { SITE_URL, ofertaFornecedorUrl } from './url'
@@ -513,7 +513,7 @@ export async function ofertarPedido(
         detalhes: texto,
         ofertaId,
       })
-      const enviado = enviadoOficial || (await enviarTextoSimples(forn.whatsapp, mensagem))
+      const enviado = enviadoOficial || (await enviarMensagem(forn.whatsapp, mensagem))
       if (enviado) notificadas++
     }
 

@@ -1,13 +1,13 @@
 // app/lib/captacao.ts
 //
 // Orquestração da captação: envia UM toque (convite ou follow-up) de um
-// contato, respeitando os canais ligados. Reusa enviarTextoSimples (Cloud API) e
+// contato, respeitando os canais ligados. Reusa enviarMensagem (zapi.ts) e
 // emailCaptacaoFornecedor (email.ts). Todo o estado fica em
 // captacao_fornecedores (etapa, status, ultimo_envio_em, ultimo_erro) — sem
 // tabela de log separada.
 
 import { supabaseAdmin } from '@/app/lib/supabase-server'
-import { enviarTextoSimples } from '@/app/lib/whatsapp-cloud'
+import { enviarMensagem } from '@/app/lib/zapi'
 import { emailCaptacaoFornecedor } from '@/app/lib/email'
 import {
   assuntoCaptacao,
@@ -51,7 +51,7 @@ export async function dispararToqueCaptacao(
 
   // WHATSAPP — await obrigatório
   if (contato.canal_whatsapp && contato.whatsapp) {
-    whatsappOk = await enviarTextoSimples(
+    whatsappOk = await enviarMensagem(
       contato.whatsapp,
       mensagemWhatsappCaptacao(etapa, segmento),
     )
