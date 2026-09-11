@@ -918,6 +918,61 @@ async function prazoDoPedido(pedidoId: string): Promise<number | null> {
 type BuscaAnterior = { regiao: RegiaoBusca; criado_em: string; novos: number | null; contatados: number | null; buscas_web: number | null }
 
 /**
+ * Data da última busca de cada pedido, numa consulta só — é a chave de ordem
+ * da faixa 2 (ver `ordenarParaAVez`).
+ */
+async function ultimaBuscaPorPedido(ids: string[]): Promise<Map<string, string>> {
+  const mapa = new Map<string, string>()
+  if (ids.length === 0) return mapa
+  const { data, error } = await supabaseAdmin
+    .from('captacao_buscas')
+    .select('pedido_id, criado_em')
+    .in('pedido_id', ids)
+  if (error) throw new Error(`última busca por pedido: ${error.message}`)
+  for (const b of (data ?? []) as Array<{ pedido_id: string; criado_em: string }>) {
+    const atual = mapa.get(b.pedido_id)
+    if (!atual || b.criado_em > atual) mapa.set(b.pedido_id, b.criado_em)
+  }
+  return mapa
+}
+
+/**
+ * A ORDEM DA VEZ — 11/09/2026. Duas faixas, mais antigo primeiro dentro de cada.
+ *
+ *   Faixa 1 — pedido que NUNCA foi buscado, por `confirmado_em` crescente.
+ *   Faixa 2 — pedido já buscado, pela data da última busca, crescente.
+ *   Faixa 1 inteira antes da faixa 2.
+ *
+ * A regra antiga era "mais novo primeiro", e com `PEDIDOS_POR_RODADA = 4` os
+ * quatro mais recentes ganhavam sempre: em 11/09 havia 9 pedidos elegíveis, e
+ * cinco deles estavam parados há 2–3 dias com uma única onda cada. Fome pura.
+ *
+ * Mais-antigo-puro conserta a fome e cria o espelho: um pedido de 20 dias, que
+ * é o menos provável de converter, passaria na frente de um confirmado hoje que
+ * não tem confecção NENHUMA olhando. Primeira abordagem é a ação de maior valor
+ * que a captação faz — daí a faixa 1 existir.
+ *
+ * COMO ISTO FALHA (e não está protegido de propósito): se a entrada de pedidos
+ * novos por dia passar da cota diária de abordagem, a faixa 1 nunca esvazia e a
+ * faixa 2 para de ser atendida — pedido já abordado uma vez jamais recebe a
+ * segunda onda, e a fome volta, só que do outro lado. Hoje não acontece nem de
+ * longe: `max_por_dia = 12` com `lote = 2` dá ~6 pedidos/dia contra 9 elegíveis
+ * no total. Se um dia entrar mais de ~6 pedido novo por dia de forma sustentada,
+ * é aqui que quebra, e a saída é reservar uma fatia das vagas pra faixa 2.
+ */
+function ordenarParaAVez<T extends { id: string; confirmado_em: string | null; desde: string }>(
+  pedidos: T[],
+  ultimaBusca: Map<string, string>,
+): T[] {
+  const chave = (p: T) => p.confirmado_em ?? p.desde
+  const nunca = pedidos.filter((p) => !ultimaBusca.has(p.id)).sort((a, b) => chave(a).localeCompare(chave(b)))
+  const jaForam = pedidos
+    .filter((p) => ultimaBusca.has(p.id))
+    .sort((a, b) => (ultimaBusca.get(a.id) ?? '').localeCompare(ultimaBusca.get(b.id) ?? ''))
+  return [...nunca, ...jaForam]
+}
+
+/**
  * Lista vazia aqui MENTE — 11/09/2026. Sem histórico de busca, `regiaoSecou`
  * devolve false pra tudo: a região nunca sobe, `regioesEsgotadas` nunca dispara
  * e o pedido fica preso no estado do cliente pra sempre. É diferente de "este
@@ -1153,12 +1208,13 @@ export async function rodarCaptacaoPedidos(origem: 'cron' | 'admin' | 'mcp' = 'c
     return resultado
   }
 
-  // Do mais recente pro mais antigo: pedido novo sem confecção é o que tem
-  // cliente esperando; os velhos só pelo "Buscar agora" do admin.
+  // Ordem da vez: ver `ordenarParaAVez`. O filtro de idade continua valendo —
+  // pedido além de `idade_max_dias` não entra nem na faixa 1, só pelo "Buscar
+  // agora" do admin.
   const limiteIdade = Date.now() - config.idade_max_dias * 86400_000
-  const pedidos = (await pedidosPorEtapa(['sem_fornecedor'], 100))
+  const elegiveis = (await pedidosPorEtapa(['sem_fornecedor'], 100))
     .filter((p) => new Date(p.confirmado_em ?? p.desde).getTime() >= limiteIdade)
-    .sort((a, b) => (b.confirmado_em ?? b.desde).localeCompare(a.confirmado_em ?? a.desde))
+  const pedidos = ordenarParaAVez(elegiveis, await ultimaBuscaPorPedido(elegiveis.map((p) => p.id)))
   resultado.pedidos_olhados = pedidos.length
   if (modo === 'responde') resultado.reabordados = await reabordarPendentes(pedidos, config)
   let rodadas = 0
