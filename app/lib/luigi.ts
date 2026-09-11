@@ -2941,6 +2941,28 @@ export type MensagemCliente = {
 }
 
 /**
+ * O cadastro de fornecedor desta pessoa ainda vale?
+ *
+ * Só `reprovado` derruba. `pausado` e afins continuam sendo fornecedor — quem
+ * está pausado é confecção que pediu pra não receber oferta agora, não gente
+ * que nunca foi confecção. Reprovado é a triagem tendo dito "isto aqui não é
+ * uma confecção", e é exatamente quem não pode receber prompt de fornecedor.
+ *
+ * Falha de leitura devolve `false` de propósito: ver o comentário no chamador
+ * sobre a assimetria do erro.
+ */
+async function fornecedorVigente(fornecedorId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from('leads_fornecedores')
+    .select('aprovacao_status')
+    .eq('id', fornecedorId)
+    .maybeSingle<{ aprovacao_status: string | null }>()
+  if (error || !data) return false
+  return data.aprovacao_status !== 'reprovado'
+}
+
+
+/**
  * Chamada pelo webhook, em after(), pra toda mensagem que não é do gestor.
  * Decide sozinha se faz algo (modo, escopo, tipo da mensagem) e nunca lança.
  */
@@ -2986,7 +3008,27 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       .select('id, nome, cliente_id, fornecedor_id')
       .eq('wa_id', waId)
       .maybeSingle<{ id: string; nome: string | null; cliente_id: string | null; fornecedor_id: string | null }>()
-    const ehFornecedor = Boolean(contato?.fornecedor_id)
+
+    // REPROVADO COMO FORNECEDOR NÃO RECEBE PROMPT DE FORNECEDOR — 11/09/2026.
+    //
+    // `Boolean(contato?.fornecedor_id)` era a definição inteira de "é
+    // fornecedor", e era porta de mão única: quem entrou pelo cadastro de
+    // confecção seguia recebendo `promptFornecedor` pra sempre, dissesse o que
+    // dissesse. O caso que abriu isto: a pessoa cadastrou como confecção, na
+    // triagem disse que é cliente, começou a pedir orçamento — e o Luigi
+    // continuou entrevistando ela como confecção, enquanto o lead dela estava
+    // `aprovacao_status = 'reprovado'`. O dado pra acertar já estava no banco.
+    //
+    // O ERRO NÃO É SIMÉTRICO, e é isso que decide o default: tratar fornecedor
+    // como cliente é recuperável — a pessoa diz "não, eu produzo" e segue.
+    // Tratar cliente como fornecedor custa a venda, porque o Luigi não monta o
+    // pedido. Então, na dúvida, cliente.
+    //
+    // Por isso a consulta acima também não estoura quando falha: sem `contato`,
+    // `ehFornecedor` é falso e a pessoa é atendida como cliente, que é o lado
+    // seguro do erro. É a exceção consciente à regra de "consulta cega
+    // estoura" — aqui o fallback tem um lado certo.
+    const ehFornecedor = contato?.fornecedor_id ? await fornecedorVigente(contato.fornecedor_id) : false
 
     const base = {
       conversa_id: params.conversaId,
