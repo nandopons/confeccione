@@ -37,6 +37,9 @@ type Conversa = {
   arquivada: boolean
   ultima_mensagem_em: string | null
   ultima_msg_contato_em: string | null
+  /** Classificação pronta da rota — ver o comentário no selo. Nunca derivar de
+   *  `contato.fornecedor_id` na tela. */
+  eh_fornecedor: boolean
   /** O Luigi chamou gente e ninguém respondeu ainda. */
   luigi_escalado_em?: string | null
   contato: Contato
@@ -1059,7 +1062,11 @@ export function WhatsAppInbox({
                         {c.contato.cliente_id && (
                           <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-sky-50 text-sky-700">Cliente</span>
                         )}
-                        {c.contato.fornecedor_id && (
+                        {/* `eh_fornecedor` vem pronto da rota, calculado pela
+                            mesma função que o Luigi usa. Não voltar a decidir
+                            por `fornecedor_id` aqui: era assim que o selo dizia
+                            FORNECEDOR pra quem o agente já tratava como cliente. */}
+                        {c.eh_fornecedor && (
                           <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-violet-50 text-violet-700">Fornecedor</span>
                         )}
                         {c.luigi_escalado_em && (

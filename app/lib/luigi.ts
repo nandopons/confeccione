@@ -35,6 +35,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
+import { ehFornecedorClassificado } from './classificacao-contato'
 import { blocoDoPdf, ehPdf, type BlocoPdf } from './anexo-pdf'
 import { salvarPerfil, lerPerfil } from './perfil-producao'
 import { pecaLabel, pecaValida, legadoDasPecas, PECAS } from './pecas'
@@ -2948,8 +2949,15 @@ export type MensagemCliente = {
  * que nunca foi confecção. Reprovado é a triagem tendo dito "isto aqui não é
  * uma confecção", e é exatamente quem não pode receber prompt de fornecedor.
  *
- * Falha de leitura devolve `false` de propósito: ver o comentário no chamador
- * sobre a assimetria do erro.
+ * ERRO E AUSÊNCIA SÃO COISAS DIFERENTES, e a primeira versão disto tratava as
+ * duas como `false`. Isso significava que uma instabilidade de banco de dois
+ * segundos transformava uma confecção APROVADA em cliente no meio da conversa,
+ * e o Luigi começava a montar pedido pra ela. O raio é de 33 contatos aprovados
+ * contra o 1 reprovado que o `false` protegia — a assimetria aponta para o
+ * outro lado aqui.
+ *
+ * Então: ignorância não muda comportamento. Só `reprovado` LIDO DE VERDADE
+ * inverte a classificação.
  */
 async function fornecedorVigente(fornecedorId: string): Promise<boolean> {
   const { data, error } = await supabaseAdmin
@@ -2957,8 +2965,13 @@ async function fornecedorVigente(fornecedorId: string): Promise<boolean> {
     .select('aprovacao_status')
     .eq('id', fornecedorId)
     .maybeSingle<{ aprovacao_status: string | null }>()
-  if (error || !data) return false
-  return data.aprovacao_status !== 'reprovado'
+  // Leitura falhou: mantém a classificação que o contato já tinha.
+  if (error) return true
+  // Sem cadastro: o `fornecedor_id` aponta pra nada, não é fornecedor.
+  if (!data) return false
+  // A regra em si mora em classificacao-contato.ts, compartilhada com o selo
+  // do inbox — o que é daqui é só a política de erro/ausência acima.
+  return ehFornecedorClassificado(fornecedorId, data.aprovacao_status)
 }
 
 
@@ -3028,6 +3041,12 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // `ehFornecedor` é falso e a pessoa é atendida como cliente, que é o lado
     // seguro do erro. É a exceção consciente à regra de "consulta cega
     // estoura" — aqui o fallback tem um lado certo.
+    //
+    // Repare que dentro de `fornecedorVigente` a assimetria APONTA PRO OUTRO
+    // LADO, e por isso o fallback de lá é o oposto: quando o contato já tem
+    // cadastro de fornecedor, errar pra cliente desclassifica confecção
+    // aprovada. Ali, ignorância mantém o que era; aqui, ausência de contato vai
+    // pra cliente. São perguntas diferentes com respostas seguras diferentes.
     const ehFornecedor = contato?.fornecedor_id ? await fornecedorVigente(contato.fornecedor_id) : false
 
     const base = {
