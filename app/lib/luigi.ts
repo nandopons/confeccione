@@ -195,6 +195,35 @@ function dias(desde: string | null | undefined): number | null {
   return Math.max(0, Math.floor((Date.now() - new Date(desde).getTime()) / 86400_000))
 }
 
+/**
+ * VOCABULÁRIO INTERNO NÃO SAI DAQUI — 10/09/2026.
+ *
+ * Às 22:24 o Wesley recebeu isto, palavra por palavra:
+ *
+ *   "Todos os dados estão preenchidos (nome, e-mail, CEP, número, CPF) e a
+ *    lista "falta_para_liberar" está vazia. Preciso agora ajustar os 5 modelos
+ *    com o detalhe de manga única no ombro, gerar os mockups e mandar o resumo.
+ *    Vou fazer isso."
+ *
+ * Isso não é uma mensagem pro cliente: é o Luigi respondendo a uma NOTA INTERNA
+ * (a devolução manual, ou a cobrança de promessa que o código injeta) como se a
+ * nota fosse o cliente falando. O cliente vê o nome de um campo do banco e um
+ * relatório de estado sobre o próprio pedido dele.
+ *
+ * Já existe regra de prompt contra isso ("o que eu te escrevo nos resultados de
+ * ferramenta não é frase pronta"). Ela não segurou, e não vai: quem escreve não
+ * distingue com segurança a quem está respondendo. Então a trava é aqui, no
+ * código — se o texto carrega vocabulário que só existe do nosso lado, ele não
+ * vira mensagem. O turno fica sem resposta, o que é MUITO melhor do que o
+ * cliente ler o avesso do sistema.
+ */
+const VOCABULARIO_INTERNO =
+  /\b(falta_para_liberar|ja_temos|modelos_para_gerar_mockup|pedido_id|conversa_id|wa_id|tool_result|tool_use|salvar_dados_do_cliente|enviar_resumo_pedido|gerar_mockup_do_modelo|chamar_humano|pausar_lembretes_do_pedido|nota do sistema|nota interna|\[respondendo à SUA mensagem)\b/i
+
+export function pareceRecadoInterno(texto: string): boolean {
+  return VOCABULARIO_INTERNO.test(texto)
+}
+
 /** Tira o que o WhatsApp não mostra bem (D-6: sem markdown, sem emoji, sem lista). */
 function paraWhatsApp(texto: string): string {
   return (
@@ -2497,6 +2526,8 @@ async function rodarLuigi(
   let rodadas = 0
   /** Já cobramos uma promessa não cumprida nesta rodada? Só vale uma vez. */
   let cobrouPromessa = false
+  /** O que ele já tinha dito ao cliente quando a cobrança entrou. */
+  let textoAntesDaCobranca = ''
   let texto = ''
   const limite = Date.now() + ORCAMENTO_MS
 
@@ -2534,8 +2565,19 @@ async function rodarLuigi(
     // Então aqui a gente devolve a promessa pra ele e força mais uma rodada —
     // uma vez só, pra não virar laço se ele insistir em conversar.
     if (resposta.stop_reason !== 'tool_use' || usos.length === 0) {
+      // A RESPOSTA À COBRANÇA NÃO É MENSAGEM — 10/09/2026.
+      //
+      // Depois da nota interna, o que se pede dele é FERRAMENTA. Se ele volta
+      // com texto, esse texto é resposta pra mim, não pro cliente — foi assim
+      // que o Wesley recebeu "a lista falta_para_liberar está vazia". Mantemos
+      // o que ele já tinha dito ao cliente antes da cobrança e encerramos.
+      if (cobrouPromessa && parcial) {
+        texto = textoAntesDaCobranca
+        break
+      }
       if (!cobrouPromessa && parcial && PROMESSA_DE_ACAO.test(parcial)) {
         cobrouPromessa = true
+        textoAntesDaCobranca = texto
         // SÓ O TEXTO, NUNCA `resposta.content` — 10/09/2026.
         //
         // A condição acima é um OU: entra aqui também quando `stop_reason` é
@@ -2651,6 +2693,32 @@ async function escalar(conversaId: string, contato: { nome: string | null; waId:
   if (modo !== 'responde' || jaAvisado) return
   const quem = contato.nome ? `${contato.nome} (${contato.waId})` : contato.waId
   await avisarGestor(`Luigi chamou você: ${quem} — ${motivo}. Responde pelo inbox (/admin/whatsapp).`)
+}
+
+function nomeOuNumero(nome: string | null | undefined, waId: string): string {
+  return nome?.trim() ? `${nome.trim()} (${waId})` : waId
+}
+
+/**
+ * A tentativa anterior nesta conversa também morreu de erro interno?
+ *
+ * Olha só o log imediatamente anterior: se ele falhou, esta é a segunda
+ * seguida. Uma falha isolada é turno torto; duas é sistema fora do ar.
+ */
+async function falhouNaVezAnterior(conversaId: string | null): Promise<boolean> {
+  if (!conversaId) return false
+  try {
+    const { data } = await supabaseAdmin
+      .from('luigi_whatsapp_log')
+      .select('status, erro')
+      .eq('conversa_id', conversaId)
+      .order('criado_em', { ascending: false })
+      .limit(1)
+    const ultimo = (data ?? [])[0] as { status: string; erro: string | null } | undefined
+    return ultimo?.status === 'falhou' && Boolean(ultimo.erro)
+  } catch {
+    return false
+  }
 }
 
 /** Marca a conversa com "Luigi chamou você" no inbox (some quando alguém responde por lá). */
@@ -3119,7 +3187,15 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // Calar não é abandonar: `escalar()` logo abaixo avisa o Fernando no
     // WhatsApp dele. O cliente prefere um silêncio curto seguido de resposta de
     // gente a uma promessa automática que ninguém honra.
-    const partes = r.escalada ? [] : mensagensSeparadas(r.texto)
+    // A última peneira: vocabulário nosso não vira mensagem dele. Vale pra
+    // qualquer caminho — cobrança de promessa, devolução manual, ou o modelo
+    // simplesmente copiando um resultado de ferramenta.
+    const vazandoInterno = !r.escalada && Boolean(r.texto.trim()) && pareceRecadoInterno(r.texto)
+    if (vazandoInterno) {
+      console.error(`[luigi] resposta com vocabulário interno BARRADA em ${params.conversaId}: "${r.texto.slice(0, 160)}"`)
+      void avisarGestor(`Barrei uma resposta do Luigi pra ${nomeOuNumero(params.nome, waId)} porque ela tinha vocabulário interno. Veja a conversa no inbox: "${r.texto.slice(0, 120)}"`)
+    }
+    const partes = r.escalada || vazandoInterno ? [] : mensagensSeparadas(r.texto)
     if (r.escalada && r.texto.trim()) {
       console.log(`[luigi] escalou e tentou falar; texto descartado em ${params.conversaId}: "${r.texto.slice(0, 80)}"`)
     }
@@ -3147,12 +3223,32 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
   } catch (err) {
     const erro = err instanceof Error ? err.message : String(err)
     console.error('[luigi] responderCliente falhou', { erro })
-    // Falha interna nunca vira mensagem pro cliente: fica pra gente, com a marca.
+    // ERRO NOSSO NÃO TIRA O CLIENTE DO LUIGI — 10/09/2026.
+    //
+    // Até aqui, qualquer exceção marcava `luigi_escalado_em` e a conversa saía
+    // do atendimento até o Fernando clicar em "devolver pro Luigi". Só que a
+    // exceção quase nunca é "esta conversa precisa de gente": é a API da
+    // Anthropic recusando um turno malformado, rede caindo, timeout. O Wesley
+    // é o caso: às 21:41 um `tool_use` sem `tool_result` derrubou UM turno, o
+    // Luigi voltou a responder normalmente às 21:42 e seguiu fechando o pedido
+    // — mas a conversa ficou marcada como escalada por mais de uma hora, com o
+    // "Chamando…" no inbox. O Fernando teve que devolver na mão, de novo.
+    //
+    // Agora a falha isolada só vira log e aviso: a conversa continua do Luigi e
+    // a próxima mensagem do cliente é atendida. Escalar de verdade só quando
+    // falha DE NOVO — duas seguidas não é turno torto, é coisa quebrada (saldo
+    // de API no zero, por exemplo), e aí o cliente precisa de gente mesmo.
     try {
       const modo = await modoLuigi()
       if (modo !== 'desligado') {
-        await gravarLog({ conversa_id: params.conversaId, wa_id: waId, wamid_entrada: params.wamid, modo, mensagem: params.corpo, resposta: null, pedido_id: null, ferramentas: [], escalado: true, motivo_escalada: 'erro interno do Luigi', status: 'falhou', modelo: MODELO, rodadas: 0, tokens_entrada: 0, tokens_saida: 0, duracao_ms: Date.now() - inicio, erro })
-        await supabaseAdmin.from('wa_conversas').update({ luigi_escalado_em: new Date().toISOString() }).eq('id', params.conversaId)
+        const persistente = await falhouNaVezAnterior(params.conversaId)
+        await gravarLog({ conversa_id: params.conversaId, wa_id: waId, wamid_entrada: params.wamid, modo, mensagem: params.corpo, resposta: null, pedido_id: null, ferramentas: [], escalado: persistente, motivo_escalada: persistente ? 'erro interno do Luigi (segunda falha seguida)' : null, status: 'falhou', modelo: MODELO, rodadas: 0, tokens_entrada: 0, tokens_saida: 0, duracao_ms: Date.now() - inicio, erro })
+        if (persistente) {
+          await marcarEscalada(params.conversaId)
+          await avisarGestor(`O Luigi falhou duas vezes seguidas com ${nomeOuNumero(params.nome, waId)} e passou a conversa pra você (/admin/whatsapp). Erro: ${erro.slice(0, 180)}`)
+        } else {
+          await avisarGestor(`Um turno do Luigi falhou com ${nomeOuNumero(params.nome, waId)} — a conversa segue com ele, a próxima mensagem é atendida normal. Erro: ${erro.slice(0, 180)}`)
+        }
       }
     } catch {
       /* já logado acima */
