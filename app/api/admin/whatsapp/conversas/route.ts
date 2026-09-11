@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
       `id, preview, nao_lidas, arquivada, ultima_mensagem_em, ultima_msg_contato_em, luigi_escalado_em,
        contato:wa_contatos!inner (
          id, wa_id, nome, cliente_id, fornecedor_id,
-         fornecedor:leads_fornecedores (aprovacao_status)
+         fornecedor:leads_fornecedores (aprovacao_status, reclassificado_em)
        )`
     )
     .order('ultima_mensagem_em', { ascending: false, nullsFirst: false })
@@ -48,17 +48,44 @@ export async function GET(req: NextRequest) {
   // Resultado: a tela dizia FORNECEDOR e o agente atendia como cliente, na
   // mesma conversa. Aqui a rota devolve a classificação pronta, calculada pela
   // mesma função que o Luigi usa — a tela não decide mais nada sozinha.
+  type LeadMin = { aprovacao_status: string | null; reclassificado_em: string | null }
   type ContatoBruto = {
     fornecedor_id: string | null
-    fornecedor?: { aprovacao_status: string | null } | Array<{ aprovacao_status: string | null }> | null
+    fornecedor?: LeadMin | LeadMin[] | null
   }
+  // O MOTIVO DA ESCALADA TEM QUE APARECER — 11/09/2026.
+  //
+  // O aviso "Luigi chamou você" dizia QUE ele chamou e nunca POR QUÊ. O motivo
+  // ia pro `luigi_whatsapp_log.motivo_escalada` e morria lá: sete diagnósticos
+  // corretos sobre a mesma pessoa, nenhum deles legível de onde se trabalha.
+  // Diagnóstico que ninguém lê é console.log com outro nome.
+  const idsEscalados = (data ?? [])
+    .filter((c) => (c as { luigi_escalado_em: string | null }).luigi_escalado_em)
+    .map((c) => (c as { id: string }).id)
+  const motivoPorConversa = new Map<string, string>()
+  if (idsEscalados.length > 0) {
+    const { data: logs } = await supabaseAdmin
+      .from('luigi_whatsapp_log')
+      .select('conversa_id, motivo_escalada, criado_em')
+      .in('conversa_id', idsEscalados)
+      .eq('escalado', true)
+      .not('motivo_escalada', 'is', null)
+      .order('criado_em', { ascending: false })
+      .limit(400)
+    // O primeiro de cada conversa é o mais recente, porque veio ordenado.
+    for (const l of (logs ?? []) as Array<{ conversa_id: string; motivo_escalada: string }>) {
+      if (!motivoPorConversa.has(l.conversa_id)) motivoPorConversa.set(l.conversa_id, l.motivo_escalada)
+    }
+  }
+
   const conversas = (data ?? []).map((c) => {
     const bruto = (c as { contato: unknown }).contato
     const contato = (Array.isArray(bruto) ? bruto[0] : bruto) as ContatoBruto
     const lead = Array.isArray(contato?.fornecedor) ? contato.fornecedor[0] : contato?.fornecedor
     return {
       ...c,
-      eh_fornecedor: ehFornecedorClassificado(contato?.fornecedor_id, lead?.aprovacao_status),
+      eh_fornecedor: ehFornecedorClassificado(contato?.fornecedor_id, lead?.aprovacao_status, lead?.reclassificado_em),
+      escalada_motivo: motivoPorConversa.get((c as { id: string }).id) ?? null,
     }
   })
 

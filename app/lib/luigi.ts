@@ -35,7 +35,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
-import { ehFornecedorClassificado } from './classificacao-contato'
+import { ehFornecedorClassificado, impedimentoParaDeixarDeSerFornecedor, reclassificarFornecedor } from './classificacao-contato'
 import { blocoDoPdf, ehPdf, type BlocoPdf } from './anexo-pdf'
 import { salvarPerfil, lerPerfil } from './perfil-producao'
 import { pecaLabel, pecaValida, legadoDasPecas, PECAS } from './pecas'
@@ -871,6 +871,31 @@ const FERRAMENTA_CHAMAR_HUMANO: Anthropic.Messages.Tool = {
   },
 }
 
+
+const FERRAMENTA_CORRIGIR_TIPO: Anthropic.Messages.Tool = {
+  name: 'corrigir_tipo_de_contato',
+  description:
+    'Corrige de que lado esta pessoa está quando o cadastro contradiz o que ela diz. ' +
+    'Use quando alguém cadastrada como CONFECÇÃO disser, com clareza, que quer COMPRAR (pede orçamento, fala em "quero mandar fazer", ' +
+    'descreve a peça que quer receber) — ou o contrário. ' +
+    'Não use por dúvida: se ela só não respondeu direito, pergunte. Use quando a evidência estiver na conversa. ' +
+    'Depois de corrigir, continue a conversa normalmente do lado novo, com UMA frase curta de transição — sem explicar cadastro, ' +
+    'sem pedir desculpa, sem falar em "sistema". Para ela, foi só a conversa seguindo.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      para: { type: 'string', enum: ['cliente', 'fornecedor'], description: 'Para que lado ela vai.' },
+      motivo: {
+        type: 'string',
+        minLength: 10,
+        maxLength: 300,
+        description: 'A EVIDÊNCIA, com o que ela disse. Não "é cliente", e sim "pediu orçamento de 50 calcinhas e disse que não produz".',
+      },
+    },
+    required: ['para', 'motivo'],
+  },
+}
+
 const FERRAMENTA_MOTIVO_PARADA: Anthropic.Messages.Tool = {
   name: 'registrar_motivo_parada',
   description:
@@ -1255,12 +1280,13 @@ function ferramentasDoModo(modo: Exclude<ModoLuigi, 'desligado'>, ehFornecedor =
   // precisa é registrar o próprio perfil e mandar foto.
   if (ehFornecedor) {
     return modo === 'responde'
-      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO]
+      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_CORRIGIR_TIPO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO]
       : [FERRAMENTA_CHAMAR_HUMANO]
   }
   return modo === 'responde'
     ? [
         FERRAMENTA_CHAMAR_HUMANO,
+        FERRAMENTA_CORRIGIR_TIPO,
         FERRAMENTA_MOTIVO_PARADA,
         FERRAMENTA_ENCERRAR,
         FERRAMENTA_AJUSTAR_PECA,
@@ -1327,6 +1353,31 @@ type Escalada = { motivo: string } | null
  * O casamento exige MESMO DDI+DDD e mesmos 8 finais: só os 8 finais juntaria
  * 5581 9xxxx-1234 com 5511 9xxxx-1234, que são pessoas diferentes.
  */
+
+/**
+ * Esta conversa já teve uma correção de tipo?
+ *
+ * Lê o próprio rastro: `luigi_whatsapp_log.ferramentas` guarda as chamadas de
+ * cada turno, então não precisa de coluna nova. Só conta chamada que DEU CERTO
+ * — tentativa barrada por trava não gasta a cota.
+ */
+async function jaReclassificouNestaConversa(conversaId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from('luigi_whatsapp_log')
+    .select('ferramentas')
+    .eq('conversa_id', conversaId)
+    .limit(200)
+  // Erro aqui não pode liberar a segunda reclassificação: na dúvida, trava.
+  if (error) return true
+  for (const linha of (data ?? []) as Array<{ ferramentas: unknown }>) {
+    const fs = Array.isArray(linha.ferramentas) ? linha.ferramentas : []
+    for (const f of fs as Array<{ nome?: string; ok?: boolean }>) {
+      if (f?.nome === 'corrigir_tipo_de_contato' && f?.ok !== false) return true
+    }
+  }
+  return false
+}
+
 async function fornecedorDoContato(waId: string): Promise<string | null> {
   const { data: exato } = await supabaseAdmin
     .from('wa_contatos')
@@ -1501,6 +1552,21 @@ async function executarFerramenta(
         }
       }
       const motivo = str(entrada.motivo) ?? 'cliente precisa de uma pessoa'
+
+      // MESMO MOTIVO, ESCALADA AINDA ABERTA: REGISTRA E CALA — 11/09/2026.
+      // Ver `escaladaAbertaPeloMesmoMotivo`. Sem isto, o Luigi reescala a mesma
+      // dúvida a cada mensagem do cliente e o aviso vira ruído — foi como a
+      // gente perdeu sete diagnósticos certos num dia só.
+      const repetido = await escaladaAbertaPeloMesmoMotivo(ctx.conversaId, motivo)
+      if (repetido) {
+        return {
+          ok: false,
+          erro:
+            'Você já chamou o Fernando por isso nesta conversa e ele ainda não respondeu — não chame de novo. ' +
+            'Siga com o que você sabe, ou fique em silêncio se não houver o que dizer sem ele.',
+        }
+      }
+
       estado.escalada = { motivo }
       return {
         ok: true,
@@ -1509,6 +1575,91 @@ async function executarFerramenta(
           'nem "já te respondo", nem "alguém da equipe continua". Encerre sua vez em silêncio.',
       }
     }
+    case 'corrigir_tipo_de_contato': {
+      // A PORTA DE VOLTA — 11/09/2026.
+      //
+      // Até aqui "é fornecedor" era uma porta de mão única: quem entrou pelo
+      // cadastro de confecção seguia recebendo prompt de confecção pra sempre.
+      // O Luigi percebia — chamou `chamar_humano` SETE vezes num dia dizendo
+      // "é cliente, não confecção", "entrou pelo lado errado do cadastro" — e
+      // não tinha como agir. Às 23:55 ele gravou "Cliente (não confecção)"
+      // dentro de `salvar_perfil_producao`, porque era o único campo gravável
+      // que alcançava. Diagnóstico certo, nenhuma ferramenta.
+      //
+      // As travas abaixo são de CÓDIGO e não de prompt, porque de dentro da
+      // conversa reclassificar parece sempre razoável.
+      const para = str(entrada.para)
+      const motivo = str(entrada.motivo)
+      if (para !== 'cliente' && para !== 'fornecedor') {
+        return { ok: false, erro: 'para precisa ser "cliente" ou "fornecedor".' }
+      }
+      if (!motivo || motivo.length < 10) {
+        return { ok: false, erro: 'Escreva a evidência: o que ela disse que mostra o lado certo.' }
+      }
+
+      // TRAVA 1 — uma por conversa. Reclassificar duas vezes na mesma conversa
+      // é sinal de que a conversa está ambígua, não de que o cadastro está
+      // errado duas vezes. Aí é caso de gente.
+      if (await jaReclassificouNestaConversa(ctx.conversaId)) {
+        estado.escalada = { motivo: `Segunda tentativa de reclassificar o contato nesta conversa (${para}): ${motivo}` }
+        return {
+          ok: false,
+          erro: 'Esta conversa já teve uma correção de tipo. Não corrija de novo — avisei o Fernando. Siga com o que você tem.',
+        }
+      }
+
+      const forn = await fornecedorDoContato(ctx.contato.telefone)
+
+      if (para === 'cliente') {
+        if (!forn) return { ok: false, aviso: 'Esta pessoa já é atendida como cliente — não há o que corrigir.' }
+
+        // TRAVA 2 — quem está produzindo não vira cliente por uma frase
+        // ambígua. Oferta aceita significa confecção com agenda comprometida;
+        // produção em andamento significa peça sendo feita.
+        const impedimento = await impedimentoParaDeixarDeSerFornecedor(forn)
+        if (impedimento) {
+          estado.escalada = { motivo: `Pediu pra virar cliente mas ${impedimento}: ${motivo}` }
+          return {
+            ok: false,
+            erro: `Não dá pra corrigir agora: ${impedimento}. Avisei o Fernando — siga a conversa sem prometer mudança.`,
+          }
+        }
+
+        // NÃO DELETA. O lead continua existindo com portfólio, perfil e
+        // histórico: se ela um dia produzir de verdade, isso importa.
+        const r = await reclassificarFornecedor({ fornecedorId: forn, para: 'cliente', motivo, por: 'luigi' })
+        if (!r.ok) return { ok: false, erro: r.erro }
+
+        void avisarGestor(
+          `Reclassifiquei ${nomeOuNumero(ctx.contato.nome, ctx.contato.telefone)} de confecção para CLIENTE. Evidência: ${motivo.slice(0, 200)}`
+        )
+        return {
+          ok: true,
+          aviso:
+            'Corrigido: ela é cliente. Siga a conversa como cliente AGORA, com UMA frase curta de transição — ' +
+            'sem explicar cadastro, sem pedir desculpa, sem falar em sistema. Se ela já descreveu o que quer, ' +
+            'comece a montar o pedido. As ferramentas de pedido entram na próxima mensagem dela.',
+        }
+      }
+
+      // para === 'fornecedor'
+      if (!forn) {
+        estado.escalada = { motivo: `Diz que é confecção mas não tem cadastro de fornecedor: ${motivo}` }
+        return {
+          ok: false,
+          erro:
+            'Ela não tem cadastro de confecção, e criar um é decisão do Fernando — avisei ele. ' +
+            'Continue atendendo como cliente e não prometa cadastro.',
+        }
+      }
+      const rVolta = await reclassificarFornecedor({ fornecedorId: forn, para: 'fornecedor', motivo, por: 'luigi' })
+      if (!rVolta.ok) return { ok: false, erro: rVolta.erro }
+      void avisarGestor(
+        `Reclassifiquei ${nomeOuNumero(ctx.contato.nome, ctx.contato.telefone)} de volta para CONFECÇÃO. Evidência: ${motivo.slice(0, 200)}`
+      )
+      return { ok: true, aviso: 'Corrigido: ela é confecção. Siga daqui com uma frase curta, sem explicar cadastro.' }
+    }
+
     case 'registrar_motivo_parada': {
       const p = await acharNoContexto(ctx, str(entrada.pedido))
       const motivo = str(entrada.motivo)
@@ -2705,6 +2856,62 @@ async function gravarLog(l: Log): Promise<string | null> {
  * Marca a conversa pra gente e, se a janela do gestor estiver aberta, avisa o
  * Fernando no WhatsApp (fora dela, a marca no inbox e a pauta cobrem).
  */
+
+/** Normaliza pra comparar motivo: sem acento, sem pontuação, minúsculo. */
+function palavrasDoMotivo(t: string): Set<string> {
+  const limpo = t
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+  const vazias = new Set(['a','o','e','de','da','do','que','para','pra','com','em','nao','sim','ela','ele','um','uma','no','na','se','por','ja'])
+  return new Set(limpo.split(/\s+/).filter((w) => w.length > 2 && !vazias.has(w)))
+}
+
+/**
+ * Já escalei por ISSO e ninguém mexeu ainda?
+ *
+ * O caso que motivou: sete `chamar_humano` num dia, todos dizendo a mesma coisa
+ * com palavras trocadas ("é cliente, não confecção", "entrou pelo lado errado
+ * do cadastro", "precisa ser migrada pro fluxo de cliente"). Escalar de novo
+ * pelo mesmo motivo enquanto a escalada anterior segue aberta não informa nada
+ * novo — só gasta turno e ensina o Fernando a ignorar aviso.
+ *
+ * Compara por sobreposição de palavras (Jaccard ≥ 0,6) em vez de igualdade,
+ * porque o modelo reescreve o motivo a cada vez. O limiar é generoso de
+ * propósito: errar pra "deixa escalar" custa um aviso repetido; errar pra
+ * "cala" esconde um problema NOVO, que é o erro caro.
+ */
+async function escaladaAbertaPeloMesmoMotivo(conversaId: string, motivo: string): Promise<string | null> {
+  const { data: conversa } = await supabaseAdmin
+    .from('wa_conversas')
+    .select('luigi_escalado_em')
+    .eq('id', conversaId)
+    .maybeSingle<{ luigi_escalado_em: string | null }>()
+  if (!conversa?.luigi_escalado_em) return null
+
+  const { data, error } = await supabaseAdmin
+    .from('luigi_whatsapp_log')
+    .select('motivo_escalada, criado_em')
+    .eq('conversa_id', conversaId)
+    .eq('escalado', true)
+    .not('motivo_escalada', 'is', null)
+    .order('criado_em', { ascending: false })
+    .limit(1)
+  // Sem conseguir ler o histórico, deixa escalar: repetir aviso é barato,
+  // engolir problema novo não é.
+  if (error || !data || data.length === 0) return null
+
+  const anterior = (data[0] as { motivo_escalada: string }).motivo_escalada
+  const a = palavrasDoMotivo(anterior)
+  const b = palavrasDoMotivo(motivo)
+  if (a.size === 0 || b.size === 0) return null
+  let comuns = 0
+  for (const w of b) if (a.has(w)) comuns++
+  const jaccard = comuns / new Set([...a, ...b]).size
+  return jaccard >= 0.6 ? anterior : null
+}
+
 async function escalar(conversaId: string, contato: { nome: string | null; waId: string }, motivo: string, modo: ModoLuigi): Promise<void> {
   // UM AVISO POR CONVERSA ABERTA — 09/09/2026.
   //
@@ -2962,16 +3169,16 @@ export type MensagemCliente = {
 async function fornecedorVigente(fornecedorId: string): Promise<boolean> {
   const { data, error } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('aprovacao_status')
+    .select('aprovacao_status, reclassificado_em')
     .eq('id', fornecedorId)
-    .maybeSingle<{ aprovacao_status: string | null }>()
+    .maybeSingle<{ aprovacao_status: string | null; reclassificado_em: string | null }>()
   // Leitura falhou: mantém a classificação que o contato já tinha.
   if (error) return true
   // Sem cadastro: o `fornecedor_id` aponta pra nada, não é fornecedor.
   if (!data) return false
   // A regra em si mora em classificacao-contato.ts, compartilhada com o selo
   // do inbox — o que é daqui é só a política de erro/ausência acima.
-  return ehFornecedorClassificado(fornecedorId, data.aprovacao_status)
+  return ehFornecedorClassificado(fornecedorId, data.aprovacao_status, data.reclassificado_em)
 }
 
 

@@ -40,6 +40,9 @@ type Conversa = {
   /** Classificação pronta da rota — ver o comentário no selo. Nunca derivar de
    *  `contato.fornecedor_id` na tela. */
   eh_fornecedor: boolean
+  /** Por que o Luigi chamou — vem do log do turno. Sem isto o aviso diz QUE
+   *  ele chamou e nunca POR QUÊ, e o diagnóstico morre no banco. */
+  escalada_motivo: string | null
   /** O Luigi chamou gente e ninguém respondeu ainda. */
   luigi_escalado_em?: string | null
   contato: Contato
@@ -410,7 +413,60 @@ function LinhaDado({ rotulo, valor }: { rotulo: string; valor: string | null }) 
   )
 }
 
-function PainelContexto({ ctx }: { ctx: Contexto | null }) {
+
+/**
+ * "Isto é cliente, não confecção".
+ *
+ * Pede o motivo antes de agir de propósito: é ele que sobrevive no lead depois
+ * (`reclassificado_motivo`), e sem ele o histórico guarda a mudança e perde a
+ * razão — que é metade do motivo de não deletar o cadastro.
+ */
+function BotaoVirarCliente({ conversaId, onPronto }: { conversaId: string; onPronto: () => void }) {
+  const [indo, setIndo] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const [pronto, setPronto] = useState(false)
+
+  async function corrigir() {
+    const motivo = window.prompt('O que ela disse que mostra que é cliente?')
+    if (!motivo || motivo.trim().length < 3) return
+    setIndo(true)
+    setErro(null)
+    try {
+      const r = await fetch(`/api/admin/whatsapp/conversas/${conversaId}/tipo-contato`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ para: 'cliente', motivo: motivo.trim() }),
+      })
+      const j = await r.json()
+      if (!r.ok) setErro(j?.erro ?? 'não deu')
+      else {
+        setPronto(true)
+        onPronto()
+      }
+    } catch {
+      setErro('não deu')
+    } finally {
+      setIndo(false)
+    }
+  }
+
+  if (pronto) return <p className="text-[11.5px] text-emerald-700 pt-1">Corrigido — agora é atendida como cliente.</p>
+  return (
+    <div className="pt-1">
+      <button
+        type="button"
+        onClick={corrigir}
+        disabled={indo}
+        className="text-[11.5px] text-violet-700 hover:text-violet-900 underline underline-offset-2 disabled:opacity-50"
+      >
+        {indo ? 'corrigindo…' : 'Isto é cliente, não confecção'}
+      </button>
+      {erro && <p className="text-[11.5px] text-red-600 mt-1">{erro}</p>}
+    </div>
+  )
+}
+
+function PainelContexto({ ctx, conversaId, onCorrigido }: { ctx: Contexto | null; conversaId: string | null; onCorrigido: () => void }) {
   if (!ctx) {
     return <p className="p-4 text-[12.5px] text-neutral-400">Carregando contexto…</p>
   }
@@ -446,6 +502,10 @@ function PainelContexto({ ctx }: { ctx: Contexto | null }) {
               <LinhaDado rotulo="Cadastro" valor={ctx.fornecedor.aprovacao_status} />
               <LinhaDado rotulo="Situação" valor={ctx.fornecedor.status} />
             </div>
+            {/* O Luigi tem `corrigir_tipo_de_contato`; este é o mesmo conserto
+                pela sua mão, porque às vezes você vê antes. Mesma função por
+                trás, mesmas travas — não dá pra tirar quem tem oferta aceita. */}
+            {conversaId && <BotaoVirarCliente conversaId={conversaId} onPronto={onCorrigido} />}
           </div>
         )}
 
@@ -1073,6 +1133,9 @@ export function WhatsAppInbox({
                           <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">Luigi chamou você</span>
                         )}
                       </div>
+                      {c.luigi_escalado_em && c.escalada_motivo && (
+                        <p className="text-[11px] text-amber-800 mt-1 line-clamp-2 text-left">{c.escalada_motivo}</p>
+                      )}
                     </button>
                   </li>
                 )
@@ -1358,7 +1421,7 @@ export function WhatsAppInbox({
             <div className="px-4 pt-4 pb-2 border-b border-neutral-100">
               <h2 className="text-[13px] font-semibold text-neutral-900">Contexto</h2>
             </div>
-            <PainelContexto ctx={contexto} />
+            <PainelContexto ctx={contexto} conversaId={ativaId} onCorrigido={() => carregarConversas(busca || undefined)} />
           </aside>
         )}
       </div>
@@ -1371,7 +1434,7 @@ export function WhatsAppInbox({
               <h2 className="text-[15px] font-semibold">Contexto</h2>
               <button onClick={() => setPainelMobileAberto(false)} className="text-neutral-400 hover:text-neutral-700" aria-label="Fechar">✕</button>
             </div>
-            <PainelContexto ctx={contexto} />
+            <PainelContexto ctx={contexto} conversaId={ativaId} onCorrigido={() => carregarConversas(busca || undefined)} />
           </div>
         </div>
       )}
