@@ -20,8 +20,18 @@ const supabase = createClient(
 export async function GET(req: Request) {
   // Validação de segurança: só aceita chamadas com o secret correto.
   // O Vercel Cron envia automaticamente o header Authorization: Bearer <CRON_SECRET>.
-  const auth = req.headers.get('authorization')
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  //
+  // TAMBÉM POR ?secret= — 10/09/2026. Esta rota aceitava só o header, enquanto
+  // captacao-pedidos, automacoes e campanhas aceitam os dois. O Fernando passou
+  // meia hora achando que o CRON_SECRET estava errado porque o curl com
+  // `?secret=` devolvia "unauthorized" — e devolveria com qualquer valor, certo
+  // ou errado. A mensagem estava tecnicamente correta e completamente enganosa.
+  // Padronizar custa três linhas; a inconsistência custou meia hora de caça a um
+  // problema que não existia.
+  const segredo = process.env.CRON_SECRET
+  const viaHeader = req.headers.get('authorization') === `Bearer ${segredo}`
+  const viaQuery = new URL(req.url).searchParams.get('secret') === segredo
+  if (!segredo || (!viaHeader && !viaQuery)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
