@@ -162,6 +162,32 @@ export async function salvarDadosDoCliente(params: {
       if (!doPedido.conta_id) {
         await supabaseAdmin.from('pedidos_assistente').update({ conta_id: conta.id }).eq('id', params.pedidoId)
       }
+
+      // E AMARRA A CONVERSA À CONTA — 11/09/2026.
+      //
+      // Faltava o outro lado do vínculo: conta→pedido era escrito aqui e
+      // conta→wa_contatos, nunca. O resultado era contato sem `cliente_id`
+      // mesmo com conta criada seis minutos antes, no mesmo fluxo — o painel do
+      // inbox não tinha como saber quem era a pessoa, e quem foi reclassificada
+      // de confecção pra cliente ficava sem identidade nenhuma.
+      //
+      // É o espelho exato do que o cadastro de fornecedor já fazia
+      // (app/api/fornecedor/cadastro/route.ts): casa pelos últimos 8 dígitos,
+      // porque o nono dígito faz o mesmo número aparecer de duas formas, e só
+      // preenche quem está com o campo NULO — conversa já vinculada a outra
+      // conta não é sobrescrita por um pedido.
+      //
+      // Roda uma vez, no fechamento, não a cada mensagem. E erro aqui só loga:
+      // está dentro do mesmo try que já protege o pedido salvo.
+      const fim8 = (doPedido.telefone ?? '').replace(/\D/g, '').slice(-8)
+      if (fim8.length === 8) {
+        const { error: erroVinculo } = await supabaseAdmin
+          .from('wa_contatos')
+          .update({ cliente_id: conta.id, atualizado_em: new Date().toISOString() })
+          .ilike('wa_id', `%${fim8}`)
+          .is('cliente_id', null)
+        if (erroVinculo) console.error('[pedido-fechamento] vínculo wa_contatos falhou:', erroVinculo.message)
+      }
     } catch (err) {
       console.error('[pedido-fechamento] cadastro do cliente falhou (pedido segue salvo):', err)
     }
