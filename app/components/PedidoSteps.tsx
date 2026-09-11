@@ -31,6 +31,28 @@ import { useState } from "react";
 import AlinharCliente from "@/app/alinhar/[id]/AlinharCliente";
 import { atribuicao } from "@/app/lib/rastreio";
 import { PECAS_PRINCIPAIS, PECAS_EXTRAS } from "@/app/lib/pecas";
+import { linkWhatsAppSuporte, WHATSAPP_SUPORTE_FORMATADO } from "@/app/lib/contatos";
+
+// O PASSO 4 VIRA WHATSAPP — 10/09/2026.
+//
+// Até aqui existiam dois assistentes: o Luigi, no WhatsApp, com ferramentas
+// (cria pedido, prende foto, gera mockup, manda PDF, libera pra confecção) e
+// travas no código; e este chat do site, sem ferramenta nenhuma, que só devolve
+// um JSON do pedido a cada turno. Os dois foram divergindo, e manter os dois é
+// pagar duas vezes pelo mesmo alinhamento — sempre com um atrasado.
+//
+// O ganho maior não é economia, é a janela: quando o CLIENTE inicia a conversa
+// no WhatsApp, abrem-se 24h de texto livre e ele passa a contar como engajado.
+// Isso derruba de uma vez a dependência de template aprovado, o erro 131049 e a
+// régua tendo que caçar quem nunca respondeu.
+//
+// Os passos 1 a 3 já coletam nome, telefone, e-mail, CEP e número, e o pedido
+// já nasce gravado — o Luigi acha pelo telefone (com tolerância ao nono dígito).
+// Só o CNPJ fica pra ele pedir na conversa.
+//
+// EM STAND-BY, NÃO REMOVIDO: a chave abaixo volta o chat numa linha, e o
+// componente continua servindo /alinhar/{id} pra quem já está no meio de um.
+const CHAT_NO_PASSO_4 = false;
 
 // PEÇA, não categoria (05/09/2026). O cliente escolhia a ocasião ("Private
 // Label", "Interclasse") e o fornecedor cadastrava a mesma ocasião — dois
@@ -474,20 +496,57 @@ export default function PedidoSteps() {
         )}
 
         {step === 3 && pedidoId && (
-          <>
-            <p className="text-gray-900 font-medium mb-1">Agora a sua produção</p>
-            <p className="text-gray-500 text-sm mb-4">
-              Seu pedido já está salvo — se precisar sair, é só voltar neste link que a conversa continua daqui.
-            </p>
-            <AlinharCliente
-              embutido
-              pedidoId={pedidoId}
-              categoria={rotuloPecas || null}
-              // Zero de propósito: a home não pergunta mais quantidade, e o chat
-              // trata 0 como "ainda não perguntamos" (não como zero peças).
-              totalPecas={0}
-            />
-          </>
+          CHAT_NO_PASSO_4 ? (
+            <>
+              <p className="text-gray-900 font-medium mb-1">Agora a sua produção</p>
+              <p className="text-gray-500 text-sm mb-4">
+                Seu pedido já está salvo — se precisar sair, é só voltar neste link que a conversa continua daqui.
+              </p>
+              <AlinharCliente
+                embutido
+                pedidoId={pedidoId}
+                categoria={rotuloPecas || null}
+                // Zero de propósito: a home não pergunta mais quantidade, e o chat
+                // trata 0 como "ainda não perguntamos" (não como zero peças).
+                totalPecas={0}
+              />
+            </>
+          ) : (
+            <div className="text-center py-2">
+              <div className="w-12 h-12 rounded-full bg-[#1D9E75]/10 flex items-center justify-center mx-auto mb-3">
+                <svg viewBox="0 0 24 24" className="w-6 h-6 fill-[#1D9E75]" aria-hidden="true">
+                  <path d="M12 2a10 10 0 0 0-8.6 15.05L2 22l5.1-1.33A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.18-1.15l-.3-.18-3.03.79.81-2.95-.2-.31A8.2 8.2 0 1 1 12 20.2Zm4.5-6.13c-.25-.13-1.46-.72-1.69-.8-.23-.09-.4-.13-.56.12s-.64.8-.79.97c-.14.16-.29.18-.54.06a6.7 6.7 0 0 1-3.35-2.93c-.25-.43.25-.4.72-1.33.08-.16.04-.3-.02-.42-.06-.13-.56-1.35-.77-1.84-.2-.48-.4-.42-.56-.42h-.47c-.16 0-.42.06-.64.3-.22.25-.84.82-.84 2s.86 2.32.98 2.48c.13.17 1.7 2.59 4.11 3.63 1.53.66 2.13.72 2.9.6.46-.06 1.46-.59 1.67-1.17.2-.58.2-1.07.14-1.18-.06-.1-.22-.16-.47-.28Z" />
+                </svg>
+              </div>
+
+              <p className="text-gray-900 font-medium mb-1">
+                Pedido salvo{nome.trim() ? `, ${nome.trim().split(/\s+/)[0]}` : ""}. Vamos alinhar no WhatsApp?
+              </p>
+              <p className="text-gray-500 text-sm mb-5 max-w-sm mx-auto">
+                É lá que a gente acerta modelo, cor, quantidade e as referências da sua peça — e onde você
+                acompanha até o orçamento chegar.
+              </p>
+
+              {/* O texto vai pré-preenchido pra que a PRIMEIRA mensagem seja do
+                  cliente: é o que abre a janela de 24h e dispensa template. O
+                  trecho do id serve pra gente achar o pedido no admin quando o
+                  número do WhatsApp não for o mesmo que ele digitou aqui. */}
+              <a
+                href={linkWhatsAppSuporte(
+                  `Oi! Acabei de abrir meu pedido${rotuloPecas ? ` de ${rotuloPecas.toLowerCase()}` : ""} no site da Confeccione e queria alinhar os detalhes por aqui. (pedido ${pedidoId.slice(0, 8)})`
+                )}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-2 bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-7 py-3.5 rounded-xl text-sm font-medium transition-colors"
+              >
+                Falar no WhatsApp →
+              </a>
+
+              <p className="mt-4 text-[12px] text-gray-400">
+                {WHATSAPP_SUPORTE_FORMATADO} · seu pedido fica guardado de qualquer jeito
+              </p>
+            </div>
+          )
         )}
         </div>
 
