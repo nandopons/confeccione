@@ -71,17 +71,34 @@ type Template = {
 
 type PedidoResumo = {
   id: string
-  tipo: string | null
-  quantidade: number | null
-  estado: string | null
-  status: string | null
+  codigo: string | null
+  etapa: string | null
+  pecas: number | null
   criado_em: string | null
+}
+
+/**
+ * A ficha do cliente vem dos PEDIDOS, não da conta.
+ *
+ * A maioria dos contatos não tem login (`cliente` nulo) e mesmo assim já deu
+ * nome, e-mail, endereço e CNPJ ao montar um pedido. Enquanto o painel só olhava
+ * `contas_clientes`, ele dizia "sem cadastro vinculado" pra gente cujo endereço
+ * estava a um clique dali — e o Fernando tinha que abrir outra aba pra ver.
+ */
+type DadosCliente = {
+  nome: string | null
+  email: string | null
+  telefone: string | null
+  cpfCnpj: string | null
+  cep: string | null
+  endereco: string | null
 }
 
 type Contexto = {
   contato: { id: string; wa_id: string; nome: string | null }
   cliente: { id: string; nome: string | null; email: string | null; cidade: string | null; uf: string | null; plano: string | null; criado_em: string | null } | null
   fornecedor: { id: string; nome: string | null; cidade: string | null; estado: string | null; status: string | null; aprovacao_status: string | null; tipos_produto: string[] | string | null; plano: string | null } | null
+  dadosCliente: DadosCliente | null
   pedidosVigentes: PedidoResumo[]
   pedidosAnteriores: PedidoResumo[]
 }
@@ -158,9 +175,24 @@ const RAPIDAS: RapidaPreset[] = [
   },
 ]
 
+// Etapas da era viva (`pedidos_assistente_etapas`). As quatro últimas são da
+// tabela `pedidos`, morta desde 28/06 — ficam só pra não quebrar linha antiga.
 const STATUS_PEDIDO_LABEL: Record<string, { rotulo: string; cor: string }> = {
+  captado: { rotulo: 'Captado', cor: 'bg-neutral-100 text-neutral-600' },
+  pedido_completo: { rotulo: 'Pedido completo', cor: 'bg-sky-50 text-sky-700' },
   buscando_fornecedor: { rotulo: 'Buscando fornecedor', cor: 'bg-amber-50 text-amber-700' },
+  sem_fornecedor: { rotulo: 'Sem fornecedor', cor: 'bg-orange-50 text-orange-700' },
   em_negociacao: { rotulo: 'Em negociação', cor: 'bg-sky-50 text-sky-700' },
+  sem_resposta: { rotulo: 'Sem resposta', cor: 'bg-amber-50 text-amber-700' },
+  orcamento_vencido: { rotulo: 'Orçamento vencido', cor: 'bg-orange-50 text-orange-700' },
+  pago: { rotulo: 'Pago', cor: 'bg-emerald-50 text-emerald-700' },
+  em_producao: { rotulo: 'Em produção', cor: 'bg-emerald-50 text-emerald-700' },
+  pronto: { rotulo: 'Pronto', cor: 'bg-emerald-50 text-emerald-700' },
+  entregue: { rotulo: 'Entregue', cor: 'bg-neutral-100 text-neutral-500' },
+  finalizado: { rotulo: 'Finalizado', cor: 'bg-neutral-100 text-neutral-500' },
+  encerrado: { rotulo: 'Encerrado', cor: 'bg-neutral-100 text-neutral-500' },
+  cancelado: { rotulo: 'Cancelado', cor: 'bg-neutral-100 text-neutral-500' },
+  inativo: { rotulo: 'Inativo', cor: 'bg-neutral-100 text-neutral-500' },
   concluido: { rotulo: 'Concluído', cor: 'bg-emerald-50 text-emerald-700' },
   expirado_sem_resposta: { rotulo: 'Expirado', cor: 'bg-neutral-100 text-neutral-500' },
 }
@@ -342,11 +374,10 @@ function CorpoMensagem({ m }: { m: Mensagem }) {
 }
 
 function CardPedido({ p, esmaecido }: { p: PedidoResumo; esmaecido?: boolean }) {
-  const st = STATUS_PEDIDO_LABEL[p.status ?? ''] ?? { rotulo: p.status ?? '—', cor: 'bg-neutral-100 text-neutral-500' }
-  const aba = p.status === 'em_negociacao' ? 'em_negociacao' : p.status === 'concluido' ? 'concluido' : 'precisa_atencao'
+  const st = STATUS_PEDIDO_LABEL[p.etapa ?? ''] ?? { rotulo: p.etapa ?? '—', cor: 'bg-neutral-100 text-neutral-500' }
   return (
     <a
-      href={`/admin/pedidos?aba=${aba}`}
+      href="/admin/pedidos-pagos"
       target="_blank"
       rel="noopener noreferrer"
       className={
@@ -356,14 +387,23 @@ function CardPedido({ p, esmaecido }: { p: PedidoResumo; esmaecido?: boolean }) 
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-[13px] font-medium text-neutral-900 truncate">
-          {p.tipo ?? 'Pedido'}{p.quantidade ? ` · ${p.quantidade} un` : ''}
+          {p.codigo ? `Nº ${p.codigo}` : 'Pedido'}{p.pecas ? ` · ${p.pecas} pç` : ''}
         </span>
         <span className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded ${st.cor}`}>{st.rotulo}</span>
       </div>
-      <p className="text-[11.5px] text-neutral-500 mt-0.5">
-        {p.estado ? `${p.estado} · ` : ''}{idadeCurta(p.criado_em)}
-      </p>
+      <p className="text-[11.5px] text-neutral-500 mt-0.5">{idadeCurta(p.criado_em)}</p>
     </a>
+  )
+}
+
+/** Uma linha da ficha. Some quando não há valor — ficha cheia de traço é ruído. */
+function LinhaDado({ rotulo, valor }: { rotulo: string; valor: string | null }) {
+  if (!valor || !valor.trim()) return null
+  return (
+    <div className="flex gap-2 text-[11.5px] leading-snug">
+      <span className="shrink-0 text-neutral-400 w-[54px]">{rotulo}</span>
+      <span className="text-neutral-700 break-words min-w-0">{valor}</span>
+    </div>
   )
 }
 
@@ -389,15 +429,41 @@ function PainelContexto({ ctx }: { ctx: Contexto | null }) {
           </div>
         )}
         {ctx.fornecedor && (
-          <div className="rounded-xl bg-violet-50/60 border border-violet-100 px-3 py-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 mb-0.5">Fornecedor</p>
-            <p className="text-[13px] font-medium text-neutral-900 truncate">{ctx.fornecedor.nome ?? '—'}</p>
-            <p className="text-[11.5px] text-neutral-500 truncate">
-              {[ctx.fornecedor.cidade && ctx.fornecedor.estado ? `${ctx.fornecedor.cidade}/${ctx.fornecedor.estado}` : ctx.fornecedor.cidade, tiposProduto].filter(Boolean).join(' · ') || '—'}
-            </p>
+          <div className="rounded-xl bg-violet-50/60 border border-violet-100 px-3 py-2.5 space-y-1.5">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 mb-0.5">Fornecedor</p>
+              <p className="text-[13px] font-medium text-neutral-900 truncate">{ctx.fornecedor.nome ?? '—'}</p>
+            </div>
+            <div className="space-y-0.5">
+              <LinhaDado
+                rotulo="Cidade"
+                valor={ctx.fornecedor.cidade && ctx.fornecedor.estado ? `${ctx.fornecedor.cidade}/${ctx.fornecedor.estado}` : ctx.fornecedor.cidade}
+              />
+              <LinhaDado rotulo="Produz" valor={tiposProduto || null} />
+              <LinhaDado rotulo="Cadastro" valor={ctx.fornecedor.aprovacao_status} />
+              <LinhaDado rotulo="Situação" valor={ctx.fornecedor.status} />
+            </div>
           </div>
         )}
-        {!ctx.cliente && !ctx.fornecedor && (
+
+        {/* A FICHA DO CLIENTE VEM DO PEDIDO — 10/09/2026.
+            Antes esta coluna só olhava `contas_clientes` e dizia "sem cadastro
+            vinculado" pra quem tinha nome, e-mail, endereço e CNPJ gravados no
+            pedido. Era a mesma cegueira que fazia o Luigi pedir de novo o que o
+            cliente já tinha dado — e obrigava o Fernando a abrir outra aba. */}
+        {ctx.dadosCliente && (
+          <div className="mt-2 rounded-xl border border-neutral-200 px-3 py-2.5 space-y-0.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400 mb-1">Dados do pedido</p>
+            <LinhaDado rotulo="Nome" valor={ctx.dadosCliente.nome} />
+            <LinhaDado rotulo="E-mail" valor={ctx.dadosCliente.email} />
+            <LinhaDado rotulo="Telefone" valor={ctx.dadosCliente.telefone} />
+            <LinhaDado rotulo="CNPJ/CPF" valor={ctx.dadosCliente.cpfCnpj} />
+            <LinhaDado rotulo="CEP" valor={ctx.dadosCliente.cep} />
+            <LinhaDado rotulo="Entrega" valor={ctx.dadosCliente.endereco} />
+          </div>
+        )}
+
+        {!ctx.cliente && !ctx.fornecedor && !ctx.dadosCliente && (
           <p className="text-[12.5px] text-neutral-500">
             Sem cadastro vinculado — contato novo, só do WhatsApp.
           </p>
