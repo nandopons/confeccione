@@ -41,12 +41,27 @@ const ETAPAS_VIGENTES = [
   'pronto',
 ]
 
+/** Soma as peças das linhas do pedido. `total` quando existe; senão, a grade. */
+function totalDePecas(linhas: unknown): number | null {
+  if (!Array.isArray(linhas) || linhas.length === 0) return null
+  let soma = 0
+  for (const l of linhas as Array<{ total?: unknown; tamanhos?: Array<{ qtd?: unknown }> }>) {
+    if (typeof l?.total === 'number' && l.total > 0) {
+      soma += l.total
+      continue
+    }
+    for (const t of l?.tamanhos ?? []) if (typeof t?.qtd === 'number') soma += t.qtd
+  }
+  return soma > 0 ? soma : null
+}
+
 type PedidoResumo = {
   id: string
   codigo: string | null
   etapa: string | null
   pecas: number | null
   criado_em: string | null
+  linhas?: unknown
   nome: string | null
   email: string | null
   telefone: string | null
@@ -134,14 +149,21 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   // ------------------------------------------------------------- pedidos
   // Busca por conta e por sufixo de telefone; junta e dedup por id.
   const ultimos8 = contato.wa_id.replace(/\D/g, '').slice(-8)
+  // A FICHA VEM DA TABELA, A ETAPA VEM DA VIEW — 10/09/2026.
+  //
+  // `pedidos_assistente_etapas` NÃO expõe cep, logradouro, bairro, complemento
+  // nem cpf_cnpj. Pedi esses campos à view na primeira versão disto e a consulta
+  // voltou vazia em silêncio (PostgREST recusa a coluna inexistente), então o
+  // painel continuou dizendo "nenhum pedido" — o mesmo sintoma que eu estava
+  // consertando. A tabela tem tudo; a view só é necessária pra `etapa`.
   const selecao =
-    'id, codigo, etapa, pecas, criado_em, nome, email, telefone, cep, numero, complemento, logradouro, bairro, cidade, uf, cpf_cnpj'
+    'id, codigo, criado_em, linhas, nome, email, telefone, cep, numero, complemento, logradouro, bairro, cidade, uf, cpf_cnpj'
   const emailConta = (clienteRes.data as { email?: string | null } | null)?.email?.trim() ?? null
 
   const [porFone, porEmail] = await Promise.all([
     ultimos8.length === 8
       ? supabaseAdmin
-          .from('pedidos_assistente_etapas')
+          .from('pedidos_assistente')
           .select(selecao)
           .like('telefone', `%${ultimos8}`)
           .order('criado_em', { ascending: false })
@@ -149,7 +171,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       : Promise.resolve({ data: [] as PedidoResumo[] }),
     emailConta
       ? supabaseAdmin
-          .from('pedidos_assistente_etapas')
+          .from('pedidos_assistente')
           .select(selecao)
           .ilike('email', emailConta)
           .order('criado_em', { ascending: false })
@@ -166,6 +188,23 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
   }
   pedidos.sort((a, b) => (b.criado_em ?? '').localeCompare(a.criado_em ?? ''))
+
+  // A etapa é derivada (a view calcula em cima de status, ofertas e pagamento),
+  // então vem dela — só que por id, que é o que ela tem em comum com a tabela.
+  if (pedidos.length > 0) {
+    // Só `etapa`: `pecas` também não existe na view — a contagem sai das linhas.
+    const { data: etapas } = await supabaseAdmin
+      .from('pedidos_assistente_etapas')
+      .select('id, etapa')
+      .in('id', pedidos.map((p) => p.id))
+    const porId = new Map(
+      ((etapas ?? []) as Array<{ id: string; etapa: string | null }>).map((e) => [e.id, e.etapa])
+    )
+    for (const p of pedidos) {
+      p.etapa = porId.get(p.id) ?? null
+      p.pecas = totalDePecas(p.linhas)
+    }
+  }
 
   const vigentes = pedidos.filter((p) => ETAPAS_VIGENTES.includes(p.etapa ?? ''))
   const anteriores = pedidos.filter((p) => !ETAPAS_VIGENTES.includes(p.etapa ?? '')).slice(0, 3)
