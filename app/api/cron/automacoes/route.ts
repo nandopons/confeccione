@@ -1,4 +1,19 @@
 // GET /api/cron/automacoes — roda todos os fluxos ativos.
+//
+// DE HORA EM HORA PARA CADA 15 MINUTOS — 10/09/2026
+// A régua de pedido incompleto promete o primeiro toque em 15 minutos, mas
+// quem decide quando ela roda é este cron. Com `0 * * * *`, "15 minutos" virava
+// "no topo da próxima hora": o pedido do Wendell nasceu 21:09, a rodada tinha
+// sido 21:00, e o primeiro contato possível era 22:00 — 51 minutos depois.
+//
+// Pior: o lead dele nem existia. É a sincronização ABAIXO que cria o lead a
+// partir do pedido, e ela roda aqui dentro — então perder a rodada não atrasa
+// só o envio, atrasa a existência da pessoa pro motor.
+//
+// Rodar a cada 15 min não multiplica mensagem: os passos são espaçados em dias,
+// ninguém entra duas vezes no mesmo fluxo e o teto por rodada continua valendo.
+// O que muda é a latência do primeiro toque, que é justamente o que a régua
+// nova vende.
 // Cada rodada inscreve quem passou a ser elegível e manda os passos vencidos,
 // respeitando janela de horário, teto de toques e cap por rodada.
 //
