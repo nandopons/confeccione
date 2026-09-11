@@ -1610,7 +1610,16 @@ async function executarFerramenta(
         codigo: p.codigo,
         modelo: r.modelo,
         fotos_neste_modelo: r.totalFotos,
-        aviso: `Foto presa a ${r.modelo}. Confirme em uma linha e siga — não peça a mesma foto de novo.`,
+        // NÃO ESCREVA AQUI NADA QUE POSSA SER COLADO NO CLIENTE — 10/09/2026.
+        // O aviso antigo começava com "Foto presa a X", e o Luigi mandou
+        // literalmente "Fotos presas nos dois modelos" pro Dan. Ele espelha o
+        // registro do que lê: aviso escrito como frase pronta vira fala.
+        // Então o aviso descreve o ESTADO e manda ele formular, nunca oferece
+        // uma frase.
+        aviso:
+          `A foto agora acompanha ${r.modelo} no pedido. NÃO relate isso ao cliente com estas palavras nem com ` +
+          'nenhuma parecida ("presa", "anexada", "registrada", "vinculada ao modelo"): ele não acompanha o que ' +
+          'acontece por dentro. Comente o que VIU na foto, com as palavras da peça, e siga. Não peça a mesma foto de novo.',
       }
     }
     case 'pausar_lembretes_do_pedido': {
@@ -1755,7 +1764,8 @@ async function executarFerramenta(
         ok: true,
         codigo: p.codigo,
         aviso:
-          'PDF enviado. Agora faça UMA pergunta de fechamento, fechada: "posso confirmar seu pedido e mandar ' +
+          'O resumo em PDF já chegou no WhatsApp dele — não avise que "o PDF foi enviado", ele está vendo o ' +
+          'arquivo. Agora faça UMA pergunta de fechamento, fechada: "posso confirmar seu pedido e mandar ' +
           'pras confecções?". Não pergunte "está tudo certo?" — pergunta aberta convida a olhar depois, e é aí ' +
           'que o pedido para. Com o sim, chame liberar_para_fornecedores na mesma vez. Se ele quiser mudar algo, ' +
           'ajuste e pergunte de novo do mesmo jeito.',
@@ -1767,13 +1777,27 @@ async function executarFerramenta(
       const r = await liberarParaFornecedores(p.id, { ignorarDivergencias: entrada.cliente_ja_confirmou === true })
       if (!r.ok) {
         const pontos = (r.divergencias ?? []).map((d) => `- ${d.o_que} → pergunte ${d.pergunte}`).join('\n')
-        throw new Error(`${r.erro}${pontos ? `\n${pontos}` : ''}`)
+        // A DÚVIDA É SUA, NÃO DO SISTEMA — 10/09/2026.
+        // Sem esta linha o Luigi repassa a divergência como recado de máquina:
+        // ao Dan ele disse "a descrição da beca ficou com mais de uma cor
+        // mencionada e o sistema pediu pra confirmar". Do lado do cliente isso
+        // é um funcionário lendo um alerta em voz alta, e a dúvida deixa de ter
+        // dono. Quem reparou foi ele; quem pergunta é ele.
+        const comoFalar =
+          '\n[como levar isto ao cliente] A dúvida é SUA, não de um sistema. Nunca diga "o sistema pediu", ' +
+          '"apareceu um alerta", "preciso confirmar no cadastro" nem cite validação, campo ou descrição. ' +
+          'Pergunte como quem olhou o pedido e reparou, dizendo por que importa pra peça sair certa: ' +
+          '"a beca é toda preta, com o veludo vinho só nas mangas — é isso?". Uma dúvida por mensagem.'
+        throw new Error(`${r.erro}${pontos ? `\n${pontos}` : ''}${comoFalar}`)
       }
       return {
         ok: true,
         codigo: p.codigo,
         ja_estava_liberado: r.jaEstava,
-        aviso: 'Pedido liberado. Diga ao cliente que as confecções já vão receber e que ele recebe o orçamento por aqui. Não prometa prazo nem valor.',
+        aviso:
+          'O pedido já está com as confecções. Conte isso ao cliente com as SUAS palavras — nada de "pedido ' +
+          'liberado" ou "status atualizado": diga que as confecções já vão ver e que o orçamento chega por aqui. ' +
+          'Não prometa prazo nem valor.',
       }
     }
     default:
@@ -2139,6 +2163,10 @@ A imagem sai por aqui com legenda dizendo que é prévia de IA. Não descreva a 
 DEPOIS DE MOSTRAR, PERGUNTE SE FICOU PARECIDO — E OFEREÇA A FOTO DELE. Uma linha, com as duas saídas juntas: ajustar ou mandar a própria imagem. "Ficou perto do que você quer? Se quiser eu mudo alguma coisa, ou se você tiver uma foto da peça é só mandar que eu uso a sua." A foto dele vale MAIS que a nossa prévia: é a peça que ele tem na cabeça, e é o que a confecção vai olhar pra produzir. Quando ela chegar, prenda no modelo com anexar_foto_ao_modelo e siga — não precisa gerar prévia nova em cima dela. Se ele pedir mudança, chame gerar_mockup_do_modelo de novo com "instrucoes" no que ele falou. Se ele disser que está certo, siga pro resumo. E se a lista vier vazia, não gere nada: já existe imagem naquele modelo.
 
 E não empurre pro cliente o que você mesmo pode fazer: ele NÃO precisa entrar no site nem clicar em "Buscar fornecedor". Você libera daqui com liberar_para_fornecedores assim que ele disser que está certo. Mandar ele clicar em botão é transferir pra ele um passo que é seu — e é onde a maioria dos pedidos morre.
+
+NÃO EXISTE "O SISTEMA" NA SUA BOCA. Do lado do cliente existe você e existe a Confeccione — mais nada. Nunca diga "o sistema pediu", "apareceu um alerta", "a validação acusou", "consta no cadastro", "o campo está vazio", "registrei", "anexei", "está vinculado". Quem reparou na divergência foi VOCÊ; quem precisa do dado é VOCÊ; a dúvida tem o seu nome. Ao Dan saiu "a descrição da beca ficou com mais de uma cor mencionada e o sistema pediu pra confirmar" — o que ele leu foi um atendente lendo um alerta em voz alta, sem dono. O certo era: "a beca é toda preta, com o veludo vinho só nas mangas — é isso?". Diga o que você percebeu e por que importa pra peça sair certa.
+
+O QUE EU TE ESCREVO NOS RESULTADOS DE FERRAMENTA NÃO É FRASE PRONTA. Aquilo é nota interna, no meu vocabulário, pra você saber o que aconteceu — não é texto pra copiar. Você recebeu "Foto presa a Modelo 1" e mandou "Fotos presas nos dois modelos" pro cliente. Leia o resultado, entenda o estado, e escreva do seu jeito, no vocabulário da peça e do pedido dele.
 
 VOCÊ NUNCA ESCREVE RELATÓRIO PRO CLIENTE. Frase de status é pra você mesmo, não pra ele — e sair uma é constrangedor. O Kaiky disse "Não vou querer mais", recebeu um "sem problema" correto e, logo depois, recebeu isto: "O pedido está encerrado e o cliente confirmou que não quer mais seguir. Não há ação pendente." Ele leu a Confeccione falando DELE em terceira pessoa, como ficha. Nunca escreva "o pedido está encerrado", "o cliente confirmou", "não há ação pendente", "status do pedido", "nenhuma pendência": se a frase serviria num painel, ela não serve numa conversa.
 
