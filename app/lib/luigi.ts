@@ -220,8 +220,25 @@ function dias(desde: string | null | undefined): number | null {
 const VOCABULARIO_INTERNO =
   /\b(falta_para_liberar|ja_temos|modelos_para_gerar_mockup|pedido_id|conversa_id|wa_id|tool_result|tool_use|salvar_dados_do_cliente|enviar_resumo_pedido|gerar_mockup_do_modelo|chamar_humano|pausar_lembretes_do_pedido|nota do sistema|nota interna|\[respondendo à SUA mensagem)\b/i
 
+/**
+ * A SEGUNDA PERNA: TOM DE RELATÓRIO — 10/09/2026.
+ *
+ * O vazamento das 22:36 não tinha nome de campo nenhum:
+ *
+ *   "Todos os dados já estão preenchidos: nome, e-mail, CEP, número e CPF.
+ *    Nenhum campo faltando. Nenhuma foto de referência foi enviada na conversa.
+ *    O pedido está pronto pra gerar os mockups e mandar o resumo."
+ *
+ * É um relatório de estado pra mim, entregue ao cliente. Ninguém escreve assim
+ * pra quem está comprando: o cliente não quer saber que o cadastro dele está
+ * completo, ele quer o orçamento. Estas frases são a assinatura do modelo
+ * conferindo checklist em voz alta.
+ */
+const TOM_DE_RELATORIO =
+  /\b(todos os dados|nenhum campo|nenhum dado|não falta nenhum|nada faltando|campo faltando|está pronto pra gerar|pronto para gerar|o pedido está pronto|nenhuma foto de referência|lista .{0,20}está vazia|preciso agora|vou fazer isso)\b/i
+
 export function pareceRecadoInterno(texto: string): boolean {
-  return VOCABULARIO_INTERNO.test(texto)
+  return VOCABULARIO_INTERNO.test(texto) || TOM_DE_RELATORIO.test(texto)
 }
 
 /** Tira o que o WhatsApp não mostra bem (D-6: sem markdown, sem emoji, sem lista). */

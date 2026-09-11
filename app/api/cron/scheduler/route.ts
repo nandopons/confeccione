@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { estaEmHorarioComercial, estaEmJanelaRetryPassivo } from '@/app/lib/horario'
 import { rodarCutucadaPosResumo } from '@/app/lib/cutucada-pos-resumo'
+import { fecharPedidosProntos } from '@/app/lib/fechar-pedido-automatico'
 // criarEDispararOferta, avisarGestor, enviarTextoSimples e
 // emailAdminFornecedorExpirou saíram em 10/09/2026 junto com o reenvio da era
 // antiga (ver TAREFA 1). Quem oferta hoje é app/lib/oferta-automatica.ts.
@@ -320,10 +321,25 @@ export async function GET(req: Request) {
     cutucada = { erro: e instanceof Error ? e.message : String(e) }
   }
 
+  // TAREFA 9: fechar sozinho o pedido que já está pronto (10/09/2026)
+  //
+  // "Gerar 5 prévias e mandar o PDF" não cabe num turno de 45 s do Luigi. Ele
+  // anuncia, o turno acaba, e como o cliente não escreve de novo não existe
+  // próxima rodada. Esta tarefa é a rede: pega o pedido que passou em todas as
+  // travas e ainda não recebeu resumo, gera o que falta e manda. Se o Luigi já
+  // tiver conseguido, não faz nada — `resumo_enviado_em` já está gravado.
+  let fechamento: Awaited<ReturnType<typeof fecharPedidosProntos>> | { erro: string }
+  try {
+    fechamento = await fecharPedidosProntos()
+  } catch (e) {
+    fechamento = { erro: e instanceof Error ? e.message : String(e) }
+  }
+
   return NextResponse.json({
     ok: true,
     duracao_ms: Date.now() - inicio,
     ...resumo,
     cutucada_pos_resumo: cutucada,
+    fechamento_automatico: fechamento,
   })
 }
