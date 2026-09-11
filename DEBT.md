@@ -4,6 +4,25 @@ Registro de débitos e decisões adiadas. Cada item diz **o que**, **por que imp
 
 ---
 
+## 🔴 App cliente ainda cria pedido na era legada (repo separado)
+
+**Descoberto em:** auditoria de 2026-09-11. Confirmado pelo Fernando no monorepo dos apps.
+
+### O quê
+`POST /api/pedidos/criar` foi fechada com **410** em 2026-09-11 (commit `1e24094`): ela gravava na tabela `pedidos`, era legada, que nenhuma automação observa desde 28/06 — pedido criado ali ficava parado pra sempre.
+
+O app cliente **chama essa rota**: `apps/cliente/src/app/novo/resumo.tsx:139`, no ramo `else` de quando o pedido não é "rico". O ramo rico já usa `/api/cliente/pedidos-assistente`, que grava em `pedidos_assistente` e está certo.
+
+### Por que importa agora: não importa
+O app não está nas lojas (sem `eas.json`, feed da Home ainda mock), então o 410 não atinge cliente nenhum hoje. Por isso a rota subiu mesmo assim.
+
+**O que importa é o par que ficou faltando:** o caminho do "pedido simples" precisa morrer no app também, do mesmo jeito que morreu no site quando o passo 4 virou handoff pro WhatsApp. Enquanto ele existir no app, é uma entrada que volta a funcionar no dia em que alguém reabrir a rota — ou um 410 na cara do usuário no dia em que o app for publicado.
+
+### Como revisitar
+No monorepo dos apps, não neste. Remover o ramo `else` de `resumo.tsx:139` e deixar o fluxo inteiro cair no assistente. Depois disso, `NovoPedidoForm.tsx` (que ficou órfão neste repo) pode ir junto com o resto da era legada.
+
+---
+
 ## 🔴 DESTAQUE — Over-share de artes per-conta entre fornecedores (decisão de PRODUTO)
 
 **Descoberto em:** Sprint "UX pós-aceite" (Item 2), 2026-05-20.
