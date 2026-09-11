@@ -100,6 +100,13 @@ const MAX_RODADAS = 20
 const PROMESSA_DE_ACAO =
   /\b(vou|vamos|já vou|agora vou|posso já|deixa que eu)\s+(definir|montar|criar|adicionar|colocar|incluir|registrar|gravar|atualizar|abrir|liberar|anexar|salvar|preencher|ajustar|corrigir|lançar|mandar o resumo|enviar o resumo|gerar)\b|\b(já|agora)\s+(defino|monto|crio|adiciono|coloco|incluo|registro|gravo|atualizo|abro|libero|anexo|salvo|preencho|ajusto|corrijo|lanço)\b/i
 
+/**
+ * Quem, numa saída do inbox, é máquina. Tudo que não está aqui — inclusive
+ * `autor` nulo, que é como a mensagem digitada pelo Fernando fica gravada — é
+ * gente. As duas travas de "não fale por cima" leem esta lista.
+ */
+const AGENTES_SAIDA = new Set(['luigi', 'mcp', 'gestao'])
+
 /** Fecha a resposta antes de a Vercel matar a função, com folga pro envio. */
 const ORCAMENTO_MS = 45_000
 const MAX_TOKENS_RESPOSTA = 600
@@ -3085,13 +3092,13 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     const inicioDoTurno = new Date(inicio).toISOString()
     const { data: ultimaSaida } = await supabaseAdmin
       .from('wa_mensagens')
-      .select('criado_em, corpo')
+      .select('criado_em, corpo, autor')
       .eq('conversa_id', params.conversaId)
       .eq('direcao', 'saida')
       .lt('criado_em', inicioDoTurno)
       .order('criado_em', { ascending: false })
       .limit(1)
-      .maybeSingle<{ criado_em: string; corpo: string | null }>()
+      .maybeSingle<{ criado_em: string; corpo: string | null; autor: string | null }>()
     // A DEVOLUÇÃO MANUAL PASSA POR CIMA DESTA TRAVA — 10/09/2026.
     //
     // "Devolver pro Luigi" reprocessa a ÚLTIMA mensagem da pessoa, que por
@@ -3108,8 +3115,20 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // a conversa. Ele sabe que tem mensagem nossa depois; é por isso que está
     // devolvendo. A trava existe pra evitar atropelo automático, não pra vetar
     // ordem humana.
+    // "JÁ RESPONDEMOS" É O LUIGI TER RESPONDIDO — 10/09/2026.
+    //
+    // Esta trava também contava mensagem digitada no inbox como resposta. Só que
+    // "só um momento, to gerando" não responde nada: é o Fernando segurando o
+    // cliente PORQUE o Luigi ainda não respondeu. Contar isso como resposta
+    // dada fazia o Luigi descartar exatamente a resposta que estava faltando —
+    // e essa trava roda antes da de baixo, então era ela quem derrubava primeiro.
+    //
+    // Agora só conta saída de agente. Mensagem de gente não consome o turno do
+    // cliente: a pergunta dele continua de pé até alguém responder de verdade.
     const devolucaoManual = Boolean(params.retomada)
-    if (!devolucaoManual && ultimaSaida && new Date(ultimaSaida.criado_em).getTime() > new Date(params.criadoEm).getTime()) {
+    const respostaDeAgente =
+      ultimaSaida && AGENTES_SAIDA.has((ultimaSaida.autor ?? '').trim().toLowerCase()) ? ultimaSaida : null
+    if (!devolucaoManual && respostaDeAgente && new Date(respostaDeAgente.criado_em).getTime() > new Date(params.criadoEm).getTime()) {
       await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'já respondemos depois dessa mensagem' })
       return
     }
@@ -3135,7 +3154,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // ferramenta gravou no meio do turno não pode me parecer gente. Cinto e
     // suspensório — o `autor` já resolve o caso conhecido (o PDF do resumo),
     // isto cobre o próximo envio que alguém esquecer de assinar.
-    const AGENTES = new Set(['luigi', 'mcp', 'gestao'])
+    const AGENTES = AGENTES_SAIDA
     const { data: ultimasSaidas } = await supabaseAdmin
       .from('wa_mensagens')
       .select('autor, criado_em')
@@ -3150,11 +3169,54 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       (m) => !AGENTES.has((m.autor ?? '').trim().toLowerCase()),
     )
 
-    // Mesma exceção da trava acima: se o Fernando clicou "Devolver pro Luigi",
-    // ele É a gente na conversa e está mandando o Luigi falar. Vetar aqui seria
-    // o sistema desobedecendo a ordem que acabou de receber.
-    if (humanoRecente && !devolucaoManual) {
-      await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: `gente na conversa (${humanoRecente.autor ?? 'equipe'}) — o Luigi não fala por cima` })
+    // QUEM TIRA O LUIGI DA CONVERSA É O CLIQUE, NÃO A DIGITAÇÃO — 10/09/2026.
+    //
+    // A regra antiga era: humano falou nos últimos 15 min, o Luigi cala a boca.
+    // A intenção era boa — não falar por cima de quem assumiu. O efeito real foi
+    // um laço que prendeu o Fernando a noite inteira:
+    //
+    //   1. o Luigi trava num passo e não manda o que prometeu
+    //   2. o Fernando digita "só um momento, to gerando" pra segurar o cliente
+    //   3. essa mensagem emudece o Luigi por 15 minutos
+    //   4. o cliente responde, e a resposta do Luigi é DESCARTADA em silêncio
+    //   5. só sobra o Fernando digitar de novo — e recomeça
+    //
+    // O erro de leitura está no passo 3. O Fernando escrevendo "só um momento"
+    // não está assumindo a conversa: está cobrindo o Luigi pra ele continuar.
+    // Tomar a conversa é outro gesto, que já tem botão e marca próprios —
+    // `luigi_escalado_em`, o "Chamando…" no inbox, desfeito pelo "Devolver".
+    //
+    // Então o teste passa a ser o ESTADO da conversa, não a autoria da última
+    // mensagem. Conversa escalada: o Luigi fica quieto, é handover de verdade e
+    // está visível na tela. Conversa não escalada: ele responde, mesmo que o
+    // Fernando tenha acabado de escrever.
+    //
+    // Fica de pé só a proteção contra COLISÃO: se a mensagem humana tem menos de
+    // um minuto, os dois estão digitando ao mesmo tempo e um vai atropelar o
+    // outro. Isso é acidente de sincronia, não decisão de quem manda — e um
+    // minuto passa sozinho, sem ninguém precisar clicar nada.
+    // A CONTRAPARTIDA: CONVERSA ESCALADA, LUIGI QUIETO.
+    //
+    // A trava antiga cuidava disso por acidente — quem assumia digitava, e a
+    // digitação calava o Luigi. Agora que digitar não cala mais, o handover
+    // precisa ser lido de onde ele de fato mora: a marca da conversa. Sem esta
+    // checagem, afrouxar a de cima soltaria o Luigi por cima do Fernando
+    // justamente nas conversas que ele tomou pra si de propósito.
+    const { data: conv } = await supabaseAdmin
+      .from('wa_conversas')
+      .select('luigi_escalado_em')
+      .eq('id', params.conversaId)
+      .maybeSingle<{ luigi_escalado_em: string | null }>()
+    if (conv?.luigi_escalado_em && !devolucaoManual) {
+      await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'conversa está com o Fernando (Devolver pro Luigi solta)' })
+      return
+    }
+
+    const COLISAO_MS = 60_000
+    const colidindo =
+      humanoRecente && Date.now() - new Date(humanoRecente.criado_em).getTime() < COLISAO_MS
+    if (colidindo && !devolucaoManual) {
+      await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: `${humanoRecente?.autor ?? 'alguém da equipe'} escreveu agora mesmo — evitando atropelo` })
       return
     }
 

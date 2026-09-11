@@ -47,8 +47,16 @@ const PEDIDOS_POR_RODADA = 3
 /** Idade máxima do pedido pra entrar na varredura. Acervo velho não se mexe sozinho. */
 const IDADE_MAX_DIAS = 7
 
-/** Silêncio necessário depois de alguém da casa falar na conversa. */
-const RESPEITO_HUMANO_MS = 15 * 60_000
+/**
+ * Silêncio depois de alguém da casa falar — só o suficiente pra não atropelar
+ * quem está digitando NESTE momento.
+ *
+ * Começou em 15 minutos e durou uma noite: o Fernando digitou "só um momento,
+ * to gerando" às 22:36 pra segurar o cliente, e isso adiou o PDF que ele estava
+ * justamente esperando. Quem tira o pedido do automático é a conversa estar
+ * escalada, não o Fernando ter escrito uma linha de apoio.
+ */
+const RESPEITO_HUMANO_MS = 60_000
 
 export type ResultadoFechamento = {
   olhados: number
