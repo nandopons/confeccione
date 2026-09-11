@@ -67,6 +67,12 @@ type MetaMensagem = {
   reaction?: { message_id: string; emoji?: string }
   button?: { text?: string; payload?: string }
   interactive?: { button_reply?: { id?: string; title?: string }; list_reply?: { id?: string; title?: string } }
+  /**
+   * Citação: veio quando o contato usou o "responder" do WhatsApp.
+   * `id` é o wamid da mensagem que ele citou — a forma mais barata que ele tem
+   * de dizer sobre O QUE está falando, e que a gente vinha descartando.
+   */
+  context?: { from?: string; id?: string; forwarded?: boolean }
 }
 
 type MetaStatus = {
@@ -343,6 +349,10 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
         midia_mime: midiaMime,
         midia_nome: midiaNome,
         status: 'recebido',
+        // Citação do "responder": guardamos o wamid citado pra o Luigi saber
+        // a que mensagem a frase se refere. Reação também traz context, mas
+        // reação a gente ignora antes de chegar aqui.
+        responde_a_wamid: msg.context?.id ?? null,
         payload: msg as unknown as Record<string, unknown>,
         criado_em: criadoEm,
       },

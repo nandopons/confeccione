@@ -2116,6 +2116,8 @@ O QUE NÃO ESTÁ NA LISTA, VOCÊ JÁ TEM. Não pergunte, não confirme, não men
 
 QUANDO ELE DIZ QUE NÃO É AGORA, GUARDE O PEDIDO E CALE OS LEMBRETES. "Vou ver com meu sócio", "to pesquisando ainda", "só mês que vem", "me chama depois" — chame pausar_lembretes_do_pedido com o prazo que ele deu. O pedido continua inteiro, esperando por ele. Se você não chamar, ele recebe cobrança automática em 24h e de novo em 48h de um pedido que ele acabou de dizer que vai demorar, e do lado dele quem está sendo chato é a Confeccione. Isso não vale pra quem só está devagar respondendo — é pra quem DIZ que vai levar tempo.
 
+QUANDO A FALA VEM COM "[respondendo a ...]", É CITAÇÃO — O CLIENTE APONTOU. Ele usou o "responder" do WhatsApp pra dizer sobre O QUE está falando: aquela foto, aquele áudio, aquela frase sua. Trate como se ele tivesse posto o dedo em cima. "Pode ser essa mesma" citando a segunda foto NÃO é sobre a terceira; "esse aqui não" citando o mockup é sobre o mockup, não sobre o pedido inteiro. Se a citação apontar pra uma mensagem que você não tem no histórico, não finja que sabe — pergunte de qual ele está falando, em uma linha.
+
 A ETAPA DA IMAGEM É A MAIS IMPORTANTE DO PEDIDO — VÁ DEVAGAR NELA. É na imagem que o cliente e a confecção combinam de verdade o que vai ser produzido; o resto do pedido é quantidade e endereço. Aqui pressa custa caro: peça errada só aparece na entrega, e aí já são centenas de peças. Trate esta parte como a conversa mais cuidadosa que você tem com ele.
 
 QUANDO CHEGAR UMA FOTO, OLHE ANTES DE FALAR. Você ENXERGA a imagem. Não responda mecânica ("recebi", "foto presa na beca") nem pule direto pra próxima pergunta: diga O QUE VOCÊ VIU, com as palavras da peça. "Vi a beca preta com as três barras de veludo vinho na manga e o capelo com borla" mostra que você olhou. "Recebi sua foto" mostra que você não olhou.
@@ -2180,6 +2182,38 @@ type LinhaMensagem = {
   criado_em: string
   midia_path: string | null
   midia_mime: string | null
+  /** wamid citado quando o contato usou "responder" no WhatsApp. */
+  responde_a_wamid: string | null
+}
+
+/**
+ * Como a mensagem citada aparece pro Luigi.
+ *
+ * O cliente que usa "responder" está desfazendo uma ambiguidade: cita a foto e
+ * diz "essa é a da manga", cita o áudio e responde só aquele ponto. Sem isso o
+ * "essa" chega sem referente e ele adivinha pela ordem — que é justamente o que
+ * falha quando vêm três fotos seguidas e o comentário é sobre a primeira.
+ *
+ * A citação entra como PREFIXO da fala, não como turno separado: é contexto da
+ * frase, não uma frase nova.
+ */
+function marcaDeCitacao(citada: LinhaMensagem | undefined): string {
+  if (!citada) return '[respondendo a uma mensagem anterior desta conversa]'
+  const quem = citada.direcao === 'entrada' ? 'à mensagem dele' : 'à SUA mensagem'
+  const corpo = (citada.corpo ?? '').trim()
+  if (corpo) {
+    const trecho = corpo.length > 90 ? `${corpo.slice(0, 90)}…` : corpo
+    return `[respondendo ${quem}: "${trecho}"]`
+  }
+  const oQue =
+    citada.tipo === 'image'
+      ? 'a imagem'
+      : citada.tipo === 'audio'
+        ? 'o áudio'
+        : citada.tipo === 'document'
+          ? 'o documento'
+          : 'a mensagem'
+  return `[respondendo ${quem}, ${oQue} que aparece logo acima]`
 }
 
 /**
@@ -2272,13 +2306,17 @@ function textoDaLinha(m: LinhaMensagem): string {
 async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.Messages.MessageParam[]; wamids: Set<string>; luigiFalou: boolean }> {
   const { data } = await supabaseAdmin
     .from('wa_mensagens')
-    .select('wamid, direcao, tipo, corpo, autor, criado_em, midia_path, midia_mime')
+    .select('wamid, direcao, tipo, corpo, autor, criado_em, midia_path, midia_mime, responde_a_wamid')
     .eq('conversa_id', conversaId)
     .order('criado_em', { ascending: false })
     .limit(HISTORICO_MENSAGENS)
 
   const linhas = ((data ?? []) as LinhaMensagem[]).reverse()
   const wamids = new Set(linhas.map((m) => m.wamid).filter((w): w is string => Boolean(w)))
+  // Índice pra resolver a citação sem ida extra ao banco. Mensagem citada fora
+  // da janela do histórico simplesmente não é achada — e a marca genérica
+  // ("respondendo a uma mensagem anterior") ainda é melhor que nada.
+  const porWamid = new Map(linhas.filter((m) => m.wamid).map((m) => [m.wamid as string, m]))
 
   const comImagem = linhas.filter((m) => m.direcao === 'entrada' && m.tipo === 'image' && m.midia_path)
   const blocos = new Map<string, BlocoImagem | BlocoPdf>()
@@ -2305,9 +2343,13 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
   for (const m of linhas) {
     const role: 'user' | 'assistant' = m.direcao === 'entrada' ? 'user' : 'assistant'
     const bloco = m.midia_path ? blocos.get(m.midia_path) : undefined
-    const texto = bloco
+    const base = bloco
       ? m.corpo?.trim() || (bloco.type === 'document' ? 'Mandei este arquivo.' : 'Mandei esta imagem.')
       : textoDaLinha(m)
+
+    // Citação na frente da fala: o "essa" do cliente ganha referente.
+    const citada = m.responde_a_wamid ? porWamid.get(m.responde_a_wamid) : undefined
+    const texto = m.responde_a_wamid ? `${marcaDeCitacao(citada)} ${base}` : base
 
     // Com anexo o conteúdo é lista de blocos e não concatena como texto.
     if (bloco) {
