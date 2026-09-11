@@ -368,6 +368,22 @@ type PedidoContexto = {
    */
   falta_para_liberar: string[]
   /**
+   * O que JÁ temos deste cliente, dito com todas as letras.
+   *
+   * POR QUE O NEGATIVO NÃO BASTOU — 10/09/2026
+   * O contexto só trazia `falta_para_liberar` e o prompt dizia "o que não está
+   * na lista, você já tem". Isso exige uma inferência — e inferência falha,
+   * como já falhou com a saudação. O Wesley abriu um pedido novo pelo WhatsApp
+   * que HERDOU e-mail e CEP do pedido dele de ontem, e mesmo assim ouviu "pra
+   * mandar o resumo, preciso de um e-mail" e depois "só falta o CEP".
+   *
+   * Ele deu os dados no site ontem, deu de novo hoje. Do lado dele, a empresa
+   * não olha o que ele já preencheu — a reclamação mais repetida do dia.
+   *
+   * Aqui vai o positivo, com o VALOR: não dá pra pedir o que se está lendo.
+   */
+  ja_temos: string[]
+  /**
    * Modelos que vão pro cliente SEM imagem nenhuma — e já dá pra gerar.
    *
    * POR QUE ISTO ENTRA NO CONTEXTO — 10/09/2026
@@ -613,8 +629,8 @@ async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | 
  * paga o preço respondendo duas vezes. A view de etapas não traz cep, numero
  * nem cpf_cnpj, então lê direto da tabela.
  */
-async function dadosDeEntrega(pedidoIds: string[]): Promise<Map<string, string[]>> {
-  const mapa = new Map<string, string[]>()
+async function dadosDeEntrega(pedidoIds: string[]): Promise<Map<string, { falta: string[]; temos: string[] }>> {
+  const mapa = new Map<string, { falta: string[]; temos: string[] }>()
   if (pedidoIds.length === 0) return mapa
 
   const { data } = await supabaseAdmin
@@ -632,7 +648,19 @@ async function dadosDeEntrega(pedidoIds: string[]): Promise<Map<string, string[]
       vazio(p.numero) && 'número da casa',
       !(p.cpf_cnpj ?? '').replace(/\D/g, '') && 'CNPJ (ou CPF)',
     ].filter(Boolean) as string[]
-    mapa.set(p.id as string, falta)
+
+    // O POSITIVO VAI COM O VALOR JUNTO. "e-mail: ok" ainda deixa margem pra ele
+    // conferir ("seu e-mail é esse mesmo?"), que é a mesma pergunta com outra
+    // roupa. Lendo o endereço escrito, não há o que perguntar.
+    const temos = [
+      !vazio(p.nome) && `nome: ${p.nome}`,
+      !vazio(p.email) && `e-mail: ${p.email}`,
+      !!(p.cep ?? '').replace(/\D/g, '') && `CEP: ${p.cep}`,
+      !vazio(p.numero) && `número: ${p.numero}`,
+      !!(p.cpf_cnpj ?? '').replace(/\D/g, '') && `CNPJ/CPF: ${p.cpf_cnpj}`,
+    ].filter(Boolean) as string[]
+
+    mapa.set(p.id as string, { falta, temos })
   }
   return mapa
 }
@@ -715,7 +743,8 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
       orcamento: p.orcamento_definido_em && p.valor_centavos ? `${reais(p.valor_centavos)} (definido há ${dias(p.orcamento_definido_em)} dias)` : null,
       pagamento: p.pagamento_status ?? null,
       fornecedor: fornecedores.get(p.id) ?? null,
-      falta_para_liberar: dadosCliente.get(p.id) ?? [],
+      falta_para_liberar: dadosCliente.get(p.id)?.falta ?? [],
+      ja_temos: dadosCliente.get(p.id)?.temos ?? [],
       // Só faz sentido perseguir imagem em pedido que ainda vai pro cliente.
       // Pedido pago/produzindo já foi aprovado como está; mexer nele agora só
       // criaria diferença entre o que a confecção recebeu e o que está na tela.
@@ -2136,7 +2165,7 @@ Nunca invente prazo de produção nem diga que "dá pra fazer em X dias": quem d
 
 PEDIDO COM PEÇAS PRONTAS NÃO FICA PARADO. Cada pedido no contexto traz "falta_para_liberar". Se a lista estiver VAZIA, o pedido pode ir pras confecções: mande o resumo, confirme com ele e libere. Se tiver itens, peça o PRIMEIRO da lista — um por mensagem — e siga até zerar.
 
-O QUE NÃO ESTÁ NA LISTA, VOCÊ JÁ TEM. Não pergunte, não confirme, não mencione. A Kelly deu o e-mail dela no cadastro e mesmo assim ouviu "pra qual e-mail mando o resumo?" — do lado dela, isso é a empresa não olhar o que ela já preencheu. Se "falta_para_liberar" não cita e-mail, o e-mail está lá.
+"JA_TEMOS" É PRA VOCÊ LER, NÃO PRA CONFERIR. Cada pedido traz também "ja_temos", com os dados que já estão gravados e o VALOR de cada um. Não pergunte, não confirme, não mencione nenhum deles — nem em versão educada ("seu e-mail ainda é esse?", "confirma o CEP pra mim?"): conferir é perguntar de novo com outra roupa. O Wesley deu e-mail e CEP no site ontem, abriu um pedido pelo WhatsApp hoje e ouviu as duas perguntas outra vez; a Kelly ouviu "pra qual e-mail mando o resumo?" com o e-mail dela na tela. Do lado deles é a mesma coisa: a empresa não olha o que já foi preenchido. Se o dado está em "ja_temos", use-o e siga.
 
 QUANDO ELE DIZ QUE NÃO É AGORA, GUARDE O PEDIDO E CALE OS LEMBRETES. "Vou ver com meu sócio", "to pesquisando ainda", "só mês que vem", "me chama depois" — chame pausar_lembretes_do_pedido com o prazo que ele deu. O pedido continua inteiro, esperando por ele. Se você não chamar, ele recebe cobrança automática em 24h e de novo em 48h de um pedido que ele acabou de dizer que vai demorar, e do lado dele quem está sendo chato é a Confeccione. Isso não vale pra quem só está devagar respondendo — é pra quem DIZ que vai levar tempo.
 
@@ -2507,7 +2536,18 @@ async function rodarLuigi(
     if (resposta.stop_reason !== 'tool_use' || usos.length === 0) {
       if (!cobrouPromessa && parcial && PROMESSA_DE_ACAO.test(parcial)) {
         cobrouPromessa = true
-        historico.push({ role: 'assistant', content: resposta.content })
+        // SÓ O TEXTO, NUNCA `resposta.content` — 10/09/2026.
+        //
+        // A condição acima é um OU: entra aqui também quando `stop_reason` é
+        // `max_tokens` E a resposta já traz blocos `tool_use` (truncada no meio
+        // das chamadas). Empurrar `resposta.content` inteiro grava um assistant
+        // com tool_use seguido de um texto do usuário — sem tool_result — e na
+        // rodada seguinte a API recusa o turno com "tool_use ids were found
+        // without tool_result blocks". Foi assim que a conversa do Wesley
+        // quebrou às 21:41 com 5 ids pendurados e virou "erro interno".
+        //
+        // O que essa nota precisa é do que ele PROMETEU, que está no texto.
+        historico.push({ role: 'assistant', content: parcial })
         historico.push({
           role: 'user',
           content:
