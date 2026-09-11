@@ -1,6 +1,16 @@
 // app/lib/admin-saude.ts
 // ============================================================================
-// Funções puras pro semáforo de saúde do dashboard /admin.
+// Formatadores de duração do painel /admin.
+//
+// O SEMÁFORO SAIU DAQUI — 11/09/2026. `calcularStatusSemaforo`,
+// `mensagemSemaforo` e seus tipos mediam `pedidos_orfaos`, `ofertas` e
+// `pedidos` — a era morta desde junho. Quatro das cinco métricas não existem
+// na era viva, e a principal (oferta vencida sem resposta) não tem como ser
+// medida: `expira_em` é NULL em 100% de `ofertas_pedido_assistente`. Ficaria
+// verde medindo um sistema parado, e verde falso manda não olhar.
+//
+// O que sobrou aqui são os formatadores, usados por /admin/pedidos e pelo
+// modal de órfãos. O topo do painel virou app/lib/admin-topo.ts.
 //
 // SEM I/O — nada de Supabase, nada de Date.now() interno. Tudo recebe dados
 // via parâmetro. Razões:
@@ -13,48 +23,6 @@
 // e invoca essas funções com os números prontos + agoraMs injetado.
 // ============================================================================
 
-export type SemaforoStatus = 'verde' | 'amarelo' | 'vermelho'
-
-export type SemaforoMetricas = {
-  /** Minutos desde a última execução de detectar-gaps. null se cron_execucoes
-   *  estiver vazia (nunca executou). Vermelho automático nesse caso. */
-  minutosDesdeUltimoCron: number | null
-
-  /** Quantos órfãos foram registrados na última hora (pedidos_orfaos.criado_em). */
-  orfaosNovosNestaHora: number
-
-  /** Ofertas com status='enviada' e enviada_em < agora - 24h. */
-  ofertasEnviadasMais24h: number
-
-  /** Ofertas com status='enviada' e enviada_em < agora - 48h. */
-  ofertasEnviadasMais48h: number
-
-  /** Pedidos sem oferta nenhuma há mais de 8h (aguardando captação manual,
-   *  já fora da janela de retomar via buscar_apos). */
-  pedidosSemOfertaMais8h: number
-}
-
-/** Calcula status do semáforo a partir das métricas.
- *  Mostra o PIOR estado: qualquer condição de 🔴 → 🔴; senão qualquer 🟡 → 🟡;
- *  senão 🟢. Regras combinadas na mini-sprint admin-overview. */
-export function calcularStatusSemaforo(m: SemaforoMetricas): SemaforoStatus {
-  // 🔴 — sistema travado ou nunca executou
-  if (m.minutosDesdeUltimoCron === null || m.minutosDesdeUltimoCron > 180) {
-    return 'vermelho'
-  }
-  if (m.pedidosSemOfertaMais8h >= 3) return 'vermelho'
-  if (m.ofertasEnviadasMais48h >= 5) return 'vermelho'
-
-  // 🟡 — atenção
-  if (m.minutosDesdeUltimoCron > 90) return 'amarelo'
-  if (m.orfaosNovosNestaHora >= 1) return 'amarelo'
-  if (m.ofertasEnviadasMais24h >= 1) return 'amarelo'
-
-  return 'verde'
-}
-
-/** Formata duração relativa: "há 5 min", "há 2h", "há 3 dias", "agora".
- *  agoraMs injetado (sem Date.now() interno) pra determinismo. */
 export function formatarDuracaoRelativa(
   msTimestamp: number,
   agoraMs: number
@@ -107,46 +75,4 @@ export function formatarIdadeHoras(horas: number): string {
   const dias = Math.floor(horas / 24)
   const restoHoras = Math.floor(horas % 24)
   return restoHoras > 0 ? `${dias}d ${restoHoras}h` : `${dias}d`
-}
-
-/** Frase complementar abaixo do título do semáforo.
- *  ultimaExecucaoMs nullable: null = cron_execucoes vazia. */
-export function mensagemSemaforo(
-  status: SemaforoStatus,
-  m: SemaforoMetricas,
-  agoraMs: number,
-  ultimaExecucaoMs: number | null
-): string {
-  // Caso edge: cron nunca executou
-  if (m.minutosDesdeUltimoCron === null || ultimaExecucaoMs === null) {
-    return 'Última detecção: nunca · Cron pode estar parado. Aguarde a próxima hora cheia ou rode o cron manualmente.'
-  }
-
-  const relativo = formatarDuracaoRelativa(ultimaExecucaoMs, agoraMs)
-  const partes: string[] = [`Última detecção ${relativo}`]
-
-  partes.push(
-    m.orfaosNovosNestaHora === 0
-      ? '0 pedidos novos sem fornecedor nesta hora'
-      : `${m.orfaosNovosNestaHora} ${m.orfaosNovosNestaHora === 1 ? 'pedido novo sem fornecedor' : 'pedidos novos sem fornecedor'} nesta hora`
-  )
-
-  // Avisos contextuais — só aparecem se houver problema relevante
-  if (m.ofertasEnviadasMais48h >= 5) {
-    partes.push(
-      `⚠️ ${m.ofertasEnviadasMais48h} ofertas enviadas há mais de 48h`
-    )
-  } else if (m.ofertasEnviadasMais24h >= 1) {
-    partes.push(
-      `${m.ofertasEnviadasMais24h} ${m.ofertasEnviadasMais24h === 1 ? 'oferta enviada' : 'ofertas enviadas'} há mais de 24h`
-    )
-  }
-
-  if (m.pedidosSemOfertaMais8h >= 3) {
-    partes.push(
-      `⚠️ ${m.pedidosSemOfertaMais8h} pedidos sem oferta há mais de 8h`
-    )
-  }
-
-  return partes.join(' · ')
 }
