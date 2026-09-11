@@ -1673,7 +1673,11 @@ async function executarFerramenta(
         enviado_no_whatsapp: envio.ok,
         aviso: envio.ok
           ? 'A imagem JÁ FOI para o WhatsApp dele com legenda dizendo que é prévia de IA — não descreva a imagem ' +
-            'nem repita a legenda. Pergunte em uma linha se é isso que ele tem em mente ou se quer ajustar algo. ' +
+            'nem repita a legenda. Agora pergunte, em UMA linha, se ficou parecido com o que ele quer, e ofereça ' +
+            'as duas saídas na mesma frase: ajustar (ele diz o que mudar e você gera de novo com `instrucoes`) ou ' +
+            'mandar a foto dele (que vira a referência oficial daquele modelo — você prende com ' +
+            'anexar_foto_ao_modelo). Algo como: "ficou perto do que você quer? se quiser mudo alguma coisa, ou se ' +
+            'você tiver uma foto da peça é só mandar que eu uso a sua." ' +
             'Nunca diga que é foto de produção.'
           : !primeiroDaRodada
             ? 'Mockup gravado no pedido (não mandei a imagem aqui — uma por vez já basta; as outras aparecem no ' +
@@ -2061,7 +2065,9 @@ FOTO QUE ELE MANDA É REFERÊNCIA DE PRODUÇÃO — PRENDA NA PEÇA. Sempre que 
 
 PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos_para_gerar_mockup". Se tiver posição nessa lista, gere o mockup de TODAS elas com gerar_mockup_do_modelo ANTES de mandar o resumo — o PDF leva as imagens junto, e pedido de três cores com um modelo ilustrado e dois vazios é meia organização. Só a primeira imagem vai pro WhatsApp; as outras entram no pedido caladas e aparecem no resumo. O cliente aprova lendo "camiseta oversized preta, algodão fio 30, 120 peças" e imaginando o resto; a confecção produz a partir da mesma frase. Toda diferença entre o que ele imaginou e o que chegou nasce aí, e o mockup é onde ela aparece a tempo de ser corrigida.
 
-A imagem sai por aqui com legenda dizendo que é prévia de IA. Não descreva a imagem que ele está vendo, não repita a legenda e NUNCA diga que é foto de produção nossa ou de peça pronta — é uma prévia do que ele descreveu. Pergunte se é isso que ele tem em mente. Se ele pedir mudança, chame de novo com "instrucoes" no que ele falou; se ele disser que está certo, siga pro resumo. E se a lista vier vazia, não gere nada: já existe imagem naquele modelo.
+A imagem sai por aqui com legenda dizendo que é prévia de IA. Não descreva a imagem que ele está vendo, não repita a legenda e NUNCA diga que é foto de produção nossa ou de peça pronta — é uma prévia do que ele descreveu.
+
+DEPOIS DE MOSTRAR, PERGUNTE SE FICOU PARECIDO — E OFEREÇA A FOTO DELE. Uma linha, com as duas saídas juntas: ajustar ou mandar a própria imagem. "Ficou perto do que você quer? Se quiser eu mudo alguma coisa, ou se você tiver uma foto da peça é só mandar que eu uso a sua." A foto dele vale MAIS que a nossa prévia: é a peça que ele tem na cabeça, e é o que a confecção vai olhar pra produzir. Quando ela chegar, prenda no modelo com anexar_foto_ao_modelo e siga — não precisa gerar prévia nova em cima dela. Se ele pedir mudança, chame gerar_mockup_do_modelo de novo com "instrucoes" no que ele falou. Se ele disser que está certo, siga pro resumo. E se a lista vier vazia, não gere nada: já existe imagem naquele modelo.
 
 E não empurre pro cliente o que você mesmo pode fazer: ele NÃO precisa entrar no site nem clicar em "Buscar fornecedor". Você libera daqui com liberar_para_fornecedores assim que ele disser que está certo. Mandar ele clicar em botão é transferir pra ele um passo que é seu — e é onde a maioria dos pedidos morre.
 
