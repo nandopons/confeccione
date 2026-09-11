@@ -24,6 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
+import { ehFornecedorClassificado } from '@/app/lib/classificacao-contato'
 
 export const dynamic = 'force-dynamic'
 
@@ -140,7 +141,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     contato.fornecedor_id
       ? supabaseAdmin
           .from('leads_fornecedores')
-          .select('id, nome, cidade, estado, status, aprovacao_status, tipos_produto, plano')
+          .select('id, nome, cidade, estado, status, aprovacao_status, tipos_produto, plano, reclassificado_em, reclassificado_motivo')
           .eq('id', contato.fornecedor_id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
@@ -213,6 +214,18 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     contato: { id: contato.id, wa_id: contato.wa_id, nome: contato.nome },
     cliente: clienteRes.data ?? null,
     fornecedor: fornecedorRes.data ?? null,
+    // A IDENTIDADE VIGENTE, CALCULADA AQUI — 11/09/2026.
+    //
+    // O painel liderava pelo card FORNECEDOR só porque o lead existia, mesmo
+    // depois de a pessoa ter sido reclassificada como cliente. A tela estava
+    // honesta (mostrava a única ficha que havia) e mesmo assim enganava, porque
+    // a ORDEM diz o que é a pessoa. Quem decide é a mesma função do Luigi e do
+    // selo da lista; a tela só obedece.
+    ehFornecedor: ehFornecedorClassificado(
+      contato.fornecedor_id,
+      (fornecedorRes.data as { aprovacao_status?: string | null } | null)?.aprovacao_status,
+      (fornecedorRes.data as { reclassificado_em?: string | null } | null)?.reclassificado_em,
+    ),
     // A ficha vale mesmo sem conta: sai dos pedidos, que é onde o dado está.
     dadosCliente: pedidos.length > 0 ? fichaDoCliente(pedidos) : null,
     pedidosVigentes: vigentes,

@@ -103,7 +103,9 @@ type DadosCliente = {
 type Contexto = {
   contato: { id: string; wa_id: string; nome: string | null }
   cliente: { id: string; nome: string | null; email: string | null; cidade: string | null; uf: string | null; plano: string | null; criado_em: string | null } | null
-  fornecedor: { id: string; nome: string | null; cidade: string | null; estado: string | null; status: string | null; aprovacao_status: string | null; tipos_produto: string[] | string | null; plano: string | null } | null
+  fornecedor: { id: string; nome: string | null; cidade: string | null; estado: string | null; status: string | null; aprovacao_status: string | null; tipos_produto: string[] | string | null; plano: string | null; reclassificado_em: string | null; reclassificado_motivo: string | null } | null
+  /** Identidade VIGENTE, decidida pela rota com a mesma regra do Luigi. */
+  ehFornecedor: boolean
   dadosCliente: DadosCliente | null
   pedidosVigentes: PedidoResumo[]
   pedidosAnteriores: PedidoResumo[]
@@ -487,7 +489,7 @@ function PainelContexto({ ctx, conversaId, onCorrigido }: { ctx: Contexto | null
             </p>
           </div>
         )}
-        {ctx.fornecedor && (
+        {ctx.fornecedor && ctx.ehFornecedor && (
           <div className="rounded-xl bg-violet-50/60 border border-violet-100 px-3 py-2.5 space-y-1.5">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 mb-0.5">Fornecedor</p>
@@ -526,7 +528,18 @@ function PainelContexto({ ctx, conversaId, onCorrigido }: { ctx: Contexto | null
           </div>
         )}
 
-        {!ctx.cliente && !ctx.fornecedor && !ctx.dadosCliente && (
+        {/* CADASTRO RECLASSIFICADO É HISTÓRICO, NÃO CABEÇALHO — 11/09/2026.
+            Enquanto o card de fornecedor liderava, o painel dizia "confecção"
+            sobre quem já tinha sido corrigida pra cliente e já tinha pedido
+            montado. O cadastro não some — some do topo. */}
+        {ctx.fornecedor && !ctx.ehFornecedor && (
+          <p className="mt-2 text-[11.5px] text-neutral-400">
+            Já se cadastrou como confecção — reclassificado{ctx.fornecedor.reclassificado_em ? ` em ${dataLegivel(ctx.fornecedor.reclassificado_em)}` : ''}
+            {ctx.fornecedor.reclassificado_motivo ? `: ${ctx.fornecedor.reclassificado_motivo}` : ''}
+          </p>
+        )}
+
+        {!ctx.cliente && !ctx.dadosCliente && !(ctx.fornecedor && ctx.ehFornecedor) && (
           <p className="text-[12.5px] text-neutral-500">
             Sem cadastro vinculado — contato novo, só do WhatsApp.
           </p>
