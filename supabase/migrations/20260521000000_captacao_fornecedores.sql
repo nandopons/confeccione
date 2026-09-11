@@ -18,13 +18,8 @@
 -- 11/09/2026. O `if not exists` em tudo torna este arquivo no-op contra a base
 -- de produção; ele serve pra base nova e pra deixar a forma registrada.
 --
--- O QUE NÃO FOI POSSÍVEL LER pelo PostgREST, e portanto NÃO está aqui:
--- índices e índices únicos. O código em app/api/admin/captacao/route.ts trata
--- erro de insert como "provavelmente e-mail duplicado (índice único)", o que
--- sugere um unique em `email` — mas sugerir não é ler, e inventar constraint
--- que governa dado de produção é pior que omitir. Confirmar com:
---   select indexdef from pg_indexes where tablename = 'captacao_fornecedores';
--- e completar este arquivo.
+-- ÍNDICES: o PostgREST não os expõe, então vieram do Fernando lendo
+-- `pg_indexes` em 11/09/2026 (ver o bloco no fim do arquivo).
 -- ============================================================================
 
 create table if not exists public.captacao_fornecedores (
@@ -61,3 +56,28 @@ comment on table public.captacao_fornecedores is
   'Confecção abordada pela captação: manual (admin), puxada por pedido (agente) ou por captador.';
 
 alter table public.captacao_fornecedores enable row level security;
+
+-- ─── Índices ────────────────────────────────────────────────────────────────
+
+-- Deduplicação de contato, case-insensitive: é este índice que faz o insert da
+-- rota /api/admin/captacao falhar quando o e-mail repete, e é por isso que lá o
+-- erro é tratado como "provavelmente e-mail duplicado". Parcial porque candidato
+-- sem e-mail (só WhatsApp) é comum e não deve colidir com os outros sem e-mail.
+create unique index if not exists idx_captacao_email_unico
+  on public.captacao_fornecedores (lower(email))
+  where email is not null;
+
+-- A fila da cadência de follow-up.
+--
+-- ATENÇÃO — este índice é parcial em `status = 'ativo'`, e esse WHERE é uma
+-- afirmação sobre o domínio: "ativo é o único estado que entra em fila". A
+-- afirmação envelheceu em 10/09/2026, quando o banco de reserva passou a querer
+-- enfileirar `status = 'sugerido'` — e é a MESMA raiz que fez o 'sugerido'
+-- nascer ilegal no check constraint. Ver 20260911160000_captacao_status_sugerido.sql.
+--
+-- A definição abaixo é a que existe em produção hoje, registrada aqui como
+-- histórico; a discussão sobre trocá-la por um índice sem WHERE está no mesmo
+-- arquivo da migration de 11/09.
+create index if not exists idx_captacao_fila
+  on public.captacao_fornecedores (proximo_envio_em)
+  where status = 'ativo';
