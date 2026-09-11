@@ -412,6 +412,15 @@ type Contexto = {
    * gerar parece sempre útil — e o que segura efeito de ferramenta é código.
    */
   mockupsNestaRodada: number
+  /**
+   * A geração de imagem falhou por indisponibilidade nesta rodada.
+   *
+   * Sem isto, a trava que exige mockup antes do resumo vira deadlock quando o
+   * provedor está fora: o Luigi tenta gerar, não consegue, tenta mandar o
+   * resumo, é barrado, tenta gerar de novo. O pedido pararia por causa de uma
+   * peça nossa fora do ar — e a imagem é desejável, não obrigatória.
+   */
+  mockupIndisponivel: boolean
   /** O que a confecção JÁ nos deu. Null quando não é fornecedor. */
   cadastroFornecedor: CadastroFornecedor | null
 }
@@ -725,7 +734,25 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
     pedidos: lista,
     pedidoEmFoco: abertos[0] ?? null,
     mockupsNestaRodada: 0,
+    mockupIndisponivel: false,
   }
+}
+
+/**
+ * Relê do banco quais modelos deste pedido AINDA não têm imagem.
+ *
+ * O contexto é uma foto do começo da rodada: se o Luigi acabou de gerar dois
+ * mockups, `modelos_para_gerar_mockup` de lá está desatualizado. Quem decide se
+ * o resumo pode sair precisa do estado de AGORA.
+ */
+async function faltamMockups(pedidoId: string): Promise<number[]> {
+  const { data } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('linhas, mockups')
+    .eq('id', pedidoId)
+    .maybeSingle<{ linhas: unknown; mockups: MapaMockups | null }>()
+  if (!data) return []
+  return modelosParaGerarMockup(data.linhas, data.mockups && typeof data.mockups === 'object' ? data.mockups : {})
 }
 
 // ─── Ferramentas ────────────────────────────────────────────────────────────
@@ -1627,6 +1654,8 @@ async function executarFerramenta(
 
       const r = await gerarMockupDoModelo({ pedidoId: p.id, index: posicao - 1, instrucoes })
       if (!r.ok && r.tipo === 'indisponivel') {
+        // Libera a trava do resumo: sem provedor, imagem deixa de ser exigência.
+        ctx.mockupIndisponivel = true
         // Provedor sem crédito não é assunto do cliente: seguir o pedido sem
         // imagem é pior que ter imagem, e muito melhor que explicar a ele que
         // uma peça interna nossa está fora do ar.
@@ -1689,6 +1718,27 @@ async function executarFerramenta(
     case 'enviar_resumo_pedido': {
       const p = await acharNoContexto(ctx, str(entrada.pedido))
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+
+      // O PDF SAI DEPOIS DAS IMAGENS, E QUEM GARANTE ISSO É O CÓDIGO — 10/09/2026.
+      //
+      // No pedido do Dan (600 peças, beca + estola) o Luigi gerou o mockup do
+      // Modelo 1, mandou o PDF e SÓ ENTÃO gerou o do Modelo 2. O resumo que o
+      // cliente recebeu pra aprovar tinha um modelo ilustrado e outro vazio, e
+      // é esse PDF que a confecção vai olhar pra produzir.
+      //
+      // A ordem estava escrita no prompt e não se sustentou — como toda ordem
+      // que depende do modelo lembrar dela no meio de uma sequência. Aqui a
+      // ferramenta recusa até o pedido estar inteiro.
+      const pendentes = await faltamMockups(p.id)
+      if (pendentes.length > 0 && !ctx.mockupIndisponivel) {
+        throw new Error(
+          `ainda falta imagem no(s) modelo(s) ${pendentes.join(', ')} deste pedido. ` +
+            'Gere com gerar_mockup_do_modelo ANTES de mandar o resumo — o PDF leva as imagens junto, e resumo com ' +
+            'modelo vazio é o que a confecção vai usar pra produzir. Só a primeira imagem vai pro WhatsApp; as ' +
+            'outras entram caladas. Depois de gerar todas, chame esta ferramenta de novo.'
+        )
+      }
+
       const r = await enviarResumoParaCliente(p.id)
       if (!r.ok) throw new Error(r.erro ?? 'não foi possível enviar o resumo')
       // Já enviado não é sucesso silencioso: se o modelo achar que mandou, ele
