@@ -730,17 +730,36 @@ export type ResultadoAbordagem = { id: string; email: boolean | null; whatsapp: 
  */
 export async function abordarCandidato(c: Candidato, perfil: PerfilBusca, enviar: boolean, pdf: { bytes: Uint8Array; nomeArquivo: string } | null): Promise<ResultadoAbordagem> {
   const agora = new Date().toISOString()
+  // O NÚMERO É UM SÓ — 11/09/2026.
+  //
+  // A coluna `whatsapp` sempre gravou `c.whatsapp ?? c.telefone`, mas a flag
+  // `canal_whatsapp` olhava só `c.whatsapp`. Candidato que a busca devolvia com
+  // telefone e sem whatsapp ficava com número no banco e flag `false` — e como
+  // o envio usava o objeto em memória (onde `c.whatsapp` é nulo), não saía nada
+  // por canal nenhum. A linha virava `status='erro'` com `ultimo_erro` VAZIO,
+  // porque nenhuma tentativa chegou a acontecer pra gerar mensagem de erro.
+  //
+  // Pior: `reabordarPendentes` anula o whatsapp de quem tem `canal_whatsapp`
+  // falso, então essas linhas nunca mais eram tentadas. Cinco confecções reais,
+  // com telefone no banco, paradas desde 08/09 — achadas e pagas em token, e
+  // invisíveis pro sistema que as procurou.
+  //
+  // Agora o número resolvido é calculado UMA vez e usado nos três lugares:
+  // coluna, flag e envio. Se o número não for de WhatsApp, o envio falha com
+  // erro de verdade e o `reabordarPendentes` tenta de novo até MAX_TENTATIVAS —
+  // que é o comportamento certo pra um palpite, e é visível.
+  const numero = c.whatsapp ?? c.telefone
   const { data: linha, error } = await supabaseAdmin
     .from('captacao_fornecedores')
     .insert({
       nome: c.nome,
       email: c.email,
-      whatsapp: c.whatsapp ?? c.telefone,
+      whatsapp: numero,
       segmento: perfil.segmento,
       etapa: 0,
       status: enviar ? 'ativo' : 'sugerido',
       canal_email: Boolean(c.email),
-      canal_whatsapp: Boolean(c.whatsapp),
+      canal_whatsapp: Boolean(numero),
       origem: 'pedido',
       pedido_id: perfil.pedidoId,
       cidade: c.cidade,
@@ -757,7 +776,9 @@ export async function abordarCandidato(c: Candidato, perfil: PerfilBusca, enviar
     .single<{ id: string }>()
   if (error || !linha) return { id: '', email: null, whatsapp: null, erro: error?.message ?? 'não gravou' }
   if (!enviar) return { id: linha.id, email: null, whatsapp: null, erro: null }
-  return await enviarSondagem(linha.id, c, perfil, pdf)
+  // Manda o que FOI GRAVADO, não o objeto cru da busca — era essa diferença que
+  // fazia o candidato só-telefone não receber nada.
+  return await enviarSondagem(linha.id, { nome: c.nome, email: c.email, whatsapp: numero }, perfil, pdf)
 }
 
 /** Manda (ou remanda) a sondagem de um candidato já gravado. */
@@ -791,6 +812,11 @@ export async function enviarSondagem(id: string, c: { nome: string | null; email
       else erros.push(`whatsapp: ${r.erro}`)
     }
   }
+
+  // Sem nenhum canal não é "tentou e falhou", é "não havia o que tentar" — e
+  // isso precisa virar texto, senão a linha fica `erro` com motivo em branco e
+  // ninguém descobre por quê (foi como as 5 de 08 e 10/09 passaram despercebidas).
+  if (!c.email && !c.whatsapp) erros.push('candidato sem e-mail e sem número utilizável')
 
   const enviouAlgo = email === true || whatsapp === true
   // Cadência antiga (follow-ups por segmento, só e-mail): +5 dias.
