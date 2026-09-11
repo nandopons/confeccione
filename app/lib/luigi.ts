@@ -1605,14 +1605,6 @@ async function executarFerramenta(
       if (!posicao) throw new Error('diga a posição do modelo (1 = Modelo 1)')
       const instrucoes = (str(entrada.instrucoes) ?? '').trim()
 
-      // Um por rodada: o cliente vê, reage, e só então vem o próximo.
-      if (ctx.mockupsNestaRodada >= 1) {
-        throw new Error(
-          'você já mandou um mockup nesta resposta. Um por vez: mostre esse, espere o cliente reagir e gere o ' +
-            'próximo quando ele responder. Não gere os outros modelos agora.'
-        )
-      }
-
       // A TRAVA DE REPETIÇÃO É CÓDIGO, NÃO REGRA DE PROMPT — 10/09/2026.
       //
       // Efeito de ferramenta se trava dentro da ferramenta. De dentro da
@@ -1644,20 +1636,34 @@ async function executarFerramenta(
         )
       }
       if (!r.ok) throw new Error(r.erro)
+
+      // GERAR TODOS, MANDAR UM — 10/09/2026.
+      //
+      // A primeira versão recusava o segundo mockup da mesma rodada, pra não
+      // despejar seis imagens seguidas no WhatsApp. Só que o mockup também
+      // alimenta o PDF do resumo: com a recusa, o pedido de 3 cores da Kelly
+      // sairia com UM modelo ilustrado e dois sem nada — e "organizar o pedido
+      // pro cliente" vira meia organização.
+      //
+      // Gerar é barato pro cliente (ele não vê) e vale pro PDF e pra confecção.
+      // Mandar é que é intrusivo. Então: gera sempre, manda só o primeiro da
+      // rodada e deixa os outros aparecerem juntos no resumo.
+      const primeiroDaRodada = ctx.mockupsNestaRodada === 0
       ctx.mockupsNestaRodada += 1
 
       const imagem = r.ia[r.ia.length - 1]
       const legenda = `Modelo ${posicao} — ${r.modelo}. Prévia gerada por IA a partir do que você descreveu, pra conferir a ideia.`
-      const envio = imagem
-        ? await enviarImagemDoPedido({
-            waId: ctx.contato.telefone,
-            nome: ctx.contato.nome,
-            pedidoId: p.id,
-            ref: imagem.url,
-            legenda,
-            autor: 'luigi',
-          })
-        : { ok: false as const, erro: 'mockup gerado sem imagem' }
+      const envio =
+        primeiroDaRodada && imagem
+          ? await enviarImagemDoPedido({
+              waId: ctx.contato.telefone,
+              nome: ctx.contato.nome,
+              pedidoId: p.id,
+              ref: imagem.url,
+              legenda,
+              autor: 'luigi',
+            })
+          : { ok: false as const, erro: primeiroDaRodada ? 'mockup gerado sem imagem' : 'não enviado de propósito' }
 
       return {
         ok: true,
@@ -1669,8 +1675,11 @@ async function executarFerramenta(
           ? 'A imagem JÁ FOI para o WhatsApp dele com legenda dizendo que é prévia de IA — não descreva a imagem ' +
             'nem repita a legenda. Pergunte em uma linha se é isso que ele tem em mente ou se quer ajustar algo. ' +
             'Nunca diga que é foto de produção.'
-          : 'O mockup entrou no pedido e vai aparecer no resumo, mas NÃO consegui mandar a imagem aqui. ' +
-            'Não avise o cliente de falha nenhuma: siga a conversa e mande o resumo normalmente.',
+          : !primeiroDaRodada
+            ? 'Mockup gravado no pedido (não mandei a imagem aqui — uma por vez já basta; as outras aparecem no ' +
+              'resumo em PDF). Siga gerando os modelos que faltam e depois mande o resumo.'
+            : 'O mockup entrou no pedido e vai aparecer no resumo, mas NÃO consegui mandar a imagem aqui. ' +
+              'Não avise o cliente de falha nenhuma: siga a conversa e mande o resumo normalmente.',
       }
     }
     case 'enviar_resumo_pedido': {
@@ -2050,7 +2059,7 @@ QUANDO ELE DIZ QUE NÃO É AGORA, GUARDE O PEDIDO E CALE OS LEMBRETES. "Vou ver 
 
 FOTO QUE ELE MANDA É REFERÊNCIA DE PRODUÇÃO — PRENDA NA PEÇA. Sempre que o cliente mandar imagem de peça, arte, estampa ou print, chame anexar_foto_ao_modelo na hora. Você vê a imagem, então elogie ou comente o que viu em uma linha — mas o que faz diferença é ela ficar grudada no modelo: é assim que quem vai costurar enxerga a referência do lado da peça certa. Foto que fica só na conversa não chega em ninguém. Se o pedido tem mais de um modelo e não está claro de qual ela é, pergunte antes ("essa é da preta ou da branca?"): foto na peça errada faz produzir errado.
 
-PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos_para_gerar_mockup". Se tiver posição nessa lista, gere o mockup com gerar_mockup_do_modelo ANTES de mandar o resumo — um por vez, esperando ele reagir a cada um. O cliente aprova lendo "camiseta oversized preta, algodão fio 30, 120 peças" e imaginando o resto; a confecção produz a partir da mesma frase. Toda diferença entre o que ele imaginou e o que chegou nasce aí, e o mockup é onde ela aparece a tempo de ser corrigida.
+PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos_para_gerar_mockup". Se tiver posição nessa lista, gere o mockup de TODAS elas com gerar_mockup_do_modelo ANTES de mandar o resumo — o PDF leva as imagens junto, e pedido de três cores com um modelo ilustrado e dois vazios é meia organização. Só a primeira imagem vai pro WhatsApp; as outras entram no pedido caladas e aparecem no resumo. O cliente aprova lendo "camiseta oversized preta, algodão fio 30, 120 peças" e imaginando o resto; a confecção produz a partir da mesma frase. Toda diferença entre o que ele imaginou e o que chegou nasce aí, e o mockup é onde ela aparece a tempo de ser corrigida.
 
 A imagem sai por aqui com legenda dizendo que é prévia de IA. Não descreva a imagem que ele está vendo, não repita a legenda e NUNCA diga que é foto de produção nossa ou de peça pronta — é uma prévia do que ele descreveu. Pergunte se é isso que ele tem em mente. Se ele pedir mudança, chame de novo com "instrucoes" no que ele falou; se ele disser que está certo, siga pro resumo. E se a lista vier vazia, não gere nada: já existe imagem naquele modelo.
 
