@@ -29,6 +29,7 @@
 import { supabaseAdmin } from './supabase-server'
 import { enviarTexto, normalizarWaId } from './whatsapp-cloud'
 import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
+import { humanoConduzindoPorTelefone } from './luigi'
 
 /** Hora local de Recife. Inline pra não arrastar o módulo de marketing junto. */
 function horaEmRecife(agora = new Date()): number {
@@ -173,6 +174,17 @@ export async function rodarCutucadaPosResumo(): Promise<ResultadoCutucada> {
       // Texto livre só existe dentro da janela. Fechada, não insistimos por
       // template: quem não respondeu ao resumo não precisa de marketing.
       if (!(await janela24hAberta(waId))) {
+        puladas++
+        continue
+      }
+
+      // GENTE FALANDO: A CUTUCADA NÃO SAI — 11/09/2026.
+      //
+      // Cutucada é o caso em que escrever por cima é mais gratuito: o cliente
+      // está conversando com o Fernando e um cron entra no meio pra perguntar
+      // se ele viu o resumo. A mesma trava da resposta, no caminho automático.
+      const conduzindo = await humanoConduzindoPorTelefone(waId)
+      if (conduzindo.conduzindo) {
         puladas++
         continue
       }

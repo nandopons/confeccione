@@ -3203,6 +3203,92 @@ export async function devolverAoLuigi(
 }
 
 /** Alguém da equipe respondeu pelo inbox: a escalada está atendida e a sugestão, superada. */
+/** Minutos de silêncio do Luigi depois de gente falar. Configurável em agentes_config. */
+const MINUTOS_APOS_HUMANO_PADRAO = 15
+
+/**
+ * GENTE ESTÁ CONDUZINDO ESTA CONVERSA AGORA?
+ *
+ * A trava do incidente de 11/09 02:27, e ela mora AQUI, não no prompt: às
+ * 02:27:13 o Fernando escreveu "Pode ser amanhã?" e 17 segundos depois o Luigi
+ * escreveu "Ligação não consigo fazer por aqui", por cima dele. Do lado da
+ * cliente, duas vozes se contradizendo no mesmo minuto — ela respondeu "Vc
+ * enrola demais" e "Só pode ser golpe". Nenhuma instrução de texto impede isso
+ * de forma confiável; o que impede é não haver caminho de envio sem passar por
+ * esta função.
+ *
+ * Vale para os DOIS caminhos: resposta a mensagem recebida e envio automático
+ * (cutucada, régua). Quem está conversando com gente não pode ser interrompido
+ * por um cron, que é o caso em que a interrupção é mais gratuita.
+ *
+ * Falha de leitura NÃO libera: sem saber se tem gente falando, o Luigi cala. O
+ * custo de calar é uma resposta atrasada; o de escrever por cima foi um cliente
+ * achando que era golpe.
+ */
+export async function humanoConduzindo(conversaId: string): Promise<{ conduzindo: boolean; faltamMin: number }> {
+  const { data, error } = await supabaseAdmin
+    .from('wa_conversas')
+    .select('humano_falou_em')
+    .eq('id', conversaId)
+    .maybeSingle<{ humano_falou_em: string | null }>()
+  if (error) {
+    console.error('[luigi] não consegui ler humano_falou_em — calando por precaução', { conversaId })
+    return { conduzindo: true, faltamMin: MINUTOS_APOS_HUMANO_PADRAO }
+  }
+  if (!data?.humano_falou_em) return { conduzindo: false, faltamMin: 0 }
+
+  const janelaMs = (await janelaAposHumanoMin()) * 60_000
+  const decorrido = Date.now() - new Date(data.humano_falou_em).getTime()
+  if (decorrido >= janelaMs) return { conduzindo: false, faltamMin: 0 }
+  return { conduzindo: true, faltamMin: Math.ceil((janelaMs - decorrido) / 60_000) }
+}
+
+/** Só a leitura do número; erro aqui cai no padrão, que não é permissivo. */
+async function janelaAposHumanoMin(): Promise<number> {
+  const { data, error } = await supabaseAdmin
+    .from('agentes_config')
+    .select('config')
+    .eq('agente', 'luigi')
+    .maybeSingle<{ config: Record<string, unknown> | null }>()
+  if (error) return MINUTOS_APOS_HUMANO_PADRAO
+  const v = data?.config?.minutos_apos_humano
+  if (typeof v !== 'number' || !Number.isFinite(v)) return MINUTOS_APOS_HUMANO_PADRAO
+  return Math.min(Math.max(Math.round(v), 0), 240)
+}
+
+
+/**
+ * Mesma trava, para quem só tem o telefone — o caminho automático (cutucada,
+ * régua) não carrega `conversaId`.
+ *
+ * Casa pelos últimos 8 dígitos por causa do nono dígito, a mesma regra do resto
+ * do repo. Se houver mais de uma conversa para o número, basta UMA com gente
+ * falando pra calar: o risco de escrever por cima não se dilui.
+ */
+export async function humanoConduzindoPorTelefone(telefone: string): Promise<{ conduzindo: boolean; faltamMin: number }> {
+  const digitos = telefone.replace(/\D/g, '').slice(-8)
+  if (digitos.length < 8) return { conduzindo: false, faltamMin: 0 }
+  const { data: contatos, error: errContatos } = await supabaseAdmin
+    .from('wa_contatos')
+    .select('id')
+    .like('wa_id', `%${digitos}`)
+  if (errContatos) return { conduzindo: true, faltamMin: MINUTOS_APOS_HUMANO_PADRAO }
+  const ids = ((contatos ?? []) as Array<{ id: string }>).map((c) => c.id)
+  if (ids.length === 0) return { conduzindo: false, faltamMin: 0 }
+
+  const { data: conversas, error } = await supabaseAdmin
+    .from('wa_conversas')
+    .select('id')
+    .in('contato_id', ids)
+  if (error) return { conduzindo: true, faltamMin: MINUTOS_APOS_HUMANO_PADRAO }
+  for (const c of (conversas ?? []) as Array<{ id: string }>) {
+    const r = await humanoConduzindo(c.id)
+    if (r.conduzindo) return r
+  }
+  return { conduzindo: false, faltamMin: 0 }
+}
+
+
 /**
  * GENTE FALOU COM O CLIENTE por esta conversa.
  *
@@ -3396,6 +3482,29 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       modo,
       mensagem: params.corpo,
       modelo: MODELO,
+    }
+
+    // GENTE FALANDO: O LUIGI NÃO ESCREVE — 11/09/2026. Ver `humanoConduzindo`.
+    // Sai ANTES de chamar o modelo: além de não escrever por cima, não gasta
+    // turno nem token numa resposta que não pode sair.
+    const conduzindo = await humanoConduzindo(params.conversaId)
+    if (conduzindo.conduzindo) {
+      await gravarLog({
+        ...base,
+        modo,
+        resposta: null,
+        pedido_id: null,
+        ferramentas: [],
+        escalado: false,
+        motivo_escalada: null,
+        status: 'descartada',
+        rodadas: 0,
+        tokens_entrada: 0,
+        tokens_saida: 0,
+        duracao_ms: Date.now() - inicio,
+        erro: `gente falou com o cliente há pouco — calado por mais ${conduzindo.faltamMin} min`,
+      })
+      return
     }
     const nome = params.nome ?? contato?.nome ?? null
 
