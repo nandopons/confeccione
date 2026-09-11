@@ -18,8 +18,14 @@
 -- 11/09/2026. O `if not exists` em tudo torna este arquivo no-op contra a base
 -- de produção; ele serve pra base nova e pra deixar a forma registrada.
 --
--- ÍNDICES: o PostgREST não os expõe, então vieram do Fernando lendo
--- `pg_indexes` em 11/09/2026 (ver o bloco no fim do arquivo).
+-- O QUE A SPEC DO PostgREST NÃO MOSTRA — e é a lição deste arquivo.
+-- Ela lista colunas, tipos, defaults e nulidade, e MAIS NADA: check constraints
+-- e índices são invisíveis nela. Reconstruir schema só com ela dá uma tabela
+-- que parece completa e não é. As duas primeiras versões deste arquivo saíram
+-- sem `chk_tem_contato` e com a chave errada em `idx_captacao_fila`, e o
+-- `if not exists` garantiria que a diferença nunca aparecesse em produção.
+-- Check constraints e índices aqui vieram do Fernando lendo `pg_constraint` e
+-- `pg_indexes` em 11/09/2026. Para qualquer outra tabela, ler as duas.
 -- ============================================================================
 
 create table if not exists public.captacao_fornecedores (
@@ -52,6 +58,16 @@ alter table public.captacao_fornecedores
   add constraint captacao_fornecedores_status_check
   check (status in ('ativo', 'convertido', 'pausado', 'esgotado', 'erro'));
 
+-- CANDIDATO SEM CANAL NENHUM NÃO ENTRA.
+--
+-- Produção tem este check desde sempre; ele não estava neste arquivo até
+-- 11/09/2026, e sem ele uma base nova aceitaria exatamente a linha que virou
+-- erro mudo esta semana: candidato gravado sem e-mail e sem whatsapp, que
+-- nenhuma sondagem alcança e nenhuma rodada reabordava.
+alter table public.captacao_fornecedores drop constraint if exists chk_tem_contato;
+alter table public.captacao_fornecedores
+  add constraint chk_tem_contato check (email is not null or whatsapp is not null);
+
 comment on table public.captacao_fornecedores is
   'Confecção abordada pela captação: manual (admin), puxada por pedido (agente) ou por captador.';
 
@@ -75,9 +91,14 @@ create unique index if not exists idx_captacao_email_unico
 -- enfileirar `status = 'sugerido'` — e é a MESMA raiz que fez o 'sugerido'
 -- nascer ilegal no check constraint. Ver 20260911160000_captacao_status_sugerido.sql.
 --
--- A definição abaixo é a que existe em produção hoje, registrada aqui como
--- histórico; a discussão sobre trocá-la por um índice sem WHERE está no mesmo
--- arquivo da migration de 11/09.
+-- PROVENIÊNCIA desta definição: veio do Fernando lendo `pg_indexes` (chave
+-- `(status, proximo_envio_em)`) somada à leitura anterior dele de que o índice
+-- é parcial em `status = 'ativo'`. A primeira versão deste arquivo escreveu
+-- `(proximo_envio_em)` — eu deduzi a chave a partir da consulta que a usa, em
+-- app/api/cron/scheduler/route.ts:286, e escrevi no comentário que era o que
+-- existia em produção. Não era: era o que eu achava que existia. O `if not
+-- exists` teria escondido a diferença em produção para sempre, e uma base nova
+-- nasceria com índice diferente do original.
 create index if not exists idx_captacao_fila
-  on public.captacao_fornecedores (proximo_envio_em)
+  on public.captacao_fornecedores (status, proximo_envio_em)
   where status = 'ativo';
