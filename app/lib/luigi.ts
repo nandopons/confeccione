@@ -111,7 +111,29 @@ const AGENTES_SAIDA = new Set(['luigi', 'mcp', 'gestao'])
 /** Fecha a resposta antes de a Vercel matar a função, com folga pro envio. */
 const ORCAMENTO_MS = 45_000
 const MAX_TOKENS_RESPOSTA = 600
-const HISTORICO_MENSAGENS = 24
+/**
+ * MENSAGEM DE WHATSAPP É FRAGMENTO, NÃO TURNO — 11/09/2026: 24 → 100.
+ *
+ * O caso: a cliente mandou a foto de referência às 01:13 e o Luigi DESCREVEU a
+ * peça às 01:14 ("calcinha básica, modelo fio dental/tanga"). Às 01:28 e 01:29
+ * ele pediu a mesma foto duas vezes. No meio, ela tinha respondido o endereço
+ * em CINCO mensagens separadas — CEP, número, nome, bairro, cidade, uma por
+ * linha, do jeito que gente digita. Seis fragmentos depois, a foto tinha saído
+ * da janela de 24 e ele não sabia mais que ela existia.
+ *
+ * Quem digita naturalmente apaga a própria memória. Contar "mensagens" como se
+ * fossem turnos de conversa é contar errado: um turno humano no WhatsApp são
+ * três, cinco, oito linhas.
+ *
+ * O CUSTO NÃO ACOMPANHA O NÚMERO. Imagem e PDF são o peso real, e os dois têm
+ * teto próprio — `IMAGENS_NO_HISTORICO` e `PDFS_NO_HISTORICO` fazem `.slice(-N)`
+ * sobre a lista JÁ filtrada, então continuam sendo no máximo 2 imagens e 1 PDF
+ * por turno, com 24 ou com 100 mensagens. O que cresce é texto, que é barato.
+ *
+ * O que muda de verdade: a foto passa a ESTAR na janela para ser candidata.
+ * Antes, conversa com muito fragmento chegava ao modelo com zero imagem.
+ */
+const HISTORICO_MENSAGENS = 100
 const LIMITE_TEXTO = 1500
 /**
  * Quanto ele espera antes de responder, pra ver se a pessoa ainda está
