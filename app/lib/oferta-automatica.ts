@@ -153,11 +153,13 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
   if (candidatos.length === 0) return []
 
   // Quem já tem oferta viva não entra: um pedido, uma confecção por vez.
-  const { data: vivas } = await supabaseAdmin
+  const { data: vivas, error: errVivas } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
     .select('pedido_id')
     .in('status', ['ofertada', 'aceita'])
     .in('pedido_id', candidatos.map((p) => p.id))
+  // TRAVA CEGA NÃO LIBERA — 11/09/2026. Ver o comentário em candidatosDisponiveis.
+  if (errVivas) throw new Error(`fila: ofertas vivas — ${errVivas.message}`)
   const ocupados = new Set(((vivas ?? []) as Array<{ pedido_id: string }>).map((o) => o.pedido_id))
 
   return candidatos.filter((p) => !ocupados.has(p.id)).slice(0, MAX_POR_RODADA)
@@ -165,28 +167,43 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
 
 /** Confecções que podem receber oferta agora (respeitando o teto de 2). */
 async function candidatosDisponiveis(pedidoId: string): Promise<FornecedorOpcao[]> {
-  const { data: forn } = await supabaseAdmin
+  const { data: forn, error: errForn } = await supabaseAdmin
     .from('leads_fornecedores')
     .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pedido_minimo, prazo_minimo_dias')
     .eq('aprovacao_status', 'aprovado')
     .eq('status', 'ativo')
     .is('pausado_em', null)
+  // TRAVA CEGA NÃO LIBERA — 11/09/2026.
+  //
+  // As três consultas desta função montam conjuntos de BLOQUEIO: quem já viu o
+  // pedido, quanta oferta cada confecção já segura. Nenhuma delas olhava
+  // `error`, e o `?? []` transformava falha em conjunto vazio — ou seja, em
+  // "ninguém está bloqueado". O modo de falha da trava era exatamente o dano
+  // que ela existe pra impedir: reofertar pra quem recusou, que é como se
+  // começa a perder confecção da base.
+  //
+  // Numa trava de segurança, consulta que falha tem que ser fatal. A rodada
+  // inteira para, o cron devolve 500 (que aparece na linha de request da
+  // Vercel, ao contrário de console.log) e nenhuma oferta sai às cegas.
+  if (errForn) throw new Error(`fila: lista de fornecedores — ${errForn.message}`)
   const todos = (forn ?? []) as FornecedorOpcao[]
   if (todos.length === 0) return []
 
   // Já recebeu ESTE pedido alguma vez? Não recebe de novo — inclusive se
   // recusou. Insistir com quem já disse não é o começo do descadastro.
-  const { data: jaViu } = await supabaseAdmin
+  const { data: jaViu, error: errJaViu } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
     .select('fornecedor_id')
     .eq('pedido_id', pedidoId)
+  if (errJaViu) throw new Error(`fila: quem já viu o pedido ${pedidoId} — ${errJaViu.message}`)
   const viram = new Set(((jaViu ?? []) as Array<{ fornecedor_id: string }>).map((o) => o.fornecedor_id))
 
   // Quantas ofertas em aberto cada uma segura agora.
-  const { data: abertas } = await supabaseAdmin
+  const { data: abertas, error: errAbertas } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
     .select('fornecedor_id')
     .eq('status', 'ofertada')
+  if (errAbertas) throw new Error(`fila: carga de ofertas abertas — ${errAbertas.message}`)
   const carga = new Map<string, number>()
   for (const o of (abertas ?? []) as Array<{ fornecedor_id: string }>) {
     carga.set(o.fornecedor_id, (carga.get(o.fornecedor_id) ?? 0) + 1)

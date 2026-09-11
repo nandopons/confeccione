@@ -133,11 +133,17 @@ function num(v: unknown, padrao: number, min: number, max: number): number {
 }
 
 export async function configCaptacao(): Promise<{ modo: ModoLuigi; config: ConfigCaptacao }> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('agentes_config')
     .select('modo, config')
     .eq('agente', 'captacao')
     .maybeSingle<{ modo: string; config: Record<string, unknown> | null }>()
+  // "NÃO SEI" NÃO É "DESLIGADO" — 11/09/2026. Sem `error`, uma consulta que
+  // falhasse devolvia data nulo e caía no mesmo galho do "sem linha":
+  // 'desligado'. A captação parava inteira e o painel dizia que estava
+  // desligada, como se alguém tivesse desligado. Sem linha segue desligado;
+  // consulta que falha estoura.
+  if (error) throw new Error(`config da captação: ${error.message}`)
   const c = data?.config ?? {}
   const regioes = Array.isArray(c.regioes) ? (c.regioes as unknown[]).filter((r): r is RegiaoBusca => REGIOES.includes(r as RegiaoBusca)) : REGIOES
   return {
@@ -620,21 +626,31 @@ function inicioDoDiaRecife(): string {
   return new Date(`${partes}T03:00:00.000Z`).toISOString() // 00:00 em Recife (UTC-3)
 }
 
+/**
+ * TETO QUE NÃO SABE CONTAR NÃO É TETO — 11/09/2026.
+ *
+ * As duas contagens abaixo alimentam `max_por_dia` e `max_por_pedido`. Nenhuma
+ * olhava `error`, e o `count ?? 0` transformava falha em zero — isto é, em
+ * "ainda não abordamos ninguém hoje". O teto diário virava 0/12 e a rodada
+ * saía mandando mensagem fria com a trava aberta. Contagem que falha estoura.
+ */
 export async function contatadosHoje(): Promise<number> {
-  const { count } = await supabaseAdmin
+  const { count, error } = await supabaseAdmin
     .from('captacao_fornecedores')
     .select('id', { count: 'exact', head: true })
     .eq('origem', 'pedido')
     .gte('ultimo_contato_em', inicioDoDiaRecife())
+  if (error) throw new Error(`contagem do teto diário: ${error.message}`)
   return count ?? 0
 }
 
 async function contatadosDoPedido(pedidoId: string): Promise<number> {
-  const { count } = await supabaseAdmin
+  const { count, error } = await supabaseAdmin
     .from('captacao_fornecedores')
     .select('id', { count: 'exact', head: true })
     .eq('pedido_id', pedidoId)
     .not('ultimo_contato_em', 'is', null)
+  if (error) throw new Error(`contagem do teto do pedido ${pedidoId}: ${error.message}`)
   return count ?? 0
 }
 
@@ -875,13 +891,20 @@ async function prazoDoPedido(pedidoId: string): Promise<number | null> {
 
 type BuscaAnterior = { regiao: RegiaoBusca; criado_em: string; novos: number | null; contatados: number | null; buscas_web: number | null }
 
+/**
+ * Lista vazia aqui MENTE — 11/09/2026. Sem histórico de busca, `regiaoSecou`
+ * devolve false pra tudo: a região nunca sobe, `regioesEsgotadas` nunca dispara
+ * e o pedido fica preso no estado do cliente pra sempre. É diferente de "este
+ * pedido ainda não teve busca", que é uma lista vazia verdadeira.
+ */
 async function buscasDoPedido(pedidoId: string): Promise<BuscaAnterior[]> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('captacao_buscas')
     .select('regiao, criado_em, novos, contatados, buscas_web')
     .eq('pedido_id', pedidoId)
     .order('criado_em', { ascending: false })
     .limit(20)
+  if (error) throw new Error(`histórico de buscas do pedido ${pedidoId}: ${error.message}`)
   return (data ?? []) as BuscaAnterior[]
 }
 
@@ -934,7 +957,7 @@ type OndaAberta = { segura: boolean; motivo: string | null; contatados: number; 
  *   • ainda tem gente em silêncio → espera `horas_entre_buscas` e tenta depois.
  */
 async function ondaPodeAbrir(pedidoId: string, config: ConfigCaptacao): Promise<OndaAberta> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('captacao_fornecedores')
     .select('resposta, ultimo_contato_em')
     .eq('origem', 'pedido')
@@ -942,6 +965,10 @@ async function ondaPodeAbrir(pedidoId: string, config: ConfigCaptacao): Promise<
     .not('ultimo_contato_em', 'is', null)
     .order('ultimo_contato_em', { ascending: false })
     .limit(50)
+  // Lista vazia aqui é "ninguém foi abordado ainda" — e o portão ABRE a onda.
+  // Se a consulta falhar e virar lista vazia, a onda abre sem saber quem já
+  // recebeu mensagem, que é como se aborda a mesma confecção duas vezes.
+  if (error) throw new Error(`portão da onda do pedido ${pedidoId}: ${error.message}`)
   const abordados = (data ?? []) as Array<{ resposta: string | null; ultimo_contato_em: string }>
   const responderam = abordados.filter((c) => c.resposta).length
   const base = { contatados: abordados.length, responderam }

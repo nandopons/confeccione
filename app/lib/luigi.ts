@@ -144,7 +144,19 @@ const PEDIDOS_NO_CONTEXTO = 4
 // ─── Modo ───────────────────────────────────────────────────────────────────
 
 export async function modoLuigi(): Promise<ModoLuigi> {
-  const { data } = await supabaseAdmin.from('agentes_config').select('modo').eq('agente', 'luigi').maybeSingle<{ modo: string }>()
+  const { data, error } = await supabaseAdmin.from('agentes_config').select('modo').eq('agente', 'luigi').maybeSingle<{ modo: string }>()
+  // "NÃO SEI" NÃO É "DESLIGADO" — 11/09/2026.
+  //
+  // Esta função não olhava `error`. Consulta que falhasse devolvia data nulo,
+  // e o nulo caía no mesmo galho do "sem linha": 'desligado'. Ou seja, uma
+  // instabilidade de banco emudecia o Luigi para TODOS os clientes, e o painel
+  // mostrava "desligado" como se fosse escolha do Fernando — indistinguível de
+  // alguém ter clicado no botão.
+  //
+  // Sem linha continua sendo desligado (é o seed que não rodou, e aí desligado
+  // é a resposta certa). Consulta que falha estoura: quem chama trata, e o erro
+  // aparece em vez de virar silêncio.
+  if (error) throw new Error(`modo do Luigi: ${error.message}`)
   // Sem linha (tabela nova, seed ainda não rodou): desligado, nunca chute.
   return ehModoLuigi(data?.modo) ? data.modo : 'desligado'
 }
@@ -2935,6 +2947,10 @@ export type MensagemCliente = {
 export async function responderCliente(params: MensagemCliente): Promise<void> {
   const inicio = Date.now()
   const waId = normalizarWaId(params.waId)
+  // `modo` sai do try pra que o catch possa usar o valor JÁ LIDO neste turno.
+  // Ver o comentário no catch: reconsultar o banco lá embaixo era o caminho
+  // pro log da falha sumir exatamente quando ele mais importa.
+  let modo: Exclude<ModoLuigi, 'desligado'> | null = null
   try {
     if (params.jaTratada) return
     if (ehNumeroGestao(waId)) return
@@ -2950,8 +2966,9 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       return
     }
 
-    const modo = await modoLuigi()
-    if (modo === 'desligado') return
+    const modoAgora = await modoLuigi()
+    if (modoAgora === 'desligado') return
+    modo = modoAgora
 
     // FORNECEDOR AGORA É COM O LUIGI TAMBÉM — 09/09/2026.
     //
@@ -3318,8 +3335,14 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // falha DE NOVO — duas seguidas não é turno torto, é coisa quebrada (saldo
     // de API no zero, por exemplo), e aí o cliente precisa de gente mesmo.
     try {
-      const modo = await modoLuigi()
-      if (modo !== 'desligado') {
+      // NÃO RECONSULTA O MODO AQUI — 11/09/2026.
+      //
+      // Este bloco lia `modoLuigi()` de novo, dentro de um catch que engole
+      // tudo. Se a falha do turno fosse o próprio banco (ou o modo passasse a
+      // estourar, como passa desde hoje), a releitura jogava pro catch de baixo
+      // e a linha de log da falha simplesmente não era escrita — o turno sumia.
+      // O modo já foi lido no começo do turno; é esse que vale.
+      if (modo) {
         const persistente = await falhouNaVezAnterior(params.conversaId)
         await gravarLog({ conversa_id: params.conversaId, wa_id: waId, wamid_entrada: params.wamid, modo, mensagem: params.corpo, resposta: null, pedido_id: null, ferramentas: [], escalado: persistente, motivo_escalada: persistente ? 'erro interno do Luigi (segunda falha seguida)' : null, status: 'falhou', modelo: MODELO, rodadas: 0, tokens_entrada: 0, tokens_saida: 0, duracao_ms: Date.now() - inicio, erro })
         if (persistente) {
@@ -3328,6 +3351,11 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
         } else {
           await avisarGestor(`Um turno do Luigi falhou com ${nomeOuNumero(params.nome, waId)} — a conversa segue com ele, a próxima mensagem é atendida normal. Erro: ${erro.slice(0, 180)}`)
         }
+      } else {
+        // Caiu antes de saber o modo — quase sempre o banco fora do ar, e aí a
+        // linha de log também não ia entrar. Resta o aviso, que é o que impede
+        // a falha de passar despercebida.
+        await avisarGestor(`Um turno do Luigi falhou antes de conseguir ler o modo do agente (provavelmente o banco) com ${nomeOuNumero(params.nome, waId)}. Erro: ${erro.slice(0, 180)}`)
       }
     } catch {
       /* já logado acima */
