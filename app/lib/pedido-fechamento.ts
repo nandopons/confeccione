@@ -654,6 +654,10 @@ export async function enviarResumoParaCliente(
         legenda: 'Resumo do seu pedido. Confere se está tudo certo e me diz se quer ajustar alguma coisa.',
       },
     ],
+    // Quem mandou foi o Luigi. Sem esta marca a linha entra como nula no inbox,
+    // a trava de "gente na conversa" lê isso como pessoa e ele se cala nos 15
+    // minutos seguintes ao próprio resumo — bem quando o cliente responde.
+    autor: 'luigi',
   })
   if (r.enviados === 0) return { ok: false, erro: 'não foi possível enviar o PDF agora' }
 

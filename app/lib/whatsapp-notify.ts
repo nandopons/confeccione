@@ -421,6 +421,21 @@ type DestinoResumo = { telefone: string; nome: string | null; legenda: string }
 export async function enviarResumoPdfPedido(params: {
   pedidoId: string
   destinos: DestinoResumo[]
+  /**
+   * Quem mandou. 'luigi' quando veio da conversa dele — e isso NÃO é cosmético.
+   *
+   * A linha do PDF entrava no inbox com `autor` nulo, e nulo é como ficam as
+   * mensagens que o Fernando digita. A trava "não fale por cima de gente"
+   * olhava as saídas recentes, via o nulo e concluía que havia uma pessoa na
+   * conversa — então, pelos 15 minutos seguintes ao PRÓPRIO resumo, o Luigi
+   * descartava tudo que o cliente escrevesse.
+   *
+   * Foi o que aconteceu com o Dan: ele respondeu o resumo com os ajustes da
+   * beca e da estola e não teve resposta; o Fernando teve que clicar "Devolver
+   * pro Luigi" a cada mensagem. O Luigi estava se calando por causa de uma
+   * mensagem que ele mesmo tinha mandado.
+   */
+  autor?: AutorSaida | null
 }): Promise<{ enviados: number; total: number }> {
   const total = params.destinos.length
   if (!total) return { enviados: 0, total: 0 }
@@ -519,6 +534,7 @@ export async function enviarResumoPdfPedido(params: {
             midia_mime: 'application/pdf',
             midia_nome: nomeArquivo,
             status: 'enviando',
+            autor: params.autor ?? null,
             criado_em: agora,
           })
           await supabaseAdmin

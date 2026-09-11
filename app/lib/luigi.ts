@@ -2853,11 +2853,26 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // alguém — o próprio Luigi, o agente ou uma pessoa no inbox — falou com
     // esse cliente depois da mensagem que eu estou respondendo, a minha
     // resposta chegou tarde e não deve sair. Silêncio é melhor que repetição.
+    // O QUE EU MESMO MANDEI NESTE TURNO NÃO CONTA — 10/09/2026.
+    //
+    // As ferramentas do Luigi mandam coisa no meio do turno: a imagem do
+    // mockup, o PDF do resumo. Cada uma vira uma saída mais nova que a
+    // mensagem do cliente — e a trava abaixo lia isso como "alguém já
+    // respondeu" e descartava o TEXTO do próprio Luigi.
+    //
+    // No pedido do Dan foi exatamente assim: ele gerou o mockup, mandou a
+    // imagem e a pergunta "é isso que você tem em mente?" morreu no log. O
+    // cliente recebia figura sem pergunta e a conversa parava.
+    //
+    // O corte certo é o INÍCIO do turno: saída entre a mensagem do cliente e o
+    // meu começo é alguém que me passou na frente; saída depois disso sou eu.
+    const inicioDoTurno = new Date(inicio).toISOString()
     const { data: ultimaSaida } = await supabaseAdmin
       .from('wa_mensagens')
       .select('criado_em, corpo')
       .eq('conversa_id', params.conversaId)
       .eq('direcao', 'saida')
+      .lt('criado_em', inicioDoTurno)
       .order('criado_em', { ascending: false })
       .limit(1)
       .maybeSingle<{ criado_em: string; corpo: string | null }>()
@@ -2900,6 +2915,10 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // NULL quando o campo é NULL, e NULL não passa no WHERE: o filtro no banco
     // descartaria exatamente as mensagens do Fernando, que são as que esta
     // trava existe pra respeitar. Aqui `null` é lido como gente, que é o que é.
+    // O corte em `inicioDoTurno` vale aqui também: anexo que a minha própria
+    // ferramenta gravou no meio do turno não pode me parecer gente. Cinto e
+    // suspensório — o `autor` já resolve o caso conhecido (o PDF do resumo),
+    // isto cobre o próximo envio que alguém esquecer de assinar.
     const AGENTES = new Set(['luigi', 'mcp', 'gestao'])
     const { data: ultimasSaidas } = await supabaseAdmin
       .from('wa_mensagens')
@@ -2907,6 +2926,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       .eq('conversa_id', params.conversaId)
       .eq('direcao', 'saida')
       .gt('criado_em', new Date(Date.now() - MINUTOS_DONO_HUMANO * 60_000).toISOString())
+      .lt('criado_em', inicioDoTurno)
       .order('criado_em', { ascending: false })
       .limit(10)
 
