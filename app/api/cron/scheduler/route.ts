@@ -50,12 +50,35 @@ export async function GET(req: Request) {
     erros: [] as string[],
   }
 
+  // O FECHAMENTO VEM ANTES DA PORTEIRA — 10/09/2026.
+  //
+  // Tudo abaixo é ABORDAGEM: régua, follow-up, oferta, captação. Falar com
+  // quem não pediu nada, de madrugada, é o que a trava de horário comercial
+  // existe pra impedir, e ela está certa.
+  //
+  // Fechar pedido é o oposto disso. É RESPOSTA a alguém que está do outro lado
+  // esperando agora: o Wesley montou o pedido às 21:26, respondeu tudo até as
+  // 22:20 e ficou sem o resumo porque o cron das 22:45, 23:00 e 23:15 acordou,
+  // viu "quinta-feira 23h", e voltou a dormir em 29 ms — sem chegar perto da
+  // tarefa. Quatro execuções, nenhum erro, nenhum log, e um cliente acordado
+  // esperando um PDF que já estava pronto.
+  //
+  // Então o fechador roda primeiro e tem janela própria (ver `podeFecharAgora`):
+  // madrugada continua proibida, mas noite com cliente ativo na conversa, não.
+  let fechamento: Awaited<ReturnType<typeof fecharPedidosProntos>> | { erro: string }
+  try {
+    fechamento = await fecharPedidosProntos()
+  } catch (e) {
+    fechamento = { erro: e instanceof Error ? e.message : String(e) }
+  }
+
   // Fora do horário comercial: cron acorda mas não dispara nada novo.
   // Apenas registra que rodou e sai. Isso evita mandar WhatsApp de madrugada.
   if (!estaEmHorarioComercial()) {
     return NextResponse.json({
       ok: true,
       pulado: 'fora do horário comercial',
+      fechamento_automatico: fechamento,
       duracao_ms: Date.now() - inicio,
     })
   }
@@ -331,19 +354,8 @@ export async function GET(req: Request) {
     cutucada = { erro: e instanceof Error ? e.message : String(e) }
   }
 
-  // TAREFA 9: fechar sozinho o pedido que já está pronto (10/09/2026)
-  //
-  // "Gerar 5 prévias e mandar o PDF" não cabe num turno de 45 s do Luigi. Ele
-  // anuncia, o turno acaba, e como o cliente não escreve de novo não existe
-  // próxima rodada. Esta tarefa é a rede: pega o pedido que passou em todas as
-  // travas e ainda não recebeu resumo, gera o que falta e manda. Se o Luigi já
-  // tiver conseguido, não faz nada — `resumo_enviado_em` já está gravado.
-  let fechamento: Awaited<ReturnType<typeof fecharPedidosProntos>> | { erro: string }
-  try {
-    fechamento = await fecharPedidosProntos()
-  } catch (e) {
-    fechamento = { erro: e instanceof Error ? e.message : String(e) }
-  }
+  // A TAREFA 9 (fechar pedido pronto) roda lá em cima, antes da porteira de
+  // horário comercial — ver o comentário longo no topo deste arquivo.
 
   return NextResponse.json({
     ok: true,

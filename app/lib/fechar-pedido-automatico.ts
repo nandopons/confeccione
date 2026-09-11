@@ -58,6 +58,39 @@ const IDADE_MAX_DIAS = 7
  */
 const RESPEITO_HUMANO_MS = 60_000
 
+/** Hora atual em Recife. */
+function horaEmRecife(): number {
+  return Number(
+    new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Recife', hour: '2-digit', hour12: false }).format(new Date())
+  )
+}
+
+/**
+ * Pode fechar pedido agora?
+ *
+ * Não é a mesma pergunta que "é horário comercial". Horário comercial protege
+ * quem NÃO pediu nada de receber abordagem de madrugada. Aqui é o contrário:
+ * tem alguém do outro lado que montou o pedido, respondeu tudo e está
+ * esperando. Recusar às 21h05 de um sábado não protege ninguém — só atrasa.
+ *
+ * As regras, então:
+ *   • 00h–07h59 nunca, em nenhuma hipótese. Madrugada é madrugada.
+ *   • 08h–20h59 sempre, todo dia — inclusive fim de semana, porque pedido feito
+ *     no sábado não tem por que esperar até segunda.
+ *   • 21h–23h59 só se o cliente escreveu nas últimas 2 h. Aí ele está acordado,
+ *     na conversa, esperando — o PDF é resposta, não interrupção.
+ */
+function podeFecharAgora(ultimaEntradaDoCliente: Date | null): { pode: boolean; motivo: string } {
+  const hora = horaEmRecife()
+  if (hora < 8) return { pode: false, motivo: 'madrugada (fecha a partir das 8h)' }
+  if (hora < 21) return { pode: true, motivo: '' }
+  const ativo =
+    ultimaEntradaDoCliente && Date.now() - ultimaEntradaDoCliente.getTime() < 2 * 60 * 60_000
+  return ativo
+    ? { pode: true, motivo: '' }
+    : { pode: false, motivo: 'depois das 21h e cliente sem falar há mais de 2h' }
+}
+
 export type ResultadoFechamento = {
   olhados: number
   fechados: Array<{ pedido: string; mockupsGerados: number }>
@@ -104,6 +137,21 @@ async function humanoFalouAgora(telefone: string): Promise<boolean> {
   return false
 }
 
+/** Quando o cliente falou pela última vez — o sinal de "está acordado, esperando". */
+async function ultimaFalaDoCliente(telefone: string): Promise<Date | null> {
+  const digitos = telefone.replace(/\D/g, '').slice(-8)
+  if (digitos.length < 8) return null
+  const { data: contatos } = await supabaseAdmin.from('wa_contatos').select('id').like('wa_id', `%${digitos}`)
+  const ids = (contatos ?? []).map((c) => c.id as string)
+  if (ids.length === 0) return null
+  const { data: conversas } = await supabaseAdmin.from('wa_conversas').select('ultima_msg_contato_em').in('contato_id', ids)
+  const datas = (conversas ?? [])
+    .map((c) => (c as { ultima_msg_contato_em: string | null }).ultima_msg_contato_em)
+    .filter((d): d is string => Boolean(d))
+    .map((d) => new Date(d).getTime())
+  return datas.length > 0 ? new Date(Math.max(...datas)) : null
+}
+
 /**
  * Gera as prévias que faltam pra este pedido.
  *
@@ -135,7 +183,47 @@ async function gerarMockupsQueFaltam(p: PedidoLinha): Promise<number> {
  * conversa aberta esperando, e é quem mais sente o atraso.
  */
 export async function fecharPedidosProntos(): Promise<ResultadoFechamento> {
+  const inicio = Date.now()
   const saida: ResultadoFechamento = { olhados: 0, fechados: [], pulados: [] }
+  try {
+    const r = await varrer(saida)
+    await gravarRodada(saida, null, Date.now() - inicio)
+    return r
+  } catch (err) {
+    const erro = err instanceof Error ? err.message : String(err)
+    await gravarRodada(saida, erro, Date.now() - inicio)
+    throw err
+  }
+}
+
+/**
+ * O RASTRO — 10/09/2026.
+ *
+ * Os logs de runtime deste projeto só registram a linha do request: nenhum
+ * `console.log` aparece neles. Escrevi a primeira versão desta varredura
+ * confiando em `console.warn` e no JSON de resposta do cron, e o resultado foi
+ * uma noite inteira perguntando ao Fernando "roda esse curl e me manda a saída"
+ * pra descobrir por que um pedido não fechou. O motivo existia — só que num
+ * lugar que ninguém lê depois do fato.
+ *
+ * O banco é o canal que a gente enxerga. Uma linha por rodada resolve: na
+ * próxima vez que um pedido for pulado em silêncio, o silêncio é consultável.
+ */
+async function gravarRodada(s: ResultadoFechamento, erro: string | null, duracaoMs: number): Promise<void> {
+  try {
+    await supabaseAdmin.from('fechamento_automatico_log').insert({
+      olhados: s.olhados,
+      fechados: s.fechados,
+      pulados: s.pulados,
+      erro,
+      duracao_ms: duracaoMs,
+    })
+  } catch (err) {
+    console.error('[fechar-pedido] não consegui gravar o rastro', { err })
+  }
+}
+
+async function varrer(saida: ResultadoFechamento): Promise<ResultadoFechamento> {
   const desde = new Date(Date.now() - IDADE_MAX_DIAS * 86400_000).toISOString()
 
   const { data, error } = await supabaseAdmin
@@ -160,11 +248,22 @@ export async function fecharPedidosProntos(): Promise<ResultadoFechamento> {
     const rotulo = p.codigo ?? p.id.slice(0, 8)
 
     // A mesma conferência que vale pra liberar: dados do cliente e peças.
+    // Pedido em montagem não é caso deste cron — mas o motivo fica registrado,
+    // senão "não fechou" e "nem foi olhado" viram a mesma coisa no rastro.
     const pronto = await conferirPedido(p.id)
-    if (!pronto.pronto) continue // pedido ainda em montagem: não é caso deste cron
+    if (!pronto.pronto) {
+      saida.pulados.push({ pedido: rotulo, motivo: `ainda em montagem: ${pronto.falta}` })
+      continue
+    }
 
     if (!p.telefone || !(await janela24hAberta(p.telefone))) {
       saida.pulados.push({ pedido: rotulo, motivo: 'janela de 24h fechada' })
+      continue
+    }
+
+    const quando = podeFecharAgora(await ultimaFalaDoCliente(p.telefone))
+    if (!quando.pode) {
+      saida.pulados.push({ pedido: rotulo, motivo: quando.motivo })
       continue
     }
     if (await humanoFalouAgora(p.telefone)) {
