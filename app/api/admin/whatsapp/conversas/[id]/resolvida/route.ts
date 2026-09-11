@@ -24,7 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
-import { humanoRespondeu } from '@/app/lib/luigi'
+import { escaladaResolvida } from '@/app/lib/luigi'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,9 +41,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     .maybeSingle<{ id: string }>()
   if (!conversa) return NextResponse.json({ erro: 'Conversa não encontrada' }, { status: 404 })
 
-  // Reusa o caminho que já existe pra "gente assumiu": limpa a marca e descarta
-  // as sugestões pendentes, que também ficariam órfãs.
-  await humanoRespondeu(id)
+  // NÃO usa o caminho de "gente falou": aqui NÃO houve fala para o cliente.
+  // `escaladaResolvida` limpa a marca e descarta as sugestões pendentes, sem
+  // tocar em `humano_falou_em` — senão um clique de limpeza de fila silenciaria
+  // o Luigi por 15 minutos numa conversa em que ninguém falou nada.
+  await escaladaResolvida(id)
 
   return NextResponse.json({ ok: true })
 }

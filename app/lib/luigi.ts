@@ -3179,7 +3179,14 @@ export async function devolverAoLuigi(
     .maybeSingle<{ wamid: string; corpo: string | null; tipo: string; criado_em: string }>()
   if (!ultima) return { ok: false, motivo: 'esta conversa não tem mensagem da pessoa pra responder' }
 
-  await supabaseAdmin.from('wa_conversas').update({ luigi_escalado_em: null }).eq('id', conversaId)
+  // DEVOLVER É ORDEM, E ORDEM LIMPA A MARCA HUMANA. Quem clicou sabe que estava
+  // conduzindo e está entregando a condução de volta — se `humano_falou_em`
+  // ficasse de pé, a trava de 15 min silenciaria o Luigi logo depois de o
+  // Fernando mandar ele assumir. É a mesma lógica de `devolucaoManual`.
+  await supabaseAdmin
+    .from('wa_conversas')
+    .update({ luigi_escalado_em: null, humano_falou_em: null })
+    .eq('id', conversaId)
   await resolverSugestoes(conversaId, 'descartada').catch(() => undefined)
 
   await responderCliente({
@@ -3196,14 +3203,55 @@ export async function devolverAoLuigi(
 }
 
 /** Alguém da equipe respondeu pelo inbox: a escalada está atendida e a sugestão, superada. */
+/**
+ * GENTE FALOU COM O CLIENTE por esta conversa.
+ *
+ * Duas metades do MESMO fato, e por isso no mesmo update:
+ *   • a escalada está atendida  → `luigi_escalado_em = null`
+ *   • gente está conduzindo     → `humano_falou_em = agora`
+ *
+ * Separá-las foi o incidente de 11/09 02:27. Só a primeira metade existia, e
+ * ela tem efeito colateral perverso: limpar a escalada DEVOLVE a conversa pro
+ * Luigi. Cada frase que o Fernando digitava rearmava o bot — ele escreveu
+ * "Pode ser amanhã?" e 17 segundos depois o Luigi escreveu "Ligação não
+ * consigo fazer por aqui", por cima. A cliente entendeu o que parecia: "Vc
+ * enrola demais", "Só pode ser golpe".
+ *
+ * Use ESTA quando houve fala para o cliente. Para baixar a marca sem ter
+ * falado, veja `escaladaResolvida`.
+ */
 export async function humanoRespondeu(conversaId: string): Promise<void> {
+  try {
+    const agora = new Date().toISOString()
+    await Promise.all([
+      supabaseAdmin
+        .from('wa_conversas')
+        .update({ luigi_escalado_em: null, humano_falou_em: agora })
+        .eq('id', conversaId),
+      resolverSugestoes(conversaId, 'descartada'),
+    ])
+  } catch (err) {
+    console.error('[luigi] humanoRespondeu falhou', { err })
+  }
+}
+
+/**
+ * Baixa a marca de escalada SEM ter falado com o cliente.
+ *
+ * É o "já resolvi" do inbox: o Fernando tratou aquilo por fora (pelo WhatsApp
+ * pessoal, por telefone, ou simplesmente não era nada) e só quer a conversa
+ * fora da fila. Como NÃO houve fala por aqui, `humano_falou_em` não é tocado —
+ * marcar aqui silenciaria o Luigi por 15 minutos por causa de um clique de
+ * limpeza de fila, que é o oposto do que o botão quer dizer.
+ */
+export async function escaladaResolvida(conversaId: string): Promise<void> {
   try {
     await Promise.all([
       supabaseAdmin.from('wa_conversas').update({ luigi_escalado_em: null }).eq('id', conversaId),
       resolverSugestoes(conversaId, 'descartada'),
     ])
   } catch (err) {
-    console.error('[luigi] humanoRespondeu falhou', { err })
+    console.error('[luigi] escaladaResolvida falhou', { err })
   }
 }
 
