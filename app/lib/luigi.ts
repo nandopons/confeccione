@@ -1383,21 +1383,49 @@ type Escalada = { motivo: string } | null
  * cada turno, então não precisa de coluna nova. Só conta chamada que DEU CERTO
  * — tentativa barrada por trava não gasta a cota.
  */
-async function jaReclassificouNestaConversa(conversaId: string): Promise<boolean> {
+/** Quantas trocas de DIREÇÃO por conversa antes de virar caso de gente. */
+const MAX_TROCAS_DE_DIRECAO = 2
+
+/**
+ * Quantas vezes o tipo do contato já MUDOU DE DIREÇÃO nesta conversa.
+ *
+ * CONTA TROCA, NÃO CHAMADA — 11/09/2026, corrigindo a versão anterior.
+ *
+ * A primeira versão barrava a segunda chamada da ferramenta, qualquer que
+ * fosse. Isso derrubou uma conversa que estava indo bem: às 01:57 o contato
+ * virou cliente e o pedido 20260900285 foi criado com sucesso; às 02:02 o
+ * Luigi chamou de novo pro MESMO destino — cliente, quando já era cliente —, a
+ * trava escalou, e a pessoa ficou sem resposta com um "consegue finalizar hj?"
+ * pendente. Repetir o destino que já vale não é confusão, é redundância: custa
+ * nada e não deve custar a conversa.
+ *
+ * O que é confusão é OSCILAR — cliente → fornecedor → cliente. Isso sim é sinal
+ * de que a conversa está ambígua e precisa de gente. Então o teto passa a valer
+ * sobre trocas de direção, e chamadas repetidas pro mesmo lado não contam.
+ *
+ * Lê a sequência de `para` das chamadas que deram certo e colapsa repetições
+ * consecutivas: [cliente, cliente, fornecedor] são DUAS direções, uma troca.
+ */
+async function direcoesAplicadasNestaConversa(conversaId: string): Promise<string[]> {
   const { data, error } = await supabaseAdmin
     .from('luigi_whatsapp_log')
-    .select('ferramentas')
+    .select('ferramentas, criado_em')
     .eq('conversa_id', conversaId)
+    .order('criado_em', { ascending: true })
     .limit(200)
-  // Erro aqui não pode liberar a segunda reclassificação: na dúvida, trava.
-  if (error) return true
+  // Sem conseguir ler o histórico, assume o pior: já oscilou o máximo.
+  if (error) return ['cliente', 'fornecedor', 'cliente']
+  const seq: string[] = []
   for (const linha of (data ?? []) as Array<{ ferramentas: unknown }>) {
     const fs = Array.isArray(linha.ferramentas) ? linha.ferramentas : []
-    for (const f of fs as Array<{ nome?: string; ok?: boolean }>) {
-      if (f?.nome === 'corrigir_tipo_de_contato' && f?.ok !== false) return true
+    for (const f of fs as Array<{ nome?: string; ok?: boolean; argumentos?: { para?: unknown } }>) {
+      if (f?.nome !== 'corrigir_tipo_de_contato' || f?.ok === false) continue
+      const para = typeof f.argumentos?.para === 'string' ? f.argumentos.para : null
+      if (!para) continue
+      if (seq[seq.length - 1] !== para) seq.push(para)
     }
   }
-  return false
+  return seq
 }
 
 async function fornecedorDoContato(waId: string): Promise<string | null> {
@@ -1619,21 +1647,45 @@ async function executarFerramenta(
         return { ok: false, erro: 'Escreva a evidência: o que ela disse que mostra o lado certo.' }
       }
 
-      // TRAVA 1 — uma por conversa. Reclassificar duas vezes na mesma conversa
-      // é sinal de que a conversa está ambígua, não de que o cadastro está
-      // errado duas vezes. Aí é caso de gente.
-      if (await jaReclassificouNestaConversa(ctx.conversaId)) {
-        estado.escalada = { motivo: `Segunda tentativa de reclassificar o contato nesta conversa (${para}): ${motivo}` }
+      const forn = await fornecedorDoContato(ctx.contato.telefone)
+
+      // JÁ ESTÁ ASSIM? NO-OP SILENCIOSO — 11/09/2026.
+      //
+      // Pedir o destino que já vale não é erro nem confusão: é redundância, e
+      // redundância não pode custar a conversa. A versão anterior barrava a
+      // segunda chamada fosse ela qual fosse, escalava, e o Luigi parava de
+      // falar — com a pessoa esperando resposta do outro lado.
+      //
+      // A conferência é contra o ESTADO REAL, não contra o histórico de
+      // chamadas: o que importa é de que lado ela está agora.
+      const ehFornecedorAgora = forn ? await fornecedorVigente(forn) : false
+      if ((para === 'fornecedor') === ehFornecedorAgora) {
         return {
-          ok: false,
-          erro: 'Esta conversa já teve uma correção de tipo. Não corrija de novo — avisei o Fernando. Siga com o que você tem.',
+          ok: true,
+          aviso: `Já está assim: esta pessoa já é atendida como ${para}. Não precisa corrigir nada — siga a conversa normalmente.`,
         }
       }
 
-      const forn = await fornecedorDoContato(ctx.contato.telefone)
+      // TRAVA 1 — oscilação. Repetir o mesmo lado é inofensivo (tratado acima);
+      // ir e voltar não: cliente → fornecedor → cliente é sinal de que a
+      // conversa está ambígua, e aí é caso de gente, não de mais uma correção.
+      const direcoes = await direcoesAplicadasNestaConversa(ctx.conversaId)
+      const trocasAteAgora = Math.max(0, direcoes.length - 1)
+      const viraTroca = direcoes.length > 0 && direcoes[direcoes.length - 1] !== para
+      if (viraTroca && trocasAteAgora >= MAX_TROCAS_DE_DIRECAO) {
+        estado.escalada = { motivo: `Tipo do contato oscilando nesta conversa (${direcoes.join(' → ')} → ${para}): ${motivo}` }
+        return {
+          ok: false,
+          erro:
+            'O tipo desta pessoa já mudou de lado vezes demais nesta conversa — avisei o Fernando. ' +
+            'Não corrija de novo: siga com o que você tem.',
+        }
+      }
 
       if (para === 'cliente') {
-        if (!forn) return { ok: false, aviso: 'Esta pessoa já é atendida como cliente — não há o que corrigir.' }
+        // `forn` existe aqui por construção: sem cadastro de fornecedor ela já
+        // é cliente, e o no-op acima teria retornado antes de chegar nesta linha.
+        if (!forn) return { ok: true, aviso: 'Já está assim: ela é atendida como cliente. Siga a conversa.' }
 
         // TRAVA 2 — quem está produzindo não vira cliente por uma frase
         // ambígua. Oferta aceita significa confecção com agenda comprometida;
