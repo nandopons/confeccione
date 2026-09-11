@@ -163,6 +163,25 @@ function agoraRecife(): string {
   }).format(new Date())
 }
 
+/**
+ * A saudação certa pra hora que é, resolvida AQUI e não pelo modelo.
+ *
+ * O prompt já trazia "Agora em Recife: ... 21:01" e mesmo assim saiu um "Boa
+ * tarde, Kaiky" às nove da noite — o modelo tinha o dado e não fez a conta,
+ * porque a conversa começara com um "Oi boa tarde" do próprio cliente, às 16h.
+ *
+ * Dado cru exige inferência; inferência falha. Faixa: bom dia até 11:59, boa
+ * tarde de 12:00 a 17:59, boa noite das 18:00 em diante.
+ */
+function saudacaoAgora(agora = new Date()): string {
+  const hora = Number(
+    new Intl.DateTimeFormat('en', { timeZone: 'America/Recife', hour: 'numeric', hour12: false }).format(agora)
+  )
+  if (hora < 12) return 'bom dia'
+  if (hora < 18) return 'boa tarde'
+  return 'boa noite'
+}
+
 function reais(centavos: number | null | undefined): string {
   return (Number(centavos ?? 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
@@ -1820,7 +1839,7 @@ Só fale disso se ELA puxar o assunto (sinal, adiantamento, "como funciona o pag
     ? 'queria saber o que vocês produzem. Me dá 3 exemplos de peça?'
     : 'queria uma foto de produção de vocês, pra mostrar pro cliente. Tem alguma no celular?'
 
-  return `Você é o Luigi, do atendimento da Confeccione, marketplace que leva pedido de roupa pra confecções verificadas (sede em Recife, PE). Agora em Recife: ${agoraRecife()}.
+  return `Você é o Luigi, do atendimento da Confeccione, marketplace que leva pedido de roupa pra confecções verificadas (sede em Recife, PE). Agora em Recife: ${agoraRecife()}. Se for cumprimentar, a saudação certa AGORA é "${saudacaoAgora()}" — use essa e nenhuma outra, mesmo que ela tenha escrito outra antes (a mensagem dela pode ser de horas atrás).
 
 QUEM ESTÁ FALANDO COM VOCÊ É UMA CONFECÇÃO CADASTRADA${nome ? ` — ${nome}` : ''}. Ela é parceira, não cliente. Fala a língua do ramo: não explique o que é facção, malha ou grade, e não trate como quem nunca produziu roupa.
 
@@ -1908,7 +1927,7 @@ function promptSistema(modo: Exclude<ModoLuigi, 'desligado'>, ctx: Contexto, jaS
       ? 'Quando o cliente disser de forma clara que não quer mais seguir com o pedido, pergunte em uma linha se pode encerrar por aqui; só depois do sim dele chame encerrar_pedido com o motivo que ele deu. Pedido pago não se encerra.'
       : 'Se o cliente disser que não quer mais seguir, registre o motivo com registrar_motivo_parada e chame chamar_humano — quem encerra é o Fernando. Não diga isso ao cliente: o que a gente faz com o pedido por dentro não é problema dele.'
 
-  return `Você é o Luigi, do atendimento da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções verificadas de todo o Brasil (sede em Recife, PE). Está respondendo pelo WhatsApp oficial da empresa a um cliente ou possível cliente. Agora em Recife: ${agoraRecife()}.
+  return `Você é o Luigi, do atendimento da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções verificadas de todo o Brasil (sede em Recife, PE). Está respondendo pelo WhatsApp oficial da empresa a um cliente ou possível cliente. Agora em Recife: ${agoraRecife()}. Se for cumprimentar, a saudação certa AGORA é "${saudacaoAgora()}" — use essa e nenhuma outra, mesmo que o cliente tenha escrito outra antes (a mensagem dele pode ser de horas atrás).
 
 ${modoTexto}
 
@@ -2091,15 +2110,59 @@ const PDFS_NO_HISTORICO = 1
 const MIMES_VISAO = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const
 type BlocoImagem = { type: 'image'; source: { type: 'base64'; media_type: (typeof MIMES_VISAO)[number]; data: string } }
 
+/**
+ * O formato real da imagem, lido dos PRIMEIROS BYTES — não do mime declarado.
+ *
+ * POR QUE NÃO DÁ PRA CONFIAR NO `midia_mime` — 10/09/2026
+ * O Bruno mandou dois mockups e o Luigi parou de responder. O log dizia
+ * "erro interno do Luigi" e a escalada voltava toda vez que o Fernando clicava
+ * "Devolver pro Luigi" — parecia loop do botão. Não era: a API recusava o turno
+ * inteiro com 400, "the image was specified using the image/jpeg media type,
+ * but the image appears to be a image/png image".
+ *
+ * A Meta gravou `image/jpeg` para bytes que são PNG. A gente repassava o rótulo
+ * errado e, pior, quando o mime não estava na lista o código chutava
+ * `image/jpeg` — transformando "não sei" em "afirmo que é jpeg". Um turno
+ * inteiro do cliente morria por causa do carimbo de uma foto.
+ *
+ * Assinatura vence rótulo: os bytes não mentem sobre o que são.
+ */
+function formatoRealDaImagem(buffer: Buffer): (typeof MIMES_VISAO)[number] | null {
+  if (buffer.length < 12) return null
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png'
+  // JPEG: FF D8 FF
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg'
+  // GIF87a / GIF89a
+  if (buffer.toString('ascii', 0, 3) === 'GIF') return 'image/gif'
+  // WEBP: "RIFF" .... "WEBP"
+  if (buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'image/webp'
+  return null
+}
+
 async function blocoDaImagem(path: string, mime: string | null): Promise<BlocoImagem | null> {
-  const media_type = (MIMES_VISAO as readonly string[]).includes(mime ?? '')
-    ? (mime as (typeof MIMES_VISAO)[number])
-    : 'image/jpeg'
   try {
     const { data, error } = await supabaseAdmin.storage.from('wa-midia').download(path)
     if (error || !data) return null
     const buffer = Buffer.from(await data.arrayBuffer())
     if (buffer.byteLength > 4 * 1024 * 1024) return null
+
+    // O rótulo do banco só entra como desempate quando os bytes não dizem nada.
+    const real = formatoRealDaImagem(buffer)
+    const declarado = (MIMES_VISAO as readonly string[]).includes(mime ?? '')
+      ? (mime as (typeof MIMES_VISAO)[number])
+      : null
+    const media_type = real ?? declarado
+    // Formato que a visão não aceita (heic, tiff, svg…): a imagem sai do
+    // histórico e o turno segue. Mandar assim derruba a conversa inteira, e o
+    // cliente perde a resposta por causa de UMA foto.
+    if (!media_type) {
+      console.warn('[luigi] imagem em formato não suportado, seguindo sem ela', { path, mime })
+      return null
+    }
+    if (real && declarado && real !== declarado) {
+      console.warn('[luigi] mime da mídia diverge dos bytes', { path, declarado, real })
+    }
     return { type: 'image', source: { type: 'base64', media_type, data: buffer.toString('base64') } }
   } catch {
     return null
