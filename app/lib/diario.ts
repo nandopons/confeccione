@@ -24,6 +24,10 @@ import { contagemPorEtapa, type Etapa, type GrupoEtapa } from './etapas-pedido'
 export type Placar = {
   referencia: string
   semana_inicio: string
+  /** Dia civil fechado de ontem no fuso de Recife. Ver a migration
+   *  20260911190000_placar_coluna_ontem.sql: mesma definição de cada indicador,
+   *  só a janela muda — exceto os dois que são saldo e não fluxo. */
+  ontem: Record<string, unknown>
   d7: Record<string, unknown>
   d30: Record<string, unknown>
   agora: Record<string, number>

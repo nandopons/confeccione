@@ -2,7 +2,7 @@
 
 // ============================================================================
 // Diário de bordo — client. Quatro abas:
-//   Placar    → os nove indicadores agora (7 d / 30 d) + histórico das fotos
+//   Placar    → os nove indicadores (ontem / 7 d / 30 d) + histórico das fotos
 //   Decisões  → registro de decisão (filtro por status, nova, revisar/revogar)
 //   Atas      → reuniões com pendências (nova ata)
 //   Filas     → cobrança, sem resposta, sem fornecedor — o que vira alerta
@@ -62,6 +62,17 @@ function dataBR(iso: string | null | undefined, comHora = false): string {
 function n(v: unknown): string {
   return typeof v === 'number' ? v.toLocaleString('pt-BR') : v == null ? '—' : String(v)
 }
+/**
+ * Nulo aqui significa NÃO MEDIDO, e tem que aparecer como "—".
+ *
+ * Sem isto, `aguardando_pgto_centavos` nulo na coluna de ontem sairia como
+ * "R$ 0,00" pelo formatador de moeda — um valor que parece medido e é zero.
+ * Zero e "não sei" não podem ter a mesma cara.
+ */
+function cel(fmt: (v: unknown) => string, v: unknown) {
+  return v == null ? <span className="text-gray-300">—</span> : fmt(v)
+}
+
 function pega(obj: Record<string, unknown> | undefined, caminho: string): unknown {
   return caminho.split('.').reduce<unknown>((acc, k) => (acc && typeof acc === 'object' ? (acc as Record<string, unknown>)[k] : undefined), obj)
 }
@@ -255,7 +266,16 @@ function Cartao({
 
 // ─── Aba: Placar ────────────────────────────────────────────────────────────
 
-type Linha = { rotulo: string; caminho: string; fmt?: (v: unknown) => string; meta?: string }
+type Linha = {
+  rotulo: string
+  caminho: string
+  fmt?: (v: unknown) => string
+  meta?: string
+  /** Indicador que é FOTO DO MOMENTO, não acumulado da janela: o SQL o calcula
+   *  sem olhar o período, então ele repete o mesmo valor em toda coluna. Marcado
+   *  aqui pra não passar por fluxo — na coluna de dia fechado vira "—". */
+  saldo?: true
+}
 
 const LINHAS: Array<{ grupo: string; linhas: Linha[] }> = [
   {
@@ -301,7 +321,7 @@ const LINHAS: Array<{ grupo: string; linhas: Linha[] }> = [
   {
     grupo: '7 · Fornecedores',
     linhas: [
-      { rotulo: 'Ativos aprovados', caminho: 'fornecedores.ativos' },
+      { rotulo: 'Ativos aprovados', caminho: 'fornecedores.ativos', saldo: true },
       { rotulo: 'Novos', caminho: 'fornecedores.novos' },
       { rotulo: 'Responderam oferta', caminho: 'fornecedores.responderam' },
     ],
@@ -318,11 +338,11 @@ const LINHAS: Array<{ grupo: string; linhas: Linha[] }> = [
   {
     grupo: '9 · Nutrição',
     linhas: [
-      { rotulo: 'Leads na base', caminho: 'nutricao.leads_total' },
-      { rotulo: 'Com 1º toque', caminho: 'nutricao.com_primeiro_toque' },
+      { rotulo: 'Leads na base', caminho: 'nutricao.leads_total', saldo: true },
+      { rotulo: 'Com 1º toque', caminho: 'nutricao.com_primeiro_toque', saldo: true },
       { rotulo: 'Disparos de campanha', caminho: 'nutricao.disparos_campanha' },
       { rotulo: 'Disparos de automação', caminho: 'nutricao.disparos_automacao' },
-      { rotulo: 'Opt-out', caminho: 'nutricao.opt_out' },
+      { rotulo: 'Opt-out', caminho: 'nutricao.opt_out', saldo: true },
     ],
   },
   {
@@ -336,6 +356,7 @@ const LINHAS: Array<{ grupo: string; linhas: Linha[] }> = [
 ]
 
 function AbaPlacar({ placar, placares }: { placar: Placar; placares: PlacarGravado[] }) {
+  const ontem = placar.ontem as Record<string, unknown> | undefined
   const d7 = placar.d7 as Record<string, unknown>
   const d30 = placar.d30 as Record<string, unknown>
   return (
@@ -349,6 +370,7 @@ function AbaPlacar({ placar, placares }: { placar: Placar; placares: PlacarGrava
           <thead>
             <tr className="text-[11px] uppercase tracking-wide text-gray-400">
               <th className="text-left px-5 py-2 font-medium">Indicador</th>
+              <th className="text-right px-3 py-2 font-medium w-24">Ontem</th>
               <th className="text-right px-3 py-2 font-medium w-24">7 dias</th>
               <th className="text-right px-5 py-2 font-medium w-24">30 dias</th>
             </tr>
@@ -364,8 +386,14 @@ function AbaPlacar({ placar, placares }: { placar: Placar; placares: PlacarGrava
                         {l.rotulo}
                         {l.meta && <span className="ml-2 text-[11px] text-gray-400">{l.meta}</span>}
                       </td>
-                      <td className="px-3 py-2 text-right text-gray-900 tabular-nums">{f(pega(d7, l.caminho))}</td>
-                      <td className="px-5 py-2 text-right text-gray-900 tabular-nums">{f(pega(d30, l.caminho))}</td>
+                      <td
+                        className="px-3 py-2 text-right tabular-nums text-gray-900"
+                        title={l.saldo ? 'Foto do momento, não acumulado: não existe valor "de ontem" pra este indicador.' : undefined}
+                      >
+                        {l.saldo ? <span className="text-gray-300">—</span> : cel(f, pega(ontem, l.caminho))}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-900 tabular-nums">{cel(f, pega(d7, l.caminho))}</td>
+                      <td className="px-5 py-2 text-right text-gray-900 tabular-nums">{cel(f, pega(d30, l.caminho))}</td>
                     </tr>
                   )
                 })}
