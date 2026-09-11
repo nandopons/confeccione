@@ -104,15 +104,28 @@ export const REGIOES: RegiaoBusca[] = ['uf', 'pe', 'brasil']
 export const REGIAO_LABEL: Record<RegiaoBusca, string> = { uf: 'estado do cliente', pe: 'polo de Pernambuco', brasil: 'Brasil' }
 
 export type ConfigCaptacao = {
+  /**
+   * Quantas confecções uma ONDA aborda de uma vez, por pedido. É o número que
+   * o Fernando pediu em 10/09/2026: "seleciona uns 2, manda mensagem e e-mail,
+   * espera um pouco pra ver a resposta; se não der certo busca mais 2".
+   *
+   * Antes disto a primeira busca abordava a cota inteira (10 de uma vez). Dava
+   * na mesma conta de mensagens fria no fim do mês, só que toda no primeiro
+   * minuto: se a segunda confecção já ia topar, as outras oito foram incômodo
+   * puro — e token de busca gasto à toa.
+   */
+  lote: number
+  /** Teto de confecções abordadas por pedido, somando todas as ondas. */
   max_por_pedido: number
   max_por_dia: number
   regioes: RegiaoBusca[]
+  /** Quanto a onda espera resposta antes da próxima sair. */
   horas_entre_buscas: number
   /** Pedido sem fornecedor há mais que isso (dias) o cron não busca sozinho — só pelo "Buscar agora". */
   idade_max_dias: number
 }
 
-const CONFIG_PADRAO: ConfigCaptacao = { max_por_pedido: 10, max_por_dia: 40, regioes: REGIOES, horas_entre_buscas: 48, idade_max_dias: 21 }
+const CONFIG_PADRAO: ConfigCaptacao = { lote: 2, max_por_pedido: 10, max_por_dia: 40, regioes: REGIOES, horas_entre_buscas: 24, idade_max_dias: 21 }
 
 function num(v: unknown, padrao: number, min: number, max: number): number {
   const n = typeof v === 'number' && Number.isFinite(v) ? v : padrao
@@ -130,6 +143,7 @@ export async function configCaptacao(): Promise<{ modo: ModoLuigi; config: Confi
   return {
     modo: ehModoLuigi(data?.modo) ? data.modo : 'desligado',
     config: {
+      lote: num(c.lote, CONFIG_PADRAO.lote, 1, 10),
       max_por_pedido: num(c.max_por_pedido, CONFIG_PADRAO.max_por_pedido, 1, 50),
       max_por_dia: num(c.max_por_dia, CONFIG_PADRAO.max_por_dia, 1, 200),
       regioes: regioes.length ? regioes : REGIOES,
@@ -142,6 +156,7 @@ export async function configCaptacao(): Promise<{ modo: ModoLuigi; config: Confi
 export async function definirConfigCaptacao(patch: { modo?: ModoLuigi } & Partial<ConfigCaptacao>): Promise<void> {
   const atual = await configCaptacao()
   const config: ConfigCaptacao = {
+    lote: num(patch.lote, atual.config.lote, 1, 10),
     max_por_pedido: num(patch.max_por_pedido, atual.config.max_por_pedido, 1, 50),
     max_por_dia: num(patch.max_por_dia, atual.config.max_por_dia, 1, 200),
     regioes: patch.regioes?.length ? patch.regioes.filter((r) => REGIOES.includes(r)) : atual.config.regioes,
@@ -788,6 +803,8 @@ export type ResultadoRodada = {
   contatados_hoje_antes: number
   /** Candidatos que tinham ficado sem canal (template pendente, Resend fora) e receberam a sondagem nesta rodada. */
   reabordados: number
+  /** Pedidos que a rodada deixou quietos de propósito, e por quê. Sem isto, o log de "0 buscas" fica igual ao de agente quebrado. */
+  segurados: Array<{ pedido: string; motivo: string; contatados: number; responderam: number }>
   pulado: string | null
 }
 
@@ -856,9 +873,123 @@ async function prazoDoPedido(pedidoId: string): Promise<number | null> {
   return data?.prazo_dias ?? null
 }
 
-async function buscasDoPedido(pedidoId: string): Promise<Array<{ regiao: RegiaoBusca; criado_em: string }>> {
-  const { data } = await supabaseAdmin.from('captacao_buscas').select('regiao, criado_em').eq('pedido_id', pedidoId).order('criado_em', { ascending: false }).limit(10)
-  return (data ?? []) as Array<{ regiao: RegiaoBusca; criado_em: string }>
+type BuscaAnterior = { regiao: RegiaoBusca; criado_em: string; novos: number | null; contatados: number | null; buscas_web: number | null }
+
+async function buscasDoPedido(pedidoId: string): Promise<BuscaAnterior[]> {
+  const { data } = await supabaseAdmin
+    .from('captacao_buscas')
+    .select('regiao, criado_em, novos, contatados, buscas_web')
+    .eq('pedido_id', pedidoId)
+    .order('criado_em', { ascending: false })
+    .limit(20)
+  return (data ?? []) as BuscaAnterior[]
+}
+
+/**
+ * A região secou? Só conta quem de fato foi à web e voltou sem ninguém novo.
+ *
+ * A onda que sai do banco de reserva grava `novos: 0` porque não descobriu
+ * ninguém — ela só usou o que já estava guardado. Sem esta checagem de
+ * `buscas_web`, a primeira onda de banco declararia a cidade do cliente
+ * esgotada e jogaria o pedido pro Brasil.
+ */
+function regiaoSecou(anteriores: BuscaAnterior[], regiao: RegiaoBusca): boolean {
+  const naWeb = anteriores.filter((a) => a.regiao === regiao && (a.buscas_web ?? 0) > 0)
+  return naWeb.length > 0 && (naWeb[0].novos ?? 0) === 0
+}
+
+/**
+ * A região da vez. Fica onde está enquanto a região ainda entrega gente nova;
+ * sobe (estado do cliente → polo de PE → Brasil) quando a última busca ali não
+ * achou mais ninguém.
+ *
+ * A regra antiga era "uma região por busca" (`regioes[anteriores.length]`), o
+ * que só fazia sentido quando uma busca varria a cota inteira. Com onda de 2,
+ * ela mandaria o terceiro par pro Brasil com a cidade do cliente mal arranhada
+ * — e confecção perto é exatamente a que costuma topar.
+ */
+function regiaoDaVez(anteriores: BuscaAnterior[], regioes: RegiaoBusca[]): RegiaoBusca {
+  for (const r of regioes) if (!regiaoSecou(anteriores, r)) return r
+  return regioes[regioes.length - 1]
+}
+
+/** Todas as regiões já secaram — não adianta o cron insistir neste pedido. */
+function regioesEsgotadas(anteriores: BuscaAnterior[], regioes: RegiaoBusca[]): boolean {
+  return regioes.every((r) => regiaoSecou(anteriores, r))
+}
+
+/** Respostas que encerram o assunto com aquela confecção, pra este pedido. */
+const RESPOSTA_FECHA = ['recusou', 'nao_produz', 'opt_out', 'depois']
+
+type OndaAberta = { segura: boolean; motivo: string | null; contatados: number; responderam: number }
+
+/**
+ * Olha as confecções já abordadas por este pedido e decide se a próxima onda
+ * pode sair. Três saídas:
+ *
+ *   • alguém respondeu "interessado" → SEGURA. Tem conversa viva; abordar mais
+ *     gente agora é pedir orçamento a quatro e ter que dispensar três.
+ *   • todo mundo da última onda já respondeu, e nenhum topou → LIBERA na hora.
+ *     Esperar 24 h por uma resposta que já chegou é só atraso pro cliente.
+ *   • ainda tem gente em silêncio → espera `horas_entre_buscas` e tenta depois.
+ */
+async function ondaPodeAbrir(pedidoId: string, config: ConfigCaptacao): Promise<OndaAberta> {
+  const { data } = await supabaseAdmin
+    .from('captacao_fornecedores')
+    .select('resposta, ultimo_contato_em')
+    .eq('origem', 'pedido')
+    .eq('pedido_id', pedidoId)
+    .not('ultimo_contato_em', 'is', null)
+    .order('ultimo_contato_em', { ascending: false })
+    .limit(50)
+  const abordados = (data ?? []) as Array<{ resposta: string | null; ultimo_contato_em: string }>
+  const responderam = abordados.filter((c) => c.resposta).length
+  const base = { contatados: abordados.length, responderam }
+
+  if (abordados.length === 0) return { segura: false, motivo: null, ...base }
+
+  if (abordados.some((c) => c.resposta && !RESPOSTA_FECHA.includes(c.resposta))) {
+    return { segura: true, motivo: 'confecção interessada em conversa', ...base }
+  }
+
+  // A última onda é quem foi abordado junto com o mais recente (mesma janela
+  // de alguns minutos). Se todos eles já responderam, não há o que esperar.
+  const ultimo = new Date(abordados[0].ultimo_contato_em).getTime()
+  const daUltimaOnda = abordados.filter((c) => ultimo - new Date(c.ultimo_contato_em).getTime() < 30 * 60_000)
+  if (daUltimaOnda.every((c) => c.resposta)) return { segura: false, motivo: null, ...base }
+
+  const espera = config.horas_entre_buscas * 3600_000
+  if (Date.now() - ultimo < espera) {
+    const faltam = Math.ceil((espera - (Date.now() - ultimo)) / 3600_000)
+    return { segura: true, motivo: `aguardando resposta da última onda (${faltam}h)`, ...base }
+  }
+  return { segura: false, motivo: null, ...base }
+}
+
+type Reserva = { id: string; nome: string | null; email: string | null; whatsapp: string | null }
+
+/**
+ * O BANCO DE RESERVA — 10/09/2026.
+ *
+ * Uma busca na web custa ~4 mil tokens e volta com 5 a 15 confecções; a onda
+ * aborda 2. Antes, as outras iam pro lixo e a onda seguinte pagava a busca de
+ * novo — às vezes pra reencontrar exatamente as mesmas. Agora elas ficam
+ * gravadas como 'sugerido' e a próxima onda começa por aqui: só quando o banco
+ * seca é que o agente volta à web.
+ */
+async function bancoDeReserva(pedidoId: string, limite: number): Promise<Reserva[]> {
+  if (limite <= 0) return []
+  const { data } = await supabaseAdmin
+    .from('captacao_fornecedores')
+    .select('id, nome, email, whatsapp')
+    .eq('origem', 'pedido')
+    .eq('pedido_id', pedidoId)
+    .eq('status', 'sugerido')
+    .is('ultimo_contato_em', null)
+    .is('resposta', null)
+    .order('criado_em', { ascending: true })
+    .limit(limite)
+  return ((data ?? []) as Reserva[]).filter((c) => c.email || c.whatsapp)
 }
 
 /**
@@ -872,14 +1003,17 @@ export async function captarParaPedido(
   const inicio = Date.now()
   const { modo, config } = await configCaptacao()
   const anteriores = await buscasDoPedido(pedido.id)
-  const regiao: RegiaoBusca = opts.regiao ?? config.regioes[Math.min(anteriores.length, config.regioes.length - 1)]
+  const regiao: RegiaoBusca = opts.regiao ?? regiaoDaVez(anteriores, config.regioes)
   const saida = { pedido: pedido.codigo ?? pedido.id, regiao, encontrados: 0, novos: 0, contatados: 0, erro: null as string | null }
 
   const jaContatados = await contatadosDoPedido(pedido.id)
   const restanteDoPedido = config.max_por_pedido - jaContatados
   const restanteDoDia = config.max_por_dia - (await contatadosHoje())
   const enviar = modo === 'responde'
-  const cota = enviar ? Math.max(0, Math.min(restanteDoPedido, restanteDoDia)) : Math.max(0, restanteDoPedido)
+  // O LOTE MANDA NA COTA — 10/09/2026. Uma busca aborda uma onda, não o teto
+  // inteiro do pedido; o teto continua valendo como soma de todas as ondas.
+  const teto = enviar ? Math.min(restanteDoPedido, restanteDoDia) : restanteDoPedido
+  const cota = Math.max(0, Math.min(config.lote, teto))
   if (cota === 0 && !opts.forcar) {
     saida.erro = restanteDoPedido <= 0 ? 'teto por pedido atingido' : 'teto diário atingido'
     return saida
@@ -888,22 +1022,44 @@ export async function captarParaPedido(
   const perfil = perfilDeBusca(pedido, await prazoDoPedido(pedido.id))
   let busca: ResultadoBusca | null = null
   const descartados: Array<{ nome: string; motivo: string }> = []
+  let doBanco = 0
   try {
-    busca = await descobrirCandidatos(perfil, regiao, Math.min(Math.max(cota, 5), 15))
-    saida.encontrados = busca.candidatos.length
-    const pdf = enviar ? await pdfSondagem(pedido.id).catch(() => null) : null
-    const base = await carregarBaseFornecedores()
-    for (const c of busca.candidatos) {
-      if (saida.contatados >= cota && enviar) break
-      const motivo = await motivoParaDescartar(c, base)
-      if (motivo) {
-        descartados.push({ nome: c.nome, motivo })
-        continue
+    // 1) O banco primeiro. Se a onda inteira sai daqui, não há busca na web.
+    const pdfBanco = enviar ? await pdfSondagem(pedido.id).catch(() => null) : null
+    if (enviar) {
+      for (const c of await bancoDeReserva(pedido.id, cota)) {
+        if (saida.contatados >= cota) break
+        const r = await enviarSondagem(c.id, c, perfil, pdfBanco)
+        if (r.email || r.whatsapp) {
+          saida.contatados++
+          doBanco++
+        } else {
+          descartados.push({ nome: c.nome ?? '—', motivo: `falha: ${(r.erro ?? 'sem canal').slice(0, 120)}` })
+        }
       }
-      saida.novos++
-      const r = await abordarCandidato(c, perfil, enviar, pdf)
-      if (enviar && (r.email || r.whatsapp)) saida.contatados++
-      if (r.erro && !r.email && !r.whatsapp) descartados.push({ nome: c.nome, motivo: `falha: ${r.erro.slice(0, 120)}` })
+    }
+    if (saida.contatados >= cota && !opts.forcar) {
+      saida.encontrados = doBanco
+      saida.novos = 0
+    } else {
+      // 2) Banco seco (ou vazio): aí sim procura na web.
+      busca = await descobrirCandidatos(perfil, regiao, Math.min(Math.max(cota, 5), 15))
+      saida.encontrados = busca.candidatos.length
+      const base = await carregarBaseFornecedores()
+      for (const c of busca.candidatos) {
+        const motivo = await motivoParaDescartar(c, base)
+        if (motivo) {
+          descartados.push({ nome: c.nome, motivo })
+          continue
+        }
+        saida.novos++
+        // Dentro da onda, aborda. Passou da onda, grava como 'sugerido' e
+        // espera a vez — é o que o banco de reserva vai consumir amanhã.
+        const naOnda = enviar && saida.contatados < cota
+        const r = await abordarCandidato(c, perfil, naOnda, pdfBanco)
+        if (naOnda && (r.email || r.whatsapp)) saida.contatados++
+        if (naOnda && r.erro && !r.email && !r.whatsapp) descartados.push({ nome: c.nome, motivo: `falha: ${r.erro.slice(0, 120)}` })
+      }
     }
   } catch (err) {
     saida.erro = err instanceof Error ? err.message : String(err)
@@ -934,7 +1090,7 @@ export async function captarParaPedido(
 /** O cron: olha os pedidos sem fornecedor e roda a busca de quem está na vez. */
 export async function rodarCaptacaoPedidos(origem: 'cron' | 'admin' | 'mcp' = 'cron'): Promise<ResultadoRodada> {
   const { modo, config } = await configCaptacao()
-  const resultado: ResultadoRodada = { pedidos_olhados: 0, buscas: [], contatados_hoje_antes: await contatadosHoje(), reabordados: 0, pulado: null }
+  const resultado: ResultadoRodada = { pedidos_olhados: 0, buscas: [], contatados_hoje_antes: await contatadosHoje(), reabordados: 0, segurados: [], pulado: null }
   if (modo === 'desligado') {
     resultado.pulado = 'agente de captação desligado'
     return resultado
@@ -960,10 +1116,18 @@ export async function rodarCaptacaoPedidos(origem: 'cron' | 'admin' | 'mcp' = 'c
       break
     }
     const anteriores = await buscasDoPedido(p.id)
-    if (anteriores.length >= config.regioes.length) continue
-    const ultima = anteriores[0]
-    if (ultima && Date.now() - new Date(ultima.criado_em).getTime() < config.horas_entre_buscas * 3600_000) continue
+    // Antes: "já fez N buscas, N = número de regiões, para". Com onda de 2 isso
+    // abandonava o pedido depois de 6 abordagens mesmo com o estado do cliente
+    // cheio de confecção. Agora o que encerra é a região secar, não a contagem.
+    if (regioesEsgotadas(anteriores, config.regioes)) continue
     if ((await contatadosDoPedido(p.id)) >= config.max_por_pedido) continue
+    // O PORTÃO DA ONDA — 10/09/2026. Manda 2, espera a resposta, só então
+    // manda mais 2. Quem já topou segura a fila inteira.
+    const onda = await ondaPodeAbrir(p.id, config)
+    if (onda.segura) {
+      resultado.segurados.push({ pedido: p.codigo ?? p.id, motivo: onda.motivo ?? 'aguardando', contatados: onda.contatados, responderam: onda.responderam })
+      continue
+    }
     rodadas++
     resultado.buscas.push(await captarParaPedido(p, { origem }))
   }

@@ -58,7 +58,7 @@ type Busca = {
 
 type Estado = {
   modo: ModoLuigi
-  config: { max_por_pedido: number; max_por_dia: number; regioes: string[]; horas_entre_buscas: number; idade_max_dias: number }
+  config: { lote: number; max_por_pedido: number; max_por_dia: number; regioes: string[]; horas_entre_buscas: number; idade_max_dias: number }
   hoje: { contatados: number; teto: number }
   template: { nome: string; status: string | null; categoria: string | null; motivo_rejeicao: string | null; erro: string | null }
   pedidos: PedidoFila[]
@@ -203,7 +203,18 @@ export default function CaptacaoPorPedido() {
         <p className={'mt-3 rounded-lg px-3 py-2 text-[12.5px] ' + (responde ? 'bg-[#E1F5EE]/70 text-[#0F6E56]' : 'bg-gray-50 text-gray-600')}>{AJUDA[estado.modo]}</p>
 
         <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-gray-700">
-          <label className="flex items-center gap-1.5">
+          <label className="flex items-center gap-1.5" title="Quantas confecções o agente aborda de uma vez. Ele espera a resposta dessas antes de procurar as próximas.">
+            Por onda
+            <input
+              type="number"
+              min={1}
+              max={10}
+              defaultValue={estado.config.lote}
+              onBlur={(e) => Number(e.target.value) !== estado.config.lote && void salvar({ lote: Number(e.target.value) })}
+              className="w-16 rounded-md border border-gray-300 px-2 py-1 text-sm"
+            />
+          </label>
+          <label className="flex items-center gap-1.5" title="Teto do pedido somando todas as ondas.">
             Por pedido
             <input
               type="number"
@@ -229,7 +240,7 @@ export default function CaptacaoPorPedido() {
             Hoje: <strong className="text-gray-900">{estado.hoje.contatados}</strong> de {estado.hoje.teto} abordadas
           </span>
           <span className="text-gray-500">
-            Ordem: {estado.config.regioes.map((r) => REGIAO[r] ?? r).join(' → ')} · nova busca a cada {estado.config.horas_entre_buscas} h · sozinho só em pedido confirmado há até {estado.config.idade_max_dias} d
+            Ordem: {estado.config.regioes.map((r) => REGIAO[r] ?? r).join(' → ')} · próxima onda em até {estado.config.horas_entre_buscas} h (antes disso, se todas já responderam) · sozinho só em pedido confirmado há até {estado.config.idade_max_dias} d
           </span>
           <button
             onClick={() => void acao({ acao: 'rodar' }, 'rodar')}

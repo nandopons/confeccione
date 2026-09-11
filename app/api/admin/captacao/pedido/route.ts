@@ -6,7 +6,7 @@
 //          (o template da sondagem na Meta: só APPROVED manda WhatsApp),
 //          pedidos: [pedidos sem fornecedor com buscas e candidatos],
 //          buscas: últimas rodadas }
-// PUT  { modo?, max_por_pedido?, max_por_dia?, regioes?, horas_entre_buscas? }
+// PUT  { modo?, lote?, max_por_pedido?, max_por_dia?, regioes?, horas_entre_buscas? }
 // POST { acao: 'buscar', pedidoId, regiao? }          → roda a busca agora pra um pedido
 //      { acao: 'abordar', candidatoId }                → manda a sondagem de um candidato 'sugerido'
 //      { acao: 'rodar' }                               → roda a rodada inteira (o que o cron faria)
@@ -91,6 +91,7 @@ export async function PUT(req: NextRequest) {
   try {
     await definirConfigCaptacao({
       ...(ehModoLuigi(body.modo) ? { modo: body.modo } : {}),
+      ...(typeof body.lote === 'number' ? { lote: body.lote } : {}),
       ...(typeof body.max_por_pedido === 'number' ? { max_por_pedido: body.max_por_pedido } : {}),
       ...(typeof body.max_por_dia === 'number' ? { max_por_dia: body.max_por_dia } : {}),
       ...(typeof body.horas_entre_buscas === 'number' ? { horas_entre_buscas: body.horas_entre_buscas } : {}),

@@ -32,6 +32,33 @@ import AlinharCliente from "@/app/alinhar/[id]/AlinharCliente";
 import { atribuicao } from "@/app/lib/rastreio";
 import { PECAS_PRINCIPAIS, PECAS_EXTRAS } from "@/app/lib/pecas";
 import { linkWhatsAppSuporte, WHATSAPP_SUPORTE_FORMATADO } from "@/app/lib/contatos";
+import { track } from "@/app/lib/rastreio";
+
+// ────────────────────────────────────────────────────────────────────────────
+// A CONVERSÃO MUDOU DE BOTÃO — 10/09/2026.
+//
+// Enquanto o passo 4 era o chat, "virou lead" e "dá pra conversar" eram a mesma
+// coisa: o pedido salvava e a conversa começava no mesmo clique. Desde que o
+// passo 4 virou handoff pro WhatsApp, são dois momentos diferentes — e o que
+// vale dinheiro é o segundo. Pedido salvo sem esse clique é um cadastro que
+// ninguém atende: a janela de 24h não abre, o Luigi não pode escrever primeiro
+// sem template, e o alinhamento (60% do pedido) não acontece.
+//
+// Por isso o passo 4 emite `contato_whatsapp`, separado do `generate_lead` que
+// o passo 3 já emitia. No Google Ads, a conversão PRIMÁRIA passa a ser esta;
+// `generate_lead` fica como secundária, pra medir quanta gente salva o pedido
+// e não chama. Os dois eventos carregam o mesmo pedido_id, então dá pra fechar
+// a conta dos dois lados.
+// ────────────────────────────────────────────────────────────────────────────
+function marcarContatoWhatsApp(pedidoId: string): void {
+  // Funil 1st-party (eventos_site): amarra o clique à sessão anônima.
+  track("whatsapp_click", { referenciaId: pedidoId });
+  try {
+    const w = window as unknown as { dataLayer?: Record<string, unknown>[] };
+    w.dataLayer = w.dataLayer || [];
+    w.dataLayer.push({ event: "contato_whatsapp", pedido_id: pedidoId, value: 1, currency: "BRL" });
+  } catch { /* analytics nunca quebra o fluxo */ }
+}
 
 // O PASSO 4 VIRA WHATSAPP — 10/09/2026.
 //
@@ -537,6 +564,7 @@ export default function PedidoSteps() {
                 )}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={() => marcarContatoWhatsApp(pedidoId)}
                 className="inline-flex items-center justify-center gap-2 bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-7 py-3.5 rounded-xl text-sm font-medium transition-colors"
               >
                 Falar no WhatsApp →
