@@ -40,6 +40,7 @@ import { conferirPedido, enviarResumoParaCliente } from './pedido-fechamento'
 import { faltaParaMockup, gerarMockupDoModelo, type LinhaMockup, type MapaMockups } from './mockup-pedido'
 import { janela24hAberta } from './whatsapp-notify'
 import { avisarGestor } from './luigi'
+import { horaEmRecife } from './horario'
 
 /** Quantos pedidos uma rodada fecha. Cada mockup é uma imagem de IA: vai devagar. */
 const PEDIDOS_POR_RODADA = 3
@@ -57,13 +58,6 @@ const IDADE_MAX_DIAS = 7
  * escalada, não o Fernando ter escrito uma linha de apoio.
  */
 const RESPEITO_HUMANO_MS = 60_000
-
-/** Hora atual em Recife. */
-function horaEmRecife(): number {
-  return Number(
-    new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Recife', hour: '2-digit', hour12: false }).format(new Date())
-  )
-}
 
 /**
  * Pode fechar pedido agora?
@@ -236,8 +230,12 @@ async function varrer(saida: ResultadoFechamento): Promise<ResultadoFechamento> 
     .order('criado_em', { ascending: false })
     .limit(30)
   if (error) {
-    console.error('[fechar-pedido] consulta falhou', { erro: error.message })
-    return saida
+    // NÃO devolve `saida` vazia aqui. Devolver transformaria uma consulta que
+    // falhou numa rodada que "olhou 0 pedidos e não teve erro" — e é exatamente
+    // esse `?? []` silencioso que fez a gente caçar o problema no lugar errado.
+    // Estourar faz `fecharPedidosProntos` gravar a linha com o erro preenchido,
+    // que é o único canal que a gente enxerga depois do fato.
+    throw new Error(`consulta de pedidos falhou: ${error.message}`)
   }
 
   const pedidos = (data ?? []) as PedidoLinha[]

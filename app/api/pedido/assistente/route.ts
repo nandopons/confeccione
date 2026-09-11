@@ -23,6 +23,7 @@ import { z } from 'zod'
 import { validarWhatsApp, normalizarWhatsApp } from '@/app/lib/phone'
 import { hintsTecidoTexto } from '@/app/lib/tecidos'
 import { registrarUsoIa } from '@/app/lib/uso-ia'
+import { FUSO } from '@/app/lib/horario'
 
 export const runtime = 'nodejs'
 
@@ -501,11 +502,11 @@ export async function POST(req: Request) {
   const cepAtual = anterior.contato.cep || extrairCepDasMensagens(janela)
   const enderecoCep = await buscarCep(cepAtual)
   const hoje = new Intl.DateTimeFormat('pt-BR', {
-    timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
+    timeZone: FUSO, weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
   }).format(new Date())
   const systemBlocks: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }> = [
     { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
-    { type: 'text', text: `DATA DE HOJE: ${hoje} (fuso de Brasília). Use SEMPRE esta data como referência ao calcular o prazo em dias a partir de uma data que o cliente disser. Nunca use outra data.` },
+    { type: 'text', text: `DATA DE HOJE: ${hoje} (fuso de Recife). Use SEMPRE esta data como referência ao calcular o prazo em dias a partir de uma data que o cliente disser. Nunca use outra data.` },
   ]
   if (enderecoCep && cepAtual) {
     const partes = [enderecoCep.logradouro, enderecoCep.bairro, [enderecoCep.cidade, enderecoCep.uf].filter(Boolean).join('/')].filter(Boolean).join(', ')

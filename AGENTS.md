@@ -31,19 +31,29 @@ ninguém lê depois do fato. **Rotina que roda sozinha grava uma linha por execu
 no Postgres** (ver `fechamento_automatico_log`), com o que fez e o motivo de cada
 item pulado. O banco é o canal que se enxerga.
 
-**O PostgREST devolve vazio em silêncio** quando você pede uma coluna que não
-existe — sem erro. Se uma consulta voltar vazia e você tem certeza que tem dado,
-confira as colunas antes de culpar a lógica. Vale também pro `NOT IN`, que
-exclui NULL sem avisar, e pra filtros em embed aninhado, que falham calados.
+**Cheque `error` ANTES de usar `data`.** O PostgREST não erra calado: coluna
+que não existe volta HTTP 400 com `42703` e o nome da coluna, seja no `select`,
+no filtro ou no `order`. Quem engole isso somos nós — o supabase-js põe a falha
+em `error` e deixa `data` como `null`, e o nosso `const x = (data ?? [])` vira
+lista vazia. Aí um erro explícito (RLS, timeout, tipo errado) passa a parecer
+"não tem dado". Se a consulta pode falhar, trate `error` e **mande o erro pro
+Postgres, não pro console** — no console ele não existe. Falham calados de
+verdade só dois: `NOT IN`, que exclui NULL sem avisar, e filtro em embed
+aninhado, que não filtra a linha pai sem `!inner`.
 
 **O scheduler aborta TUDO fora do horário comercial** (seg–sex, 8h–20h), logo no
 topo do handler. Tarefa nova colocada depois dessa porteira simplesmente não
 roda à noite nem no fim de semana. Se a tarefa é RESPOSTA a um cliente que está
 esperando (e não abordagem), ela vai antes da porteira, com janela própria.
 
-**Há duas eras de pedido.** `pedidos`/`ofertas` estão mortas desde 28/06. Quem
-vale é `pedidos_assistente`/`ofertas_pedido_assistente`. Ler a tabela errada
-devolve "nenhum pedido" com o pedido aberto na tela ao lado.
+**Há duas eras de pedido.** `pedidos`/`ofertas` são a **era legada com call
+sites vivos**: não recebem linha nova desde 28/06, mas ~20 pontos do código
+ainda leem e escrevem nelas (`ofertas.ts`, `matching.ts`, `orfaos.ts`,
+`planos.ts`, `fila.ts`, a TAREFA 1 do scheduler) e `/api/pedidos/criar` ainda
+grava lá. Então: pra saber de pedido de hoje, leia
+`pedidos_assistente`/`ofertas_pedido_assistente` — ler a tabela errada devolve
+"nenhum pedido" com o pedido aberto na tela ao lado. Mas **não trate o código da
+era legada como morto**: ele roda.
 
 **Nono dígito:** o mesmo cliente aparece com 12 e com 13 dígitos. Case por
 telefone sempre pelos **últimos 8 dígitos**, nunca por igualdade exata.

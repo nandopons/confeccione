@@ -15,25 +15,14 @@
 // calendário custa mais do que a chance de incomodar alguém num sábado à tarde.
 // ============================================================================
 
+// O fuso e a leitura de partes vêm de `horario.ts`, que é o único lugar do
+// repo que responde "que horas são" no fuso do negócio. Este arquivo já tinha
+// a sua própria cópia de `emRecife`; duas cópias é como o scheduler acabou
+// contando em São Paulo enquanto o fechador contava em Recife.
+import { partesEmRecife as emRecife } from './horario'
+
 export const HORA_ABRE = 7
 export const HORA_FECHA = 19
-
-const FUSO = 'America/Recife'
-
-/** Partes da data no fuso de Recife, sem depender do fuso do servidor. */
-function emRecife(d: Date): { ano: number; mes: number; dia: number; hora: number; minuto: number } {
-  const p = new Intl.DateTimeFormat('en-CA', {
-    timeZone: FUSO,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(d)
-  const get = (t: string) => Number(p.find((x) => x.type === t)?.value ?? 0)
-  return { ano: get('year'), mes: get('month'), dia: get('day'), hora: get('hour'), minuto: get('minute') }
-}
 
 /**
  * Deslocamento de Recife em relação ao UTC, em minutos, naquele instante.

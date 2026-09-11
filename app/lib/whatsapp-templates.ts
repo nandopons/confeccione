@@ -16,6 +16,8 @@
 //     tarifa é a de marketing (R$ 0,3217 vs R$ 0,035).
 // ============================================================================
 
+import { horaEmRecife } from './horario'
+
 const GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v23.0'
 // Só pra mock local (mesmo knob de whatsapp-cloud.ts). Em produção fica sem definir.
 const GRAPH_BASE = process.env.WHATSAPP_GRAPH_BASE || 'https://graph.facebook.com'
@@ -178,13 +180,13 @@ export const TEMPLATES_DUVIDA_PEDIDO = {
 } as const
 
 export function saudacaoPorHora(agora = new Date()): 'manha' | 'tarde' | 'noite' {
-  const hora = Number(new Intl.DateTimeFormat('en', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false }).format(agora))
+  const hora = horaEmRecife(agora)
   if (hora >= 5 && hora < 12) return 'manha'
   if (hora >= 12 && hora < 18) return 'tarde'
   return 'noite'
 }
 
-/** Nome do template "posso tirar uma dúvida?" certo pra hora atual em SP. */
+/** Nome do template "posso tirar uma dúvida?" certo pra hora atual. */
 export function templateDuvidaPedidoAgora(agora = new Date()): string {
   return TEMPLATES_DUVIDA_PEDIDO[saudacaoPorHora(agora)]
 }
