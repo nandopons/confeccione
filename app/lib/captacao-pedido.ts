@@ -1167,6 +1167,20 @@ export async function captarParaPedido(
         const r = await abordarCandidato(c, perfil, naOnda, pdfBanco)
         if (naOnda && (r.email || r.whatsapp)) saida.contatados++
         if (naOnda && r.erro && !r.email && !r.whatsapp) descartados.push({ nome: c.nome, motivo: `falha: ${r.erro.slice(0, 120)}` })
+        // O ERRO DE QUEM VAI PRA RESERVA TAMBÉM CONTA — 11/09/2026.
+        //
+        // Este ramo era cego: as duas linhas acima só olham `r.erro` quando o
+        // candidato está NA onda, então falha ao gravar um candidato de reserva
+        // não aparecia em lugar nenhum — nem em `descartados`, nem no erro da
+        // busca. `saida.novos` ainda contava ele como novo, então o rastro dizia
+        // "achei 3 novos" com 2 linhas no banco.
+        //
+        // Não é hipótese: em 11/09 o backfill provou que `status='sugerido'`
+        // viola a check constraint da tabela. Enquanto as falhas de canal
+        // seguraram `contatados` abaixo da cota, `naOnda` nunca foi falso e o
+        // problema não apareceu — ele estava esperando o dia em que a onda
+        // enchesse. Agora, se acontecer, sai no rastro em vez de sumir.
+        if (!naOnda && r.erro) descartados.push({ nome: c.nome, motivo: `reserva não gravou: ${r.erro.slice(0, 120)}` })
       }
     }
   } catch (err) {
