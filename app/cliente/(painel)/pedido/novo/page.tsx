@@ -1,39 +1,23 @@
 // app/cliente/(painel)/pedido/novo/page.tsx
 // ============================================================================
-// Criar pedido dentro do painel (cliente autenticado). Form de 2 passos —
-// os dados pessoais (nome/email/whatsapp) vêm da conta, então não há passo 3.
-// Se a conta ainda não tem WhatsApp, o form pede (e a API salva no perfil).
+// PÁGINA APOSENTADA — 11/09/2026.
+//
+// Era o formulário de 2 passos que criava pedido na tabela `pedidos` (era
+// legada) pela rota /api/pedidos/criar, hoje fechada com 410. Nenhum link do
+// site apontava pra cá desde o corte de 28/06 — varri o repo e as únicas
+// menções ao caminho eram comentários. Quem chegava aqui tinha a URL salva, e
+// o pedido que criasse não seria visto por automação nenhuma.
+//
+// Em vez de apagar, redireciona: cliente que tem o link antigo no favorito cai
+// no lugar certo em vez de tomar 404. O `#pedido` é a seção da home onde o
+// assistente monta o pedido novo (ver app/page.tsx).
+//
+// O formulário antigo (NovoPedidoForm.tsx) continua no repo por enquanto, sem
+// uso; some junto com o resto da era legada quando ela for aposentada inteira.
 // ============================================================================
 
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
-import NovoPedidoForm from './NovoPedidoForm'
-
-export const dynamic = 'force-dynamic'
 
 export default async function NovoPedidoPage() {
-  const conta = await getContaAtual()
-  if (!conta) return null // layout redireciona
-  if (!perfilCompleto(conta)) redirect('/cliente/perfil?completar=1')
-
-  const nomeExibido = conta.nome ?? conta.email.split('@')[0]
-
-  return (
-    <section className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-      <Link
-        href="/cliente/painel"
-        className="text-sm text-gray-600 hover:text-gray-900 inline-block mb-4 transition-colors"
-      >
-        ← Voltar
-      </Link>
-
-      <h2 className="text-lg font-semibold text-gray-900 mb-1">Novo pedido</h2>
-      <p className="text-sm text-gray-500 mb-4">
-        Vamos buscar fornecedores compatíveis. Você acompanha tudo por aqui.
-      </p>
-
-      <NovoPedidoForm nomeExibido={nomeExibido} email={conta.email} />
-    </section>
-  )
+  redirect('/#pedido')
 }

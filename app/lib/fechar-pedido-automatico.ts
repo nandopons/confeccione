@@ -60,6 +60,20 @@ const IDADE_MAX_DIAS = 7
 const RESPEITO_HUMANO_MS = 60_000
 
 /**
+ * Quantas rodadas seguidas o pedido espera por uma prévia que não sai.
+ *
+ * O cron roda de 15 em 15 min, então três rodadas são ~45 min. É a janela que
+ * separa as duas falhas: erro passageiro (400 da API, crédito, timeout de
+ * imagem) some sozinho na rodada seguinte; falha permanente naquele modelo não
+ * some nunca, e aí segurar o resumo seria trocar "PDF com um modelo sem foto"
+ * por "PDF que não chega".
+ */
+const MAX_ADIAMENTOS_PREVIA = 3
+
+/** Prefixo estável do motivo — é por ele que a rodada seguinte se conta. */
+const MOTIVO_PREVIA = 'prévia não saiu'
+
+/**
  * Pode fechar pedido agora?
  *
  * Não é a mesma pergunta que "é horário comercial". Horário comercial protege
@@ -87,7 +101,8 @@ function podeFecharAgora(ultimaEntradaDoCliente: Date | null): { pode: boolean; 
 
 export type ResultadoFechamento = {
   olhados: number
-  fechados: Array<{ pedido: string; mockupsGerados: number }>
+  /** `semImagem` lista os modelos (1-based, como o cliente vê) que foram sem prévia. */
+  fechados: Array<{ pedido: string; mockupsGerados: number; semImagem?: number[] }>
   pulados: Array<{ pedido: string; motivo: string }>
 }
 
@@ -153,21 +168,55 @@ async function ultimaFalaDoCliente(telefone: string): Promise<Date | null> {
  * pulado sem erro: mockup de peça "a combinar" seria invenção, e o resumo sai
  * melhor com quatro prévias boas do que com cinco, uma delas fantasiada.
  */
-async function gerarMockupsQueFaltam(p: PedidoLinha): Promise<number> {
+type Previas = { gerados: number; falharam: Array<{ index: number; motivo: string }> }
+
+async function gerarMockupsQueFaltam(p: PedidoLinha): Promise<Previas> {
   const linhas = Array.isArray(p.linhas) ? p.linhas : []
-  let gerados = 0
+  const r: Previas = { gerados: 0, falharam: [] }
   for (const [i, linha] of linhas.entries()) {
     if (temMockupIa(p.mockups, i)) continue
+    // Peça incompleta não é falha: não há o que ilustrar, e o `conferirPedido`
+    // já barrou o pedido antes se isso importasse pra liberar.
     if (faltaParaMockup(linha, p.mockups?.[String(i)]).length > 0) continue
     try {
-      const r = await gerarMockupDoModelo({ pedidoId: p.id, index: i })
-      if (r.ok) gerados++
-      else console.warn('[fechar-pedido] mockup não saiu', { pedido: p.codigo, index: i, motivo: 'erro' in r ? r.erro : r.motivo })
+      const g = await gerarMockupDoModelo({ pedidoId: p.id, index: i })
+      if (g.ok) r.gerados++
+      else r.falharam.push({ index: i, motivo: ('erro' in g ? g.erro : g.motivo) ?? 'sem motivo' })
     } catch (err) {
-      console.error('[fechar-pedido] mockup falhou', { pedido: p.codigo, index: i, err })
+      r.falharam.push({ index: i, motivo: err instanceof Error ? err.message : String(err) })
     }
   }
-  return gerados
+  return r
+}
+
+/**
+ * Quantas rodadas seguidas este pedido já foi adiado por prévia que não saiu.
+ *
+ * Lê o próprio rastro: `fechamento_automatico_log` já guarda o motivo de cada
+ * pulado, então o contador não precisa de coluna nova em `pedidos_assistente`.
+ * Conta só o prefixo corrido mais recente — pedido que fechou e voltou (não
+ * acontece hoje, mas o código não deve depender disso) recomeça do zero.
+ *
+ * Se a leitura falhar, devolve 0 e o pedido espera mais uma rodada. É a direção
+ * segura: o erro aqui não pode virar um resumo incompleto enviado cedo demais.
+ * Se o log estiver inacessível de vez, o `gravarRodada` também está falhando e
+ * o problema é maior que este contador.
+ */
+async function adiamentosPorPrevia(rotulo: string): Promise<number> {
+  const { data, error } = await supabaseAdmin
+    .from('fechamento_automatico_log')
+    .select('pulados')
+    .order('criado_em', { ascending: false })
+    .limit(MAX_ADIAMENTOS_PREVIA)
+  if (error || !data) return 0
+  let seguidas = 0
+  for (const linha of data as Array<{ pulados: Array<{ pedido: string; motivo: string }> | null }>) {
+    const lista = Array.isArray(linha.pulados) ? linha.pulados : []
+    const este = lista.find((x) => x.pedido === rotulo)
+    if (!este || !este.motivo.startsWith(MOTIVO_PREVIA)) break
+    seguidas++
+  }
+  return seguidas
 }
 
 /**
@@ -269,11 +318,41 @@ async function varrer(saida: ResultadoFechamento): Promise<ResultadoFechamento> 
       continue
     }
 
-    const mockupsGerados = await gerarMockupsQueFaltam(p)
+    // PRÉVIA QUE FALHA NÃO FECHA O PEDIDO CALADA — 11/09/2026.
+    //
+    // Antes, erro ao gerar mockup caía num `console.warn` e o resumo saía assim
+    // mesmo, com um modelo sem imagem. Como `resumo_enviado_em` marca o pedido
+    // pra sempre, o pedido nunca mais voltava aqui: o buraco era permanente e
+    // ninguém — nem o cliente, nem o Fernando — ficava sabendo. É a mesma
+    // família do PDF que mostrava a prévia velha: entregar errado em silêncio.
+    //
+    // Agora o pedido espera. Quase toda falha aqui é passageira (400 da API,
+    // crédito, timeout de imagem) e a rodada seguinte resolve de graça. O que
+    // não pode é esperar pra sempre, então depois de MAX_ADIAMENTOS_PREVIA o
+    // resumo sai do mesmo jeito — só que dizendo, no rastro e pro Fernando,
+    // quais modelos foram sem foto.
+    const previas = await gerarMockupsQueFaltam(p)
+    if (previas.falharam.length > 0) {
+      const modelos = previas.falharam.map((f) => f.index + 1)
+      const adiado = await adiamentosPorPrevia(rotulo)
+      if (adiado < MAX_ADIAMENTOS_PREVIA) {
+        const porque = previas.falharam[0].motivo.slice(0, 120)
+        saida.pulados.push({
+          pedido: rotulo,
+          motivo: `${MOTIVO_PREVIA} no(s) modelo(s) ${modelos.join(', ')} — adiando ${adiado + 1}/${MAX_ADIAMENTOS_PREVIA}: ${porque}`,
+        })
+        continue
+      }
+    }
+    const semImagem = previas.falharam.map((f) => f.index + 1)
+
     const r = await enviarResumoParaCliente(p.id)
     if (r.ok && !r.jaEnviado) {
-      saida.fechados.push({ pedido: rotulo, mockupsGerados })
-      void avisarGestor(`Fechei sozinho o pedido ${rotulo}: ${mockupsGerados > 0 ? `${mockupsGerados} prévia(s) gerada(s) e ` : ''}resumo enviado ao cliente.`)
+      saida.fechados.push({ pedido: rotulo, mockupsGerados: previas.gerados, ...(semImagem.length ? { semImagem } : {}) })
+      const faltando = semImagem.length
+        ? ` Atenção: o(s) modelo(s) ${semImagem.join(', ')} foram sem prévia depois de ${MAX_ADIAMENTOS_PREVIA} tentativas — motivo: ${previas.falharam[0].motivo.slice(0, 200)}`
+        : ''
+      void avisarGestor(`Fechei sozinho o pedido ${rotulo}: ${previas.gerados > 0 ? `${previas.gerados} prévia(s) gerada(s) e ` : ''}resumo enviado ao cliente.${faltando}`)
     } else {
       saida.pulados.push({ pedido: rotulo, motivo: r.erro ?? 'resumo não saiu' })
     }

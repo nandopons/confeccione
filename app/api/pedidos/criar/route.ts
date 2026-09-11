@@ -1,186 +1,34 @@
-import { createClient } from '@supabase/supabase-js'
+// app/api/pedidos/criar/route.ts
+// ============================================================================
+// ROTA FECHADA — 11/09/2026.
+//
+// Esta rota criava pedido na tabela `pedidos`, a era legada. Ela não recebe
+// linha nova desde 28/06/2026 (conferido: zero pedidos com `criado_em` depois
+// do corte), e hoje nenhuma automação olha pra lá — o disparo saiu das TAREFAS
+// 1, 2 e 6 do scheduler em 10/09. Ou seja: um pedido criado aqui ficaria parado
+// pra sempre, sem oferta, sem cron e sem ninguém avisado.
+//
+// Ela ficou alcançável esse tempo todo por um detalhe: a página
+// /cliente/pedido/novo não tem link em lugar nenhum do site, mas existe, e
+// cliente logado que tivesse a URL salva criava um pedido invisível. Dormente
+// é melhor que ativa, mas armadilha dormente ainda é armadilha.
+//
+// O fluxo vivo é o assistente: POST /api/pedido/assistente/criar, que grava em
+// `pedidos_assistente`. O corpo antigo desta rota está no histórico do git
+// (último commit com ela funcionando: fb84c5c).
+//
+// 410 e não 404 de propósito: 404 diz "nunca existiu" e manda o cliente
+// procurar erro de digitação; 410 diz "existiu e acabou", que é a verdade.
+// ============================================================================
+
 import { NextResponse } from 'next/server'
-import { criarEDispararOferta } from '@/app/lib/ofertas'
-import { emailConfirmacaoCliente } from '@/app/lib/email'
-import { normalizarWhatsApp, validarWhatsApp } from '@/app/lib/phone'
-import { getContaAtual, perfilCompleto } from '@/app/lib/cliente-auth'
-import { getContaSessao } from '@/lib/mobileAuth'
-import { enviarTextoSimples } from '@/app/lib/whatsapp-cloud'
-import { notificarPedidoRecebido } from '@/app/lib/whatsapp-notify'
-import { tipoLabel } from '@/app/lib/ofertas-labels'
-import { loginComEmailUrl } from '@/app/lib/url'
-import { primeiroNome } from '@/app/lib/nome'
-import { pecaValida } from '@/app/lib/pecas'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
-
-export async function POST(req: Request) {
-  const body = await req.json()
-
-  // Cliente autenticado (sessão): dados pessoais vêm da conta, não do body.
-  // Cookie (web) com fallback no Bearer (app mobile). Anônimo (home, sem
-  // nenhum dos dois): conta = null → comportamento original intacto.
-  const conta = (await getContaAtual()) ?? (await getContaSessao(req))
-
-  const tipo = body.tipo
-  // Peça e texto livre são opcionais aqui: este formulário ainda nasce da
-  // categoria. Passam adiante pra este caminho não ficar cego ao vocabulário
-  // novo — o matching prefere a peça quando ela existe.
-  const pecas = Array.isArray(body.pecas)
-    ? [...new Set(body.pecas.filter(pecaValida))]
-    : []
-  const peca = pecaValida(body.peca) ? body.peca : (pecas[0] ?? null)
-  const pecaOutro =
-    typeof body.peca_outro === 'string' && body.peca_outro.trim()
-      ? body.peca_outro.trim().slice(0, 300)
-      : null
-  const quantidade = body.quantidade
-  const prazo = body.prazo
-  const estado = body.estado
-  const descricao = body.descricao
-  const nome = conta ? (conta.nome ?? conta.email.split('@')[0]) : body.nome
-  const email = conta ? conta.email : body.email
-  const whatsapp = conta ? conta.whatsapp : body.whatsapp
-  const contaId: string | null = conta?.id ?? null
-
-  // Cliente autenticado precisa de perfil completo (WhatsApp) pra criar pedido.
-  // A página /cliente/pedido/novo já bloqueia antes, isto é defesa em profundidade.
-  if (conta && !perfilCompleto(conta)) {
-    return NextResponse.json(
-      { error: 'Complete seu perfil (WhatsApp) antes de criar um pedido.' },
-      { status: 400 },
-    )
-  }
-
-  // ============================================================
-  // Validação de campos obrigatórios
-  // ============================================================
-  const camposObrigatorios = { tipo, quantidade, prazo, estado, nome, whatsapp, email }
-  const faltando = Object.entries(camposObrigatorios)
-    .filter(([, v]) => v === undefined || v === null || v === '' || (typeof v === 'string' && v.trim() === ''))
-    .map(([k]) => k)
-
-  if (faltando.length > 0) {
-    return NextResponse.json(
-      { error: `Preencha todos os campos obrigatórios: ${faltando.join(', ')}` },
-      { status: 400 }
-    )
-  }
-
-  if (typeof quantidade !== 'number' || quantidade <= 0) {
-    return NextResponse.json(
-      { error: 'Quantidade deve ser um número maior que zero' },
-      { status: 400 }
-    )
-  }
-
-  if (!validarWhatsApp(whatsapp)) {
-    return NextResponse.json(
-      { error: 'WhatsApp inválido. Use o formato (DDD) 9XXXX-XXXX' },
-      { status: 400 }
-    )
-  }
-
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  if (!emailRegex.test(email)) {
-    return NextResponse.json(
-      { error: 'E-mail inválido' },
-      { status: 400 }
-    )
-  }
-
-  const { data, error } = await supabase
-    .from('pedidos')
-    .insert({
-      tipo,
-      peca,
-      pecas,
-      peca_outro: pecaOutro,
-      quantidade,
-      prazo,
-      estado,
-      nome,
-      whatsapp: normalizarWhatsApp(whatsapp),
-      email,
-      descricao: descricao || null,
-      status: 'buscando_fornecedor',
-      conta_id: contaId,
-    })
-    .select('id')
-    .single()
-
-  if (error || !data) {
-    return NextResponse.json(
-      { error: error?.message ?? 'Erro ao criar pedido' },
-      { status: 500 }
-    )
-  }
-
-  // Dispara a 1ª oferta. O gate de horário comercial vive dentro de
-  // criarEDispararOferta: fora de hora, ela agenda buscar_apos e a TAREFA 2
-  // do scheduler acorda o pedido no próximo ciclo válido.
-  try {
-    await criarEDispararOferta(data.id)
-  } catch (err) {
-    console.error('criarEDispararOferta error:', err)
-  }
-
-  if (email) {
-    try {
-      await emailConfirmacaoCliente({
-        email,
-        nomeCliente: primeiroNome(nome),
-        protocolo: data.id,
-        tipo,
-        quantidade,
-        estado,
-        prazo,
-      })
-    } catch (err) {
-      console.error('email confirmação falhou:', err)
-    }
-  }
-
-  // WhatsApp de confirmação ao cliente. Preferência: número OFICIAL
-  // (Meta Cloud API, template `pedido_recebido` — utility, registra no inbox).
-  // Fallback transitório: Z-API (número antigo) enquanto o template não está
-  // aprovado ou se o envio oficial falhar. Failure-soft nos dois caminhos.
-  if (validarWhatsApp(whatsapp)) {
-    const protocoloCurto = data.id.slice(0, 8).toUpperCase()
-    const enviadoOficial = await notificarPedidoRecebido({
-      telefone: normalizarWhatsApp(whatsapp),
-      nome: primeiroNome(nome),
-      protocolo: protocoloCurto,
-      email: email ?? null,
-    })
-
-    if (!enviadoOficial) {
-      const tipoDesc = tipoLabel[tipo] ?? tipo
-      const linhaPedido = [
-        `*${tipoDesc}*`,
-        typeof quantidade === 'number' ? `${quantidade} peças` : null,
-        estado || null,
-      ]
-        .filter(Boolean)
-        .join(' · ')
-      const mensagemCliente =
-        `✅ *Confeccione — Pedido recebido*\n\n` +
-        `Olá *${primeiroNome(nome)}*!\n\n` +
-        `Recebemos seu pedido:\n${linhaPedido}\n\n` +
-        `Em breve enviamos para fornecedores compatíveis. Avisaremos quando alguém aceitar.\n\n` +
-        `Enquanto isso, você pode acompanhar tudo pelo seu painel — inclusive subir referências, modelagens ou logomarcas:\n\n` +
-        `🔗 ${loginComEmailUrl(email)}\n\n` +
-        `— Confeccione`
-      try {
-        await enviarTextoSimples(normalizarWhatsApp(whatsapp), mensagemCliente)
-      } catch (err) {
-        console.error('whatsapp confirmação cliente falhou:', err)
-      }
-    }
-  }
-
-  return NextResponse.json({ ok: true, protocolo: data.id, status: 'buscando_fornecedor' })
+export async function POST() {
+  return NextResponse.json(
+    {
+      error: 'Esta forma de criar pedido foi desativada. O pedido agora é montado pelo assistente.',
+      use: '/api/pedido/assistente/criar',
+    },
+    { status: 410 },
+  )
 }
