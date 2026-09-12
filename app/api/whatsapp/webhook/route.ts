@@ -30,11 +30,16 @@ import { ehAudioTranscritivel, transcreverAudio } from '@/app/lib/transcricao'
 export const dynamic = 'force-dynamic'
 // Os agentes (gestão e Luigi) rodam em after(), depois do 200 pra Meta, e
 // podem levar dezenas de segundos consultando o banco — o limite cobre isso.
-// 300 s, e NÃO é folga: sobe junto com ORCAMENTO_MS (90 s, em luigi.ts). O
-// orçamento é conferido entre rodadas e não interrompe geração em curso — a
-// distância entre os dois é a rede que segura a rodada que já começou. O pior
-// caso legal do schema leva ~161 s pra gerar; começando em 89,9 s, termina em
-// ~251 s. Mexer num sem o outro tira a rede.
+// 300 s, e NÃO é folga: é o total de TRÊS fatias sequenciais, todas em
+// app/lib/luigi.ts. O debounce dorme, depois o orçamento começa a contar,
+// depois a geração roda — uma não sobrepõe a outra:
+//
+//     debounce_teto  +  ORCAMENTO_MS  +  geração_do_pior_caso  ≤  maxDuration
+//            60 s    +      60 s      +        161 s           =  281 s ≤ 300
+//
+// Folga: 19 s. Mexer em qualquer um dos três sem refazer a soma estoura aqui, e
+// estoura calado: a Vercel mata no meio da geração, e o AbortController do
+// streaming está armado no ORCAMENTO_MS, que a essa altura já expirou.
 export const maxDuration = 300
 
 // ---------------------------------------------------------------------------

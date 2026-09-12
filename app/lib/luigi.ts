@@ -109,21 +109,30 @@ const PROMESSA_DE_ACAO =
 const AGENTES_SAIDA = new Set(['luigi', 'mcp', 'gestao'])
 
 /**
- * ORÇAMENTO DA RESPOSTA — 12/09/2026: 45s → 90s, junto com `maxDuration` 120 → 300.
+ * ORÇAMENTO DA RESPOSTA — 12/09/2026: 60 s.
  *
- * OS DOIS SOBEM JUNTOS, SEMPRE. O orçamento é conferido ENTRE rodadas; a
- * distância entre ele e o `maxDuration` do webhook é a rede que segura a rodada
- * que já começou. Subir um sem o outro é tirar a rede.
+ * ESTE NÚMERO NÃO É SOZINHO. Ele é uma de TRÊS fatias que dividem o
+ * `maxDuration` do webhook, e elas são SEQUENCIAIS — o debounce dorme, depois o
+ * orçamento começa a contar, depois a geração roda:
  *
- * Dimensionamento, com a reta medida em 12/09 (~4,1 s fixos + ~140 tok/s):
- * o pior caso legal do schema são 21.897 tokens ≈ 161 s de geração. Uma rodada
- * que comece em 89,9 s termina em ~251 s, dentro dos 300 s. Rede de 210 s.
+ *     debounce_teto  +  ORCAMENTO_MS  +  geração_do_pior_caso  ≤  maxDuration
+ *            60 s    +      60 s      +        161 s           =  281 s ≤ 300 s
  *
- * A reta é de dois pontos e o fixo varia bastante (600 tokens já levaram de
- * 10,2 s a 42,5 s), então a margem calculada não é garantia — é por isso que o
- * abort por streaming existe, e não como otimização.
+ * Folga: 19 s. Mexer em qualquer um dos três sem refazer a soma estoura o
+ * `maxDuration`, e estoura do pior jeito: a Vercel mata no meio da geração, e o
+ * `AbortController` do streaming está armado no ORCAMENTO_MS, que a essa altura
+ * já expirou — volta a falha silenciosa que o streaming foi feito pra fechar.
+ *
+ * POR QUE 60/60 E NÃO 45/90 OU 90/45. As três combinações fecham a soma, mas as
+ * outras duas deixam 4 s de folga. Num sistema onde a MESMA saída de 600 tokens
+ * já levou de 10,2 s a 42,5 s — variação de 4× no tempo fixo —, 4 s de folga é
+ * ilusão de margem, não margem.
+ *
+ * O 161 s é o pior caso LEGAL do schema (21.897 tokens), não o real: o maior
+ * pedido da história tem 31 modelos e ~2.600 tokens, ~23 s de geração. No caso
+ * real a folga é ~150 s; os 19 s protegem um cenário que nunca aconteceu.
  */
-const ORCAMENTO_MS = 90_000
+const ORCAMENTO_MS = 60_000
 
 /**
  * TETO DA RODADA — 11/09/2026: 600 → 4000.
@@ -200,7 +209,32 @@ const LIMITE_TEXTO = 1500
  * custo é responder meio minuto depois, o que ninguém estranha no WhatsApp — a
  * pessoa não está olhando a tela esperando. Responder atropelado, sim, estranha.
  */
-const ESPERA_MENSAGEM_SEGUINTE_MS = 30_000
+/**
+ * DEBOUNCE DE VERDADE, NÃO SONO FIXO — 12/09/2026.
+ *
+ * O que havia: `await dormir(30_000)` por mensagem. Com 4 fragmentos chegando a
+ * cada 40 s, cada invocação acordava ANTES do fragmento seguinte e respondia —
+ * quatro respostas para quatro pedaços de uma frase só. O caso real: "ficou
+ * perfeito, mas a gola" → FOTO → "da gola"; ele respondeu ao primeiro sem ter
+ * visto a foto que o corrigia.
+ *
+ * Os 30 s estavam ABAIXO da mediana real: entre mensagens consecutivas do
+ * cliente a mediana é 43 s, e 61,5% dos intervalos passam de 30 s (n=707, 10
+ * dias). Medimos também se o intervalo é maior depois de mockup — a intuição
+ * era que sim — e a amostra deu n=4. Quatro observações não decidem nada, então
+ * é um número só para toda conversa, sustentado pelas 707.
+ *
+ * JANELA vs TETO. A janela é silêncio: cada fragmento novo faz a invocação
+ * antiga ceder, e a nova espera de novo — o relógio reinicia sozinho. O teto
+ * limita quanto UMA execução pode dormir, e é ele que entra na conta das três
+ * fatias (ver ORCAMENTO_MS). O teto não limita a conversa: se a pessoa fragmenta
+ * por dez minutos, a resposta sai 45 s depois do último fragmento, porque quem
+ * responde é sempre a invocação mais nova.
+ */
+const DEBOUNCE_MS_PADRAO = 45_000
+const DEBOUNCE_TETO_MS_PADRAO = 60_000
+/** Fatia de sono entre consultas — reconsulta a última entrada a cada 3 s. */
+const DEBOUNCE_FATIA_MS = 3_000
 
 /**
  * Por quanto tempo a conversa continua sendo de quem falou por último, quando
@@ -3516,6 +3550,68 @@ async function fornecedorVigente(fornecedorId: string): Promise<boolean> {
 }
 
 
+/** Janelas do debounce, ajustáveis sem deploy (agentes_config → luigi). */
+async function janelasDoDebounce(): Promise<{ janelaMs: number; tetoMs: number }> {
+  const { data, error } = await supabaseAdmin
+    .from('agentes_config')
+    .select('config')
+    .eq('agente', 'luigi')
+    .maybeSingle<{ config: Record<string, unknown> | null }>()
+  const num = (v: unknown, padrao: number, min: number, max: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(Math.round(v), min), max) : padrao
+  if (error) return { janelaMs: DEBOUNCE_MS_PADRAO, tetoMs: DEBOUNCE_TETO_MS_PADRAO }
+  const janelaMs = num(data?.config?.debounce_ms, DEBOUNCE_MS_PADRAO, 0, 120_000)
+  // O teto tem MÁXIMO DURO de 60 s: acima disso a soma das três fatias estoura
+  // o maxDuration do webhook. Ver o comentário de ORCAMENTO_MS.
+  const tetoMs = Math.max(num(data?.config?.debounce_teto_ms, DEBOUNCE_TETO_MS_PADRAO, 0, 60_000), janelaMs)
+  return { janelaMs, tetoMs }
+}
+
+/**
+ * Espera o cliente terminar de falar.
+ *
+ * Devolve `'ceder'` quando apareceu mensagem mais nova que a minha — nesse caso
+ * quem responde é a invocação dela, e esta sai calada. É daí que vem o reinício
+ * do relógio: não existe "estender a espera", existe uma invocação nova que
+ * começa a esperar do zero enquanto a antiga desiste.
+ *
+ * Dorme em fatias e reconsulta em vez de dormir tudo de uma vez, porque ceder
+ * cedo libera a execução (e o tempo cobrado) da invocação que não vai responder.
+ */
+async function esperarOClienteTerminar(params: {
+  conversaId: string
+  wamid: string
+  criadoEm: string
+}): Promise<'seguir' | 'ceder'> {
+  const { janelaMs, tetoMs } = await janelasDoDebounce()
+  const comecou = Date.now()
+  const meuEm = new Date(params.criadoEm).getTime()
+
+  while (true) {
+    const decorrido = Date.now() - comecou
+    if (decorrido >= tetoMs) return 'seguir'
+    if (decorrido >= janelaMs) return 'seguir'
+    await dormir(Math.min(DEBOUNCE_FATIA_MS, janelaMs - decorrido, tetoMs - decorrido))
+
+    const { data: ultima } = await supabaseAdmin
+      .from('wa_mensagens')
+      .select('wamid, criado_em')
+      .eq('conversa_id', params.conversaId)
+      .eq('direcao', 'entrada')
+      .order('criado_em', { ascending: false })
+      .limit(1)
+      .maybeSingle<{ wamid: string | null; criado_em: string }>()
+    if (
+      ultima?.wamid &&
+      ultima.wamid !== params.wamid &&
+      new Date(ultima.criado_em).getTime() > meuEm
+    ) {
+      return 'ceder'
+    }
+  }
+}
+
+
 /**
  * Chamada pelo webhook, em after(), pra toda mensagem que não é do gestor.
  * Decide sozinha se faz algo (modo, escopo, tipo da mensagem) e nunca lança.
@@ -3537,7 +3633,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // de cliente — a pessoa não tem pedido, tem uma sondagem pra responder.
     const candidato = await candidatoPeloWaId(waId)
     if (candidato) {
-      await dormir(ESPERA_MENSAGEM_SEGUINTE_MS)
+      await dormir((await janelasDoDebounce()).janelaMs)
       await responderCandidato({ conversaId: params.conversaId, waId, nome: params.nome, wamid: params.wamid, corpo: params.corpo, candidato })
       return
     }
@@ -3646,21 +3742,13 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // Na devolução manual não há o que esperar: a mensagem dela é de horas
     // atrás e quem está do outro lado é o Fernando, olhando o botão girar. Os
     // 30 s aqui eram metade do tempo que ele ficava vendo "Chamando…".
-    if (!params.retomada) await dormir(ESPERA_MENSAGEM_SEGUINTE_MS)
-    const { data: ultimaEntrada } = await supabaseAdmin
-      .from('wa_mensagens')
-      .select('wamid, criado_em')
-      .eq('conversa_id', params.conversaId)
-      .eq('direcao', 'entrada')
-      .order('criado_em', { ascending: false })
-      .limit(1)
-      .maybeSingle<{ wamid: string | null; criado_em: string }>()
-    if (
-      ultimaEntrada?.wamid &&
-      ultimaEntrada.wamid !== params.wamid &&
-      new Date(ultimaEntrada.criado_em).getTime() > new Date(params.criadoEm).getTime()
-    ) {
-      return
+    if (!params.retomada) {
+      const espera = await esperarOClienteTerminar({
+        conversaId: params.conversaId,
+        wamid: params.wamid,
+        criadoEm: params.criadoEm,
+      })
+      if (espera === 'ceder') return
     }
 
     // Uma sugestão por conversa: a nova mensagem do cliente supera a anterior.

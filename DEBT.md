@@ -4,6 +4,25 @@ Registro de débitos e decisões adiadas. Cada item diz **o que**, **por que imp
 
 ---
 
+## ⚪ Assimetria de limite de modelos entre canais: ferramenta 20, site 31
+
+**Descoberto em:** 12/09/2026, de brinde, ao dimensionar o teto de tokens do Luigi.
+
+### O quê
+As ferramentas `criar_pedido` e `definir_pecas_pedido` declaram `maxItems: 20` para a lista de peças. O site não tem esse limite: o maior pedido real da base tem **31 modelos**, criado via `home_chat`.
+
+Distribuição medida (229 pedidos com linhas): mediana **1**, p95 **7,6**, p99 **20,2**, máximo **31**. Acima de 12 modelos: 7 pedidos. O maior pedido feito pelo Luigi tem **6** — o `maxItems: 20` nunca chegou a morder na prática.
+
+### Por que importa
+O mesmo cliente tem limites diferentes conforme o canal por onde entra. Se alguém montar pelo site um pedido de 25 modelos e depois pedir um ajuste pelo WhatsApp, o Luigi não consegue reescrever a lista inteira com `definir_pecas_pedido` — a ferramenta recusa acima de 20. Não é hipótese distante: 7 pedidos reais já passaram de 12.
+
+Não conserta baixando o limite da ferramenta. Isso foi considerado em 12/09 para comprar folga no orçamento de tempo e **descartado com dado**: cortar para 12 excluiria 7 pedidos reais, e pioraria a assimetria em vez de resolvê-la.
+
+### Como revisitar
+Decidir qual é o limite do produto — não o limite de cada canal — e aplicar nos dois lados. Se for maior que 20, refazer a conta das três fatias em `app/lib/luigi.ts` (ver o comentário de `ORCAMENTO_MS`): mais modelos significa geração mais longa no pior caso.
+
+---
+
 ## 🔴 App cliente ainda cria pedido na era legada (repo separado)
 
 **Descoberto em:** auditoria de 2026-09-11. Confirmado pelo Fernando no monorepo dos apps.
