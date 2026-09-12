@@ -346,8 +346,21 @@ export async function listarPedidosPagos(): Promise<{
 // ---------------------------------------------------------------------------
 export async function ofertarPedido(
   pedidoId: string,
-  fornecedorIds: string[]
+  fornecedorIds: string[],
+  /**
+   * SUPRIMIR A NOTIFICAÇÃO NÃO É ESCONDER — 12/09/2026.
+   *
+   * A notificação existe porque normalmente NÃO HÁ CONVERSA: ela é o único jeito
+   * de a confecção saber que tem pedido. Quando o Luigi está entregando ao vivo,
+   * naquele segundo, mandar as duas coisas é falar duas vezes com quem já está
+   * te ouvindo — e a segunda chega como se a primeira não tivesse existido.
+   *
+   * O motivo fica gravado em `ofertas_pedido_assistente.observacao`, pra ninguém
+   * ler "notificadas: 0" daqui a três meses e achar que foi silêncio.
+   */
+  opts?: { notificar?: boolean; motivoSemNotificar?: string }
 ): Promise<{ ok: boolean; criadas: number; notificadas: number; erro?: string }> {
+  const notificar = opts?.notificar !== false
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
     .select('id, status, pagamento_status, confirmado_em, valor_centavos, linhas, cep, imagens, mockups, prazo_dias, uf, categoria')
@@ -465,6 +478,14 @@ export async function ofertarPedido(
       ofertaId = nova.id
     }
     criadas++
+
+    if (!notificar) {
+      await supabaseAdmin
+        .from('ofertas_pedido_assistente')
+        .update({ observacao: opts?.motivoSemNotificar ?? 'entregue na conversa' })
+        .eq('id', ofertaId)
+      continue
+    }
 
     const link = ofertaFornecedorUrl(ofertaId)
 

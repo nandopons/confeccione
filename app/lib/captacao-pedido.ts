@@ -41,7 +41,8 @@ import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
 import { URL_CADASTRO_FORNECEDOR } from './captacao-templates'
 import { estaEmHorarioComercial } from './horario'
 import { avisarGestor, marcarEscalada } from './luigi'
-import { definirStatusOferta } from './pedido-assistente-oferta'
+import { definirStatusOferta, ofertarPedido } from './pedido-assistente-oferta'
+import { MAX_OFERTAS_ABERTAS } from './oferta-automatica'
 import { ehModoLuigi, type ModoLuigi } from './luigi-catalogo'
 
 const MODELO = 'claude-sonnet-4-6'
@@ -798,7 +799,7 @@ async function cadastrarConfeccaoDaConversa(
   entrada: Record<string, unknown>,
   waId: string,
   nomeContato: string | null
-): Promise<{ ok: boolean; pendente?: boolean; aviso: string }> {
+): Promise<{ ok: boolean; pendente?: boolean; ofertou?: boolean; proximo_passo?: string; aviso: string }> {
   // TRAVA 1 — ELA TEM QUE TER CONFIRMADO.
   // O formulário dá de graça uma coisa que a conversa perde: a pessoa VÊ o que
   // preencheu antes de enviar. Na conversa isso só existe se for explícito.
@@ -938,9 +939,24 @@ async function cadastrarConfeccaoDaConversa(
     .update({ status: 'convertido', convertido_em: new Date().toISOString(), proximo_envio_em: null })
     .eq('id', cand.id)
 
+  // A OFERTA NASCE AQUI — 12/09/2026.
+  //
+  // Sem isto o cadastro terminava em "já está valendo" e parava: quem cria
+  // oferta é o `ofertarPedido`, que ninguém chamava. Os quatro que disseram sim
+  // e sumiram morriam exatamente neste vão.
+  //
+  // NÃO PEDE CONFIRMAÇÃO NOVA. Ela já disse que atende ESTE pedido no passo 1 —
+  // é o `resposta = 'interessado'` que a trava 2 lá em cima exige. A régua da
+  // noite é uma confirmação por DECISÃO, não uma por escrita.
+  //
+  // Nasce `ofertada`, que é o estado que o `aceitar_oferta` procura.
+  const oferta = await ofertarNaConversa(cand, fornecedorId)
+
   return {
     ok: true,
     pendente,
+    ofertou: oferta.ok,
+    proximo_passo: oferta.aviso,
     aviso: pendente
       ? 'Cadastro criado, mas as peças dela não estão no catálogo: ficou pendente e o Fernando vai olhar. ' +
         'Diga a ela que está tudo certo e que você avisa quando chegar pedido do tipo dela.'
@@ -951,6 +967,80 @@ async function cadastrarConfeccaoDaConversa(
   }
 }
 
+
+
+/**
+ * Cria a oferta do pedido da conversa pra confecção que acabou de se cadastrar.
+ *
+ * Reusa `ofertarPedido` com a notificação suprimida — não bifurca. O Luigi está
+ * entregando ao vivo; o WhatsApp de oferta chegaria como se a conversa não
+ * existisse.
+ *
+ * AS 3H COMERCIAIS NÃO SE APLICAM. Aquele relógio é ritmo de SAÍDA: existe pra
+ * dar tempo de a oferta anterior ser respondida antes de procurar a próxima.
+ * Aqui quem puxou a conversa foi ela, e esperar 3h com a confecção na linha é
+ * perder exatamente o momento que a captação existe pra alcançar.
+ */
+async function ofertarNaConversa(cand: CandidatoLinha, fornecedorId: string): Promise<{ ok: boolean; aviso: string }> {
+  if (!cand.pedido_id) return { ok: false, aviso: 'Esta conversa não está ligada a um pedido; não há o que ofertar.' }
+
+  // TRAVA — O PEDIDO AINDA ESTÁ DISPONÍVEL?
+  // Podem ter passado horas entre a abordagem e o cadastro. Se outra confecção
+  // já assumiu, ofertar agora criaria uma oferta natimorta e uma promessa falsa.
+  const { data: aceita } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id')
+    .eq('pedido_id', cand.pedido_id)
+    .eq('status', 'aceita')
+    .maybeSingle<{ id: string }>()
+  if (aceita) {
+    return {
+      ok: false,
+      aviso:
+        'Esse pedido já foi fechado com outra confecção enquanto vocês conversavam. Diga isso a ela sem rodeio, ' +
+        'agradeça, e avise que o cadastro já está valendo e o próximo que combinar com ela você manda aqui.',
+    }
+  }
+
+  // TRAVA — O TETO DE OFERTAS ABERTAS, QUE É POR FORNECEDOR.
+  //
+  // Conferido no código da fila (`oferta-automatica.ts:212`): `MAX_OFERTAS_ABERTAS`
+  // conta quantas ofertas em aberto CADA CONFECÇÃO segura, não quantas o pedido
+  // tem. Não existe teto por pedido — hoje 6 pedidos têm 2+ ofertas abertas e
+  // nada impede mais. Não criei um às 5h da manhã, no mesmo commit que abre um
+  // caminho novo de escrita.
+  //
+  // Na prática isto quase nunca barra quem acabou de se cadastrar (ela tem zero
+  // ofertas). Existe pra confecção que já estava na rede e voltou pela conversa.
+  const { data: abertas } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id')
+    .eq('fornecedor_id', fornecedorId)
+    .eq('status', 'ofertada')
+  if ((abertas ?? []).length >= MAX_OFERTAS_ABERTAS) {
+    return {
+      ok: false,
+      aviso:
+        `Ela já tem ${(abertas ?? []).length} pedidos em aberto esperando resposta, que é o teto. Diga que o cadastro ` +
+        'já está valendo, que você não quer sobrecarregar, e que manda o próximo assim que ela fechar algum.',
+    }
+  }
+
+  // `ofertarPedido` já é idempotente: se ela tiver oferta `ofertada` pra este
+  // pedido, ele pula e não cria segunda.
+  const r = await ofertarPedido(cand.pedido_id, [fornecedorId], {
+    notificar: false,
+    motivoSemNotificar: 'entregue na conversa (captação)',
+  })
+  if (!r.ok) return { ok: false, aviso: `Não deu pra liberar o pedido pra ela agora (${r.erro ?? 'motivo desconhecido'}).` }
+
+  return {
+    ok: true,
+    aviso:
+      'O pedido já está com ela. Mostre o resumo EM NÚMEROS (peça, quantidade, cidade do cliente, prazo que ele pediu) ' +
+      'e pergunte se ela assume. Com o sim, chame aceitar_oferta.',
+  }
+}
 
 // ─── Aceite da oferta na conversa ───────────────────────────────────────────
 /**
@@ -1938,7 +2028,8 @@ DEPOIS DE GRAVAR, diga LITERAL, conforme o galho:
 NÃO prometa volume nem número de pedidos: são 4 pedidos entregues em 229.
 
 ASSUMIR O PEDIDO, DEPOIS DO CADASTRO E SEPARADO DELE.
-Feito o cadastro, o pedido que motivou a conversa pode ser dela — mas isso é UM SEGUNDO SIM, e ela precisa ver o que está assumindo. Mostre o RESUMO EM NÚMEROS numa mensagem só, sem prosa:
+Feito o cadastro, o pedido JÁ FICA COM ELA automaticamente — a ferramenta cuida disso e te diz no campo proximo_passo. Você não precisa pedir nada pra isso acontecer, e NÃO diga a ela que "liberou o pedido": pra ela o que mudou é que agora dá pra assumir. Se o proximo_passo disser que não deu (pedido já fechado, ou ela no teto de pedidos em aberto), repasse o motivo com as palavras que ele te der e NÃO ofereça o pedido.
+Quando der certo, o pedido que motivou a conversa pode ser dela — mas isso é UM SEGUNDO SIM, e ela precisa ver o que está assumindo. Mostre o RESUMO EM NÚMEROS numa mensagem só, sem prosa:
 "Então: 10 scrubs, entrega em Joinville/SC, o cliente pediu 13 dias. Você monta o orçamento direto com ele. Confirma que quer esse pedido?"
 Peça, quantidade, cidade do cliente e o prazo que ELE pediu. Só isso — são os números que ela precisa pra dizer sim sabendo do que se trata.
 Com o sim dela, chame aceitar_oferta com confirmado_por_ela: true e frase_dela com o que ela escreveu, TEXTUAL.
