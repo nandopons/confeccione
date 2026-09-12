@@ -446,7 +446,9 @@ export async function gerarMockupDoModelo(params: {
     modelo: l.modelo,
     cor: corLimpa(l.cor),
     descricao: l.descricao,
-    estampado: ehEstampado(l),
+    // O valor CRU, com NULL preservado — ver a armadilha 3 em verificar-mockup.ts.
+    estampado: l.estampado ?? null,
+    temEstampasCadastradas: (l.estampas?.length ?? 0) > 0,
   })
 
   let gerada: { base64: string; mime: string } | null = null

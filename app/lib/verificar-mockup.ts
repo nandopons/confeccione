@@ -47,11 +47,33 @@ export type ResultadoVerificacao =
   | { verificada: true; divergencias: string[] }
 
 // ============================================================================
-// VOCABULÁRIO FECHADO.
+// VOCABULÁRIO FECHADO — e as três armadilhas que ele levou na cara.
 //
-// Ordem importa: a negativa vem antes da afirmativa dentro da mesma chave, senão
-// "sem bolso" casa com /bolso/ e o esperado sai invertido — o verificador então
-// reprova a imagem CERTA, que é o pior defeito possível aqui.
+// A primeira versão reprovou 11 de 19 prévias REAIS do banco. As 11 eram falso
+// positivo, e nenhuma era culpa do verificador: era a lista que estava errada.
+// O que os dados de verdade mostraram:
+//
+//  1. PEÇA COMPOSTA. "blusa … bolso frontal; calça wide leg SEM bolsos laterais"
+//     (20260900293). Uma descrição, duas peças, atributos opostos. A ordem
+//     negativa-primeiro elegia "sem bolso" e reprovava a imagem CERTA, que
+//     mostrava a blusa com bolso.
+//     → Se o texto casa com mais de um valor da mesma chave, o atributo SAI.
+//
+//  2. ATRIBUTO QUALIFICADO. "Macacão … manga em apenas um ombro (assimétrico).
+//     Sem manga no outro lado." (20260900282, cinco modelos). Só a negativa
+//     casava, então não havia contradição pra detectar — mas "sem manga" ali é
+//     sobre UM LADO, não sobre a peça.
+//     → Palavra de ressalva por perto ("apenas", "outro lado", "assimétrico")
+//       tira as chaves de forma do jogo.
+//
+//  3. NULL NÃO É "NÃO". `estampado` chega NULL e o `ehEstampado` colapsa pra
+//     false — aí a lista afirmava "lisa, sem estampa" numa peça cuja descrição
+//     dizia "Estampa com símbolo … centralizado na frente" (20260900277).
+//     → NULL é "não sei", e "não sei" não vira afirmação.
+//
+// A regra que sai das três é a mesma: NA DÚVIDA, NÃO PERGUNTA. Lista que
+// encolhe deixa passar um defeito de vez em quando; lista que afirma errado
+// descarta a prévia certa e o cliente fica sem imagem nenhuma.
 // ============================================================================
 const VOCABULARIO: { chave: string; padrao: RegExp; esperado: string }[] = [
   { chave: 'manga', padrao: /\b(sem\s*mangas?|regata|cavada)\b/i, esperado: 'sem manga' },
@@ -67,6 +89,12 @@ const VOCABULARIO: { chave: string; padrao: RegExp; esperado: string }[] = [
   { chave: 'bolso', padrao: /\bbolsos?\b/i, esperado: 'com bolso' },
 ]
 
+/** Armadilha 2: ressalva por perto derruba as chaves de forma. */
+const RESSALVA = /\b(apenas|somente|s[óo]\s+um|um\s+(lado|ombro|bra[çc]o)|outro\s+lado|assim[ée]tric\w*|de\s+um\s+lado)\b/i
+
+/** Armadilha 3: palavras que denunciam arte aplicada, mesmo com a coluna NULL. */
+const FALA_DE_ARTE = /\b(estampas?|estampad\w*|bordad\w*|logo(tipo)?s?|aplica[çc][ãa]o|aplica[çc][õo]es|silk|serigrafia|s[íi]mbolo|bras[ãa]o|emblema)\b/i
+
 /**
  * O que a peça deve ser, já resolvido pelo chamador.
  *
@@ -80,8 +108,14 @@ export type PedidoDaPeca = {
   /** Já passada por `corLimpa`. */
   cor?: string | null
   descricao?: string | null
-  /** Já decidido por `ehEstampado`. */
-  estampado: boolean
+  /**
+   * O valor CRU da coluna, incluindo `null`. Não use `ehEstampado` aqui: ele
+   * colapsa NULL em false, e afirmar "lisa" a partir de "não sei" foi a
+   * armadilha 3 lá em cima.
+   */
+  estampado?: boolean | null
+  /** `true` quando a linha tem estampas cadastradas (`estampas.length > 0`). */
+  temEstampasCadastradas?: boolean
 }
 
 /**
@@ -92,6 +126,9 @@ export type PedidoDaPeca = {
  * — foi justamente o atributo que queimou dois pedidos. Daí o extrator de
  * vocabulário fechado acima, em vez de mandar a descrição inteira pro
  * verificador julgar.
+ *
+ * Toda dúvida encolhe a lista. Ver as três armadilhas no comentário do
+ * VOCABULARIO: cada uma delas nasceu de uma afirmação feita sem base.
  */
 export function atributosEsperados(p: PedidoDaPeca): Atributo[] {
   const lista: Atributo[] = []
@@ -102,18 +139,35 @@ export function atributosEsperados(p: PedidoDaPeca): Atributo[] {
   const cor = (p.cor || '').trim()
   if (cor) lista.push({ chave: 'cor', esperado: cor })
 
-  lista.push({
-    chave: 'estampa',
-    esperado: p.estampado ? 'com estampa ou bordado aplicado' : 'lisa, sem estampa e sem bordado',
-  })
-
   const texto = `${modelo} ${p.descricao || ''}`
-  const vistas = new Set<string>()
-  for (const v of VOCABULARIO) {
-    if (vistas.has(v.chave)) continue
-    if (v.padrao.test(texto)) {
-      vistas.add(v.chave)
-      lista.push({ chave: v.chave, esperado: v.esperado })
+  const falaDeArte = FALA_DE_ARTE.test(texto)
+
+  // ESTAMPA. Três estados, não dois:
+  //   • true (coluna ou estampas cadastradas) → afirma "com estampa"
+  //   • false explícito e a descrição não fala de arte → afirma "lisa"
+  //   • NULL, ou false brigando com a descrição → não pergunta
+  const estampado = p.estampado === true || p.temEstampasCadastradas === true
+  if (estampado) {
+    lista.push({ chave: 'estampa', esperado: 'com estampa, bordado ou arte aplicada' })
+  } else if (p.estampado === false && !falaDeArte) {
+    lista.push({ chave: 'estampa', esperado: 'lisa, sem estampa e sem bordado' })
+  }
+
+  // FORMA (manga, gola, capuz, bolso). Ressalva por perto e a peça pode ser
+  // assimétrica ou composta: nenhuma chave de forma é confiável no texto todo.
+  if (!RESSALVA.test(texto)) {
+    const porChave = new Map<string, Set<string>>()
+    for (const v of VOCABULARIO) {
+      if (!v.padrao.test(texto)) continue
+      const s = porChave.get(v.chave) ?? new Set<string>()
+      s.add(v.esperado)
+      porChave.set(v.chave, s)
+    }
+    for (const [chave, valores] of porChave) {
+      // Mais de um valor pra mesma chave = a descrição fala de duas peças (ou se
+      // contradiz). Armadilha 1: escolher um dos dois reprova a imagem certa.
+      if (valores.size !== 1) continue
+      lista.push({ chave, esperado: [...valores][0] })
     }
   }
 
