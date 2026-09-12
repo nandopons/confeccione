@@ -37,6 +37,9 @@ type PedidoRow = {
   quantidade: number | null
   estado: string
   status: string
+  /** null sempre: era legada (`pedidos`) não tem `linhas`. Ver a nota em
+   *  app/api/admin/ofertar/route.ts. */
+  linhas: null
 }
 
 export async function GET(req: NextRequest) {

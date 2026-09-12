@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { temCreditoDisponivel, planoEfetivo, type Plano } from './planos'
-import { legadoDasPecas } from './pecas'
+import { legadoDasPecas, pecasDoPedido } from './pecas'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,6 +14,12 @@ export type Pedido = {
   peca?: string | null
   /** Todas as peças do pedido. `peca` é a primeira delas. */
   pecas?: string[] | null
+  /**
+   * As linhas do pedido — é daqui que a peça sai de verdade (`pecasDoPedido`).
+   * Obrigatório: quem carregar o pedido sem elas não compila, em vez de
+   * silenciosamente cair no valor declarado na criação.
+   */
+  linhas: { modelo?: string | null }[] | null
   quantidade: number | null
   prazo: string
   estado: string
@@ -56,18 +62,11 @@ export type ResultadoMatching = {
  *  significam fornecedor existe mas não quer receber leads agora. */
 export const STATUS_FORNECEDOR_ATIVO = 'ativo' as const
 
-/** As peças que o pedido pede, em uma lista só.
- *
- *  `pecas` é o conjunto (o cliente pode marcar camiseta + moletom); `peca` é a
- *  primeira, mantida porque o resto do sistema já lê essa coluna. Pedidos
- *  antigos não têm nenhuma das duas. */
-export function pecasDoPedido(pedido: {
-  peca?: string | null
-  pecas?: string[] | null
-}): string[] {
-  if (pedido.pecas && pedido.pecas.length > 0) return pedido.pecas
-  return pedido.peca ? [pedido.peca] : []
-}
+// `pecasDoPedido` mora em pecas.ts (módulo puro) e é reexportado aqui porque o
+// resto do sistema já importava daqui. Não pode morar NESTE arquivo: matching.ts
+// cria um client com service-role no topo do módulo, e quem importasse a função
+// levaria esse efeito junto.
+export { pecasDoPedido }
 
 /**
  * Quantas das peças do pedido essa confecção cobre? (05/09/2026)
@@ -85,7 +84,7 @@ export function pecasDoPedido(pedido: {
  */
 export function coberturaDoPedido(
   fornecedor: { tipos_produto?: string[] | null; pecas?: string[] | null },
-  pedido: { tipo: string; peca?: string | null; pecas?: string[] | null },
+  pedido: { tipo: string; peca?: string | null; pecas?: string[] | null; linhas: { modelo?: string | null }[] | null },
 ): number {
   const pecasFornecedor = fornecedor.pecas ?? []
   const tipos = fornecedor.tipos_produto ?? []
@@ -112,7 +111,7 @@ export function coberturaDoPedido(
  */
 export function produzOQuePedem(
   fornecedor: { tipos_produto?: string[] | null; pecas?: string[] | null },
-  pedido: { tipo: string; peca?: string | null; pecas?: string[] | null },
+  pedido: { tipo: string; peca?: string | null; pecas?: string[] | null; linhas: { modelo?: string | null }[] | null },
 ): boolean {
   return coberturaDoPedido(fornecedor, pedido) > 0
 }
@@ -134,6 +133,7 @@ export function fornecedorAtendePedido(
   pedido: Pick<Pedido, 'tipo' | 'quantidade' | 'estado'> & {
     peca?: string | null
     pecas?: string[] | null
+    linhas: { modelo?: string | null }[] | null
   },
 ): boolean {
   if (fornecedor.status !== STATUS_FORNECEDOR_ATIVO) return false

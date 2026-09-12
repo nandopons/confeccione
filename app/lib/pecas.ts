@@ -182,3 +182,153 @@ export function ehVestuario(modelo: string | null | undefined): boolean {
   if (!t) return false
   return !NAO_VESTUARIO.test(t)
 }
+
+// ============================================================================
+// DE `modelo` PRA PEÇA — 12/09/2026 (Fase 2, passo 1).
+//
+// `linhas[].modelo` é texto livre e carrega TRÊS níveis juntos: a peça
+// ("camiseta"), o modelo ("calça wide leg") e a variação ("manga curta"). Média
+// de 2,4 palavras. O catálogo acima é o vocabulário do matching, e só 31 dos 229
+// pedidos têm `pecas` preenchido — porque esse campo é DECLARAÇÃO feita na
+// criação (os cards do site), nunca recalculada. Pedido do Luigi e da vitrine
+// nascem com zero.
+//
+// Esta tabela não adivinha: ou o texto casa com um termo conhecido, ou devolve
+// `null`. "Não sei" é resposta melhor que palpite — peça errada manda o pedido
+// pra confecção errada, e o ativo escasso aqui é paciência de fornecedor.
+//
+// ORDEM IMPORTA, e é a maior fonte de erro:
+//   • "camiseta" antes de "camisa", senão toda camiseta vira polo
+//   • "camisola" antes de "camisa" (é moda íntima, não camisa)
+//   • "blusa de frio" antes de "blusa"
+//   • "pijama"/"baby doll" antes de "short", senão "short de pijama" vira bermuda
+// A primeira regra que casar vence, então o específico vem sempre antes do geral.
+//
+// O QUE FICA DE FORA DE PROPÓSITO: beca acadêmica, estola e kimono (5 linhas).
+// Um id novo no catálogo vira card na tela do cliente e item na autodescrição do
+// fornecedor — card que ninguém escolhe é ruído nas duas pontas. Se formatura
+// virar segmento, isso muda, e é decisão de produto, não de classificação.
+// ============================================================================
+
+/** Fronteira que respeita acento — `\b` é ASCII e falha depois de "é"/"ã". */
+function termo(t: string): RegExp {
+  return new RegExp(`(?<!\\p{L})${t}(?!\\p{L})`, 'iu')
+}
+
+const SINONIMOS: { peca: string; termos: string[] }[] = [
+  // `pet` PRIMEIRO: é qualificador, não tipo de peça. "pijama pet" e "vestido
+  // pet" são roupa de cachorro — quem produz é outra confecção. Deixado no meio
+  // da lista, "pijama pet" casava com moda_intima e ia pro fornecedor errado.
+  { peca: 'pet', termos: ['pets?'] },
+  // --- específicos primeiro ---
+  { peca: 'moda_intima', termos: ['baby ?doll', 'short ?doll', 'camisola', 'pijamas?', 'cuecas?', 'calcinhas?', 'suti[ãa]s?', 'lingerie', 'cinto-?liga', 'sleepwear'] },
+  { peca: 'moletom_jaqueta', termos: ['blusa de frio', 'corta-? ?vento', 'moletons?', 'moletom', 'jaquetas?', 'casacos?', 'college', 'puffer', 'canguru'] },
+  { peca: 'camiseta', termos: ['camisetas?', 'tshi[rt]t?', 't-shirts?', 'baby ?look', 'oversized', 'cropped', 'ringer', 'dry ?fit', 'boxy', 'gola careca'] },
+  { peca: 'uniforme', termos: ['uniformes?', 'fardamentos?', 'scrubs?'] },
+  { peca: 'jaleco_avental', termos: ['jalecos?', 'aventais?', 'avental'] },
+  { peca: 'macacao', termos: ['macac[ãa]o', 'macaquinho', 'jardineiras?'] },
+  { peca: 'blazer', termos: ['blazers?', 'ternos?'] },
+  { peca: 'colete', termos: ['coletes?'] },
+  { peca: 'moda_praia', termos: ['moda praia', 'biqu[íi]nis?', 'sungas?', 'mai[ôo]s?', 'sa[íi]da de praia'] },
+  { peca: 'fitness', termos: ['fitness', 'leggings?', 'top de treino'] },
+  { peca: 'bone', termos: ['bon[ée]s?', 'chap[ée]us?', 'viseiras?', 'toucas?', 'gorros?'] },
+  { peca: 'bolsa', termos: ['mochilas?', 'sacochilas?', 'eco ?bags?', 'tote ?bags?', 'necessaires?', 'pochetes?', 'bolsas?'] },
+  { peca: 'meia', termos: ['meias?'] },
+  { peca: 'cama_mesa_banho', termos: ['toalhas?', 'len[çc][óo]is', 'jogo de cama', 'pano de prato'] },
+  { peca: 'uv', termos: ['prote[çc][ãa]o uv', 'camisa uv', '\\buv\\b'] },
+  { peca: 'infantil', termos: ['beb[êe]', 'infantis'] },
+  { peca: 'vestido', termos: ['vestidos?'] },
+  { peca: 'saia', termos: ['saias?'] },
+  // --- gerais depois ---
+  { peca: 'camisa_polo', termos: ['polos?', 'camisas?'] },
+  { peca: 'blusa_top', termos: ['blusas?', 'regatas?', 'tops?', 'bodys?', 'batas?'] },
+  { peca: 'calca', termos: ['cal[çc]as?'] },
+  { peca: 'bermuda_short', termos: ['bermudas?', 'shorts?'] },
+  { peca: 'acessorios', termos: ['bandanas?', 'faixas?', 'chaveiros?', 'brindes?', 'canecas?', 'squeezes?', 'garrafas?', 'copos?', 'crach[áa]s?', 'cadernos?', 'canetas?', 'estojos?', 'planners?', 'calend[áa]rios?', 'pastas?', 'porta-?cart[ãa]o', 'l[áa]pis', 'mousepads?', 'adesivos?', 'marcadores?'] },
+]
+
+const COMPILADO = SINONIMOS.map((s) => ({ peca: s.peca, res: s.termos.map(termo) }))
+
+/**
+ * A peça do catálogo que este `modelo` descreve, ou `null` se não der pra saber.
+ *
+ * `null` cobre três coisas diferentes e todas legítimas: modelo vazio (98
+ * linhas), nome de CATEGORIA no campo errado ("private label", "interclasse /
+ * evento" — 10 linhas) e variação usada como modelo ("manga longa" — 3 linhas).
+ * Nenhuma delas diz qual é a peça, e nenhuma deve virar palpite.
+ */
+export function pecaDaLinha(modelo: string | null | undefined): string | null {
+  const t = (modelo || '').trim()
+  if (!t) return null
+  for (const { peca, res } of COMPILADO) {
+    if (res.some((re) => re.test(t))) return peca
+  }
+  return null
+}
+
+/**
+ * As peças que as linhas de um pedido pedem, sem repetir e sem os "não sei".
+ *
+ * Vazio é resposta possível: pedido só de brinde sem nome reconhecido, ou
+ * pedido em montagem com todos os modelos em branco. Quem chama decide o que
+ * fazer com o vazio — ver `pecasDoPedido` em matching.ts.
+ */
+export function pecasDasLinhas(linhas: { modelo?: string | null }[] | null | undefined): string[] {
+  const out = new Set<string>()
+  for (const l of linhas ?? []) {
+    const p = pecaDaLinha(l?.modelo)
+    if (p) out.add(p)
+  }
+  return [...out]
+}
+
+// ============================================================================
+// AS PEÇAS DO PEDIDO — DERIVADAS NA LEITURA (Fase 2, passo 2) — 12/09/2026.
+//
+// `pedidos_assistente.pecas` NÃO é derivado de nada: é DECLARAÇÃO feita na
+// criação, a partir dos cards que o cliente marcou no site, escrita uma vez em
+// `criar/route.ts` e nunca recalculada. Daí 31 de 229 pedidos — e zero nos 7 do
+// Luigi e nos 4 da vitrine, que não passam por card nenhum. Pior: 14 dos 31 já
+// tiveram as linhas editadas depois, então a coluna descreve uma intenção velha.
+//
+// POR QUE DERIVAR NA LEITURA E NÃO MANTER CACHE
+// Existem NOVE lugares que escrevem `pedidos_assistente.linhas`. Um cache
+// derivado exigiria que todos os nove lembrassem de recalcular; o que esquecesse
+// deixaria `pecas` velho e o matching estreitaria em silêncio — o mesmo defeito
+// que este repo já pagou seis vezes (ver a FAMÍLIA no topo do DEBT.md).
+// Derivando na leitura não há o que esquecer: a regra some do caminho de escrita.
+// Isso só é possível porque `pedidos_assistente.pecas` NUNCA entra em filtro SQL
+// sobre pedidos — é lido em JS, de uma linha já carregada. (O `pecas.ov.{…}` de
+// matching.ts e o `pecas.cs.{}` daqui filtram `leads_fornecedores`, outra tabela.)
+//
+// SUBSTITUIÇÃO COM PISO, decisão do Fernando, e o motivo é o custo do erro:
+//   derivado não-vazio → vence o declarado
+//   derivado vazio     → mantém o declarado (nunca devolve lista vazia por cima)
+// União preservaria intenção velha pra sempre: o cliente que declarou camiseta e
+// depois trocou as linhas por moletom continuaria pontuando confecção de
+// camiseta. Oferta errada queima paciência de fornecedor, que é o ativo que não
+// se repõe; pedido que alcança menos fornecedor a gente reoferece.
+//
+// `linhas` É OBRIGATÓRIO NO TIPO de propósito. Quem carregar o pedido sem as
+// linhas não degrada calado pro piso — não compila. É a mesma trava que achou os
+// três chamadores de `gerarMockupDoModelo`. Cuidado extra: existe uma COLISÃO DE
+// NOME no repo — em `contexto/route.ts`, `FunilPainel` e `WhatsAppInbox`, o campo
+// `pecas` de um objeto de pedido é a QUANTIDADE de peças (number). Se um desses
+// chegasse aqui, `pedido.pecas.length > 0` seria `undefined > 0` = false e cairia
+// no piso sem avisar. O tipo abaixo recusa number.
+// ============================================================================
+
+export type PedidoParaPecas = {
+  /** Obrigatório: é de onde a peça sai. Ver o comentário acima. */
+  linhas: { modelo?: string | null }[] | null
+  /** Declaração de criação — só é usada quando não dá pra derivar nada. */
+  peca?: string | null
+  pecas?: string[] | null
+}
+
+export function pecasDoPedido(pedido: PedidoParaPecas): string[] {
+  const derivadas = pecasDasLinhas(pedido.linhas)
+  if (derivadas.length > 0) return derivadas
+  if (pedido.pecas && pedido.pecas.length > 0) return pedido.pecas
+  return pedido.peca ? [pedido.peca] : []
+}

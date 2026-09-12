@@ -24,6 +24,7 @@ import { pedidoTemListaAbertaIncompleta } from '@/app/lib/listas-externas'
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
+import { legadoDasPecas, pecasDoPedido } from './pecas'
 import { registrarVersaoOrcamento } from './orcamento-versoes'
 import { enviarTextoSimples } from './whatsapp-cloud'
 import { avisoOficial, notificarOfertaFornecedor, enviarResumoPdfPedido } from './whatsapp-notify'
@@ -87,6 +88,8 @@ export type FornecedorOpcao = {
   estado: string | null
   status: string | null
   tipos_produto: string[] | null
+  /** Vocabulário NOVO do catálogo (pecas.ts). 15 dos 41 aprovados já têm. */
+  pecas: string[] | null
   pedido_minimo: number | null
   /** Prazo mínimo que ela aceita. Null = não informou, recebe tudo. */
   prazo_minimo_dias: number | null
@@ -150,8 +153,17 @@ function normalizar(t: string | null | undefined): string {
  * nada em comum", não é "ruim" — confecção sem cidade preenchida cai aqui.
  */
 export function pontuarFornecedor(
-  pedido: { cidade?: string | null; uf?: string | null; categoria?: string | null; pecas?: string[] | null; prazoDias?: number | null },
-  f: Pick<FornecedorOpcao, 'cidade' | 'estado' | 'tipos_produto' | 'pedido_minimo' | 'prazo_minimo_dias' | 'status'>,
+  pedido: {
+    cidade?: string | null
+    uf?: string | null
+    categoria?: string | null
+    peca?: string | null
+    pecas?: string[] | null
+    /** Obrigatório — é de onde a peça sai. Ver `pecasDoPedido` em pecas.ts. */
+    linhas: { modelo?: string | null }[] | null
+    prazoDias?: number | null
+  },
+  f: Pick<FornecedorOpcao, 'cidade' | 'estado' | 'tipos_produto' | 'pecas' | 'pedido_minimo' | 'prazo_minimo_dias' | 'status'>,
   totalPecas?: number | null
 ): MatchFornecedor {
   const motivos: string[] = []
@@ -171,15 +183,40 @@ export function pontuarFornecedor(
     motivos.push('mesmo estado')
   }
 
-  // Peça: o que o pedido pede contra o que a confecção declarou fazer.
-  const querPecas = [pedido.categoria, ...(pedido.pecas ?? [])].map(normalizar).filter(Boolean)
+  // ==========================================================================
+  // PEÇA: O QUE O PEDIDO PEDE CONTRA O QUE A CONFECÇÃO FAZ — 12/09/2026.
+  //
+  // Isto era `[pedido.categoria, ...(pedido.pecas ?? [])]` comparado por
+  // substring contra `tipos_produto`. Dois defeitos somados:
+  //
+  //  1. `pedido.pecas` é DECLARAÇÃO DE CRIAÇÃO, escrita uma vez pelos cards do
+  //     site e nunca recalculada — 31 de 229 pedidos, zero nos do Luigi e da
+  //     vitrine. O cliente que declarou camiseta e depois trocou as linhas por
+  //     moletom continuava pontuando confecção de camiseta. Agora a peça vem das
+  //     LINHAS (`pecasDoPedido`), com o declarado só como piso.
+  //
+  //  2. VOCABULÁRIOS DIFERENTES. `pedido.pecas` guarda id de catálogo
+  //     ('moletom_jaqueta') e `tipos_produto` guarda categoria legada
+  //     ('private_label', 'interclasse'). Substring entre os dois NUNCA casa —
+  //     conferido: nenhum id do catálogo é substring de nenhuma categoria. Na
+  //     prática só `pedido.categoria` pontuava, e a metade `pecas` era código
+  //     morto que parecia funcionar. A tradução é `legadoDasPecas`, a mesma
+  //     ponte que `coberturaDoPedido` usa.
+  //
+  // Duas vias porque as duas pontas estão em migração: 15 dos 41 fornecedores
+  // aprovados já declaram `pecas`; os outros 26 só têm `tipos_produto`.
+  // ==========================================================================
+  const pedidas = pecasDoPedido(pedido)
+  const fazPecasNovo = (f.pecas ?? []).filter(Boolean)
+  const bateNoVocabularioNovo = pedidas.length > 0 && fazPecasNovo.length > 0 && pedidas.some((q) => fazPecasNovo.includes(q))
+
+  const querLegado = [pedido.categoria, ...legadoDasPecas(pedidas)].map(normalizar).filter(Boolean)
   const fazPecas = (f.tipos_produto ?? []).map(normalizar).filter(Boolean)
-  if (querPecas.length && fazPecas.length) {
-    const bate = querPecas.some((q) => fazPecas.some((p) => p.includes(q) || q.includes(p)))
-    if (bate) {
-      pontos += 20
-      motivos.push('faz esse tipo de peça')
-    }
+  const bateNoLegado = querLegado.length > 0 && fazPecas.length > 0 && querLegado.some((q) => fazPecas.some((p) => p.includes(q) || q.includes(p)))
+
+  if (bateNoVocabularioNovo || bateNoLegado) {
+    pontos += 20
+    motivos.push('faz esse tipo de peça')
   }
 
   // Pedido mínimo, com 20% de margem pra baixo. Mínimo 30 aceita a partir de
@@ -223,8 +260,17 @@ export function pontuarFornecedor(
 }
 
 /** A mesma lista, na ordem em que faz sentido olhar pra ESTE pedido. */
-export function ordenarFornecedoresPara<T extends Pick<FornecedorOpcao, 'nome' | 'cidade' | 'estado' | 'tipos_produto' | 'pedido_minimo' | 'prazo_minimo_dias' | 'status'>>(
-  pedido: { cidade?: string | null; uf?: string | null; categoria?: string | null; pecas?: string[] | null; prazoDias?: number | null },
+export function ordenarFornecedoresPara<T extends Pick<FornecedorOpcao, 'nome' | 'cidade' | 'estado' | 'tipos_produto' | 'pecas' | 'pedido_minimo' | 'prazo_minimo_dias' | 'status'>>(
+  pedido: {
+    cidade?: string | null
+    uf?: string | null
+    categoria?: string | null
+    peca?: string | null
+    pecas?: string[] | null
+    /** Obrigatório: sem as linhas a peça não é derivável e o match degrada. */
+    linhas: { modelo?: string | null }[] | null
+    prazoDias?: number | null
+  },
   fornecedores: T[],
   totalPecas?: number | null
 ): Array<T & { match: MatchFornecedor }> {
@@ -392,7 +438,7 @@ export async function listarPedidosPagos(): Promise<{
   // interrompe o disparo automático, não a escolha manual).
   const { data: fornRaw } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pedido_minimo, prazo_minimo_dias')
+    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pecas, pedido_minimo, prazo_minimo_dias')
     .order('nome', { ascending: true })
 
   return {

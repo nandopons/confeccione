@@ -369,6 +369,9 @@ export async function matchingRetroativo(
     estado: string
     status: string
     fornecedor_aceito_id: string | null
+    /** null sempre: era legada (`pedidos`) não tem `linhas`. Ver a nota em
+     *  app/api/admin/ofertar/route.ts. */
+    linhas: null
   }
   const pedidosMap = new Map<string, PedidoRow>()
   for (const p of (pedidosRaw ?? []) as PedidoRow[]) {

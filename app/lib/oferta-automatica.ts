@@ -169,7 +169,7 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
 async function candidatosDisponiveis(pedidoId: string): Promise<FornecedorOpcao[]> {
   const { data: forn, error: errForn } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pedido_minimo, prazo_minimo_dias')
+    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pecas, pedido_minimo, prazo_minimo_dias')
     .eq('aprovacao_status', 'aprovado')
     .eq('status', 'ativo')
     .is('pausado_em', null)
@@ -244,7 +244,10 @@ export async function rodarFilaDeOfertas(): Promise<ResultadoFila> {
     // mínimo dela (já com os 20% de margem) ou prazo mais curto do que ela
     // aceita não vira oferta. A tela manual continua mostrando todo mundo — lá
     // tem uma pessoa que pode saber de algo que o cadastro não sabe.
-    const escolhido = ordenarFornecedoresPara({ ...p, prazoDias: p.prazo_dias }, disponiveis, totalPecas || null).find(
+    // `linhas` já vinha no select; só não estava tipado. É de onde a peça do
+    // pedido é derivada agora (`pecasDoPedido`), em vez do `pecas` declarado na
+    // criação — que nestes pedidos do cron é quase sempre vazio.
+    const escolhido = ordenarFornecedoresPara({ ...p, linhas, prazoDias: p.prazo_dias }, disponiveis, totalPecas || null).find(
       (f) => f.match.viavel
     )
     if (!escolhido) {

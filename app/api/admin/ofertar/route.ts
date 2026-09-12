@@ -53,6 +53,14 @@ type PedidoRow = {
   id: string
   tipo: string
   peca: string | null
+  /**
+   * SEMPRE null aqui: esta rota lê a tabela `pedidos`, da ERA LEGADA, que não
+   * tem coluna `linhas`. `pecasDoPedido` então cai no piso (`peca`/`pecas`
+   * declarados), que é exatamente o comportamento de hoje pra esta era. O campo
+   * existe pra o tipo casar e pra deixar escrito que a ausência é do schema,
+   * não um esquecimento de `select`.
+   */
+  linhas: null
   quantidade: number | null
   estado: string
   status: string
