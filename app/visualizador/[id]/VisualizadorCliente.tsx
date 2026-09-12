@@ -20,6 +20,7 @@ import { linkWhatsApp } from "@/app/lib/phone";
 import { msgClienteParaFornecedor } from "@/app/lib/mensagens-whatsapp";
 import { ETAPAS } from "@/app/lib/producao-etapas";
 import { AVISOS } from "@/app/lib/producao-avisos";
+import { ehVestuario } from "@/app/lib/pecas";
 
 export type Tamanho = { tamanho: string; qtd: number | null };
 export type Estampa = { posicao: string; tamanho: string };
@@ -421,6 +422,15 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   // spinner e julga sozinho), mas com o aviso do que pode não conferir. Esconder
   // seria pior; entregar calado, pior ainda.
   const [iaRessalva, setIaRessalva] = useState<Record<number, string[]>>({});
+  // O QUE FALTA, EM CÓDIGO — 12/09/2026.
+  // O erro de "falta o público" aparece no botão de gerar, mas a correção mora
+  // dentro da gaveta de editar produto. Guardando os códigos (não a frase) a
+  // tela oferece os quatro botões ali mesmo, ao lado da mensagem.
+  const [iaFaltando, setIaFaltando] = useState<Record<number, string[]>>({});
+  // Qual botão a pessoa acabou de tocar. Existe só pra MARCAR a escolha na tela
+  // antes do spinner: os quatro botões ficam colados, e quem erra o clique tem
+  // que ver o engano na hora em vez de esperar 40 s por uma prévia masculina.
+  const [publicoEscolhido, setPublicoEscolhido] = useState<Record<number, string>>({});
   const [zoom, setZoom] = useState<string | null>(null);
   // Acordeão mobile: só 1 card expandido por vez (no lg+ todos ficam abertos).
   const [abertoIdx, setAbertoIdx] = useState(0);
@@ -693,19 +703,42 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   }
   async function gerarMockupIA(i: number, regenIaIndex: number | null = null) {
     if (iaBusy !== null) return;
-    setIaBusy(i); setIaErro((p) => ({ ...p, [i]: null })); setIaRessalva((p) => ({ ...p, [i]: [] }));
+    setIaBusy(i); setIaErro((p) => ({ ...p, [i]: null })); setIaRessalva((p) => ({ ...p, [i]: [] })); setIaFaltando((p) => ({ ...p, [i]: [] }));
     try {
       const r = await fetch(`/api/visualizador/${pedido.id}/gerar-mockup`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ index: i, instrucoes: iaInstr[i] || "", regenIaIndex }),
       }).then((x) => x.json());
       if (r.disponivel === false) { setIaErro((p) => ({ ...p, [i]: r.motivo || "Geração de IA indisponível agora." })); return; }
-      if (r.erro) { setIaErro((p) => ({ ...p, [i]: r.erro })); return; }
+      if (r.erro) {
+        setIaErro((p) => ({ ...p, [i]: r.erro }));
+        setIaFaltando((p) => ({ ...p, [i]: Array.isArray(r.faltando) ? (r.faltando as string[]) : [] }));
+        return;
+      }
       if (Array.isArray(r.divergencias)) setIaRessalva((p) => ({ ...p, [i]: r.divergencias as string[] }));
       if (Array.isArray(r.ia)) { setIaImgs((p) => ({ ...p, [i]: r.ia })); setIaAjuste(null); }
     } catch { setIaErro((p) => ({ ...p, [i]: "Falha de conexão." })); }
     finally { setIaBusy(null); }
   }
+  /**
+   * Resolve a única coisa que falta sem mandar o cliente pra gaveta.
+   *
+   * Grava o público NA LINHA (mesmo PATCH que a gaveta usa) e tenta gerar de
+   * novo. A trava do servidor continua sendo a trava — isto aqui só encurta o
+   * caminho entre o aviso e a correção.
+   */
+  async function definirPublicoEGerar(i: number, valor: string) {
+    if (iaBusy !== null) return;
+    // A marca vem ANTES de qualquer await: é o que a pessoa vê enquanto espera.
+    setPublicoEscolhido((p) => ({ ...p, [i]: valor }));
+    const novas = linhas.map((l, idx) => (idx === i ? { ...l, publico: valor } : l));
+    setLinhas(novas);
+    setIaErro((p) => ({ ...p, [i]: null }));
+    await persistir(novas);
+    await gerarMockupIA(i);
+    setPublicoEscolhido((p) => { const n = { ...p }; delete n[i]; return n; });
+  }
+
   async function removerIaImg(i: number, idx: number) {
     const nova = (iaImgs[i] || []).filter((_, k) => k !== idx);
     setIaImgs((p) => ({ ...p, [i]: nova }));
@@ -1173,6 +1206,26 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                             {ajustandoEste && <button type="button" onClick={() => setIaAjuste(null)} className="text-sm text-gray-500 hover:text-gray-700">cancelar ajuste</button>}
                           </div>
                           {iaErro[i] && <p className="text-xs text-red-600 mt-2">{iaErro[i]}</p>}
+                          {/* Só quando o público é a ÚNICA pendência: com mais
+                              coisas faltando, um botão só daria a impressão de
+                              resolver o que não resolve. */}
+                          {((iaFaltando[i]?.length === 1 && iaFaltando[i][0] === "publico") || publicoEscolhido[i]) && (
+                            <div className="mt-2 rounded-lg border border-[#1D9E75]/40 bg-[#E1F5EE]/50 px-3 py-2">
+                              <p className="text-xs text-[#0F6E56] mb-2">Pra quem é esta peça? A modelagem muda.</p>
+                              <div className="flex flex-wrap gap-2">
+                                {([["feminino","Feminino"],["masculino","Masculino"],["infantil","Infantil"],["unissex","Unissex"]] as const).map(([val,label]) => {
+                                  const escolhido = publicoEscolhido[i] === val;
+                                  return (
+                                    <button key={val} type="button" disabled={iaBusy !== null || Boolean(publicoEscolhido[i])}
+                                      onClick={() => void definirPublicoEGerar(i, val)}
+                                      className={"px-3 py-1.5 rounded-lg text-sm border transition-colors disabled:opacity-100 " + (escolhido ? "border-[#1D9E75] bg-[#1D9E75] text-white font-medium" : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40")}>
+                                      {label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                           {(iaRessalva[i]?.length ?? 0) > 0 && (
                             <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
                               Confira esta prévia antes de aprovar: ela pode não refletir{" "}
@@ -1671,6 +1724,16 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                 <p className="text-[11px] text-gray-400 mt-1">Toque nos tamanhos pra adicionar (ou crie um com “+ adicionar tamanho”). Informe a quantidade por tamanho — o total do modelo vira a soma deles.</p>
               </Campo>
               <Campo label="Público">
+                {/* EVITA A SEGUNDA VIAGEM — 12/09/2026.
+                    Linha sem `modelo` não tem público exigido (não dá pra saber
+                    se é roupa sem saber a peça): medido, 101 das 337 sem público
+                    estão nesse estado. Sem este aviso o cliente preenche o
+                    modelo, fecha a gaveta, clica em Gerar e SÓ ENTÃO descobre
+                    que falta o público — duas viagens. O aviso aparece assim que
+                    o modelo digitado vira vestuário. */}
+                {ehVestuario(draft.modelo) && !draft.publico && (
+                  <p className="text-xs text-amber-700 mb-2">Obrigatório pra gerar a prévia — a modelagem muda.</p>
+                )}
                 <div className="flex flex-wrap gap-2">
                   {([["feminino","Feminino"],["masculino","Masculino"],["infantil","Infantil"],["unissex","Unissex"]] as const).map(([val,label]) => (
                     <button key={val} type="button" onClick={() => setDraft({ ...draft, publico: val })}

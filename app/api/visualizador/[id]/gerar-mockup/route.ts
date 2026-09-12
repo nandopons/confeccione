@@ -61,7 +61,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!r.ok && r.tipo === 'reprovado') {
     return NextResponse.json({ disponivel: true, ia: [], divergencias: r.divergencias })
   }
-  if (!r.ok) return NextResponse.json({ erro: r.erro }, { status: r.status })
+  // `faltando` é a mesma informação do texto, em código: a tela precisa AGIR
+  // sobre a falta (oferecer os botões de público ali mesmo), e parsear a frase
+  // quebraria na primeira reescrita do texto.
+  if (!r.ok) return NextResponse.json({ erro: r.erro, faltando: r.faltando ?? [] }, { status: r.status })
 
   // `divergencias` não vazio = a imagem vai pra tela COM ressalva. A tela é que
   // decide como mostrar; a rota só não esconde o que a conferência achou.

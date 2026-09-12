@@ -28,6 +28,7 @@ import { guardarImagem } from './imagens-pedido-storage'
 import { salvarLinhasEditadas, type LinhaEditada } from './pedido-linhas-edicao'
 import { enviarResumoPdfPedido } from './whatsapp-notify'
 import type { LinhaPedido } from './pedido-assistente-oferta'
+import { ehPublicoValido } from './pecas'
 
 export type PecaEntrada = {
   modelo?: string | null
@@ -472,7 +473,7 @@ export function pecaCompleta(l: LinhaPedido): boolean {
  */
 export type Divergencia = { posicao: number; o_que: string; pergunte: string }
 
-const PUBLICOS = ['feminino', 'masculino', 'infantil', 'unissex']
+// A lista mora em pecas.ts — ver o comentário de lá sobre cópia divergente.
 
 export function revisarPecas(linhas: LinhaPedido[]): Divergencia[] {
   const achados: Divergencia[] = []
@@ -508,7 +509,7 @@ export function revisarPecas(linhas: LinhaPedido[]): Divergencia[] {
       }
     }
 
-    if (!publico || !PUBLICOS.includes(publico)) {
+    if (!ehPublicoValido(publico)) {
       achados.push({
         posicao,
         o_que: `a peça ${posicao} não diz o público (feminino, masculino, infantil ou unissex) — muda a modelagem`,

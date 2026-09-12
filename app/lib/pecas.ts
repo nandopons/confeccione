@@ -112,3 +112,73 @@ export function condicaoPecaSupabase(peca: string): string {
   if (legado.length > 0) condicoes.push(`tipos_produto.ov.{${legado.join(',')}}`)
   return condicoes.join(',')
 }
+
+// ============================================================================
+// PÚBLICO E VESTUÁRIO — 12/09/2026.
+//
+// Mora aqui porque é vocabulário do domínio, do mesmo naipe do catálogo acima, e
+// porque a lista de públicos já existia PRIVADA dentro de pedido-fechamento.ts.
+// Duas cópias da mesma lista é o defeito que este repo já pagou várias vezes: a
+// segunda cópia diverge e ninguém vê. Uma lista, dois leitores.
+// ============================================================================
+
+export const PUBLICOS = ['feminino', 'masculino', 'infantil', 'unissex'] as const
+
+export function ehPublicoValido(v: unknown): boolean {
+  return typeof v === 'string' && (PUBLICOS as readonly string[]).includes(v.trim().toLowerCase())
+}
+
+/**
+ * Palavras de modelo que NÃO são roupa: brinde, gráfica, acessório sem corpo.
+ *
+ * Medido nas 534 linhas de produção: 17 caem aqui (3,2%) — caneca, squeeze,
+ * crachá, caderno, caneta, chaveiro, copo térmico, mochila, sacochila, boné.
+ * As outras 517 são vestuário ou têm `modelo` vazio.
+ */
+const PALAVRAS_NAO_VESTUARIO = [
+  'caneca', 'squeeze', 'garrafa', 'copo', 'tumbler', 'túmbler', 'crachá', 'cracha',
+  'caderno', 'caneta', 'chaveiro', 'adesivo', 'adesivos', 'banner', 'placa', 'mousepad',
+  'marcador', 'botton', 'bottom', 'botom', 'ímã', 'ima', 'lanyard', 'cordão', 'sacola',
+  'sacochila', 'ecobag', 'mochila', 'bolsa', 'necessaire', 'pochete', 'estojo',
+  'boné', 'bone', 'bonés', 'bones', 'chapéu', 'chapeu', 'viseira', 'touca', 'gorro',
+  'meia', 'meias', 'toalha', 'almofada', 'lençol', 'lencol', 'pano de prato',
+]
+
+/**
+ * `\b` NÃO SERVE AQUI — 12/09/2026.
+ *
+ * A primeira versão era `/\b(caneca|bon[ée]|crach[áa]|…)\b/i` e deixava
+ * "boné trucker" passar como vestuário. Em JavaScript o `\b` é ASCII: `é` não
+ * é caractere de palavra, então entre `é` e o espaço NÃO existe fronteira e o
+ * `\b` final falha. Só quebra nas palavras com acento no FIM — "cordão" passava
+ * porque o acento é interno. "crachá" só era pego de carona pelo "cordão" ao
+ * lado; sozinho, escaparia.
+ *
+ * Mesma família da armadilha do nono dígito no AGENTS.md: regra de fronteira que
+ * parece certa e falha calada num subconjunto do dado real.
+ */
+const NAO_VESTUARIO = new RegExp(
+  `(?<!\\p{L})(?:${PALAVRAS_NAO_VESTUARIO.join('|')})(?!\\p{L})`,
+  'iu'
+)
+
+/**
+ * A linha é peça de vestir? Decide se `publico` é exigível.
+ *
+ * DIREÇÃO DA FALHA, e é o oposto da do verificador de prévia: aqui o padrão é
+ * EXIGIR, e só a lista fechada acima escapa. O custo dos dois erros não é
+ * simétrico — exigir público de uma caneca custa UMA pergunta a mais do agente;
+ * não exigir de uma camiseta manda pro cliente uma prévia com a modelagem do
+ * gênero errado, que é a falha cara e silenciosa. Peça desconhecida cai no lado
+ * seguro: pergunta.
+ *
+ * Por que pelo texto de `modelo` e não por um campo: não existe campo. Medido —
+ * `linhas[].categoria` mistura dois vocabulários e carrega a lista do PEDIDO
+ * colada na linha, e `pedidos_assistente.peca` só existe em 31 dos 229 pedidos.
+ * O texto de `modelo` é o único sinal por linha que a base realmente tem.
+ */
+export function ehVestuario(modelo: string | null | undefined): boolean {
+  const t = (modelo || '').trim()
+  if (!t) return false
+  return !NAO_VESTUARIO.test(t)
+}

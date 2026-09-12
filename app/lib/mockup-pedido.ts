@@ -35,6 +35,7 @@ import { gerarImagem, type ImagemEntrada } from './mockup-image'
 import { normalizarMockup } from './imagem-normalizar'
 import { guardarImagem, lerImagem, refParaUrl } from './imagens-pedido-storage'
 import { supabaseAdmin } from './supabase-server'
+import { ehPublicoValido, ehVestuario } from './pecas'
 import { atributosEsperados, verificarMockup, type Atributo } from './verificar-mockup'
 
 /** Quantos mockups de IA um modelo guarda. Passou disso, o mais antigo sai. */
@@ -68,8 +69,23 @@ export type IAItem = { url: string; prompt?: string }
 export type Mockup = { liso?: string; arte?: string; fotos?: string[]; ia?: IAItem[] }
 export type MapaMockups = Record<string, Mockup>
 
+/**
+ * O que falta, em código E em prosa.
+ *
+ * O código existe porque a TELA precisa AGIR sobre a falta, não só mostrá-la: a
+ * mensagem aparece no botão de gerar e a correção mora dentro da gaveta de
+ * editar, então quando falta só o público a tela oferece os quatro botões ali
+ * mesmo. Parsear a frase pra descobrir isso quebraria na primeira vez que
+ * alguém reescrevesse o texto — e o texto é pro cliente ler, logo vai ser
+ * reescrito.
+ */
+export type CodigoFalta = 'modelo' | 'cor' | 'quantidade' | 'publico' | 'arte'
+export type Falta = { codigo: CodigoFalta; texto: string }
+
 export type LinhaMockup = {
   modelo?: string | null
+  /** feminino | masculino | infantil | unissex. Muda a modelagem inteira. */
+  publico?: string | null
   cor?: string | null
   material?: string | null
   total?: number | null
@@ -98,7 +114,7 @@ export type ResultadoMockupPedido =
       verificada: boolean
       tentativas: number
     }
-  | { ok: false; tipo: 'erro'; erro: string; status: number }
+  | { ok: false; tipo: 'erro'; erro: string; status: number; faltando?: CodigoFalta[] }
   | { ok: false; tipo: 'indisponivel'; motivo: string }
   /**
    * Gerou, conferiu, divergiu, tentou de novo e divergiu de novo. NADA foi
@@ -165,14 +181,37 @@ export function fotosDoModelo(mk: Mockup | undefined): string[] {
  * decide se gera, e uma ferramenta que só devolve erro depois de rodar não
  * ajuda a decidir.
  */
-export function faltaParaMockup(l: LinhaMockup, mk?: Mockup, instrucoes = ''): string[] {
-  const falta: string[] = []
-  if (ehPlaceholder(l.modelo)) falta.push('tipo da peça')
-  if (ehPlaceholder(corLimpa(l.cor))) falta.push('cor')
-  if (qtdDaLinha(l) <= 0) falta.push('quantidade')
+export function faltaParaMockup(l: LinhaMockup, mk?: Mockup, instrucoes = ''): Falta[] {
+  const falta: Falta[] = []
+  if (ehPlaceholder(l.modelo)) falta.push({ codigo: 'modelo', texto: 'tipo da peça' })
+  if (ehPlaceholder(corLimpa(l.cor))) falta.push({ codigo: 'cor', texto: 'cor' })
+  if (qtdDaLinha(l) <= 0) falta.push({ codigo: 'quantidade', texto: 'quantidade' })
+
+  // PÚBLICO É TRAVA, NÃO PEDIDO NO PROMPT — 12/09/2026.
+  //
+  // A exigência existia só em texto: o prompt do chat do site manda "em
+  // VESTUÁRIO é OBRIGATÓRIO — NUNCA deixe null", e o resultado medido é 34% de
+  // preenchimento. Na ferramenta do Luigi o mesmo campo está em `required` e dá
+  // 81%. O AGENTS.md ao pé da letra: regra que vira só instrução de texto é
+  // desobedecida em produção.
+  //
+  // Aqui é o ponto único: Luigi, botão do visualizador e fechador do cron
+  // passam todos por `gerarMockupDoModelo`, que chama esta função. Uma trava,
+  // três caminhos.
+  //
+  // A conferência que já existia (`revisarPecas`) acusa o mesmo campo, mas só
+  // roda na LIBERAÇÃO pro fornecedor — depois de a prévia ter sido gerada e
+  // mandada pro cliente. Tarde: o erro já saiu.
+  //
+  // Medido: teria pegado 25 das 69 prévias já geradas (36%), e em 22 delas o
+  // gênero não aparecia em lugar nenhum da linha — nem no modelo, nem na
+  // descrição, nem no prompt salvo. Não era dado implícito; era dado ausente.
+  if (ehVestuario(l.modelo) && !ehPublicoValido(l.publico)) {
+    falta.push({ codigo: 'publico', texto: 'o público da peça (feminino, masculino, infantil ou unissex)' })
+  }
   if (ehEstampado(l)) {
     const temRef = fotosDoModelo(mk).length > 0 || !ehPlaceholder(l.descricao) || instrucoes.trim().length > 0
-    if (!temRef) falta.push('a arte ou uma descrição da estampa/bordado')
+    if (!temRef) falta.push({ codigo: 'arte', texto: 'a arte ou uma descrição da estampa/bordado' })
   }
   return falta
 }
@@ -406,14 +445,15 @@ export async function gerarMockupDoModelo(params: {
 
   const falta = faltaParaMockup(l, mk, instrucoes)
   if (falta.length > 0) {
-    const detalhe = falta.join(', ')
+    const detalhe = falta.map((f) => f.texto).join(', ')
     return {
       ok: false,
       tipo: 'erro',
-      erro: ehEstampado(l) && falta.some((f) => f.startsWith('a arte'))
+      erro: ehEstampado(l) && falta.some((f) => f.codigo === 'arte')
         ? `Pra gerar a estampa/bordado falta ${detalhe} — envie a arte ou descreva a estampa.`
         : `Complete os detalhes do modelo antes de gerar o mockup com IA: falta ${detalhe}.`,
       status: 422,
+      faltando: falta.map((f) => f.codigo),
     }
   }
 
