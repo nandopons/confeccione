@@ -24,6 +24,7 @@ import { pedidoTemListaAbertaIncompleta } from '@/app/lib/listas-externas'
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
+import { APROVACAO_QUE_DESCLASSIFICA } from './classificacao-contato'
 import { registrarVersaoOrcamento } from './orcamento-versoes'
 import { enviarTextoSimples } from './whatsapp-cloud'
 import { avisoOficial, notificarOfertaFornecedor, enviarResumoPdfPedido } from './whatsapp-notify'
@@ -306,6 +307,27 @@ export async function listarPedidosPagos(): Promise<{
   const { data: fornRaw } = await supabaseAdmin
     .from('leads_fornecedores')
     .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pecas, pedido_minimo, prazo_minimo_dias')
+    // QUEM O SISTEMA NÃO OFERTA, A TELA NÃO OFERECE — 12/09/2026.
+    //
+    // Esta lista carregava `leads_fornecedores` inteira, enquanto o matching
+    // automático filtra `aprovacao_status='aprovado'` (matching.ts:218,
+    // oferta-automatica.ts:173). Duas regras pro mesmo fato, e a tela mostrava
+    // quem o sistema nunca ofertaria.
+    //
+    // Apareceu com o sentinela da conta Melhor Envio: marcado `reprovado` +
+    // `pausado`, ele continuava na lista. `pausado` só desconta 15 pontos em
+    // match-fornecedor.ts:213, e geografia vale 50 — em pedido de Recife ele
+    // descia umas posições e não sumia.
+    //
+    // Exclui só o DESCLASSIFICADO, não o `pendente`: quem está esperando
+    // aprovação é confecção de verdade, e ofertar à mão pode ser justamente
+    // como o Fernando decide aprovar. A constante é a mesma que a classificação
+    // de contato usa — uma lista, dois leitores.
+    //
+    // As ofertas JÁ FEITAS não somem: o bloco delas vem de `ofertas_pedido_
+    // assistente` com embed próprio do nome, sem passar por aqui. Trabalho em
+    // andamento com fornecedor reprovado continua visível.
+    .neq('aprovacao_status', APROVACAO_QUE_DESCLASSIFICA)
     .order('nome', { ascending: true })
 
   return {
