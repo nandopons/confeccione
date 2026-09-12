@@ -592,22 +592,42 @@ hoje não tem resposta possível.
 **Medido em:** 2026-09-12.
 
 ### O quê
-**26 de 229 (11,4%)** têm `total` e `tamanhos` vazios. Medido: **26 de 26 têm linha com modelo
-e cor preenchidos** — nenhum tem `linhas` vazio. E **26 de 26 vieram do `home_chat`**.
+**26 de 229 (11,4%)** têm `total` e `tamanhos` vazios, todos do `home_chat`, nenhum com
+`linhas` vazio. Mas **eles param MUITO antes da grade**, e isso só apareceu ao medir o degrau:
 
-Ou seja: o cliente descreveu a peça e parou **antes da grade** — que é a última coisa que o
-chat pergunta.
+```
+com_cor     26   <- todos têm cor
+com_modelo   0   <- NENHUM tem modelo
+```
+
+Uma versão anterior desta entrada dizia "26 de 26 têm modelo e cor preenchidos". **Era falso** —
+eu afirmei sem medir, e a query do funil derrubou.
+
+### O degrau, medido — 216 pedidos do site
+```
+p0  sem modelo                96  (44,4%)  ##################
+p1  modelo, sem cor            0  ( 0,0%)
+p2  cor, sem quantidade        0  ( 0,0%)
+p3  quantidade, sem público   71  (32,9%)  #############
+p4  completo                  49  (22,7%)  #########
+```
+
+Os 26 estão **dentro dos 96 do p0**. Não é "descreveu a peça e parou na grade": é **parou antes
+de dizer que peça é**.
 
 ### Por que importa
-É o caso mais fácil que existe: **tem o que perguntar** (a grade) e **tem pra quem perguntar**
-(o cliente descreveu a peça, então esteve lá). Ainda assim nenhuma régua os alcança — a
-cobrança de orçamento não vê pedido sem fornecedor, e a captação agora os exclui da isca
-(corretamente: pedido sem quantidade não é isca, é pedido incompleto).
+**O vazamento é um penhasco, e ele é no primeiro degrau.** 44,4% dos pedidos do site não têm
+nem o nome da peça — e o chat pede cor antes de modelo, ou grava cor sem ter modelo, o que já
+é uma pista. Depois disso a montagem não perde quase ninguém até o público (32,9%), que é a
+mesma trava que a Fase 1 endereçou.
+
+Com cor e sem modelo, **não há o que perguntar sobre a peça e quase não há pra quem perguntar**
+— é o oposto do que esta entrada afirmava antes.
 
 ### Como revisitar
-Uma pergunta só, por WhatsApp ou e-mail: "faltou só a quantidade de cada tamanho". Antes de
-escrever, medir o degrau — quantos dos 229 param exatamente nesse ponto contra quantos passam
-dele — pra saber se 26 é vazamento ou penhasco.
+A pergunta não é "como cobrar a grade". É **por que 96 pedidos gravam cor sem modelo** — o que
+é anomalia do chat, não do cliente. E isso esbarra na dívida de cima: o histórico que produziu
+esses 96 não existe.
 
 ---
 
