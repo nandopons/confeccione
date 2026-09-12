@@ -205,17 +205,44 @@ export type ServicoCotado = {
 }
 
 /**
- * Cota o frete na conta DO fornecedor (preço real da conta dele).
+ * O token da conta da PRÓPRIA Confeccione, pra cotar sem a conta da confecção.
+ *
+ * POR QUE EXISTE — 12/09/2026. A confecção precisa saber o frete pra dar o preço
+ * ao cliente, e hoje só consegue depois de conectar a conta dela por OAuth —
+ * página, login, autorização. Isso é barreira no meio de uma conversa. Mas o
+ * endpoint `calculate` recebe `from.postal_code` NO CORPO: o token autentica,
+ * não define o remetente. Então dá pra cotar entre dois CEPs quaisquer com um
+ * token só, e a conexão dela fica sendo o que sempre foi — necessária pra
+ * EMITIR a etiqueta, não pra saber quanto custa.
+ *
+ * O id vem de env porque `melhorenvio_contas.fornecedor_id` tem FK pra
+ * `leads_fornecedores`: a conta da plataforma precisa de uma linha lá, e QUAL
+ * linha é decisão de operação, não de código.
+ *
+ * FALHA FECHADO: sem env ou sem conta conectada devolve null, e quem chama diz
+ * que não consegue cotar agora. Nunca cai na conta de outro fornecedor.
+ */
+export async function tokenDaPlataforma(): Promise<string | null> {
+  const id = process.env.MELHORENVIO_FORNECEDOR_PLATAFORMA
+  if (!id) return null
+  return tokenDoFornecedor(id)
+}
+
+/**
+ * Cota o frete. Com `fornecedorId`, na conta DELE (preço real da conta dele).
+ * Com `token`, em qualquer conta — é como a conversa cota sem ela ter conectado.
  * Dimensões em cm, peso em kg, seguro em centavos (convertido pra reais).
  */
 export async function cotarFrete(params: {
-  fornecedorId: string
+  fornecedorId?: string
+  /** Alternativa ao `fornecedorId`: token já resolvido (ver `tokenDaPlataforma`). */
+  token?: string
   cepOrigem: string
   cepDestino: string
   volumes: VolumeFrete[]
   seguroCentavos: number
 }): Promise<{ ok: true; servicos: ServicoCotado[] } | { ok: false; erro: string; reconectar?: boolean }> {
-  const token = await tokenDoFornecedor(params.fornecedorId)
+  const token = params.token ?? (params.fornecedorId ? await tokenDoFornecedor(params.fornecedorId) : null)
   if (!token) return { ok: false, erro: 'Conta Melhor Envio não conectada.', reconectar: true }
 
   const seguroPorVolume = Math.max(params.seguroCentavos / 100 / Math.max(params.volumes.length, 1), 0.5)

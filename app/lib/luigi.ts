@@ -55,6 +55,8 @@ import {
   type MapaMockups,
 } from './mockup-pedido'
 import { registrarUsoIa } from './uso-ia'
+import { cotarFrete, tokenDaPlataforma } from './melhorenvio'
+import { AVISO_COTACAO, AVISO_MANUSEIO, CAIXAS_PRONTAS, formatarCotacao, validarCaixa } from './cotacao-frete'
 import { ehNumeroGestao, numerosGestao } from './gestao-whatsapp'
 import {
   COLUNAS_ETAPA,
@@ -1369,6 +1371,29 @@ const FERRAMENTA_PERFIL_PRODUCAO: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_COTAR_FRETE: Anthropic.Messages.Tool = {
+  name: 'cotar_frete',
+  description:
+    'Cota o frete de um pedido pra confecção, aqui na conversa. Use quando ELA perguntar quanto custa mandar. ' +
+    'Não invente a caixa: pergunte o tamanho. Não precisa da conta Melhor Envio dela.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      pedido_codigo: { type: 'string', description: 'Código do pedido (o CEP de destino sai dele).' },
+      cep_origem: {
+        type: 'string',
+        description: 'CEP de onde ELA despacha. Só mande se ela acabou de dizer — se já está no cadastro, omita.',
+      },
+      caixa: { type: 'string', enum: ['P', 'M', 'G'], description: 'Um dos três tamanhos prontos.' },
+      altura_cm: { type: 'number', description: 'Só quando ela der a medida própria, em vez de P/M/G.' },
+      largura_cm: { type: 'number' },
+      comprimento_cm: { type: 'number' },
+      peso_kg: { type: 'number' },
+    },
+    required: ['pedido_codigo'],
+  },
+}
+
 const FERRAMENTA_PORTFOLIO: Anthropic.Messages.Tool = {
   name: 'salvar_no_portfolio',
   description:
@@ -1386,7 +1411,7 @@ function ferramentasDoModo(modo: Exclude<ModoLuigi, 'desligado'>, ehFornecedor =
   // precisa é registrar o próprio perfil e mandar foto.
   if (ehFornecedor) {
     return modo === 'responde'
-      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_CORRIGIR_TIPO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO]
+      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_CORRIGIR_TIPO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO, FERRAMENTA_COTAR_FRETE]
       : [FERRAMENTA_CHAMAR_HUMANO]
   }
   return modo === 'responde'
@@ -1607,6 +1632,67 @@ async function executarFerramenta(
           pecasNovas.length === 0
             ? 'Gravei o que ela contou, mas NENHUMA peça foi pro match — só `pecas` faz o pedido chegar nela. Se ela citou peça, chame de novo com `pecas`. Não diga a ela que o cadastro está atualizado enquanto isso não acontecer.'
             : undefined,
+      }
+    }
+    case 'cotar_frete': {
+      // COTAÇÃO É INFORMAÇÃO, NÃO OPERAÇÃO — 12/09/2026.
+      // Ela não precisa ter conectado o Melhor Envio: o `calculate` recebe o CEP
+      // de origem no corpo, então o token da plataforma cota entre dois CEPs
+      // quaisquer. A conta dela continua sendo necessária pra EMITIR a etiqueta.
+      const forn = await fornecedorDoContato(ctx.contato.telefone)
+      if (!forn) throw new Error('esta conversa não está ligada a um cadastro de confecção')
+
+      const codigo = String(entrada.pedido_codigo ?? '').trim()
+      const { data: ped } = await supabaseAdmin
+        .from('pedidos_assistente')
+        .select('id, codigo, cep, cidade, uf')
+        .eq('codigo', codigo)
+        .maybeSingle<{ id: string; codigo: string; cep: string | null; cidade: string | null; uf: string | null }>()
+      if (!ped?.cep) throw new Error(`o pedido ${codigo || '(sem código)'} não tem CEP de entrega — não dá pra cotar`)
+
+      // CEP DE ORIGEM: pergunta UMA vez e grava. `leads_fornecedores.cep` já
+      // existia e estava vazia em 40 dos 42 aprovados — nada a coletava.
+      const { data: cad } = await supabaseAdmin
+        .from('leads_fornecedores').select('cep').eq('id', forn).maybeSingle<{ cep: string | null }>()
+      const cepInformado = String(entrada.cep_origem ?? '').replace(/\D/g, '')
+      const cepOrigem = cepInformado.length === 8 ? cepInformado : (cad?.cep ?? '').replace(/\D/g, '')
+      if (cepOrigem.length !== 8) {
+        throw new Error('não sei de onde ela despacha. Pergunte o CEP de origem, uma vez só, e chame de novo.')
+      }
+      if (cepInformado.length === 8 && cepInformado !== (cad?.cep ?? '').replace(/\D/g, '')) {
+        await supabaseAdmin.from('leads_fornecedores').update({ cep: cepInformado }).eq('id', forn)
+      }
+
+      const pronta = entrada.caixa ? CAIXAS_PRONTAS[entrada.caixa as 'P' | 'M' | 'G'] : null
+      const caixa = pronta ?? {
+        altura: Number(entrada.altura_cm),
+        largura: Number(entrada.largura_cm),
+        comprimento: Number(entrada.comprimento_cm),
+        pesoKg: Number(entrada.peso_kg),
+      }
+      // Valida ANTES da API: medida abaixo do piso volta como erro de validação
+      // do Melhor Envio, e aí a conversa morre num erro em vez de numa pergunta.
+      const v = validarCaixa(caixa)
+      if (!v.ok) throw new Error(v.erro)
+
+      const token = await tokenDaPlataforma()
+      if (!token) throw new Error('a cotação de frete está indisponível agora; diga que você confere e volta')
+
+      const r = await cotarFrete({ token, cepOrigem, cepDestino: ped.cep, volumes: [v.volume], seguroCentavos: 0 })
+      if (!r.ok) throw new Error(`não deu pra cotar agora: ${r.erro}`)
+      if (r.servicos.length === 0) throw new Error('nenhuma transportadora cotou essa caixa; peça a medida de novo')
+
+      return {
+        ok: true,
+        destino: [ped.cidade, ped.uf].filter(Boolean).join('/'),
+        caixa: pronta ? pronta.rotulo : `${caixa.comprimento}×${caixa.largura}×${caixa.altura} cm, ${caixa.pesoKg} kg`,
+        // Já formatado: transportadora, valor e prazo do FRETE, sem markup. O
+        // prazo do transporte é dela pra prometer entrega; o que não sai é o
+        // prazo de PRODUÇÃO na oferta, que varia com a fila de máquina dela.
+        cotacao: formatarCotacao(r.servicos),
+        aviso_manuseio: v.avisoManuseio ? AVISO_MANUSEIO : null,
+        aviso: AVISO_COTACAO,
+        nota_interna: 'Repasse a cotação como está. Diga o aviso UMA vez por conversa, não a cada cotação.',
       }
     }
     case 'salvar_no_portfolio': {
