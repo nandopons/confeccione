@@ -42,6 +42,10 @@ export async function GET(req: NextRequest) {
 const PostSchema = z.object({
   modelo: z.string().min(1),
   cor: z.string().min(1),
+  // Sem público o admin grava na chave "não sei" (`|?`), que nunca casa com uma
+  // busca que TEM gênero. Era daqui que vinha a divergência com o leitor do
+  // visualizador — ver o comentário de chaveMockup.
+  publico: z.string().nullable().optional(),
   material: z.string().nullable().optional(),
   imagemDataUrl: z.string().min(1),
 })
@@ -69,7 +73,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ erro: 'Imagem grande demais (máx. 8 MB).' }, { status: 400 })
   }
 
-  const chave = chaveMockup(parsed.data.modelo, parsed.data.cor, parsed.data.material)
+  const chave = chaveMockup(parsed.data.modelo, parsed.data.cor, parsed.data.material, parsed.data.publico)
 
   // padroniza pro mesmo tamanho dos mockups gerados (2048x878, fundo branco)
   const imagemNormalizada = await normalizarMockup(parsed.data.imagemDataUrl)
