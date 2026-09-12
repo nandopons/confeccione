@@ -615,19 +615,41 @@ p4  completo                  49  (22,7%)  #########
 Os 26 estão **dentro dos 96 do p0**. Não é "descreveu a peça e parou na grade": é **parou antes
 de dizer que peça é**.
 
-### Por que importa
-**O vazamento é um penhasco, e ele é no primeiro degrau.** 44,4% dos pedidos do site não têm
-nem o nome da peça — e o chat pede cor antes de modelo, ou grava cor sem ter modelo, o que já
-é uma pista. Depois disso a montagem não perde quase ninguém até o público (32,9%), que é a
-mesma trava que a Fase 1 endereçou.
+### CORREÇÃO — 12/09/2026: "sem modelo" NÃO é "sem dizer que peça é"
+Medir `modelo` foi artefato. Conferido, 97 de 97:
+```
+cor = "a definir"        97/97   <- literal no código da home (PedidoSteps.tsx)
+linha com categoria      97/97
+pedido com categoria     97/97
+nenhum dos dois           0/97
+```
+O commit `f801d61` (#173) **moveu a escolha do cliente de `modelo` pra `categoria`** — não a
+perdeu. O `171dbd0` (#187) só afrouxou a validação pra aceitar o formato novo. **Eles dizem
+qual é a peça.** O que não fazem é voltar pra detalhar o modelo.
 
-Com cor e sem modelo, **não há o que perguntar sobre a peça e quase não há pra quem perguntar**
-— é o oposto do que esta entrada afirmava antes.
+### O que o dado diz de verdade
+| | n | vida mediana | morreu em <1 min |
+|---|---:|---:|---:|
+| com modelo | 122 | **4h48min** | 7 |
+| sem modelo | 97 | **2min18s** | **43** |
+
+O rascunho nasce **com conteúdo** (categoria + tamanhos) e é abandonado no mesmo fôlego.
+Quase metade some em menos de um minuto. Não é validação frouxa nem formulário longo: é
+alguém que chega, cria, e sai.
+
+O degrau semanal existe (0% até 15/06, 35%+ a partir de 22/06) e bate com o #173 — mas ele
+marca a **mudança de formato**, não a origem do abandono.
 
 ### Como revisitar
-A pergunta não é "como cobrar a grade". É **por que 96 pedidos gravam cor sem modelo** — o que
-é anomalia do chat, não do cliente. E isso esbarra na dívida de cima: o histórico que produziu
-esses 96 não existe.
+A pergunta é **o que acontece nos primeiros 60 segundos**, e ela esbarra na dívida do chat não
+persistido: dá pra ver que saem, não de onde.
+
+O que dá pra medir SEM o histórico — comparar quem sobrevive com quem morre em <1 min por
+`categoria`, número de tamanhos, hora do dia e `utm_source`/`referrer` (que existem na tabela):
+- se uma **categoria** concentra as mortes → é a tela daquele nicho
+- se o **utm_source** concentra → é expectativa errada antes de chegar
+- se **não concentra em nada** → é persistir o chat e esperar, e aí a dívida do chat não
+  persistido deixa de ser nota e vira prioridade
 
 ---
 
