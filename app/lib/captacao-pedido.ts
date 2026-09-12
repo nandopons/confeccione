@@ -1270,15 +1270,42 @@ async function ultimaBuscaPorPedido(ids: string[]): Promise<Map<string, string>>
  * no total. Se um dia entrar mais de ~6 pedido novo por dia de forma sustentada,
  * é aqui que quebra, e a saída é reservar uma fatia das vagas pra faixa 2.
  */
-function ordenarParaAVez<T extends { id: string; confirmado_em: string | null; desde: string }>(
+/** Quantas peças o pedido pede, somando as linhas. Zero = incompleto. */
+export function pecasDoPedidoEtapa(linhas: unknown): number {
+  if (!Array.isArray(linhas)) return 0
+  return (linhas as { total?: number | null; tamanhos?: { qtd?: number | null }[] | null }[]).reduce((s, l) => {
+    const t = typeof l?.total === 'number' && l.total > 0 ? l.total : 0
+    const grade = (l?.tamanhos ?? []).reduce((a, x) => a + (x?.qtd ?? 0), 0)
+    return s + (t > 0 ? t : grade)
+  }, 0)
+}
+
+function ordenarParaAVez<T extends { id: string; confirmado_em: string | null; desde: string; linhas?: unknown }>(
   pedidos: T[],
   ultimaBusca: Map<string, string>,
 ): T[] {
   const chave = (p: T) => p.confirmado_em ?? p.desde
-  const nunca = pedidos.filter((p) => !ultimaBusca.has(p.id)).sort((a, b) => chave(a).localeCompare(chave(b)))
+  // TAMANHO DESEMPATA DENTRO DO DIA, NÃO POR CIMA DA VEZ — 12/09/2026.
+  //
+  // Medido: em 8 de 18 rodadas (44%) havia pedido MAIOR aberto e a captação
+  // abordou com o menor — uma confecção recebeu "1 oversized" e cotou R$ 65 a
+  // unidade. Isca pequena ensina que a plataforma manda miudeza.
+  //
+  // Mas ordenar por tamanho puro destruiria a justiça que a faixa acima existe
+  // pra garantir: um pedido de 100 peças passaria à frente de um de 20 pra
+  // sempre, e o de 20 nunca seria abordado. Então o tamanho entra só como
+  // desempate DENTRO DO MESMO DIA — pedido de anteontem continua na frente do
+  // de hoje, e entre dois do mesmo dia vai o maior primeiro.
+  const dia = (iso: string) => iso.slice(0, 10)
+  const porVez = (a: T, b: T, k: (p: T) => string) => {
+    const d = dia(k(a)).localeCompare(dia(k(b)))
+    if (d !== 0) return d
+    return pecasDoPedidoEtapa(b.linhas) - pecasDoPedidoEtapa(a.linhas)
+  }
+  const nunca = pedidos.filter((p) => !ultimaBusca.has(p.id)).sort((a, b) => porVez(a, b, chave))
   const jaForam = pedidos
     .filter((p) => ultimaBusca.has(p.id))
-    .sort((a, b) => (ultimaBusca.get(a.id) ?? '').localeCompare(ultimaBusca.get(b.id) ?? ''))
+    .sort((a, b) => porVez(a, b, (p) => ultimaBusca.get(p.id) ?? ''))
   return [...nunca, ...jaForam]
 }
 
@@ -1536,8 +1563,28 @@ export async function rodarCaptacaoPedidos(origem: 'cron' | 'admin' | 'mcp' = 'c
   // pedido além de `idade_max_dias` não entra nem na faixa 1, só pelo "Buscar
   // agora" do admin.
   const limiteIdade = Date.now() - config.idade_max_dias * 86400_000
-  const elegiveis = (await pedidosPorEtapa(['sem_fornecedor'], 100))
+  const todos = (await pedidosPorEtapa(['sem_fornecedor'], 100))
     .filter((p) => new Date(p.confirmado_em ?? p.desde).getTime() >= limiteIdade)
+
+  // PEDIDO SEM QUANTIDADE NÃO É ISCA — 12/09/2026.
+  //
+  // `20260900255` tem ZERO peças e virou sondagem pra uma confecção. Não é
+  // pedido pequeno, é pedido INCOMPLETO: não dá pra dizer o que se está pedindo,
+  // e a confecção que responde descobre isso na segunda mensagem. Queima o lead
+  // sem chance nenhuma.
+  //
+  // NÃO é piso de quantidade. Pedido de 4 peças aborda normalmente — o Samuel é
+  // cliente real com pedido real, e filtrar por tamanho mataria ele. O corte é
+  // só em quantidade ZERO, que é ausência de dado, não tamanho.
+  //
+  // Medido: 26 dos 229 pedidos (11,4%) estão assim. Se o pool inteiro for de
+  // zero, a rodada não roda — melhor não abordar que abordar com nada.
+  const elegiveis = todos.filter((p) => pecasDoPedidoEtapa(p.linhas) > 0)
+  const semQuantidade = todos.length - elegiveis.length
+  if (semQuantidade > 0 && elegiveis.length === 0) {
+    resultado.pulado = `todos os ${semQuantidade} pedidos elegíveis estão sem quantidade — nada que valha uma abordagem`
+    return resultado
+  }
   const pedidos = ordenarParaAVez(elegiveis, await ultimaBuscaPorPedido(elegiveis.map((p) => p.id)))
   resultado.pedidos_olhados = pedidos.length
   if (modo === 'responde') resultado.reabordados = await reabordarPendentes(pedidos, config)

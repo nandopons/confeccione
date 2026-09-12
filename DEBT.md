@@ -511,3 +511,46 @@ inteiro vai pro `pecas_outro` nas palavras dela, e o Fernando decide. `fornecedo
 já guarda serviço — mas o matching não lê, e é isso que precisaria mudar.
 
 ---
+
+## 🟡 26 dos 229 pedidos têm ZERO peças — e ninguém sabe por quê
+
+**Medido em:** 2026-09-12.
+
+### O quê
+**11,4% da base não tem quantidade nenhuma.** Não são pedidos pequenos — são pedidos sem o
+dado: nenhuma linha com `total` ou grade de tamanhos preenchida.
+
+```
+a) zero      26  (11,4%)
+b) 1-4       35  (15,3%)
+c) 5-9       16  ( 7,0%)
+d) 10-29     90  (39,3%)
+e) 30-99     38  (16,6%)
+f) 100+      24  (10,5%)
+```
+
+### Por que importa
+Eles **não servem de isca** — `20260900255`, com zero peças, virou sondagem pra uma confecção
+real, que descobriu na segunda mensagem que não dava pra dizer o que se estava pedindo. E
+**não servem de oferta**: `conferirPedido` barra antes de liberar.
+
+Ou seja, ocupam a fila e não podem sair dela por nenhuma porta.
+
+### O que já foi feito
+A captação parou de usá-los como isca (`rodarCaptacaoPedidos`, 12/09). Se o pool inteiro for
+de zero, a rodada não roda — melhor não abordar que abordar com nada.
+
+**Isso trata o sintoma.** A causa ninguém investigou.
+
+### Como revisitar
+São duas hipóteses e elas pedem consertos diferentes:
+- **cliente abandonou no primeiro turno** — o pedido nasce e ele some antes de dizer quantas
+  peças. Aí é retenção, e o número certo de olhar é quanto tempo depois de criado ele parou.
+- **algum caminho grava pedido antes de ter quantidade** — aí é código, e o conserto é não
+  criar linha antes de ter o dado.
+
+A query que separa as duas: comparar `criado_em` com a última mensagem do cliente naquela
+conversa. Se houver conversa depois da criação, ele estava lá e não respondeu; se não houver,
+o pedido nasceu sozinho.
+
+---
