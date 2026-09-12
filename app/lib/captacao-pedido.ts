@@ -2073,6 +2073,28 @@ export async function responderCandidato(params: {
             }
           }
         } else if (uso.name === 'enviar_pdf_pedido') {
+          // UMA VEZ POR CONVERSA, TRAVADO AQUI — 12/09/2026.
+          //
+          // Em 10/09 o mesmo PDF saiu TRÊS vezes pra Bordado Mágico (09:14:55,
+          // 09:15:55, 09:17:56). A única contenção era uma linha de prompt
+          // dizendo "o resumo em PDF já foi enviado nesta conversa" — e o
+          // `pdfJaEnviado` que a alimenta existia desde 07/09, três dias antes.
+          // O prompt avisou e o modelo mandou assim mesmo.
+          //
+          // É a regra do AGENTS.md ao pé da letra: efeito de ferramenta se trava
+          // DENTRO da ferramenta. A recusa devolve o que fazer em seguida, não
+          // um erro — a conversa continua, ela só não leva a terceira cópia.
+          if (pdfJaEnviado) {
+            resultados.push({
+              type: 'tool_result',
+              tool_use_id: uso.id,
+              content: JSON.stringify({
+                ok: false,
+                aviso: 'O PDF já foi enviado nesta conversa. Não mande de novo: responda a dúvida dela com palavras.',
+              }),
+            })
+            continue
+          }
           const ok = cand.pedido_id ? await enviarPdfNaConversa(waId, params.nome ?? cand.nome, cand.pedido_id) : false
           if (ok) pdfJaEnviado = true
           resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify({ ok, aviso: ok ? 'PDF enviado nesta conversa.' : 'Não deu pra mandar o PDF agora; diga que manda em seguida.' }) })
