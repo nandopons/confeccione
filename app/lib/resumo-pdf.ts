@@ -56,15 +56,23 @@ function imagensDoProduto(mockups: MapaMockups | null | undefined, i: number): s
   const fotos = Array.isArray(m.fotos) ? m.fotos.filter(Boolean) : []
   // SÓ A ÚLTIMA PRÉVIA DE IA — 11/09/2026.
   //
-  // `mockups[i].ia` é HISTÓRICO (guarda até 4), não galeria de opções. Quando o
-  // cliente corrige a peça e a prévia é gerada de novo, a anterior fica ERRADA —
-  // não vira alternativa. O PDF despejava o array inteiro, e o Wesley recebeu o
-  // macacão de manga assimétrica lado a lado com a versão de manga longa nos
-  // dois braços, que era justamente a que ele tinha mandado mudar. Do lado dele
-  // parece que a gente não entendeu o pedido.
+  // Quando o cliente corrige a peça e a prévia é gerada de novo, a anterior fica
+  // ERRADA — não vira alternativa. O PDF despejava o array inteiro, e o Wesley
+  // recebeu o macacão de manga assimétrica lado a lado com a versão de manga
+  // longa nos dois braços, que era justamente a que ele tinha mandado mudar. Do
+  // lado dele parece que a gente não entendeu o pedido.
   //
-  // O histórico continua no painel, pro Fernando comparar gerações. Pro cliente
-  // vai o estado atual da peça, que é uma imagem só.
+  // O `[listaIa.length - 1]` aqui é CINTO, não a trava. A trava está em
+  // `mockup-pedido.ts`, onde `MAX_IA = 1` e a geração nova SUBSTITUI (`mk.ia =
+  // [novoItem]`) em vez de empilhar. Então hoje `ia` tem no máximo um item, e
+  // não existe mais histórico de gerações — nem aqui, nem no painel. Uma versão
+  // anterior deste comentário prometia que o painel guardava o histórico "pro
+  // Fernando comparar gerações": não guarda mais. Se um dia a comparação fizer
+  // falta, ela volta como coluna própria, não afrouxando o MAX_IA — porque seis
+  // lugares leem `ia` com TRÊS políticas diferentes: aqui e o Luigi pegam o
+  // ÚLTIMO, a `/inscricao` pega o PRIMEIRO, e a confecção, o visualizador e a
+  // rota de mockup pegam TODOS. Com um item só as três coincidem; com dois,
+  // divergem em silêncio (ver DEBT.md).
   const listaIa = Array.isArray(m.ia) ? m.ia.map((it) => it?.url).filter((x): x is string => typeof x === 'string' && x.length > 0) : []
   const ia = listaIa.length > 0 ? [listaIa[listaIa.length - 1]] : []
   if (fotos.length > 0 || ia.length > 0) return [...fotos, ...ia]

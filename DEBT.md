@@ -215,3 +215,92 @@ Base de pedidos ainda pequena; cada pedido é dado valioso. Preferimos não perd
 Reativar quando o volume crescer. **A lógica já foi validada:** expira pedido aceito que o cliente nunca acessou no painel após **7 dias** (acesso ≥ aceite = vivo); dry-run em produção conferido (pegava os abandonados certos, nenhum vivo por engano). Está pronta no histórico pra reaproveitar, no commit **`96b7ae8`** (`feat(scheduler): nova regra de expiracao do cliente`). O status `expirado_sem_resposta` segue no schema — só não é atribuído automaticamente; pode ser usado manualmente.
 
 ---
+
+## 🔴 `mockups[i].ia` — seis leitores, três políticas, nenhuma combinada
+
+**Registrado em:** 2026-09-11. **Risco DORMENTE** — só acorda se `MAX_IA` voltar a ser > 1.
+
+### O quê
+Depois do caso do Wesley (PDF mostrou a prévia velha junto com a nova), `mockup-pedido.ts`
+passou a ter `MAX_IA = 1` e a geração nova **substitui** (`mk.ia = [novoItem]`, linha 414)
+em vez de empilhar. Com no máximo um item, todo mundo que lê `ia` concorda.
+
+O que ninguém combinou é o que fazer quando há **dois**. Hoje os leitores fazem três
+coisas diferentes:
+
+| política | onde | quem vê |
+|---|---|---|
+| **o ÚLTIMO** | `resumo-pdf.ts:76`, `luigi.ts:2101` | o cliente, no PDF e no WhatsApp |
+| **o PRIMEIRO** | `inscricao/[token]/page.tsx:25` | o grupo do cliente, escolhendo tamanho |
+| **TODOS** | `pedido-visuais.ts:27`, `VisualizadorCliente.tsx:411`, `api/visualizador/[id]/gerar-mockup/route.ts:43` | a confecção, e o painel |
+
+(Não contam: `luigi.ts:871`, `luigi.ts:2066` e `fechar-pedido-automatico.ts:120` só checam
+existência; `pedido-assistente-oferta.ts:971` só conta o tamanho pra saber se tem foto.)
+
+### Por que importa
+Se alguém afrouxar o `MAX_IA` — pra "deixar o Fernando comparar gerações", que é o motivo
+mais provável — a divergência entra em produção **calada**: o cliente vê a versão nova, o
+grupo dele vê a versão velha (a que já estava errada), e a confecção vê as duas e escolhe.
+Exatamente o bug do Wesley, agora repartido em três superfícies em vez de uma. Nada quebra,
+nada loga, e o sintoma chega como "a confecção fez diferente do que eu pedi".
+
+### DECIDIDO — 2026-09-12, pelo Fernando
+**Não guardamos histórico de geração; o estado atual da peça é a única imagem.** O histórico
+servia pra depurar prompt, e isso já vive no `luigi_whatsapp_log` — as chamadas de ferramenta
+guardam o texto que gerou cada imagem. Assunto fechado: `MAX_IA = 1` é escolha, não remendo.
+
+### Como revisitar
+Só se a decisão acima for revertida. E aí **não volta afrouxando o `MAX_IA`**: volta como campo
+próprio (`mockups[i].ia_historico`), que só o painel lê — o `ia` continua sendo "o estado atual
+da peça, uma imagem". Antes de qualquer mudança aqui, os seis leitores acima viram um helper só.
+
+---
+
+## 🟡 Régua de encerramento por desistência — MEDIDA, não vale a pena ainda
+
+**Medido em:** 2026-09-11.
+
+### O quê
+Ideia: encerrar pedido sozinho quando o cliente diz que desistiu. Medido no histórico inteiro,
+com rede larga de frases ("não tenho mais interesse", "desisti", "pode cancelar", "não quero
+mais", "deixa pra lá", "outro fornecedor", "já resolvi", "finalizar o atendimento"):
+**3 mensagens, em 3 conversas.** Um número anterior de "9 casos" circulou nesta sprint e é
+**falso** — não reproduz.
+
+Das 3, só **1** (Thaís Santos, 11/09) foi a **última palavra** do cliente, e o pedido dela
+(`20260900240`) já está `encerrado`. As outras 2 continuaram conversando depois: a Nany mandou
+**50** mensagens depois de "Desisti", e o Andre Filipe **12** depois de "cancelei aquele" — que
+nem era desistência, era ele contando que tinha cancelado um pedido *anterior*.
+
+### Por que importa
+A regra ingênua ("encerra quando ouvir a frase") erra em **2 de 3** e fecharia dois pedidos
+vivos: `20260900268` (sem_fornecedor) e `20260900285` (pedido_completo). A regra correta
+("encerra quando a frase for a **última palavra**") acerta, e rende **zero** — porque o único
+caso já foi fechado à mão. Escrever agora é risco sem ganho.
+
+### Como revisitar
+Quando o volume subir. O critério já está validado: **não é ouvir a frase, é a frase ser a
+última palavra** — exige silêncio do cliente depois dela (janela a definir), nunca só o match
+de texto.
+
+---
+
+## 🟡 Prompt caching — duas rotas fora, uma medida ruim
+
+**Registrado em:** 2026-09-11, junto com o marco de cache nas ferramentas do Luigi.
+
+### O quê
+O `luigi.ts` ganhou `cache_control` no fim das ferramentas. Duas outras rotas ficaram de fora:
+
+- **`gestao-whatsapp`** — 9,8% de aproveitamento de cache. Marca posta, prefixo instável.
+- **`captacao-busca`** — **113k tokens por chamada**, cache nenhum.
+
+### Por que importa
+O Luigi é ~53% da conta de IA e agora tem marco; a `captacao-busca` é a maior chamada única do
+sistema e não tem. Enquanto ninguém mede depois do deploy, "ligamos o cache" é fé, não número.
+
+### Como revisitar
+A tabela `uso_ia` tem as colunas de cache. Rodar a comparação **antes/depois** por rota —
+sem 24h de tráfego real depois do deploy, o número não significa nada.
+
+---
