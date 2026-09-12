@@ -45,7 +45,7 @@ import { enviarImagemDoPedido, janela24hAberta, registrarSaidaInbox } from './wh
 // O tipo local LinhaPedido deste arquivo é um recorte antigo, sem material nem
 // descricao. Pra editar a peça de verdade usamos o tipo canônico do produto.
 import { type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
-import { editarLinhasPedidoCliente } from './pedido-linhas-edicao'
+import { editarLinhasPedidoCliente, gradeDaFerramenta, linhasComAjuste } from './pedido-linhas-edicao'
 import { anexarFotoDaConversaAoModelo, conferirPedido, salvarDadosDoCliente, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores, pausarLembretesDoPedido } from './pedido-fechamento'
 import {
   faltaParaMockup,
@@ -1047,8 +1047,9 @@ const FERRAMENTA_ENCERRAR: Anthropic.Messages.Tool = {
 const FERRAMENTA_AJUSTAR_PECA: Anthropic.Messages.Tool = {
   name: 'ajustar_peca_pedido',
   description:
-    'Altera uma peça do pedido quando o CLIENTE pedir a mudança nesta conversa: material/tecido, modelo, cor, quantidade ' +
-    'ou descrição. Informe só o que muda. A peça é identificada pela posição (1 = primeira do pedido, como aparece no ' +
+    'Altera uma peça do pedido quando o CLIENTE pedir a mudança nesta conversa: material/tecido, modelo, cor, quantidade, ' +
+    'grade de tamanhos ou descrição. Informe só o que muda — mas se a peça tem grade e a quantidade muda, mande os dois: ' +
+    'é a soma da grade que vale como total. A peça é identificada pela posição (1 = primeira do pedido, como aparece no ' +
     'contexto). Antes de chamar, repita o que entendeu e espere ele confirmar. Depois de alterar, diga o que ficou. ' +
     'Se o orçamento já estava definido, ele volta pro fornecedor refazer — avise isso ao cliente. Pedido pago não altera: ' +
     'nesse caso chame chamar_humano. Não invente valor nem prazo novo.',
@@ -1061,6 +1062,15 @@ const FERRAMENTA_AJUSTAR_PECA: Anthropic.Messages.Tool = {
       modelo: { type: 'string', maxLength: 120 },
       cor: { type: 'string', maxLength: 80 },
       quantidade: { type: 'number', minimum: 1, maximum: 100000 },
+      tamanhos: {
+        type: 'array',
+        description: 'Grade nova. Obrigatória junto da quantidade quando a peça já tem grade — a soma é o total.',
+        items: {
+          type: 'object',
+          properties: { tamanho: { type: 'string' }, qtd: { type: 'number' } },
+          required: ['tamanho', 'qtd'],
+        },
+      },
       descricao: { type: 'string', maxLength: 500 },
     },
     required: ['posicao'],
@@ -1934,19 +1944,13 @@ async function executarFerramenta(
       const atuais: LinhaPedidoCompleta[] = Array.isArray(ped?.linhas) ? ped.linhas : []
       if (posicao > atuais.length) throw new Error(`o pedido tem ${atuais.length} peça(s); não existe a ${posicao}ª`)
 
-      // Mantém as outras peças como estão; origIdx preserva lid, preço já
-      // definido pelo fornecedor e a posição dos mockups.
-      const linhas = atuais.map((l, i) => {
-        const base = { ...l, origIdx: i }
-        if (i !== posicao - 1) return base
-        return {
-          ...base,
-          material: str(entrada.material) ?? l.material,
-          modelo: str(entrada.modelo) ?? l.modelo,
-          cor: str(entrada.cor) ?? l.cor,
-          total: num(entrada.quantidade) ?? l.total,
-          descricao: str(entrada.descricao) ?? l.descricao,
-        }
+      const linhas = linhasComAjuste(atuais, posicao, {
+        material: str(entrada.material),
+        modelo: str(entrada.modelo),
+        cor: str(entrada.cor),
+        quantidade: num(entrada.quantidade),
+        descricao: str(entrada.descricao),
+        tamanhos: gradeDaFerramenta(entrada.tamanhos),
       })
 
       const r = await editarLinhasPedidoCliente({ pedidoId: p.id, linhas })

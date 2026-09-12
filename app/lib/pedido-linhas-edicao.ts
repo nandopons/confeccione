@@ -293,7 +293,33 @@ export async function editarLinhasPedidoCliente(params: {
   const antes: LinhaPedido[] = Array.isArray(antesData?.linhas) ? antesData.linhas : []
 
   const r = await salvarLinhasEditadas({ pedidoId: params.pedidoId, linhas: params.linhas, autor: 'cliente' })
-  if (!r.ok || !r.mudou) return r
+  if (!r.ok) return r
+
+  // NADA GRAVADO NÃO É SUCESSO — 12/09/2026.
+  //
+  // Até hoje isto devolvia `ok: true, mudou: false` quando a edição não mexia
+  // em nada. O agente lê `ok` e anuncia: no pedido 20260900302 o cliente pediu
+  // 50 peças, a gravação caiu fora por um campo que a ferramenta descartava, e
+  // o Luigi respondeu "Atualizado: 50 jaquetões" com 40 no banco. Falha que se
+  // parece com sucesso, dita na cara do cliente.
+  //
+  // A trava é aqui, e não no prompt, porque a classe é maior que aquele campo:
+  // qualquer campo que alguém esqueça de mapear amanhã volta a dar "nada
+  // mudou". Enquanto isto for erro, o agente não tem como anunciar a mudança.
+  //
+  // Empate legítimo (o cliente pediu o que já está lá) também cai aqui, e é o
+  // comportamento certo: "já está assim" é a resposta verdadeira, "atualizei"
+  // não é.
+  if (!r.mudou) {
+    return {
+      ok: false,
+      erro:
+        'nada foi gravado: a peça já está exatamente assim. NÃO diga que alterou. ' +
+        'Confira o que ele pediu contra o que já está no pedido: se for igual, diga que já está assim; ' +
+        'se for diferente, o campo certo não foi mandado — mande de novo com ele.',
+      status: 409,
+    }
+  }
 
   // Avisa o fornecedor que aceitou. Failure-soft: o aviso não pode desfazer a
   // edição que já valeu — a mesma regra do resto do módulo.
@@ -301,6 +327,77 @@ export async function editarLinhasPedidoCliente(params: {
     console.error('[pedido-linhas] aviso ao fornecedor falhou', { err })
   )
   return r
+}
+
+/** O que `ajustar_peca_pedido` muda numa peça. Os dois agentes mandam isto. */
+export type AjusteDeLinha = {
+  material?: string | null
+  modelo?: string | null
+  cor?: string | null
+  quantidade?: number | null
+  descricao?: string | null
+  tamanhos?: Array<{ tamanho: string; qtd: number }> | null
+}
+
+/** Grade como as ferramentas dos agentes mandam: [{tamanho, qtd}]. */
+export function gradeDaFerramenta(v: unknown): Array<{ tamanho: string; qtd: number }> | null {
+  if (!Array.isArray(v)) return null
+  const out = (v as Array<Record<string, unknown>>)
+    .map((t) => ({ tamanho: str(t?.tamanho) ?? '', qtd: Number(t?.qtd) }))
+    .filter((t) => t.tamanho.length > 0 && Number.isFinite(t.qtd) && t.qtd > 0)
+    .map((t) => ({ tamanho: t.tamanho, qtd: Math.round(t.qtd) }))
+  return out.length > 0 ? out : null
+}
+
+/**
+ * Aplica o ajuste de UMA peça e devolve a lista inteira pronta pra
+ * editarLinhasPedidoCliente — origIdx em todas, pra preservar lid, preço do
+ * fornecedor e a posição dos mockups.
+ *
+ * A GRADE MANDA NO TOTAL, E MUDAR SÓ O TOTAL É RECUSADO — 12/09/2026.
+ *
+ * Pedido 20260900302: o cliente pediu 50, o modelo chamou a ferramenta com
+ * quantidade 50 E a grade nova, e o pedido ficou em 40. Duas coisas somadas:
+ * `tamanhos` não existia no schema, então sobrava a grade velha (10/10/10/10)
+ * na linha; e `normalizarLinha` faz `total = soma da grade` sempre que há
+ * grade. O 50 era descartado no caminho, o diff dava "nada mudou", e o Luigi
+ * anunciou "Atualizado: 50 jaquetões" com 40 gravado.
+ *
+ * Agora a grade entra. E quantidade sem grade numa peça que TEM grade estoura:
+ * aceitar seria escolher em silêncio entre dois números que o cliente deu — e o
+ * silêncio é o que fez este bug custar uma mentira pro cliente. Quem tem que
+ * desempatar é ele, perguntado.
+ *
+ * Vive aqui, e não nos dois handlers, porque a regra é uma só e os agentes são
+ * dois: a cópia que ficasse pra trás seria exatamente o buraco de novo.
+ */
+export function linhasComAjuste(atuais: LinhaPedido[], posicao: number, ajuste: AjusteDeLinha): LinhaEditada[] {
+  const alvo = atuais[posicao - 1]
+  const gradeAtual = (alvo?.tamanhos ?? []).filter((t) => str(t?.tamanho))
+  const gradeNova = ajuste.tamanhos ?? null
+
+  if (ajuste.quantidade != null && !gradeNova && gradeAtual.length > 0) {
+    const comoEsta = gradeAtual.map((t) => `${t.tamanho}:${t.qtd ?? 0}`).join(', ')
+    throw new Error(
+      `essa peça tem grade de tamanhos (${comoEsta}) e é a soma da grade que vale como total. ` +
+        `Mudar só a quantidade não grava nada. Pergunte a ele como fica a grade nova somando ` +
+        `${ajuste.quantidade} e chame de novo mandando tamanhos junto.`
+    )
+  }
+
+  return atuais.map((l, i) => {
+    const base: LinhaEditada = { ...l, origIdx: i }
+    if (i !== posicao - 1) return base
+    return {
+      ...base,
+      material: ajuste.material ?? l.material,
+      modelo: ajuste.modelo ?? l.modelo,
+      cor: ajuste.cor ?? l.cor,
+      total: ajuste.quantidade ?? l.total,
+      descricao: ajuste.descricao ?? l.descricao,
+      tamanhos: gradeNova ?? l.tamanhos,
+    }
+  })
 }
 
 /** Só o aviso ao fornecedor (o histórico já foi gravado por salvarLinhasEditadas). */

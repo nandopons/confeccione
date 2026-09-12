@@ -63,7 +63,7 @@ import { corrigirOrcamento } from './orcamento-versoes'
 import { enviarRascunho, prepararMensagem } from './mcp-mensagens'
 import { buscarContato, detalhePedido, lerConversa } from './gestao-consulta'
 import { captarParaPedido, REGIOES, type RegiaoBusca } from './captacao-pedido'
-import { editarLinhasPedidoCliente } from './pedido-linhas-edicao'
+import { editarLinhasPedidoCliente, gradeDaFerramenta, linhasComAjuste } from './pedido-linhas-edicao'
 import { type LinhaPedido } from './pedido-assistente-oferta'
 
 const MODELO = 'claude-sonnet-4-6'
@@ -519,7 +519,8 @@ const FERRAMENTAS: Anthropic.Messages.Tool[] = [
   {
     name: 'ajustar_peca_pedido',
     description:
-      'Altera uma peça do pedido: tecido/material, modelo, cor, quantidade ou descrição. Informe só o que muda. A peça é ' +
+      'Altera uma peça do pedido: tecido/material, modelo, cor, quantidade, grade de tamanhos ou descrição. Informe só o ' +
+      'que muda — mas se a peça tem grade e a quantidade muda, mande os dois: é a soma da grade que vale como total. A peça é ' +
       'identificada pela posição que aparece em detalhe_pedido (1 = primeira). Use quando o Fernando mandar ajustar algo ' +
       'que o cliente pediu. Pedido pago não altera. Se o orçamento já estava definido, ele volta pro fornecedor refazer e ' +
       'o fornecedor que aceitou é avisado — diga isso ao Fernando. Confirme o que entendeu antes de chamar.',
@@ -532,6 +533,15 @@ const FERRAMENTAS: Anthropic.Messages.Tool[] = [
         modelo: { type: 'string', maxLength: 120 },
         cor: { type: 'string', maxLength: 80 },
         quantidade: { type: 'number', minimum: 1, maximum: 100000 },
+        tamanhos: {
+          type: 'array',
+          description: 'Grade nova. Obrigatória junto da quantidade quando a peça já tem grade — a soma é o total.',
+          items: {
+            type: 'object',
+            properties: { tamanho: { type: 'string' }, qtd: { type: 'number' } },
+            required: ['tamanho', 'qtd'],
+          },
+        },
         descricao: { type: 'string', maxLength: 500 },
         confirmar: { type: 'boolean', description: 'Precisa ser true — o Fernando confirmou a mudança.' },
       },
@@ -803,19 +813,14 @@ async function executarFerramenta(nome: string, entrada: Entrada): Promise<unkno
       const atuais: LinhaPedido[] = Array.isArray(ped?.linhas) ? ped.linhas : []
       if (posicao > atuais.length) throw new Error(`o pedido tem ${atuais.length} peça(s); não existe a ${posicao}ª`)
 
-      const linhas = atuais.map((l, i) =>
-        i === posicao - 1
-          ? {
-              ...l,
-              origIdx: i,
-              material: str(entrada.material) ?? l.material,
-              modelo: str(entrada.modelo) ?? l.modelo,
-              cor: str(entrada.cor) ?? l.cor,
-              total: num(entrada.quantidade) ?? l.total,
-              descricao: str(entrada.descricao) ?? l.descricao,
-            }
-          : { ...l, origIdx: i }
-      )
+      const linhas = linhasComAjuste(atuais, posicao, {
+        material: str(entrada.material),
+        modelo: str(entrada.modelo),
+        cor: str(entrada.cor),
+        quantidade: num(entrada.quantidade),
+        descricao: str(entrada.descricao),
+        tamanhos: gradeDaFerramenta(entrada.tamanhos),
+      })
       const r = await editarLinhasPedidoCliente({ pedidoId: p.id, linhas })
       if (!r.ok) throw new Error(r.erro)
       return { codigo: p.codigo, mudou: r.mudou, resumo: r.resumo, orcamento_reaberto: r.orcamentoReaberto }
