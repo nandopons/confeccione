@@ -31,11 +31,12 @@
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
-import { anexarFotoDaConversaAoModelo } from './pedido-fechamento'
+import { anexarFotoDaConversaAoModelo, pecaCompleta } from './pedido-fechamento'
+import type { LinhaPedido } from './pedido-assistente-oferta'
 
 export type ResultadoAnexoEntrada =
   | { anexou: true; pedidoId: string; codigo: string | null }
-  | { anexou: false; motivo: 'sem_pedido_aberto' | 'varias_pecas' | 'sem_peca' | 'falhou' }
+  | { anexou: false; motivo: 'sem_pedido_aberto' | 'varias_pecas' | 'peca_indefinida' | 'sem_peca' | 'falhou' }
 
 /**
  * Anexa a imagem que acabou de chegar ao pedido aberto do contato, quando dá
@@ -67,9 +68,28 @@ export async function anexarImagemNaEntrada(params: {
     .maybeSingle<{ id: string; codigo: string | null; linhas: unknown }>()
   if (!pedido) return { anexou: false, motivo: 'sem_pedido_aberto' }
 
-  const linhas = Array.isArray(pedido.linhas) ? pedido.linhas : []
+  const linhas = (Array.isArray(pedido.linhas) ? pedido.linhas : []) as LinhaPedido[]
   if (linhas.length === 0) return { anexou: false, motivo: 'sem_peca' }
   if (linhas.length > 1) return { anexou: false, motivo: 'varias_pecas' }
+
+  // UMA LINHA NÃO É UMA PEÇA — 12/09/2026.
+  //
+  // Pedido que ainda está montando tem UMA linha de placeholder (`cor: "a
+  // definir"`, modelo null) e ela vira várias peças minutos depois: nos 5
+  // pedidos que receberam foto nesse estado, o placeholder virou 2, 2, 1, 11 e
+  // 2 peças. Anexar no placeholder é apostar que a foto é da PRIMEIRA das 11.
+  //
+  // Hoje isso nem chega a doer, e o motivo é outro bug: `definirPecasPedido`
+  // monta toda linha com `origIdx: null`, `remapearMockups` pula linha sem
+  // origIdx, e o mapa volta VAZIO — definir as peças apaga as fotos. Ou seja,
+  // anexar no placeholder é gravar num slot que vai ser limpo. As duas coisas
+  // se escondem uma atrás da outra.
+  //
+  // Então a trava é a peça estar DEFINIDA, não a lista ter tamanho 1. O caso do
+  // placeholder é o da fila: a foto fica pendente e é atribuída no momento em
+  // que as peças nascem, que é o único instante em que existe descrição e peça
+  // ao mesmo tempo.
+  if (!pecaCompleta(linhas[0])) return { anexou: false, motivo: 'peca_indefinida' }
 
   const r = await anexarFotoDaConversaAoModelo({ pedidoId: pedido.id, posicao: 1, midiaPath: params.midiaPath })
   if (!r.ok) return { anexou: false, motivo: 'falhou' }
