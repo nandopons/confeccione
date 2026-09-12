@@ -31,6 +31,11 @@ export type ResumoPedido = {
   cidade?: string | null
   uf?: string | null
   codigo?: string | null
+  /**
+   * O que o cliente pediu e não coube em campo nenhum — "mais acinturado",
+   * "manga um pouco mais curta". Ver o bloco que desenha isto lá embaixo.
+   */
+  observacoes?: string | null
   mockups?: MapaMockups | null
   imagens?: string[] | null
 }
@@ -343,6 +348,31 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
   page.drawLine({ start: { x: MX, y: y + 2 }, end: { x: A4.w - MX, y: y + 2 }, thickness: 1, color: CINZA_CLARO })
   y -= 16
   linha(`Total: ${totalPecas} ${totalPecas === 1 ? 'peça' : 'peças'}`, { size: 12, font: bold, cor: VERDE, gap: 2 })
+  // O PEDIDO QUE NÃO CABE EM CAMPO — 12/09/2026.
+  //
+  // `observacoes` está preenchida em 217 dos 236 pedidos e a confecção NUNCA viu
+  // nenhuma: a coluna existia, aparecia só no Diário do admin, e o PDF não a
+  // lia. É onde mora o ajuste que não tem campo — "só deixar mais acinturado",
+  // que a Ana Vitória pediu três vezes e se perdeu três vezes.
+  //
+  // É paliativo, e assumido: o certo é `variacao` ter campo próprio (Fase 2,
+  // passo 3, parado). Enquanto não tem, texto solto que a confecção lê é melhor
+  // que silêncio — quem costura sabe o que fazer com "mais acinturado"; o
+  // sistema é que não sabia onde guardar.
+  // A linha "Peça: ..." é AUTOMÁTICA, não é observação: o `criar/route.ts`
+  // grava a categoria escolhida ali e depois a extrai de volta com o mesmo
+  // regex. Medido: das 217 com conteúdo, 36 são só isso. Imprimir sob o título
+  // "Observações do cliente" seria dar ao leitor um recado da máquina como se
+  // fosse fala de gente.
+  const obs = (pedido.observacoes ?? '')
+    .split(/\n+/)
+    .map((x) => x.trim())
+    .filter((x) => x && !/^(?:Categoria|Peça):/i.test(x))
+  if (obs.length > 0) {
+    linha('Observações do cliente', { size: 10.5, font: bold, cor: ESCURO, gap: 6 })
+    for (const p of obs.slice(0, 8)) linha(p, { size: 9.5, cor: ESCURO, gap: 2 })
+  }
+
   if (pedido.prazoDias) linha(`Prazo de produção: ${pedido.prazoDias} dias (a partir da confirmação do pagamento).`, { size: 9.5, cor: CINZA })
 
   return await doc.save()

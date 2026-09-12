@@ -362,28 +362,61 @@ export async function criarPedidoParaContato(params: {
   if (tel.length < 10) return { ok: false, erro: 'telefone do contato inválido' }
   if (params.pecas.length === 0) return { ok: false, erro: 'informe ao menos uma peça' }
 
-  // Mesma lição do resumo em PDF: efeito de ferramenta se trava na ferramenta.
-  // Se o modelo chamar duas vezes — porque o cliente mandou duas mensagens, ou
-  // porque a rodada anterior pareceu falhar — o cliente acaba com dois pedidos
-  // iguais e recebe oferta em dobro. Dentro de 15 minutos, devolve o que já foi
-  // criado em vez de abrir outro.
+  // ═══════════════════════════════════════════════════════════════════════
+  // UM PEDIDO ABERTO POR PESSOA — 12/09/2026.
+  //
+  // A versão anterior desta trava era "mesmo telefone + origem whatsapp_luigi +
+  // últimos 15 minutos". Medido em produção: ela pegaria ZERO dos 23 pedidos
+  // duplicados da base. As duas condições se anulavam —
+  //   • a janela de 15 min pegaria 8 dos 23 (a média entre duplicatas é 4.120
+  //     minutos; a Clau teve três pedidos idênticos em 35, 66 e 101 minutos);
+  //   • e o `origem = 'whatsapp_luigi'` derrubava até esses, porque só 3 dos
+  //     pedidos anteriores tinham vindo por esse caminho — o cliente começa no
+  //     site e continua no WhatsApp.
+  //
+  // O QUE A MEDIÇÃO MOSTROU, e muda a forma da trava: de 48 pares do mesmo
+  // contato em 48 h, 46 têm LINHAS DIFERENTES. Não é cópia — é o mesmo pedido
+  // sendo refinado, e cada refinamento virando pedido novo:
+  //   Maira  104 (sem modelo) → 105 (sem modelo) → 106 (corta-vento + legging)
+  //   Alefe  061 (calça + colete refletivo) → 064 (sem modelo) → 065 (calça + colete)
+  //   Lucas  258 (sem modelo, 0 pç) → 259 (Oversized, 2 pç)
+  // Trava por CONTEÚDO pegaria 2 de 48. Por CONTATO pega os 23.
+  //
+  // Então: existe pedido ABERTO desta pessoa? Devolve ele, com as linhas, e
+  // manda ajustar. Aberto = nem confirmado nem encerrado — pedido já confirmado
+  // é história, e a pessoa tem direito a um segundo pedido depois dele.
+  //
+  // SEM JANELA DE TEMPO de propósito: "há quanto tempo" nunca foi a pergunta.
+  // A pergunta é se ela já tem um pedido em aberto, e isso não caduca.
   const tel8 = tel.slice(-8)
-  const { data: recente } = await supabaseAdmin
+  const { data: aberto } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, codigo')
+    .select('id, codigo, linhas, criado_em')
     .like('telefone', `%${tel8}`)
-    .eq('origem', 'whatsapp_luigi')
-    .gte('criado_em', new Date(Date.now() - 15 * 60 * 1000).toISOString())
+    .is('confirmado_em', null)
+    .is('encerrado_em', null)
+    .neq('status', 'cancelado')
     .order('criado_em', { ascending: false })
     .limit(1)
-    .maybeSingle<{ id: string; codigo: string | null }>()
-  if (recente) {
+    .maybeSingle<{ id: string; codigo: string | null; linhas: unknown; criado_em: string }>()
+  if (aberto) {
+    // Devolve AS LINHAS junto: sem elas o Luigi não sabe o que já está lá e
+    // pergunta tudo de novo, que é o comportamento que fez a Ana Vitória
+    // repetir a mesma correção três vezes.
+    const linhas = Array.isArray(aberto.linhas) ? (aberto.linhas as PecaEntrada[]) : []
+    const resumoAtual = linhas
+      .map((l, i) => `${i + 1}. ${[l.modelo, l.cor, l.quantidade ? `${l.quantidade} un` : null].filter(Boolean).join(', ')}`)
+      .join(' | ')
     return {
       ok: true,
       reaproveitado: true,
-      pedidoId: recente.id,
-      codigo: recente.codigo ?? undefined,
-      erro: `você já abriu o pedido ${recente.codigo ?? recente.id} pra esta pessoa há poucos minutos — use ajustar_peca_pedido nele em vez de criar outro`,
+      pedidoId: aberto.id,
+      codigo: aberto.codigo ?? undefined,
+      erro:
+        `esta pessoa JÁ TEM o pedido ${aberto.codigo ?? aberto.id} em aberto. NÃO crie outro: ` +
+        `use ajustar_peca_pedido pra mudar o que ela pediu, ou definir_pecas_pedido pra trocar a lista inteira. ` +
+        `O que já está nele: ${resumoAtual || '(nenhuma peça ainda)'}. ` +
+        `Se for mesmo um SEGUNDO pedido, diferente deste, chame chamar_humano — quem decide isso é o Fernando.`,
     }
   }
 

@@ -493,7 +493,7 @@ export async function enviarResumoPdfPedido(params: {
 
     const { data } = await supabaseAdmin
       .from('pedidos_assistente')
-      .select('id, codigo, nome, linhas, prazo_dias, cep, numero, complemento, logradouro, bairro, cidade, uf, mockups, imagens')
+      .select('id, codigo, nome, linhas, prazo_dias, cep, numero, complemento, logradouro, bairro, cidade, uf, mockups, imagens, observacoes')
       .eq('id', params.pedidoId)
       .maybeSingle<Record<string, unknown>>()
     if (!data) return { enviados: 0, total }
@@ -503,6 +503,7 @@ export async function enviarResumoPdfPedido(params: {
       nome: (data.nome as string | null) ?? null,
       linhas: Array.isArray(data.linhas) ? (data.linhas as ResumoPedido['linhas']) : [],
       prazoDias: (data.prazo_dias as number | null) ?? null,
+      observacoes: (data.observacoes as string | null) ?? null,
       cep: (data.cep as string | null) ?? null,
       numero: (data.numero as string | null) ?? null,
       complemento: (data.complemento as string | null) ?? null,

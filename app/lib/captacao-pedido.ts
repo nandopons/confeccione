@@ -1245,6 +1245,14 @@ export async function pdfSondagem(pedidoId: string): Promise<{ bytes: Uint8Array
     codigo: (data.codigo as string | null) ?? null,
     mockups: (data.mockups as ResumoPedido['mockups']) ?? null,
     imagens: Array.isArray(data.imagens) ? (data.imagens as string[]) : null,
+    // SEM `observacoes` AQUI, DE PROPÓSITO — 12/09/2026.
+    //
+    // Este PDF é o da SONDAGEM: vai pra confecção que ainda não assumiu nada, e
+    // o nome do arquivo e a legenda prometem "sem os dados do cliente". Mas
+    // `observacoes` é texto LIVRE que o cliente escreveu — já apareceu telefone,
+    // nome e endereço ali. Nos outros dois PDFs (ficha técnica e resumo pós-
+    // aceite) ela entra, porque a confecção já tem o contato de qualquer jeito.
+    observacoes: null,
   }
   const bytes = await gerarResumoPedidoPdf(pedido)
   return { bytes, nomeArquivo: `confeccione-sondagem-${pedido.id.slice(0, 8)}.pdf` }

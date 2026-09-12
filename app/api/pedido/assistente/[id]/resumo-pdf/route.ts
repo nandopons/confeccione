@@ -17,16 +17,33 @@ export async function GET(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params
   const { data } = await supabase
     .from('pedidos_assistente')
-    .select('id, codigo, nome, linhas, prazo_dias, cep, numero, complemento, logradouro, bairro, cidade, uf, mockups, imagens')
+    .select('id, codigo, nome, linhas, prazo_dias, cep, numero, complemento, logradouro, bairro, cidade, uf, observacoes, mockups, imagens')
     .eq('id', id)
-    .maybeSingle<any>()
+    .maybeSingle<{
+      id: string
+      codigo: string | null
+      nome: string | null
+      linhas: unknown
+      prazo_dias: number | null
+      cep: string | null
+      numero: string | null
+      complemento: string | null
+      logradouro: string | null
+      bairro: string | null
+      cidade: string | null
+      uf: string | null
+      observacoes: string | null
+      mockups: ResumoPedido['mockups']
+      imagens: unknown
+    }>()
   if (!data) return NextResponse.json({ erro: 'Pedido não encontrado' }, { status: 404 })
 
   const pedido: ResumoPedido = {
     id: data.id,
     nome: data.nome,
-    linhas: Array.isArray(data.linhas) ? data.linhas : [],
+    linhas: Array.isArray(data.linhas) ? (data.linhas as ResumoPedido['linhas']) : [],
     prazoDias: data.prazo_dias ?? null,
+    observacoes: data.observacoes ?? null,
     cep: data.cep, numero: data.numero, complemento: data.complemento,
     logradouro: data.logradouro, bairro: data.bairro, cidade: data.cidade, uf: data.uf,
     codigo: data.codigo ?? null,
