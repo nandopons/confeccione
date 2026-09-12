@@ -475,6 +475,21 @@ export type Divergencia = { posicao: number; o_que: string; pergunte: string }
 
 // A lista mora em pecas.ts — ver o comentário de lá sobre cópia divergente.
 
+/**
+ * Palavra que AMARRA a segunda cor à peça — sinal de bicolor, não de duas peças.
+ *
+ * "branca COM COSTURA preta", "LISTRADO azul e branco", "FRENTE branca /
+ * TRASEIRA azul": em todos, a segunda cor tem um lugar na peça. Quando a cor é
+ * só um par solto ("Branca e azul marinho"), ninguém disse onde cada uma fica —
+ * e aí a pergunta ao cliente faz sentido.
+ *
+ * `\b` não serve: em JS ele é ASCII e falha depois de acento no fim da palavra
+ * (foi o que deixou "boné" escapar de uma lista parecida em pecas.ts). Guardas
+ * unicode.
+ */
+const CONECTOR_BICOLOR =
+  /(?<!\p{L})(com|costuras?|detalhes?|listrad\w*|listras?|frente|traseira|externa?|interna?|al[çc]a|bico|gola|punhos?|barra|extremidades?|capa|estampa\w*|vivo|frisos?|manga)(?!\p{L})/iu
+
 export function revisarPecas(linhas: LinhaPedido[]): Divergencia[] {
   const achados: Divergencia[] = []
 
@@ -484,8 +499,40 @@ export function revisarPecas(linhas: LinhaPedido[]): Divergencia[] {
     const desc = (l.descricao ?? '').trim()
     const publico = ((l as { publico?: string | null }).publico ?? '').trim().toLowerCase()
 
-    // Duas cores na mesma peça: "branca e azul marinho", "preto/branco", "azul, verde".
-    if (/\s+e\s+|\s*\/\s*|\s*,\s*|\s*\+\s*/.test(cor) && cor.length > 3) {
+    // ==================================================================
+    // DUAS CORES, OU UMA PEÇA BICOLOR? — 12/09/2026.
+    //
+    // A regra acusava qualquer separador em `cor` ("branca e azul marinho",
+    // "preto/branco"). Medido nas 534 linhas de produção: 18 acusações, e
+    // classificando à mão uma por uma, 13 eram PEÇA BICOLOR — uma peça só, dois
+    // tons nela. O caso que não deixa dúvida é o 20260600010 m1/m2, cuja
+    // `descricao` diz literalmente "bicolor, sublimação total": a trava mandava
+    // separar uma peça que o cliente já tinha descrito como bicolor. As duas
+    // linhas ali diferem por `publico` (masculino / baby look), não por cor.
+    //
+    // O custo do falso positivo não é só ruído: `liberarParaFornecedores` para
+    // quando há divergência, e o Luigi devolve `pronto_para_liberar: false` com
+    // "resolva as divergências antes de seguir". O 20260900292 tomou duas
+    // acusações no dia em que nasceu e precisou ser liberado na mão.
+    //
+    // CASO DE TESTE — NÃO REMOVA ESTA TRAVA ACHANDO QUE ELA NUNCA ACERTA.
+    // `pedidos_assistente_edicoes`, 09/09/2026 17:10, autor admin:
+    //     antes:  tshirt — "Branca e azul marinho"
+    //     depois: "Azul marinho", "Branca"
+    // Verdadeiro positivo confirmado: duas cores que viraram duas linhas. Note
+    // que ele NÃO tem palavra de conector, então a regra abaixo o preserva.
+    //
+    // ESTA CORREÇÃO É PARCIAL, E DE PROPÓSITO.
+    // Ela tira os 13 fáceis (72%) e deixa 3 falsos positivos de pé:
+    // "azul marinho/branco" (×2) e "marinho/branco". Não é descuido — é que a
+    // informação que separa de verdade NÃO ESTÁ NO CAMPO `cor`. Está na
+    // `descricao` ("bicolor", "listrado", "sublimação total") e na estrutura da
+    // linha (uma grade de tamanhos contra duas). Regex sobre `cor` não alcança
+    // isso, e forçar daria 3 falsos positivos pra 1 verdadeiro — proporção que
+    // treina o agente a ignorar o aviso, que é pior que não ter aviso.
+    // A separação de verdade está nomeada como trabalho da Fase 2.
+    // ==================================================================
+    if (/\s+e\s+|\s*\/\s*|\s*,\s*|\s*\+\s*/.test(cor) && cor.length > 3 && !CONECTOR_BICOLOR.test(cor)) {
       achados.push({
         posicao,
         o_que: `a peça ${posicao} tem mais de uma cor no mesmo item ("${cor}") — a confecção precisa de uma linha por cor pra orçar`,
