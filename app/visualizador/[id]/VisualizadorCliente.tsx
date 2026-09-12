@@ -415,6 +415,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   const [iaBusy, setIaBusy] = useState<number | null>(null);
   const [iaErro, setIaErro] = useState<Record<number, string | null>>({});
   const [iaAjuste, setIaAjuste] = useState<{ i: number; idx: number } | null>(null);
+  // RESSALVA DA CONFERÊNCIA — 12/09/2026.
+  // A prévia passa por uma conferência de visão antes de aparecer. Quando ela
+  // reprova nas duas tentativas, a imagem vem MESMO ASSIM (o cliente esperou o
+  // spinner e julga sozinho), mas com o aviso do que pode não conferir. Esconder
+  // seria pior; entregar calado, pior ainda.
+  const [iaRessalva, setIaRessalva] = useState<Record<number, string[]>>({});
   const [zoom, setZoom] = useState<string | null>(null);
   // Acordeão mobile: só 1 card expandido por vez (no lg+ todos ficam abertos).
   const [abertoIdx, setAbertoIdx] = useState(0);
@@ -687,7 +693,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
   }
   async function gerarMockupIA(i: number, regenIaIndex: number | null = null) {
     if (iaBusy !== null) return;
-    setIaBusy(i); setIaErro((p) => ({ ...p, [i]: null }));
+    setIaBusy(i); setIaErro((p) => ({ ...p, [i]: null })); setIaRessalva((p) => ({ ...p, [i]: [] }));
     try {
       const r = await fetch(`/api/visualizador/${pedido.id}/gerar-mockup`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -695,6 +701,7 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
       }).then((x) => x.json());
       if (r.disponivel === false) { setIaErro((p) => ({ ...p, [i]: r.motivo || "Geração de IA indisponível agora." })); return; }
       if (r.erro) { setIaErro((p) => ({ ...p, [i]: r.erro })); return; }
+      if (Array.isArray(r.divergencias)) setIaRessalva((p) => ({ ...p, [i]: r.divergencias as string[] }));
       if (Array.isArray(r.ia)) { setIaImgs((p) => ({ ...p, [i]: r.ia })); setIaAjuste(null); }
     } catch { setIaErro((p) => ({ ...p, [i]: "Falha de conexão." })); }
     finally { setIaBusy(null); }
@@ -1166,6 +1173,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
                             {ajustandoEste && <button type="button" onClick={() => setIaAjuste(null)} className="text-sm text-gray-500 hover:text-gray-700">cancelar ajuste</button>}
                           </div>
                           {iaErro[i] && <p className="text-xs text-red-600 mt-2">{iaErro[i]}</p>}
+                          {(iaRessalva[i]?.length ?? 0) > 0 && (
+                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+                              Confira esta prévia antes de aprovar: ela pode não refletir{" "}
+                              {iaRessalva[i].map((d) => d.split(":")[0].trim()).join(", ")}. O resto do pedido segue como você descreveu.
+                            </p>
+                          )}
                         </div>
                       ) : (
                         <div>

@@ -304,3 +304,26 @@ A tabela `uso_ia` tem as colunas de cache. Rodar a comparação **antes/depois**
 sem 24h de tráfego real depois do deploy, o número não significa nada.
 
 ---
+
+## 🟡 `luigi_whatsapp_log.duracao_ms` mede LATÊNCIA, não trabalho
+
+**Registrado em:** 2026-09-12.
+
+### O quê
+`inicio = Date.now()` nasce na **linha 3662** de `luigi.ts`, logo na entrada de `responderCliente`.
+O `esperarOClienteTerminar` (o debounce, teto de 60 s) só é chamado na **linha 3788**. Ou seja:
+**o debounce está DENTRO da medição.**
+
+### Por que importa
+Quem olhar esse número amanhã pra dimensionar orçamento vai **superestimar o trabalho em até
+60 s** e cortar tempo do modelo achando que ele demora mais do que demora. O pior turno medido
+(127,0 s, 14 dias) tem até 60 s de espera dentro — o trabalho puro foi ~67 s.
+
+Pra latência percebida pelo cliente o número é **bom**: é quase exatamente o que ele espera.
+São duas perguntas diferentes e a coluna só responde uma.
+
+### Como revisitar
+Se um dia a distinção importar, são duas colunas (`espera_ms` e `trabalho_ms`), não uma
+reinterpretação da mesma. Enquanto for uma só, o nome honesto dela é latência.
+
+---

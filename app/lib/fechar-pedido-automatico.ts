@@ -181,6 +181,13 @@ async function gerarMockupsQueFaltam(p: PedidoLinha): Promise<Previas> {
     try {
       const g = await gerarMockupDoModelo({ pedidoId: p.id, index: i })
       if (g.ok) r.gerados++
+      // Prévia reprovada entra como FALHA, não como gerada: a imagem não foi
+      // guardada e a peça continua sem prévia. Assim ela cai no adiamento com
+      // teto que já existe aqui, em vez de o pedido fechar com um modelo
+      // ilustrado errado — o caminho que vaza pro PDF e pra confecção sem
+      // ninguém revisar.
+      else if (g.tipo === 'reprovado')
+        r.falharam.push({ index: i, motivo: `prévia não confere com o pedido: ${g.divergencias.join('; ')}` })
       else r.falharam.push({ index: i, motivo: ('erro' in g ? g.erro : g.motivo) ?? 'sem motivo' })
     } catch (err) {
       r.falharam.push({ index: i, motivo: err instanceof Error ? err.message : String(err) })

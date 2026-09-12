@@ -35,6 +35,7 @@ import { gerarImagem, type ImagemEntrada } from './mockup-image'
 import { normalizarMockup } from './imagem-normalizar'
 import { guardarImagem, lerImagem, refParaUrl } from './imagens-pedido-storage'
 import { supabaseAdmin } from './supabase-server'
+import { atributosEsperados, verificarMockup, type Atributo } from './verificar-mockup'
 
 /** Quantos mockups de IA um modelo guarda. Passou disso, o mais antigo sai. */
 /**
@@ -43,6 +44,16 @@ import { supabaseAdmin } from './supabase-server'
  * nomeada porque `iaParaExibicao` e as telas ainda tratam `ia` como lista.
  */
 export const MAX_IA = 1
+
+/**
+ * Quantas vezes gerar a mesma peça antes de desistir da conferência.
+ *
+ * Dois, e o motivo é a ESPERA do cliente, não o custo: com teto 1, quem clica
+ * no visualizador recebe a errada, clica de novo e espera duas vezes — a espera
+ * fica visível. Com teto 2 ele espera uma vez só (~10 s) e recebe a certa.
+ * Spinner de 10 s é aceitável; receber errado e ter que reclicar não é.
+ */
+export const TENTATIVAS_MOCKUP = 2
 
 /**
  * Teto de imagens de referência enviadas ao provedor.
@@ -70,9 +81,32 @@ export type LinhaMockup = {
 }
 
 export type ResultadoMockupPedido =
-  | { ok: true; ia: IAItem[]; referenciasUsadas: number; modelo: string }
+  | {
+      ok: true
+      ia: IAItem[]
+      referenciasUsadas: number
+      modelo: string
+      /**
+       * Atributos do pedido que a imagem entregue NÃO cumpre. Vazio quando
+       * passou na conferência — e também quando não deu pra conferir, daí o
+       * `verificada` ao lado. Quem chamou decide o que fazer: o Luigi e o cron
+       * não entregam imagem com divergência; o botão do visualizador entrega
+       * com a ressalva na tela.
+       */
+      divergencias: string[]
+      /** `false` quando a verificação não rodou (sem chave, provedor fora). */
+      verificada: boolean
+      tentativas: number
+    }
   | { ok: false; tipo: 'erro'; erro: string; status: number }
   | { ok: false; tipo: 'indisponivel'; motivo: string }
+  /**
+   * Gerou, conferiu, divergiu, tentou de novo e divergiu de novo. NADA foi
+   * guardado: nem no bucket, nem em `mockups[i].ia`. A peça continua sem prévia,
+   * que é o estado honesto — prévia errada guardada vaza pro PDF e pra confecção
+   * por caminhos que ninguém revisa.
+   */
+  | { ok: false; tipo: 'reprovado'; divergencias: string[]; tentativas: number }
 
 // ----------------------------------------------------------------------------
 // Leitura dos dados do modelo
@@ -329,8 +363,21 @@ export async function gerarMockupDoModelo(params: {
   index: number
   instrucoes?: string
   regenIaIndex?: number | null
+  /**
+   * O que fazer quando a imagem reprova nas duas tentativas.
+   *
+   * `descartar` (padrão) — ENVIO AUTOMÁTICO: Luigi no WhatsApp e fechador no
+   * cron. O cliente receberia a prévia pronta e confiaria nela sem olhar com
+   * desconfiança; melhor não mandar nada.
+   *
+   * `entregar_com_ressalva` — BOTÃO DO VISUALIZADOR: o cliente está olhando a
+   * tela, esperou o spinner e julga a imagem ele mesmo. Esconder depois de 10 s
+   * de espera é pior que mostrar dizendo o que pode não conferir.
+   */
+  aoReprovar?: 'descartar' | 'entregar_com_ressalva'
 }): Promise<ResultadoMockupPedido> {
   const { pedidoId, index } = params
+  const aoReprovar = params.aoReprovar ?? 'descartar'
   const instrucoes = (params.instrucoes || '').trim()
   const regenIaIndex = typeof params.regenIaIndex === 'number' ? params.regenIaIndex : null
 
@@ -379,13 +426,83 @@ export async function gerarMockupDoModelo(params: {
   const alvoAjuste = regenIaIndex !== null ? (iaAtual[regenIaIndex] ?? iaAtual[0]) : undefined
   const baseAjuste = alvoAjuste ? (await carregarImagens([alvoAjuste.url]))[0] ?? null : null
 
-  const { prompt, imagens } = montarPromptMockup({ linha: l, artes, instrucoes, baseAjuste })
+  // ==========================================================================
+  // GERA, CONFERE, REGENERA — 12/09/2026.
+  //
+  // O laço mora AQUI porque os três chamadores passam por esta função: o Luigi
+  // no turno, o fechador no cron e o botão do visualizador. Regra do AGENTS.md:
+  // efeito de ferramenta se trava dentro da ferramenta. Se a retentativa
+  // morasse no Luigi, ela atravessaria turnos e ele precisaria LEMBRAR que a
+  // imagem reprovou — estado entre turnos que ninguém garante.
+  //
+  // Teto 2, e o motivo é a espera, não o custo: com teto 1 o cliente do
+  // visualizador recebe a errada, clica de novo e espera duas vezes, vendo.
+  // Com teto 2 ele espera uma vez (~10 s) e recebe a certa.
+  //
+  // A conferência roda ANTES do `guardarImagem`: prévia reprovada não chega a
+  // virar arquivo.
+  // ==========================================================================
+  const atributos: Atributo[] = atributosEsperados({
+    modelo: l.modelo,
+    cor: corLimpa(l.cor),
+    descricao: l.descricao,
+    estampado: ehEstampado(l),
+  })
 
-  const r = await gerarImagem({ prompt, imagens, aspectRatio: '1:1', imageSize: '2K' })
-  if (!r.disponivel) return { ok: false, tipo: 'indisponivel', motivo: r.motivo }
+  let gerada: { base64: string; mime: string } | null = null
+  let divergencias: string[] = []
+  let verificada = false
+  let tentativas = 0
+
+  for (let n = 1; n <= TENTATIVAS_MOCKUP; n++) {
+    tentativas = n
+
+    // O reforço entra pelo canal que já existe (`instrucoes`), dizendo o que
+    // saiu errado da vez anterior. Regerar com o mesmo prompt costuma repetir o
+    // mesmo erro; e ajustar a imagem reprovada como BASE é pior ainda — parte do
+    // desenho errado pra tentar consertá-lo.
+    const reforco =
+      divergencias.length > 0
+        ? ` ATENÇÃO: a geração anterior saiu errada nisto — ${divergencias.join('; ')}. Desta vez respeite exatamente esses pontos.`
+        : ''
+    const { prompt, imagens } = montarPromptMockup({
+      linha: l,
+      artes,
+      instrucoes: `${instrucoes}${reforco}`.trim(),
+      baseAjuste,
+    })
+
+    const r = await gerarImagem({ prompt, imagens, aspectRatio: '1:1', imageSize: '2K' })
+    if (!r.disponivel) return { ok: false, tipo: 'indisponivel', motivo: r.motivo }
+    gerada = { base64: r.imagemBase64, mime: r.mime }
+
+    const v = await verificarMockup({
+      base64: r.imagemBase64,
+      mime: r.mime,
+      atributos,
+      rota: 'verificar-mockup',
+    })
+    if (!v.verificada) {
+      // Verificador fora do ar não segura a prévia: ver o cabeçalho de
+      // verificar-mockup.ts. Entrega sem garantia e diz que não conferiu.
+      console.warn('[mockup-pedido] verificação indisponível, seguindo sem ela:', v.motivo)
+      divergencias = []
+      verificada = false
+      break
+    }
+    verificada = true
+    divergencias = v.divergencias
+    if (divergencias.length === 0) break
+  }
+
+  if (!gerada) return { ok: false, tipo: 'erro', erro: 'Não saiu imagem da geração', status: 500 }
+
+  if (divergencias.length > 0 && aoReprovar === 'descartar') {
+    return { ok: false, tipo: 'reprovado', divergencias, tentativas }
+  }
 
   // Vai pro bucket: o mockup de IA era o maior peso no TOAST do pedido.
-  const url = await guardarImagem(await normalizarMockup(`data:${r.mime};base64,${r.imagemBase64}`), pedidoId)
+  const url = await guardarImagem(await normalizarMockup(`data:${gerada.mime};base64,${gerada.base64}`), pedidoId)
   const novoItem: IAItem = { url, prompt: instrucoes || undefined }
 
   // PRÉVIA SUBSTITUI, NÃO EMPILHA — 12/09/2026.
@@ -428,6 +545,9 @@ export async function gerarMockupDoModelo(params: {
     ia: mk.ia,
     referenciasUsadas: artes.length,
     modelo: (l.modelo || '').trim() || `modelo ${index + 1}`,
+    divergencias,
+    verificada,
+    tentativas,
   }
 }
 

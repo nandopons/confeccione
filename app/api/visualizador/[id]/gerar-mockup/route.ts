@@ -31,6 +31,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     index: p.data.index,
     instrucoes: p.data.instrucoes,
     regenIaIndex: p.data.regenIaIndex ?? null,
+    // AQUI A POLÍTICA É A OPOSTA DO ENVIO AUTOMÁTICO — 12/09/2026.
+    //
+    // No WhatsApp e no cron, prévia que reprova na conferência não é enviada: o
+    // cliente receberia pronta e confiaria. Aqui ele está OLHANDO A TELA, já
+    // esperou o spinner e julga a imagem ele mesmo. Esconder depois de ~10 s de
+    // espera é pior que mostrar com a ressalva do que pode não conferir.
+    aoReprovar: 'entregar_com_ressalva',
   })
 
   // Provedor desligado/sem crédito não é erro do cliente: a tela cai no
@@ -38,7 +45,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (!r.ok && r.tipo === 'indisponivel') {
     return NextResponse.json({ disponivel: false, motivo: r.motivo })
   }
+  // Inalcançável com `entregar_com_ressalva` (a lib entrega em vez de reprovar),
+  // mas o tipo cobre os dois e "inalcançável hoje" não é garantia amanhã.
+  if (!r.ok && r.tipo === 'reprovado') {
+    return NextResponse.json({ disponivel: true, ia: [], divergencias: r.divergencias })
+  }
   if (!r.ok) return NextResponse.json({ erro: r.erro }, { status: r.status })
 
-  return NextResponse.json({ disponivel: true, ia: iaParaExibicao(r.ia, id) })
+  // `divergencias` não vazio = a imagem vai pra tela COM ressalva. A tela é que
+  // decide como mostrar; a rota só não esconde o que a conferência achou.
+  return NextResponse.json({ disponivel: true, ia: iaParaExibicao(r.ia, id), divergencias: r.divergencias })
 }

@@ -2082,6 +2082,24 @@ async function executarFerramenta(
             'não comente isso com o cliente.'
         )
       }
+
+      // REPROVOU NA CONFERÊNCIA: NÃO MANDA — 12/09/2026.
+      //
+      // A imagem não foi guardada (`aoReprovar` é 'descartar' por padrão), então
+      // a peça segue sem prévia e o cron tenta de novo mais tarde. O Luigi
+      // precisa saber só ISTO, agora, no resultado da ferramenta: a retentativa
+      // já aconteceu lá dentro, síncrona, e não atravessa turno — ele nunca
+      // precisa LEMBRAR que uma imagem reprovou.
+      //
+      // O texto é NOTA INTERNA. "manga: o pedido é ..." não pode sair verbatim
+      // pro cliente, e já saiu nome de coluna do banco em mensagem de WhatsApp.
+      if (!r.ok && r.tipo === 'reprovado') {
+        throw new Error(
+          `a prévia saiu errada nas ${r.tentativas} tentativas (${r.divergencias.join('; ')}) e por isso NÃO foi ` +
+            'enviada. Não repita esta nota pro cliente e não diga que a imagem está a caminho: siga a conversa ' +
+            'normalmente sem a prévia deste modelo.'
+        )
+      }
       if (!r.ok) throw new Error(r.erro)
 
       // GERAR TODOS, MANDAR UM — 10/09/2026.
