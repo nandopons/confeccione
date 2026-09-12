@@ -359,15 +359,27 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
   // passo 3, parado). Enquanto não tem, texto solto que a confecção lê é melhor
   // que silêncio — quem costura sabe o que fazer com "mais acinturado"; o
   // sistema é que não sabia onde guardar.
-  // A linha "Peça: ..." é AUTOMÁTICA, não é observação: o `criar/route.ts`
-  // grava a categoria escolhida ali e depois a extrai de volta com o mesmo
-  // regex. Medido: das 217 com conteúdo, 36 são só isso. Imprimir sob o título
-  // "Observações do cliente" seria dar ao leitor um recado da máquina como se
-  // fosse fala de gente.
+  // `observacoes` É UM CAMPO COM DOIS DONOS, e só um deles fala com a confecção.
+  //
+  //  1. A CLIENTE — "só deixar mais acinturado". É isto que tem que sair.
+  //  2. A MÁQUINA — duas formas, e nenhuma é pra ninguém ler de fora:
+  //     • "Peça: Camisetas e t-shirts + ..." — o `criar/route.ts` grava a
+  //       categoria escolhida aqui e depois a extrai de volta com o mesmo
+  //       regex. 36 dos 220 pedidos com conteúdo são só isso.
+  //     • "[11/09 23:14] Encerrado por duplicidade: cópia de 20260900291..." —
+  //       nota operacional nossa, com data. São 4 pedidos hoje, e um deles é o
+  //       20260900293, que é justamente o que vai ser ofertado. Sem este
+  //       filtro a confecção receberia um PDF explicando a bagunça interna do
+  //       pedido dela, com timestamps.
+  //
+  // O filtro é paliativo e assumido: a causa é nota interna e fala de cliente
+  // morarem na MESMA coluna. Enquanto for assim, todo formato novo de nota
+  // interna precisa lembrar de vir aqui — que é exatamente o tipo de coisa que
+  // ninguém lembra. Ver DEBT.md.
   const obs = (pedido.observacoes ?? '')
     .split(/\n+/)
     .map((x) => x.trim())
-    .filter((x) => x && !/^(?:Categoria|Peça):/i.test(x))
+    .filter((x) => x && !/^(?:Categoria|Peça):/i.test(x) && !/^\[\d{2}\/\d{2}(?:\s+\d{2}:\d{2})?\]/.test(x))
   if (obs.length > 0) {
     linha('Observações do cliente', { size: 10.5, font: bold, cor: ESCURO, gap: 6 })
     for (const p of obs.slice(0, 8)) linha(p, { size: 9.5, cor: ESCURO, gap: 2 })

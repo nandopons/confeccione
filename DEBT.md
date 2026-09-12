@@ -680,3 +680,71 @@ aplicação pro banco, que é onde ela não depende de ninguém lembrar. Até l�
 linhas chegam com NULL diz quanto do tráfego vem por fora.
 
 ---
+
+## 🔴 Terceiro mecanismo de duplicação: id fantasma no contexto do Luigi
+
+**Medido em:** 2026-09-12.
+
+### O quê
+O Luigi carrega no histórico da conversa o id de um pedido que **não existe mais no banco** —
+apagado à mão, em geral. Ele não valida; tenta usar, não acha, e **cria outro pedido**.
+
+Escrito pela própria mão, dentro do `observacoes` do `20260900293`:
+
+> `[11/09 23:14] Encerrado por duplicidade: cópia de 20260900291. O Luigi criou este pedido às
+> 23:04 porque o 7b287c46 foi apagado e o id continuou no histórico da conversa.`
+
+### Não é caso isolado
+`luigi_whatsapp_log`, ids que não existem mais em `pedidos_assistente`:
+
+```
+7b287c46…   23 turnos   11/09 18:12 → 12/09 00:17   (Ana Vitória)
+6c01b57b…   10 turnos   11/09 00:14 → 11/09 00:26
+51d55114…    7 turnos   12/09 00:46 → 12/09 02:05
+```
+
+**3 de 38 ids distintos (8%), 40 de 386 turnos**, em três conversas diferentes, todos em dois
+dias. O fantasma não some sozinho: o da Ana Vitória durou **6 horas e 23 turnos**.
+
+### Por que a trava nova não pega — e não deveria
+A trava de 12/09 (`criarPedidoParaContato`) recusa quando **existe pedido aberto** do contato.
+Aqui não existia: o pedido tinha sido apagado. São três mecanismos distintos, e a Ana Vitória
+sofreu dois deles — `291 → 293` (id fantasma) e `293 → 299` (ajuste virando pedido).
+
+### Como revisitar
+O conserto é o **contexto validar os ids antes de entregar ao modelo**: id que não resolve no
+banco não entra no prompt, e o Luigi trata como conversa sem pedido em vez de tentar usar.
+É a mesma família do `acharNoContexto`, que já existe.
+
+Cuidado com a direção da falha: filtrar id inválido é seguro (vira "não tem pedido"), mas
+filtrar id VÁLIDO por erro de consulta seria pior que o problema — o Luigi perderia o pedido do
+cliente no meio da conversa. A consulta que valida precisa distinguir "não existe" de "não
+consegui ler".
+
+---
+
+## 🟡 `observacoes` tem dois donos e só um fala com a confecção
+
+**Registrado em:** 2026-09-12.
+
+### O quê
+A mesma coluna guarda **fala da cliente** ("só deixar mais acinturado") e **nota interna
+nossa**, em dois formatos:
+- `Peça: Camisetas e t-shirts + …` — gravado e relido pelo `criar/route.ts` (36 de 220)
+- `[11/09 23:14] Encerrado por duplicidade: …` — nota operacional com data (4 de 220)
+
+Quando o `observacoes` passou a sair no PDF (12/09), o `20260900293` — **que é justamente o
+que vai ser ofertado** — ia entregar à confecção um documento explicando a bagunça interna do
+próprio pedido, com timestamps.
+
+### O que tem hoje
+Um filtro em `resumo-pdf.ts` que descarta os dois formatos. **É paliativo e está assumido no
+comentário**: todo formato novo de nota interna precisa lembrar de vir aqui, que é exatamente
+o tipo de coisa que ninguém lembra.
+
+### Como revisitar
+Coluna própria pra nota interna (`observacoes_internas`), e o PDF passa a ler só a da cliente
+— sem filtro, porque não haveria o que filtrar. É migração pequena; o que ela compra é que o
+próximo formato de nota interna não precise de ninguém lembrar de nada.
+
+---
