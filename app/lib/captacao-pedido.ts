@@ -35,7 +35,7 @@ import { normalizarWhatsApp } from './phone'
 import { pedidosPorEtapa, pedidoEtapa, type PedidoEtapa } from './etapas-pedido'
 import { normalizarWaId, enviarTemplate, enviarTexto, enviarMidiaPorId, uploadMidia, marcarComoLida, listarTemplates } from './whatsapp-cloud'
 import { consultarTemplatesWhatsApp } from './whatsapp-templates'
-import { janela24hAberta, registrarSaidaInbox, vincularContato } from './whatsapp-notify'
+import { acharContatoPorNumero, janela24hAberta, registrarSaidaInbox, vincularContato } from './whatsapp-notify'
 import { emailSondagemProducao } from './email'
 import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
 import { URL_CADASTRO_FORNECEDOR } from './captacao-templates'
@@ -928,9 +928,28 @@ async function cadastrarConfeccaoDaConversa(
     fornecedorId = data.id
   }
 
-  // Liga o contato do WhatsApp ao fornecedor: é o que faz o inbox mostrar o selo
-  // e o que o `salvar_perfil_producao` exige pra completar o perfil depois.
-  await supabaseAdmin.from('wa_contatos').update({ fornecedor_id: fornecedorId }).eq('wa_id', waId)
+  // Liga o contato do WhatsApp ao fornecedor: é o que faz o inbox mostrar o selo,
+  // o que o `salvar_perfil_producao` exige, e — o mais frágil — o que o
+  // `aceitar_oferta` procura pra saber de quem é a oferta.
+  //
+  // POR ÚLTIMOS 8 DÍGITOS, NÃO POR IGUALDADE — 12/09/2026.
+  //
+  // Isto era `.eq('wa_id', waId)`. Medido: 9 dos 213 contatos têm `wa_id` que
+  // não sobrevive ao `normalizarWaId` — a Meta entrega 12 dígitos, o resto do
+  // sistema usa 13, e SEIS dos nove são confecções de captação (Malharia Salete,
+  // NModas, Brasil Uniformes, Garota Brazil, Maria's, Bordados & CIA).
+  //
+  // Pra essas, o update casava zero linhas EM SILÊNCIO — o Supabase não erra
+  // quando o `where` não acha nada. A confecção se cadastrava, a oferta nascia,
+  // e o aceite recusava com "ela ainda não tem cadastro nesta conversa". O fluxo
+  // quebraria exatamente no passo novo, e só na primeira confecção real.
+  //
+  // `acharContatoPorNumero` é a mesma função que o resto do sistema usa: tenta
+  // igualdade e cai nos últimos 8. Uma regra, não uma terceira cópia.
+  const contatoDela = await acharContatoPorNumero(waId)
+  if (contatoDela) {
+    await supabaseAdmin.from('wa_contatos').update({ fornecedor_id: fornecedorId }).eq('id', contatoDela.id)
+  }
 
   // MEDIÇÃO SEM COLUNA NOVA: `convertido_em` já existe e é exatamente a pergunta
   // que importa — "disse que faz -> virou fornecedor", hoje 0 de 4.
@@ -1083,8 +1102,13 @@ async function aceitarOfertaDaConversa(
   // TRAVA 2 — A OFERTA TEM QUE SER DELA.
   // Sem isto uma confecção aceita a oferta de outra por id errado: a ferramenta
   // não recebe ofertaId justamente pra o modelo não poder escolher um.
-  const { data: contato } = await supabaseAdmin
-    .from('wa_contatos').select('fornecedor_id').eq('wa_id', waId).maybeSingle<{ fornecedor_id: string | null }>()
+  // Mesma tolerância do carimbo, pelo mesmo motivo: 9 contatos têm o wa_id numa
+  // forma e o sistema usa outra. Ler por igualdade aqui recusaria o aceite de
+  // quem acabou de se cadastrar.
+  const achado = await acharContatoPorNumero(waId)
+  const { data: contato } = achado
+    ? await supabaseAdmin.from('wa_contatos').select('fornecedor_id').eq('id', achado.id).maybeSingle<{ fornecedor_id: string | null }>()
+    : { data: null }
   if (!contato?.fornecedor_id) {
     return { ok: false, aviso: 'Ela ainda não tem cadastro nesta conversa. Cadastre com cadastrar_confeccao antes.' }
   }

@@ -102,7 +102,7 @@ export async function vincularContato(waId: string, nomeContato?: string | null)
  * (que não mudam com DDI, nono dígito ou formatação). Preferimos o contato com
  * mais histórico, que é o que carrega o pedido e as mensagens antigas.
  */
-async function acharContatoPorNumero(waId: string): Promise<{ id: string; nome: string | null } | null> {
+export async function acharContatoPorNumero(waId: string): Promise<{ id: string; nome: string | null } | null> {
   const { data: exato } = await supabaseAdmin
     .from('wa_contatos')
     .select('id, nome')

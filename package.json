@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "ship": "bash scripts/ship.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
