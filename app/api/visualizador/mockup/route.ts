@@ -16,6 +16,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { gerarImagem } from '@/app/lib/mockup-image'
 import { chaveMockup, normMockup } from '@/app/lib/mockup-cache'
+import { ehPlaceholder } from '@/app/lib/mockup-pedido'
 import { normalizarMockup } from '@/app/lib/imagem-normalizar'
 
 export const runtime = 'nodejs'
@@ -40,7 +41,14 @@ const BodySchema = z.object({
 // produtos "similares".
 function cacheavel(b: z.infer<typeof BodySchema>): boolean {
   // só cacheia quando há identidade mínima (modelo + cor)
-  return normMockup(b.modelo).length > 0 && normMockup(b.cor).length > 0
+  if (normMockup(b.modelo).length === 0 || normMockup(b.cor).length === 0) return false
+  // "A DEFINIR" NÃO É COR — 12/09/2026.
+  // A tabela tinha a chave `fitness|a definir|`: o cliente ainda não tinha
+  // escolhido a cor, e o placeholder virou entrada de cache. Isso não é cache, é
+  // sujeira — e pior, é uma imagem de cor arbitrária esperando pra ser servida
+  // como se fosse a cor pedida.
+  if (ehPlaceholder(b.modelo) || ehPlaceholder(b.cor)) return false
+  return true
 }
 
 // Brindes/artigos de gráfica não são "vestidos" — o mockup é do OBJETO em si,
@@ -118,10 +126,35 @@ export async function POST(req: Request) {
     try {
       const { data } = await supabase
         .from('mockups_lisos')
-        .select('imagem_data_url')
+        .select('imagem_data_url, acessos')
         .eq('chave', chave)
-        .maybeSingle()
+        .maybeSingle<{ imagem_data_url: string | null; acessos: number | null }>()
       if (data?.imagem_data_url) {
+        // ACESSOS PASSA A CONTAR DE VERDADE — 12/09/2026.
+        //
+        // A coluna existia desde sempre e NINGUÉM a incrementava: valia 1 em
+        // todas as 22 linhas porque é o default do insert. Isso fez a gente
+        // concluir "22 acessos, zero reuso" e quase trocar a chave do cache sem
+        // cuidado — a coluna media a si mesma, não o uso. Coluna que parece
+        // métrica e não é vale menos que coluna nenhuma.
+        //
+        // Tem que ser AWAITED: em serverless a função é congelada ao retornar,
+        // então um write solto não completa — é o mesmo motivo já anotado no
+        // upsert lá embaixo.
+        //
+        // Leitura-e-escrita não é atômico e pode subcontar se dois acertos
+        // caírem no mesmo instante. Aceito: aqui o número serve pra responder
+        // "esta imagem já foi servida alguma vez?", e pra essa pergunta perder
+        // uma contagem não muda a resposta. Se um dia virar número de decisão,
+        // troque por incremento atômico no Postgres.
+        try {
+          await supabase
+            .from('mockups_lisos')
+            .update({ acessos: (data.acessos ?? 0) + 1 })
+            .eq('chave', chave)
+        } catch {
+          // contabilidade não derruba a resposta
+        }
         return NextResponse.json({ disponivel: true, imagemDataUrl: data.imagem_data_url, cache: true })
       }
     } catch {
