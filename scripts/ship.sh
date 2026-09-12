@@ -44,16 +44,14 @@ if [ -n "$SAIDA_TSC" ]; then
 fi
 echo "  ok"
 
-echo "→ eslint (arquivos alterados)"
-ALVOS="$(git diff --name-only HEAD -- '*.ts' '*.tsx' | tr '\n' ' ')"
-if [ -n "${ALVOS// /}" ]; then
-  # shellcheck disable=SC2086
-  if ! npx eslint $ALVOS; then
-    echo "✗ eslint falhou — nada foi commitado" >&2
-    exit 1
-  fi
+echo "→ eslint (linhas alteradas)"
+# Só as linhas que a mudança tocou — ver scripts/lint-diff.mjs. Erro
+# preexistente no mesmo arquivo aparece como aviso e não trava: regra que
+# reprova por coisa alheia é regra que a pessoa aprende a contornar.
+if ! node scripts/lint-diff.mjs; then
+  echo "✗ eslint falhou — nada foi commitado" >&2
+  exit 1
 fi
-echo "  ok"
 
 echo "→ commit"
 git add -A

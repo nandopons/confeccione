@@ -1037,11 +1037,12 @@ export function WhatsAppInbox({
               <div className="flex items-center gap-2">
                 <span className="text-[12px] font-semibold text-neutral-800">Luigi</span>
                 <select
+                  title="Vale para TODAS as conversas, não só esta."
                   value={modoLuigi ?? ''}
                   disabled={modoLuigi === null || trocandoModo}
                   onChange={(e) => trocarModoLuigi(e.target.value as ModoLuigi)}
                   className="flex-1 rounded-md border border-neutral-200 bg-white px-2 py-1 text-[12.5px] text-neutral-900 outline-none focus:border-[#1D9E75] disabled:opacity-60"
-                  aria-label="Modo do Luigi"
+                  aria-label="Modo do Luigi (vale para todas as conversas)"
                 >
                   {modoLuigi === null && <option value="">…</option>}
                   {MODOS_LUIGI.map((m) => (
@@ -1049,7 +1050,12 @@ export function WhatsAppInbox({
                   ))}
                 </select>
               </div>
-              {modoLuigi && <p className="mt-1.5 text-[11.5px] leading-snug text-neutral-600">{MODO_LUIGI_AJUDA[modoLuigi]}</p>}
+              {/* O "global" também fica ACIMA do seletor, em destaque: quem
+                  troca o modo no meio de um incidente não lê o parágrafo de
+                  ajuda embaixo — foi o que aconteceu em 12/09. */}
+              {modoLuigi && (
+                <p className="mt-1.5 text-[11.5px] leading-snug text-neutral-600">{MODO_LUIGI_AJUDA[modoLuigi]}</p>
+              )}
             </div>
 
             {saude && !saude.recibosOk && !avisoFechado && (
