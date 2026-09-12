@@ -110,7 +110,38 @@ const AGENTES_SAIDA = new Set(['luigi', 'mcp', 'gestao'])
 
 /** Fecha a resposta antes de a Vercel matar a função, com folga pro envio. */
 const ORCAMENTO_MS = 45_000
-const MAX_TOKENS_RESPOSTA = 600
+
+/**
+ * TETO DA RODADA — 11/09/2026: 600 → 4000.
+ *
+ * 600 era orçamento de TEXTO, e para texto está certo: a mediana de saída do
+ * Luigi é 57–189 tokens. O erro foi usar UM número para DUAS coisas — argumento
+ * de ferramenta nunca esteve nessa conta, e ele não tem o mesmo tamanho.
+ *
+ * O que quebrou: a conversa da Ana Vitória fechou 6 modelos (3 cores × 2
+ * modelos, com grade de tamanhos em cada). A chamada de `definir_pecas_pedido`
+ * com essas 6 peças não cabe em 600 — a geração era cortada no meio do
+ * `tool_use`, sobrava um turno sem texto e sem ferramenta, e isso caía no
+ * fallback genérico "não conseguiu formular resposta". Seis turnos assim num
+ * dia, todos com `tokens_saida = 600` exato; 347 turnos nos quatro dias
+ * anteriores, zero falhas — porque nenhum pedido tinha tantos modelos.
+ *
+ * O NÚMERO É MEDIDO, não estimado (12/09, modelo e schema reais):
+ *    6 peças  →   992 / 1004 / 1052 tokens
+ *   20 peças  → 2.372 tokens   (20 é o `maxItems` do schema, o pior caso legal)
+ * 4000 cobre o pior caso com folga pro preâmbulo.
+ *
+ * TETO NÃO É RESERVA: a rodada que emite 62 tokens custa 62, com teto de 600 ou
+ * de 4000 — em dinheiro e em tempo. Não há o que adivinhar por rodada.
+ *
+ * E NÃO MEXE NO ORÇAMENTO. O tempo também foi medido: ~11,4 s para os ~1000
+ * tokens, 21,1 s para os 2.372. As próprias falhas de 600 tokens levaram de
+ * 10,2 s a 42,5 s produzindo a MESMA saída — duração aqui é dominada por
+ * latência de API e cold start, não por token. (O fato de `ORCAMENTO_MS` ser
+ * conferido ENTRE rodadas e não interromper geração em curso é um buraco real,
+ * anterior a esta mudança e independente dela.)
+ */
+const MAX_TOKENS_RESPOSTA = 4000
 /**
  * MENSAGEM DE WHATSAPP É FRAGMENTO, NÃO TURNO — 11/09/2026: 24 → 100.
  *
@@ -2820,6 +2851,26 @@ async function rodarLuigi(
     const usos = resposta.content.filter((b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use')
     const parcial = textoDaResposta(resposta.content)
     if (parcial) texto = parcial
+
+    // TRUNCOU? DIZ QUE TRUNCOU, E PARA — 11/09/2026.
+    //
+    // `stop_reason === 'max_tokens'` é detectável e era jogado fora. A geração
+    // cortada no meio de um `tool_use` não deixa texto nem ferramenta, e caía no
+    // fallback `não conseguiu formular resposta` — que não diz nada e mandou o
+    // Fernando caçar fantasma por horas com seis turnos idênticos no log.
+    //
+    // E NÃO REPETE: `tool_use` truncado não retoma. O bloco veio pela metade e
+    // não há como completá-lo; a rodada seguinte gera tudo de novo e corta no
+    // mesmo ponto. Foi o loop das 20:53:31 → 20:54:00 → 20:54:22 (Recife), três
+    // turnos iguais em 51 segundos. Escala na primeira.
+    if (resposta.stop_reason === 'max_tokens') {
+      const oQue = usos.length > 0 ? `a chamada de ${usos.map((u) => u.name).join(', ')}` : 'a resposta'
+      estado.escalada = {
+        motivo: `resposta cortada no teto de ${MAX_TOKENS_RESPOSTA} tokens — ${oQue} não coube. Não dá pra retomar de onde parou.`,
+      }
+      texto = ''
+      break
+    }
 
     // PROMETEU E NÃO FEZ? O TURNO NÃO ACABA — 10/09/2026.
     //
