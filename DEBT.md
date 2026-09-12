@@ -4,6 +4,74 @@ Registro de débitos e decisões adiadas. Cada item diz **o que**, **por que imp
 
 ---
 
+## 🔴 Geração de mockup estoura o tempo da função — e mata o turno no meio
+
+**Descoberto em:** 12/09/2026. Reformula um diagnóstico anterior que estava errado.
+
+### O quê
+Gerar mockups é lento e a dispersão é enorme. Medido em `luigi_whatsapp_log`, 15 dias:
+
+```
+6 mockups → 127.011 ms   (pedido 20260900291)
+6 mockups → 108.515 ms
+5 mockups →  81.383 / 63.119 ms
+2 mockups →  78.188 / 75.125 / 73.732 / 30.620 / 21.125 ms
+1 mockup  →  63.162 / 34.132 / 19.255 ms
+```
+
+Dois mockups já levaram de 21 s a 78 s. Não há tempo por imagem estável.
+
+### O DIAGNÓSTICO QUE ISTO CORRIGE
+Atribuímos ao agente: *"o Luigi confirma a correção do cliente verbalmente, passa a instrução certa pro gerador de imagem, e não grava no pedido"*. Formulado assim, o conserto seria mexer no prompt.
+
+**Era runtime.** No pedido 20260900291 o turno levou 127.011 ms com `maxDuration = 120`. As 6 imagens saíram; a gravação da `descricao` não — a função morreu entre uma coisa e outra. O agente fez a parte dele.
+
+Registrado porque a formulação errada mandaria a gente otimizar prompt para resolver morte por timeout — e o sintoma (dado desatualizado enquanto a imagem está certa) é idêntico nos dois casos.
+
+### O QUE O INSTRUMENTO NÃO VÊ
+`duracao_ms` é gravado no FIM do turno. Turno morto pela Vercel **não deixa linha** — esta medição só enxerga sobreviventes. Distribuição de 7 dias:
+
+```
+78,1%  até 45 s
+16,2%  45–60 s
+ 5,5%  60–120 s   (27 turnos passam do ORCAMENTO_MS e sobreviviam pelo maxDuration antigo)
+ 0,2%  120–300 s  (1 turno, o de 127 s)
+```
+
+O número real de turnos mortos é desconhecido e ≥ 1. Para medir de verdade seria preciso um sinal escrito no COMEÇO do turno (uma linha "comecei", fechada no fim), que hoje não existe.
+
+### Metade já está tapada
+`maxDuration` subiu de 120 para 300 em 22ecea8 (12/09), junto com `ORCAMENTO_MS` de 45 para 60. O turno de 127 s agora sobrevive. **O que continua aberto:** 5,5% dos turnos passam do `ORCAMENTO_MS` de 60 s, e o orçamento é conferido ENTRE rodadas — não interrompe geração em curso. Gerar 6 mockups em lote dentro de um turno de conversa continua sendo mais tempo do que o orçamento prevê.
+
+### Como revisitar
+Tirar a geração em lote de dentro do turno de conversa (fechador automático já roda no cron e tem 300 s), e instrumentar início/fim do turno para que morte por timeout deixe rastro.
+
+---
+
+## 🔴 Mockup gerado nunca é conferido — 4 de 4 atributos divergiam
+
+**Descoberto em:** 12/09/2026, no pedido 20260900291, modelo 0 (scrub cargo azul marinho).
+
+### O quê
+Ninguém olha a imagem gerada — nem o Luigi, nem o sistema. Gera, manda, confia. Conferindo a prévia que ia para a cliente contra a descrição da peça:
+
+| atributo | pedido | na imagem |
+|---|---|---|
+| manga | curta | **longa** |
+| blusa | transpassada | reta, sem transpasse |
+| bolso frontal | tem | não aparece |
+| calça | cargo | bolsos laterais sem cara de cargo |
+
+**Quatro de quatro.** A conversa inteira tinha girado em torno da manga; ninguém tinha visto os outros três.
+
+### Verificação por visão é factível e barata
+Medido contra a imagem real: `claude-sonnet-4-6` com a imagem + a descrição pegou a manga e os outros três em **5,0 s** e **US$ 0,0084** (1.523 tokens de entrada, 258 de saída). Seis modelos: ~30 s, ~US$ 0,05.
+
+### Como revisitar
+Verificação DENTRO de `gerarMockupDoModelo`, antes de gravar em `mk.ia` — efeito de ferramenta se trava na ferramenta. Com três cuidados decididos em 12/09: lista de atributos **binários** explícita no código e curta (manga curta/longa, gola V/careca, com/sem bolso frontal, com/sem estampa), teto de 2 tentativas, e a escalada nomeando o que divergiu ("a prévia saiu com manga longa e o pedido pede curta"), nunca "não consegui gerar". E **fora do turno de conversa** — ver o item acima: a geração sozinha já estoura o orçamento.
+
+---
+
 ## 🔴 Pedido duplicado: a janela anti-duplicata não cobre conversa longa
 
 **Descoberto em:** 11–12/09/2026, medindo 14 dias de pedidos.
