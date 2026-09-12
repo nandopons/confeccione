@@ -554,3 +554,87 @@ conversa. Se houver conversa depois da criação, ele estava lá e não responde
 o pedido nasceu sozinho.
 
 ---
+
+## 🔴 O chat de montagem do site NÃO é guardado em lugar nenhum
+
+**Descoberto em:** 2026-09-12, tentando responder "onde o cliente trava".
+
+### O quê
+`/api/pedido/assistente` recebe `messages` do NAVEGADOR a cada requisição e **não grava nada**.
+A conversa que monta o pedido — a que decide se ele nasce completo ou pela metade — existe só
+na aba do cliente e some quando ele fecha.
+
+`mensagens_pedido_assistente` **não** é essa conversa: são 3 mensagens em 2 pedidos, e é o chat
+cliente↔fornecedor de depois do match.
+
+### Por que importa: é assimetria de observabilidade
+Do lado do **WhatsApp** a gente guarda tudo — `wa_mensagens`, `luigi_whatsapp_log` com tokens,
+rodadas, ferramentas e erro por turno. Do lado do **site**, de onde vêm **216 dos 229 pedidos**,
+não guarda nada.
+
+Isso quer dizer que a pergunta "onde o cliente trava" **não tem como ser respondida pelo banco,
+nunca, pra nenhum pedido do site**. Não é que ninguém mediu: não há o que medir.
+
+O caso concreto: **26 pedidos onde o cliente descreveu a peça — modelo e cor preenchidos — e a
+conversa que produziu aquilo não existe mais.** Dá pra ver o resultado e não dá pra ver o
+caminho.
+
+### Como revisitar
+Gravar o turno do chat do site como o do WhatsApp já é gravado. Não precisa ser a conversa
+inteira: autor, tamanho, ferramenta chamada e erro por turno já responderiam "onde parou".
+O custo é uma tabela e um insert por turno; o que ele compra é a única pergunta de funil que
+hoje não tem resposta possível.
+
+---
+
+## 🟡 Os 26 pedidos sem quantidade são recuperáveis, e nada os alcança
+
+**Medido em:** 2026-09-12.
+
+### O quê
+**26 de 229 (11,4%)** têm `total` e `tamanhos` vazios. Medido: **26 de 26 têm linha com modelo
+e cor preenchidos** — nenhum tem `linhas` vazio. E **26 de 26 vieram do `home_chat`**.
+
+Ou seja: o cliente descreveu a peça e parou **antes da grade** — que é a última coisa que o
+chat pergunta.
+
+### Por que importa
+É o caso mais fácil que existe: **tem o que perguntar** (a grade) e **tem pra quem perguntar**
+(o cliente descreveu a peça, então esteve lá). Ainda assim nenhuma régua os alcança — a
+cobrança de orçamento não vê pedido sem fornecedor, e a captação agora os exclui da isca
+(corretamente: pedido sem quantidade não é isca, é pedido incompleto).
+
+### Como revisitar
+Uma pergunta só, por WhatsApp ou e-mail: "faltou só a quantidade de cada tamanho". Antes de
+escrever, medir o degrau — quantos dos 229 param exatamente nesse ponto contra quantos passam
+dele — pra saber se 26 é vazamento ou penhasco.
+
+---
+
+## 🟡 `prazo_producao_dias` nasceu ANULÁVEL por causa do app mobile
+
+**Registrado em:** 2026-09-12, com a migração `20260912060000_prazo_producao_dias.sql`.
+
+### O quê
+A coluna existe em `ofertas_pedido_assistente` (estado vivo) e `orcamento_versoes` (snapshot),
+mas **aceita NULL**. A regra "orçamento sem prazo não é orçamento, é preço" está na APLICAÇÃO,
+não no banco.
+
+### Por quê
+São **três** caminhos que formalizam orçamento, e um está fora deste repositório:
+
+| caminho | onde | trava? |
+|---|---|---|
+| tela do fornecedor | `/api/fornecedor/oferta/[id]/orcamento` | **sim**, zod exige 1–180 |
+| admin | `orcamento-versoes.ts:157` | não — é o Fernando corrigindo valor |
+| **app mobile** | `/api/fornecedor/pedido-assistente/[id]/orcar` | **fora deste repo** |
+
+Com `NOT NULL`, o app mobile quebraria no primeiro orçamento **e a gente não teria como saber**
+— ele importa de `@/lib/mobileAuth` e vive no monorepo dos apps.
+
+### Como revisitar
+Quando o app mobile passar a mandar o campo, `alter column set not null` e a regra sai da
+aplicação pro banco, que é onde ela não depende de ninguém lembrar. Até lá, medir quantas
+linhas chegam com NULL diz quanto do tráfego vem por fora.
+
+---

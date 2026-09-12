@@ -34,6 +34,11 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
   )
   const [frete, setFrete] = useState<string>(paraTexto(dados.freteLiquidoAtualCentavos))
   const [freteMe, setFreteMe] = useState<FreteMeEscolhido | null>(null)
+  // PRAZO DE PRODUÇÃO — 12/09/2026.
+  // Até aqui o orçamento tinha preço e frete, e a data ficava no acordo verbal:
+  // o único prazo do sistema era o DESEJO do cliente (pedidos_assistente.
+  // prazo_dias). Orçamento sem prazo não é orçamento, é preço.
+  const [prazo, setPrazo] = useState<string>('')
   const [calculadoraAberta, setCalculadoraAberta] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [feito, setFeito] = useState<{ valorCliente: number; repasse: number } | null>(null)
@@ -57,7 +62,12 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
 
   async function enviar() {
     if (enviando || !calc.valido) return
-    if (!window.confirm(`Enviar o orçamento ao cliente?\n\nVocê recebe: ${brl(calc.liquido)}\nCliente paga: ${brl(calc.cliente)}\n\nEle será avisado por e-mail e WhatsApp na hora.`)) return
+    const dias = Number((prazo || '').replace(/\D/g, ''))
+    if (!Number.isFinite(dias) || dias < 1 || dias > 180) {
+      setErro('Informe em quantos dias você entrega a produção (1 a 180).')
+      return
+    }
+    if (!window.confirm(`Enviar o orçamento ao cliente?\n\nVocê recebe: ${brl(calc.liquido)}\nCliente paga: ${brl(calc.cliente)}\nPrazo de produção: ${dias} dias\n\nEle será avisado por e-mail e WhatsApp na hora.`)) return
     setEnviando(true)
     setErro(null)
     try {
@@ -67,6 +77,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
         body: JSON.stringify({
           unitCentavos: dados.itens.map((_, i) => paraCentavos(unit[i] ?? '')),
           freteCentavos: paraCentavos(frete || '0'),
+          prazoProducaoDias: dias,
           freteMe,
         }),
       })
@@ -155,6 +166,17 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
                   placeholder="0,00"
                   className="block mt-1 w-32 border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 focus:outline-none focus:border-emerald-600"
                 />
+              </label>
+              <label className="text-xs text-gray-500 block mt-3">
+                Prazo de produção — em quantos dias você entrega
+                <input
+                  value={prazo}
+                  onChange={(e) => setPrazo(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                  inputMode="numeric"
+                  placeholder="dias"
+                  className="block mt-1 w-32 border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 focus:outline-none focus:border-emerald-600"
+                />
+                <span className="block mt-1 text-[11px] text-gray-400">Conta a partir da confirmação do pagamento. Não inclui o transporte.</span>
               </label>
               <button
                 type="button"

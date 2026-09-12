@@ -1091,7 +1091,9 @@ export async function salvarOrcamentoFornecedor(
   ofertaId: string,
   unitLiquidoCentavos: number[],
   freteLiquidoCentavos: number,
-  freteMe?: FreteMeEscolhido | null
+  freteMe?: FreteMeEscolhido | null,
+  /** Dias de PRODUÇÃO que ela assume. Ver a migração 20260912060000. */
+  prazoProducaoDias?: number | null
 ): Promise<{ ok: boolean; erro?: string; valorClienteCentavos?: number; repasseCentavos?: number }> {
   const { data: oferta } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
@@ -1166,6 +1168,16 @@ export async function salvarOrcamentoFornecedor(
   // Rastro do orcamento. Fica DEPOIS do UPDATE do pedido de proposito: o que
   // vale e o valor gravado no pedido; isto e auditoria e nunca pode derrubar
   // o salvamento (a funcao engole o proprio erro).
+  // ESTADO VIVO: a linha da confecção que assumiu. Mesmo padrão do
+  // `valor_repasse_centavos`, que já mora aqui pelo mesmo motivo — é de onde sai
+  // o que ela vê. Fora do `if` de erro: falhar aqui não desfaz o orçamento.
+  if (typeof prazoProducaoDias === 'number') {
+    await supabaseAdmin
+      .from('ofertas_pedido_assistente')
+      .update({ prazo_producao_dias: Math.round(prazoProducaoDias) })
+      .eq('id', ofertaId)
+  }
+
   await registrarVersaoOrcamento({
     pedidoId: pedido.id,
     valorCentavos: valorCliente,
@@ -1175,6 +1187,7 @@ export async function salvarOrcamentoFornecedor(
     freteMe: freteMe ? { ...freteMe, cotado_em: agora } : null,
     autor: 'fornecedor',
     autorNome: oferta.leads_fornecedores?.nome ?? null,
+    prazoProducaoDias: typeof prazoProducaoDias === 'number' ? Math.round(prazoProducaoDias) : null,
   })
 
   // cobrança já gerada (não paga) com valor antigo → atualiza no ASAAS

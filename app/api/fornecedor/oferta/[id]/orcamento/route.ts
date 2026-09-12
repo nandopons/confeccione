@@ -33,6 +33,16 @@ const FreteMeSchema = z.object({
 const BodySchema = z.object({
   unitCentavos: z.array(z.number().int().positive()).min(1).max(50),
   freteCentavos: z.number().int().min(0),
+  // ORÇAMENTO SEM PRAZO NÃO É ORÇAMENTO, É PREÇO — 12/09/2026.
+  //
+  // A coluna nasceu ANULÁVEL no banco porque o app mobile também grava orçamento
+  // e está fora deste repositório (ver DEBT.md). A obrigatoriedade mora aqui, no
+  // caminho que a gente controla: a tela de orçamento do fornecedor.
+  //
+  // Faixa 1–180 igual à do banco e à do `prazo_minimo_dias` do cadastro: duas
+  // réguas de prazo discordando no mesmo sistema é como uma confecção que
+  // declara mínimo 120 não consegue gravar 120 aqui.
+  prazoProducaoDias: z.number().int().min(1).max(180),
   freteMe: FreteMeSchema.nullable().optional(),
 })
 
@@ -47,7 +57,7 @@ export async function POST(req: Request, ctx: Ctx) {
   const p = BodySchema.safeParse(bruto)
   if (!p.success) return NextResponse.json({ erro: 'Dados inválidos' }, { status: 400 })
 
-  const r = await salvarOrcamentoFornecedor(id, p.data.unitCentavos, p.data.freteCentavos, p.data.freteMe ?? null)
+  const r = await salvarOrcamentoFornecedor(id, p.data.unitCentavos, p.data.freteCentavos, p.data.freteMe ?? null, p.data.prazoProducaoDias)
   if (!r.ok) return NextResponse.json({ erro: r.erro ?? 'Falha ao salvar' }, { status: 409 })
 
   return NextResponse.json({

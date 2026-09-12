@@ -48,6 +48,8 @@ export async function registrarVersaoOrcamento(params: {
   linhas?: unknown
   orcamentoItens?: unknown
   freteMe?: unknown
+  /** Dias de PRODUÇÃO assumidos nesta versão. Prazo e preço mudam juntos. */
+  prazoProducaoDias?: number | null
   autor: 'fornecedor' | 'admin'
   autorId?: string | null
   autorNome?: string | null
@@ -71,6 +73,7 @@ export async function registrarVersaoOrcamento(params: {
       frete_centavos: params.freteCentavos,
       repasse_centavos: params.repasseCentavos,
       linhas: params.linhas ?? null,
+      prazo_producao_dias: params.prazoProducaoDias ?? null,
       orcamento_itens: params.orcamentoItens ?? null,
       frete_me: params.freteMe ?? null,
       autor: params.autor,
