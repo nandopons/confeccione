@@ -4,6 +4,41 @@ Registro de débitos e decisões adiadas. Cada item diz **o que**, **por que imp
 
 ---
 
+## 🔴 Pedido duplicado: a janela anti-duplicata não cobre conversa longa
+
+**Descoberto em:** 11–12/09/2026, medindo 14 dias de pedidos.
+
+### O quê
+`criarPedidoParaContato` (`app/lib/pedido-fechamento.ts:370-386`) recusa criar pedido novo quando já existe um do mesmo telefone criado **nos últimos 15 minutos**, com `origem = 'whatsapp_luigi'`. Duas limitações:
+
+1. **A janela é curta demais.** Foi dimensionada para double-click do modelo — duas chamadas no mesmo turno. Os intervalos reais entre duplicados medidos foram **1 min, 5 min, 2 h e 4 h**. Quinze minutos não cobre metade dos casos.
+2. **O filtro de origem cega a trava.** Só enxerga pedido criado pelo próprio Luigi; duplicata entre canais (`home_chat` + `whatsapp_luigi`) passa. Seis dos oito pares medidos não envolviam o Luigi em ambos os lados.
+
+### Por que importa
+Em 12/09, às 23:04, o Luigi criou o `20260900293` com os mesmos 6 modelos do `20260900291` (21:16) — quase 2 h de intervalo, fora da janela. O 293 nasceu sem CPF e sem `conta_id`.
+
+### Como revisitar
+Ao mexer, **medir a distribuição do intervalo entre duplicados reais antes de escolher o número novo** — não herdar os 15 min nem chutar. E tirar o `.eq('origem', ...)` exige mais que remover a cláusula: o caminho de "devolve o existente" hoje assume pedido fresco e editável (a janela curta garantia isso) e não tem guarda de status; pedido de outra origem pode estar já liberado, orçado ou pago. Ver a análise em `app/lib/pedido-fechamento.ts`.
+
+---
+
+## 🔴 Hard delete de pedido deixa o agente perseguindo fantasma
+
+**Descoberto em:** 12/09/2026, consequência observada em produção.
+
+### O quê
+O pedido `20260900287` foi apagado à mão (hard delete, sem `encerrado_em`). Com `HISTORICO_MENSAGENS = 100`, o id dele (`7b287c46…`) continuou no histórico que vai ao modelo. O Luigi seguiu citando esse id na conversa, tentou trabalhar nele, não achou — e criou outro pedido.
+
+### Por que importa
+É o argumento mais forte a favor de `substituido_por` em vez de delete, e vale para pedido **e** para orçamento avulso: **id marcado continua resolvendo**; id apagado vira fantasma que o agente persegue. O histórico longo, que existe para o agente lembrar, passa a ser o mecanismo que o faz insistir no que não existe mais.
+
+Some-se a isso o que já se sabia: apagar é irreversível e a escolha do vencedor é fácil de errar — o 287 era justamente o lado que tinha o CPF.
+
+### Como revisitar
+Junto com o desenho de `substituido_por`. Enquanto ele não existir, encerrar pedido com status (`cancelado`, `encerrado_em`) em vez de deletar.
+
+---
+
 ## ⚪ Assimetria de limite de modelos entre canais: ferramenta 20, site 31
 
 **Descoberto em:** 12/09/2026, de brinde, ao dimensionar o teto de tokens do Luigi.

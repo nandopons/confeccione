@@ -37,7 +37,12 @@ import { guardarImagem, lerImagem, refParaUrl } from './imagens-pedido-storage'
 import { supabaseAdmin } from './supabase-server'
 
 /** Quantos mockups de IA um modelo guarda. Passou disso, o mais antigo sai. */
-export const MAX_IA = 4
+/**
+ * Quantas prévias de IA um modelo guarda. É 1 desde 12/09/2026: prévia
+ * substitui, não empilha (ver `gerarMockupDoModelo`). Mantido como constante
+ * nomeada porque `iaParaExibicao` e as telas ainda tratam `ia` como lista.
+ */
+export const MAX_IA = 1
 
 /**
  * Teto de imagens de referência enviadas ao provedor.
@@ -315,8 +320,9 @@ export function montarPromptMockup(e: EntradaPrompt): { prompt: string; imagens:
  * Gera (ou ajusta) o mockup de IA de um modelo do pedido e grava em
  * `mockups[index].ia[]`. Aditivo: não encosta nas fotos do cliente.
  *
- * `regenIaIndex` aponta um mockup já gerado pra ser AJUSTADO em vez de somar
- * mais um na lista.
+ * `regenIaIndex` marca que isto é um AJUSTE: a prévia atual entra como imagem
+ * base pra nova geração. Desde 12/09/2026 a prévia é uma só, então o valor do
+ * índice é irrelevante — o que importa é ele não ser nulo.
  */
 export async function gerarMockupDoModelo(params: {
   pedidoId: string
@@ -367,7 +373,10 @@ export async function gerarMockupDoModelo(params: {
   const artes = await carregarImagens(fotosDoModelo(mk))
 
   const iaAtual: IAItem[] = Array.isArray(mk.ia) ? mk.ia.slice() : []
-  const alvoAjuste = regenIaIndex !== null ? iaAtual[regenIaIndex] : undefined
+  // Com uma prévia só, o ÍNDICE não importa mais — `regenIaIndex` virou apenas
+  // o sinal de "isto é ajuste, use a imagem atual como base". O `?? iaAtual[0]`
+  // cobre a tela que ainda manda o índice antigo.
+  const alvoAjuste = regenIaIndex !== null ? (iaAtual[regenIaIndex] ?? iaAtual[0]) : undefined
   const baseAjuste = alvoAjuste ? (await carregarImagens([alvoAjuste.url]))[0] ?? null : null
 
   const { prompt, imagens } = montarPromptMockup({ linha: l, artes, instrucoes, baseAjuste })
@@ -379,14 +388,30 @@ export async function gerarMockupDoModelo(params: {
   const url = await guardarImagem(await normalizarMockup(`data:${r.mime};base64,${r.imagemBase64}`), pedidoId)
   const novoItem: IAItem = { url, prompt: instrucoes || undefined }
 
-  let iaNova: IAItem[]
-  if (alvoAjuste && regenIaIndex !== null) {
-    iaNova = iaAtual.slice()
-    iaNova[regenIaIndex] = novoItem
-  } else {
-    iaNova = [...iaAtual, novoItem].slice(-MAX_IA)
-  }
-  mk.ia = iaNova
+  // PRÉVIA SUBSTITUI, NÃO EMPILHA — 12/09/2026.
+  //
+  // Isto era `[...iaAtual, novoItem].slice(-MAX_IA)`: cada regeração dava PUSH e
+  // o array virava histórico. Mas prévia é RASCUNHO, não registro — quando o
+  // cliente corrige a peça, a versão anterior não vira alternativa, vira errada.
+  //
+  // O custo estava espalhado por cinco leitores com TRÊS regras diferentes:
+  //   • pedido-visuais.ts       manda TODAS pra confecção — ela orça e costura
+  //                             olhando a aprovada e a rejeitada juntas, sem
+  //                             saber qual vale
+  //   • inscricao/[token]       mostra `ia[0]`, a MAIS VELHA, na página pública
+  //                             onde o grupo do cliente escolhe tamanho
+  //   • resumo-pdf / luigi      pegam a última
+  //   • VisualizadorCliente     mostra todas, como galeria
+  // Com um item só, os cinco concordam sem precisar combinar nada.
+  //
+  // É a causa daquela "família" que o comentário de fechar-pedido-automatico.ts
+  // já nomeava sem ter achado: "o PDF que mostrava a prévia velha". O PDF foi
+  // corrigido em 426d64a tratando o sintoma; a origem é este push.
+  //
+  // O AJUSTE TAMBÉM SUBSTITUI. `regenIaIndex` trocava no lugar, o que quebrava
+  // "última = mais nova" — ajustar a imagem 0 de três deixava a mais nova no
+  // índice 0. Com uma imagem só, o índice perde sentido e a ambiguidade some.
+  mk.ia = [novoItem]
   mapa[String(index)] = mk
 
   const { error } = await supabaseAdmin
@@ -400,7 +425,7 @@ export async function gerarMockupDoModelo(params: {
 
   return {
     ok: true,
-    ia: iaNova,
+    ia: mk.ia,
     referenciasUsadas: artes.length,
     modelo: (l.modelo || '').trim() || `modelo ${index + 1}`,
   }
