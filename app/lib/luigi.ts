@@ -108,8 +108,22 @@ const PROMESSA_DE_ACAO =
  */
 const AGENTES_SAIDA = new Set(['luigi', 'mcp', 'gestao'])
 
-/** Fecha a resposta antes de a Vercel matar a função, com folga pro envio. */
-const ORCAMENTO_MS = 45_000
+/**
+ * ORÇAMENTO DA RESPOSTA — 12/09/2026: 45s → 90s, junto com `maxDuration` 120 → 300.
+ *
+ * OS DOIS SOBEM JUNTOS, SEMPRE. O orçamento é conferido ENTRE rodadas; a
+ * distância entre ele e o `maxDuration` do webhook é a rede que segura a rodada
+ * que já começou. Subir um sem o outro é tirar a rede.
+ *
+ * Dimensionamento, com a reta medida em 12/09 (~4,1 s fixos + ~140 tok/s):
+ * o pior caso legal do schema são 21.897 tokens ≈ 161 s de geração. Uma rodada
+ * que comece em 89,9 s termina em ~251 s, dentro dos 300 s. Rede de 210 s.
+ *
+ * A reta é de dois pontos e o fixo varia bastante (600 tokens já levaram de
+ * 10,2 s a 42,5 s), então a margem calculada não é garantia — é por isso que o
+ * abort por streaming existe, e não como otimização.
+ */
+const ORCAMENTO_MS = 90_000
 
 /**
  * TETO DA RODADA — 11/09/2026: 600 → 4000.
@@ -127,9 +141,14 @@ const ORCAMENTO_MS = 45_000
  * anteriores, zero falhas — porque nenhum pedido tinha tantos modelos.
  *
  * O NÚMERO É MEDIDO, não estimado (12/09, modelo e schema reais):
- *    6 peças  →   992 / 1004 / 1052 tokens
- *   20 peças  → 2.372 tokens   (20 é o `maxItems` do schema, o pior caso legal)
- * 4000 cobre o pior caso com folga pro preâmbulo.
+ *    6 peças (o caso real)  →   992 / 1004 / 1052 tokens
+ *   20 peças com grade      → 2.372 tokens
+ *   PIOR CASO LEGAL         → 21.897 tokens  (`criar_pedido`, 20 peças com
+ *     todos os campos no limite — modelo 120, cor 80, material 200, descrição
+ *     500, 30 tamanhos por peça, mais observações 500. O que estoura não são as
+ *     descrições: são os 600 objetos de tamanho.)
+ * 24.000 cobre o pior caso legal com folga pro preâmbulo. O objetivo é não
+ * travar NUNCA, nem no pedido mais absurdo que o schema aceita.
  *
  * TETO NÃO É RESERVA: a rodada que emite 62 tokens custa 62, com teto de 600 ou
  * de 4000 — em dinheiro e em tempo. Não há o que adivinhar por rodada.
@@ -141,7 +160,7 @@ const ORCAMENTO_MS = 45_000
  * conferido ENTRE rodadas e não interromper geração em curso é um buraco real,
  * anterior a esta mudança e independente dela.)
  */
-const MAX_TOKENS_RESPOSTA = 4000
+const MAX_TOKENS_RESPOSTA = 24_000
 /**
  * MENSAGEM DE WHATSAPP É FRAGMENTO, NÃO TURNO — 11/09/2026: 24 → 100.
  *
@@ -2837,13 +2856,58 @@ async function rodarLuigi(
 
   while (rodadas < MAX_RODADAS && Date.now() < limite) {
     rodadas++
-    const resposta = await client.messages.create({
-      model: MODELO,
-      max_tokens: MAX_TOKENS_RESPOSTA,
-      system: promptSistema(modo, ctx, jaSeApresentou),
-      tools: ferramentasDoModo(modo, ctx.ehFornecedor),
-      messages: historico,
-    })
+    // STREAMING, E NÃO É OTIMIZAÇÃO — 12/09/2026.
+    //
+    // Com teto de 24.000 tokens, uma geração pode levar ~161 s. Sem streaming
+    // isso é uma conexão HTTP aberta quase três minutos SEM UM BYTE trafegando,
+    // apostando que todo proxy no caminho — o da Vercel, o que estiver na frente
+    // da API — segure conexão ociosa esse tempo todo. Nenhum desses timeouts é
+    // nosso, nenhum está neste código, e quando estourasse pareceria exatamente
+    // o que a gente passou o dia caçando: some sem log.
+    //
+    // Streaming também é o que torna a geração INTERROMPÍVEL. Antes, o orçamento
+    // só era conferido entre rodadas: uma geração que passasse do tempo era
+    // morta pela Vercel no meio, sem log e sem escalada. Agora ela é abortada
+    // por nós, com motivo.
+    const controlador = new AbortController()
+    const sobra = limite - Date.now()
+    const alarme = setTimeout(() => controlador.abort(), Math.max(sobra, 1))
+    let resposta: Anthropic.Messages.Message
+    try {
+      const fluxo = client.messages.stream(
+        {
+          model: MODELO,
+          max_tokens: MAX_TOKENS_RESPOSTA,
+          system: promptSistema(modo, ctx, jaSeApresentou),
+          tools: ferramentasDoModo(modo, ctx.ehFornecedor),
+          messages: historico,
+        },
+        { signal: controlador.signal }
+      )
+      resposta = await fluxo.finalMessage()
+    } catch (err) {
+      if (!controlador.signal.aborted) throw err
+      // O PARCIAL É DESCARTADO AQUI, E ISSO É O PONTO — ver luigi.ts, a nota do
+      // Wesley: `tool_use` sem `tool_result` na rodada seguinte faz a API
+      // recusar o turno inteiro com "tool_use ids were found without
+      // tool_result blocks", e aquilo virou "erro interno" por uma hora.
+      //
+      // Streaming monta a resposta por deltas, então abortar no meio de um
+      // tool_use deixa um bloco pela metade. Ele NÃO entra no histórico: saímos
+      // por `break` antes do `historico.push` lá embaixo, e `resposta` nunca
+      // chega a existir. Nada parcial é gravado, nem como texto.
+      //
+      // Abortar não entrega resposta — só troca "morre calado" por "morre com
+      // motivo". Quem fala com a cliente depois disto é o Fernando, então o
+      // motivo tem que dizer o que aconteceu de verdade.
+      estado.escalada = {
+        motivo: `a montagem passou do tempo (${Math.round(ORCAMENTO_MS / 1000)}s) e foi interrompida na rodada ${rodadas}. O cliente não recebeu resposta.`,
+      }
+      texto = ''
+      break
+    } finally {
+      clearTimeout(alarme)
+    }
     void registrarUsoIa(`luigi-${modo}`, MODELO, resposta.usage)
     tokensEntrada += resposta.usage?.input_tokens ?? 0
     tokensSaida += resposta.usage?.output_tokens ?? 0
