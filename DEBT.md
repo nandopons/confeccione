@@ -387,3 +387,42 @@ campo aceitar dois formatos, todo leitor novo é uma chance nova de cair no mesm
 verificador de visão foi o leitor novo que quase caiu.
 
 ---
+
+## 🟠 Três superfícies ainda leem a tabela `pedidos`, congelada em 28/06
+
+**Registrado em:** 2026-09-12, ao fazer a Fase 2 do vocabulário de peças.
+
+### O quê
+`/admin/ofertar`, `/admin/fornecedores-compativeis` e `orfaos.ts` leem
+`from('pedidos')` — **104 pedidos de um mundo que acabou em junho**. A era viva
+(`pedidos_assistente`) tem 229. E o desequilíbrio aparece também nas ofertas:
+
+```
+pedidos                    104 linhas   última: 2026-06-28
+ofertas                    298 linhas
+ofertas_pedido_assistente  180 linhas   última: 2026-09-12
+```
+
+A era morta tem **298 ofertas** contra **180** da viva — quem abre essas telas vê
+mais movimento lá do que aqui, e nada disso é de hoje.
+
+### Por que importa
+Não quebra: as três funcionam, sobre dados corretos para junho. O risco é de
+decisão — abrir `/admin/fornecedores-compativeis` e concluir algo sobre um pedido
+que não existe mais. É primo do que já aconteceu no painel do inbox.
+
+Efeito colateral da Fase 2: o `pecasDoPedido` passou a exigir `linhas` no tipo, e
+as três recebem `linhas: null` **de propósito** — a tabela `pedidos` não tem essa
+coluna. Caem no piso (`peca`/`pecas` declarados), que é o comportamento de
+sempre. O `linhas: null` está comentado em cada uma pra deixar escrito que a
+ausência é do schema, não um `select` esquecido.
+
+### Como revisitar
+**Não é trocar o nome da tabela.** Os `PedidoRow` de lá têm `tipo`, `quantidade`
+e `estado` como colunas próprias; na era viva essas três viraram campos dentro de
+`linhas` (`tipo` não existe, `quantidade` é soma de `tamanhos`). É **porte de
+superfície**, uma tela por vez, com a regra de match já pronta em
+`match-fornecedor.ts`. Antes de portar, vale medir se alguém ainda clica nelas —
+isso o banco não responde.
+
+---

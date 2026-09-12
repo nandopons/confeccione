@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { tipoLabel } from '@/app/lib/ofertas-labels'
 import { INFO_ETAPA, MOTIVO_LABEL, MOTIVOS_ENCERRAMENTO, ehEtapa, type Etapa, type GrupoEtapa, type MotivoEncerramento } from '@/app/lib/etapas-pedido-catalogo'
+// Módulo PURO (sem supabase) — ver o cabeçalho dele. É o que permite ordenar
+// aqui, no client, sem uma rota nova.
+import { ordenarFornecedoresPara } from '@/app/lib/match-fornecedor'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 type Estampa = { posicao?: string | null; tamanho?: string | null }
@@ -41,6 +44,13 @@ type Pedido = {
   email?: string | null
   prazo_dias?: number | null
   atualizado_em?: string | null
+  // Entram no match que ordena a lista de fornecedores abaixo. `linhas` é de
+  // onde a peça sai; `peca`/`pecas` são o piso (declaração da criação).
+  cidade?: string | null
+  uf?: string | null
+  categoria?: string | null
+  peca?: string | null
+  pecas?: string[] | null
   // Etapa calculada no banco (view pedidos_assistente_etapas, D-8).
   etapa?: Etapa | null
   grupo?: GrupoEtapa | null
@@ -59,7 +69,10 @@ type Fornecedor = {
   estado: string | null
   status: string | null
   tipos_produto: string[] | null
+  /** Vocabulário novo do catálogo. A API já devolvia; faltava no tipo. */
+  pecas: string[] | null
   pedido_minimo: number | null
+  prazo_minimo_dias: number | null
 }
 
 // Detalhe do chat (reusa /api/admin/pedidos-assistente/[id])
@@ -474,9 +487,24 @@ export default function PedidosPagosAdmin() {
           const totalPecas = p.linhas.reduce((s, l) => s + (typeof l.total === 'number' ? l.total : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0)), 0)
           const aceita = p.ofertas.find((o) => o.status === 'aceita')
           const f = (filtroForn[p.id] || '').toLowerCase()
-          const listaForn = fornecedores.filter((x) =>
-            !f || (x.nome || '').toLowerCase().includes(f) || (x.cidade || '').toLowerCase().includes(f) || (x.estado || '').toLowerCase().includes(f)
-              || (x.tipos_produto ?? []).some((t) => (tipoLabel[t] ?? t).toLowerCase().includes(f))
+          // ORDEM COM MOTIVO — 12/09/2026.
+          //
+          // A lista vinha na ordem alfabética do banco e o Fernando escolhia no
+          // olho. Agora vem ordenada pelo mesmo `pontuarFornecedor` que a fila
+          // automática usa — mesma regra nos dois lugares, senão a tela mostra
+          // um ranking e o sistema oferta pra outro.
+          //
+          // ORDENA, NÃO FILTRA: ninguém some da lista, nem quem pontua zero, nem
+          // quem é inviável por pedido mínimo. Volume de oferta não muda aqui —
+          // quem manda é o clique dele. O `match.motivos[0]` aparece ao lado do
+          // nome porque ordem sem motivo é mágica, e mágica não se confia.
+          const listaForn = ordenarFornecedoresPara(
+            { cidade: p.cidade, uf: p.uf, categoria: p.categoria, peca: p.peca, pecas: p.pecas, linhas: p.linhas, prazoDias: p.prazo_dias },
+            fornecedores.filter((x) =>
+              !f || (x.nome || '').toLowerCase().includes(f) || (x.cidade || '').toLowerCase().includes(f) || (x.estado || '').toLowerCase().includes(f)
+                || (x.tipos_produto ?? []).some((t) => (tipoLabel[t] ?? t).toLowerCase().includes(f))
+            ),
+            totalPecas || null
           )
           const sel = selecao[p.id] ?? new Set<string>()
           const jaOfertados = new Set(p.ofertas.filter((o) => o.status === 'ofertada' || o.status === 'aceita').map((o) => o.fornecedor_id))
@@ -794,6 +822,11 @@ export default function PedidosPagosAdmin() {
                               {x.status !== 'ativo' && <span className="text-xs text-amber-600">({x.status})</span>}
                               {x.pedido_minimo != null && x.pedido_minimo > 0 && (
                                 <span className="text-xs text-gray-500">mín. {x.pedido_minimo} pç</span>
+                              )}
+                              {x.match.motivos[0] && (
+                                <span className={'text-xs rounded px-1.5 py-0.5 ' + (x.match.viavel ? 'bg-[#E1F5EE] text-[#0F6E56]' : 'bg-amber-50 text-amber-700')}>
+                                  {x.match.motivos[0]}
+                                </span>
                               )}
                             </div>
                             {(x.tipos_produto?.length ?? 0) > 0 && (
