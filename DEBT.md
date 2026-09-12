@@ -830,3 +830,24 @@ A decisão que falta é **quais imagens entram**: hoje entra o que o modelo esco
 pra confecção tem custo próprio.
 
 ---
+## A foto que chega e a conversa morre — 17 imagens, 6 conversas — 12/09/2026
+
+Terceiro caso da medição de imagens (ver a entrada anterior): a pessoa manda foto,
+**nenhum pedido existe**, e nenhum pedido nasce depois. 17 das 68 imagens de 30 dias,
+em 6 conversas. **Não é bug de anexo** — não há onde anexar. É conversa que morreu
+com intenção demonstrada.
+
+Isso é o mesmo território dos **89 do primeiro minuto** (pessoas que escreveram uma
+vez e não voltaram): os dois são perda ANTES da mecânica, e nenhum dos dois melhora
+consertando o caminho da foto. Mandar uma foto é sinal mais forte que mandar "oi" —
+quem fotografa a peça que quer já decidiu que quer. Se 17 fotos viraram nada, o
+buraco é de resposta, não de gravação.
+
+### Antes de agir
+Medir o que aconteceu depois da foto nessas 6 conversas: teve resposta? em quanto
+tempo? o Luigi estava ligado? Só então decidir — pode ser que a resposta tenha vindo
+e a pessoa sumiu mesmo, e aí não há o que fazer. **É o que sobra depois que a
+mecânica estiver certa**, não antes: consertar retenção com o anexo quebrado seria
+otimizar o topo de um funil que vaza embaixo.
+
+---

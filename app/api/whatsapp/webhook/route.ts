@@ -25,6 +25,7 @@ import { baixarMidia, lerPayloadFeedbackNeg, QUICK_REPLY_ATENDENTE } from '@/app
 import { responderFeedbackNegociacao, responderPedidoAtendente } from '@/app/lib/whatsapp-notify'
 import { ehNumeroGestao, responderGestao } from '@/app/lib/gestao-whatsapp'
 import { responderCliente } from '@/app/lib/luigi'
+import { anexarImagemNaEntrada } from '@/app/lib/anexo-entrada'
 import { ehAudioTranscritivel, transcreverAudio } from '@/app/lib/transcricao'
 
 export const dynamic = 'force-dynamic'
@@ -402,6 +403,20 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
   const pediuAtendente = tituloBotao === QUICK_REPLY_ATENDENTE.toLowerCase()
   if (pediuAtendente) {
     await responderPedidoAtendente(waId, nomePerfil ?? null)
+  }
+
+  // A FOTO ENTRA NO PEDIDO AQUI, não quando o modelo lembrar — 12/09/2026.
+  // Roda em after() junto com o agente, mas ganha dele: o turno do Luigi começa
+  // dormindo o debounce, então a foto já está no pedido quando ele lê o contexto.
+  // Failure-soft: anexo que falha não pode segurar a resposta ao cliente.
+  if (tipo === 'image' && midiaPath) {
+    const mensagemId = inserida[0].id as string
+    const caminho = midiaPath
+    after(() =>
+      anexarImagemNaEntrada({ mensagemId, telefone: waId, midiaPath: caminho }).catch((err) =>
+        console.error('[wa-webhook] anexo na entrada falhou', { wamid: msg.id, err })
+      )
+    )
   }
 
   // Agentes rodam depois do 200 pra Meta não reentregar.

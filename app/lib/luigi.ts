@@ -2088,17 +2088,27 @@ async function executarFerramenta(
       // A foto é a última que ELE mandou nesta conversa — nunca de outra pessoa.
       const { data: foto } = await supabaseAdmin
         .from('wa_mensagens')
-        .select('midia_path')
+        .select('id, midia_path')
         .eq('conversa_id', ctx.conversaId)
         .eq('direcao', 'entrada')
         .eq('tipo', 'image')
         .not('midia_path', 'is', null)
         .order('criado_em', { ascending: false })
         .limit(1)
-        .maybeSingle<{ midia_path: string | null }>()
+        .maybeSingle<{ id: string; midia_path: string | null }>()
       if (!foto?.midia_path) throw new Error('não achei foto que ele tenha mandado nesta conversa')
       const r = await anexarFotoDaConversaAoModelo({ pedidoId: p.id, posicao, midiaPath: foto.midia_path })
       if (!r.ok) throw new Error(r.erro ?? 'não deu pra anexar a foto')
+      // Marca por QUAL caminho entrou. Sem isto, daqui a um mês "foto sem anexo"
+      // e "foto anexada pela ferramenta" ficam indistinguíveis, e não dá pra
+      // saber se o automático substituiu a ferramenta ou só somou com ela.
+      // Anexar a mesma foto duas vezes é inofensivo: guardarImagem endereça por
+      // sha do conteúdo, então os dois caminhos produzem a MESMA ref e o anexo
+      // dedupe sozinho.
+      await supabaseAdmin
+        .from('wa_mensagens')
+        .update({ anexada_em: new Date().toISOString(), anexo_motivo: 'ferramenta' })
+        .eq('id', foto.id)
       return {
         ok: true,
         codigo: p.codigo,
