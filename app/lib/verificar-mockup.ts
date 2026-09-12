@@ -92,6 +92,20 @@ const VOCABULARIO: { chave: string; padrao: RegExp; esperado: string }[] = [
 /** Armadilha 2: ressalva por perto derruba as chaves de forma. */
 const RESSALVA = /\b(apenas|somente|s[óo]\s+um|um\s+(lado|ombro|bra[çc]o)|outro\s+lado|assim[ée]tric\w*|de\s+um\s+lado)\b/i
 
+/**
+ * Armadilha 4: `cor` que não é cor.
+ *
+ * `20260900292` guarda cor = "branca com costura preta na manga e barra". Isso
+ * é cor MAIS detalhe de construção, e a lista binária perguntava as duas coisas
+ * numa pergunta só. A imagem tinha a costura visível, mas CINZA em vez de preta
+ * — e o atributo inteiro reprovou por causa do tom de uma linha.
+ *
+ * O verificador acertou; a pergunta é que era impossível de responder com um
+ * booleano. Cor composta sai da lista: melhor não conferir a cor do que
+ * descartar a prévia certa por meio-acerto.
+ */
+const COR_COMPOSTA = /\b(com|e|costuras?|detalhes?|punhos?|barra|gola|mangas?|vivo|frisos?)\b/i
+
 /** Armadilha 3: palavras que denunciam arte aplicada, mesmo com a coluna NULL. */
 const FALA_DE_ARTE = /\b(estampas?|estampad\w*|bordad\w*|logo(tipo)?s?|aplica[çc][ãa]o|aplica[çc][õo]es|silk|serigrafia|s[íi]mbolo|bras[ãa]o|emblema)\b/i
 
@@ -136,8 +150,11 @@ export function atributosEsperados(p: PedidoDaPeca): Atributo[] {
   const modelo = (p.modelo || '').trim()
   if (modelo) lista.push({ chave: 'modelo', esperado: modelo })
 
+  // Só cor SIMPLES vira pergunta — ver COR_COMPOSTA.
   const cor = (p.cor || '').trim()
-  if (cor) lista.push({ chave: 'cor', esperado: cor })
+  if (cor && cor.split(/\s+/).length <= 3 && !COR_COMPOSTA.test(cor)) {
+    lista.push({ chave: 'cor', esperado: cor })
+  }
 
   const texto = `${modelo} ${p.descricao || ''}`
   const falaDeArte = FALA_DE_ARTE.test(texto)

@@ -110,6 +110,28 @@ export async function lerImagem(valor: string): Promise<{ bytes: Buffer; mime: s
     const p = partesDataUrl(valor)
     return p ? { bytes: p.bytes, mime: p.mime } : null
   }
+
+  // O CAMPO GUARDA DOIS FORMATOS — 12/09/2026.
+  //
+  // `mockups[i].ia[].url` tem 64 linhas em `storage:` e 5 em URL de EXIBIÇÃO
+  // (`/api/pedido/assistente/<id>/arquivo?f=<hash>`). A URL entrou por uma
+  // rota que gravava `ia` sem passar pelo `guardarImagem` — já fechada — mas as
+  // 5 ficaram, e este leitor devolvia `null` pra elas SEM UMA LINHA DE LOG.
+  //
+  // O custo era invisível: o `carregarImagens` filtra null calado, e daí o
+  // "Atualizar mockup" desses 5 pedidos regerava do zero em vez de ajustar a
+  // imagem atual — o cliente pedia um retoque e recebia outra peça.
+  //
+  // O arquivo sempre esteve lá: a rota devolve HTTP 200 com o JPEG. Quem
+  // recusava era este `if`. O id do pedido está dentro da própria URL, então
+  // não precisa de parâmetro novo pra desfazer a tradução.
+  const daUrl = /^\/api\/pedido\/assistente\/([0-9a-f-]{36})\/arquivo\?f=(.+)$/.exec(valor)
+  if (daUrl) {
+    const ref = urlParaRef(valor, daUrl[1])
+    if (ref) return lerImagem(ref)
+    return null
+  }
+
   if (!ehRefStorage(valor)) return null
 
   const caminho = valor.slice(PREFIXO.length)

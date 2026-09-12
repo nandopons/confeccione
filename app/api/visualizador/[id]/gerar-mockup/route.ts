@@ -7,7 +7,18 @@ import { z } from 'zod'
 import { gerarMockupDoModelo, iaParaExibicao } from '@/app/lib/mockup-pedido'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+// 300, NÃO 60 — 12/09/2026.
+//
+// A conferência de visão trouxe uma operação nova pra dentro desta rota: no
+// pior caso são 2 gerações + 2 conferências. As conferências custam ~2 s cada
+// (medido), mas a GERAÇÃO variou de 21 s a 78 s em produção. Com 60 s de teto,
+// uma única geração lenta já estoura e o cliente vê erro em vez da imagem.
+//
+// O 60 foi escolhido quando a rota fazia uma geração só — número de antes da
+// operação que ele precisa caber. O teto de tentativas não desce por causa
+// disso: quem desce é o orçamento que ficou pequeno. O plano permite 300, e os
+// crons já usam.
+export const maxDuration = 300
 
 const Body = z.object({
   index: z.number().int().min(0).max(199),

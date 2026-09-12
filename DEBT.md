@@ -327,3 +327,32 @@ Se um dia a distinção importar, são duas colunas (`espera_ms` e `trabalho_ms`
 reinterpretação da mesma. Enquanto for uma só, o nome honesto dela é latência.
 
 ---
+
+## ✅ `mockups[i].ia[].url` guardava dois formatos — RESOLVIDO em 2026-09-12
+
+**O quê:** 64 linhas em `storage:pedidos/<id>/<hash>.jpg` e 5 em URL de exibição
+(`/api/pedido/assistente/<id>/arquivo?f=<hash>.jpg`). Mesmo `storage:` vs URL que já tinha sido
+consertado uma vez — no LEITOR (`lerImagem`). O campo continuou guardando as duas coisas, e o
+conserto anterior não alcançava quem escrevesse um leitor novo.
+
+**De onde vinham as 5:** `app/api/pedido/assistente/[id]/mockup/route.ts` gravava `novo.ia =
+p.data.ia` **cru, vindo do navegador** — enquanto o `fotos` logo acima passava por
+`guardarImagens`. O navegador tem a URL de exibição (`iaParaExibicao` a gerou), então todo
+round-trip por essa rota escrevia o formato errado de volta.
+
+**O custo, que era invisível:** `lerImagem` devolvia `null` pra esse formato **sem uma linha de
+log**, e `carregarImagens` filtra `null` calado. Resultado: nesses 5 pedidos o "Atualizar
+mockup" carregava `baseAjuste = null` e **regerava do zero em vez de ajustar** — o cliente
+pedia um retoque e recebia outra peça. Os arquivos nunca faltaram: a rota devolve HTTP 200 com
+o JPEG (conferido nos 4 ids).
+
+**Consertado:** (a) `lerImagem` passou a aceitar os dois formatos, tirando o id de dentro da
+própria URL; (b) a rota de mockup passou o `ia` por `guardarImagem`, igual ao `fotos`;
+(c) as 5 linhas migraram pra `storage:`, cada uma relida antes de gravar. O campo hoje é
+**69 de 69 em `storage:`**.
+
+**A lição, que vale além deste campo:** consertar o leitor não conserta o dado. Enquanto o
+campo aceitar dois formatos, todo leitor novo é uma chance nova de cair no mesmo buraco — e o
+verificador de visão foi o leitor novo que quase caiu.
+
+---

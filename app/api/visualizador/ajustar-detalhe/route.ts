@@ -7,7 +7,12 @@ import { gerarImagem, type ImagemEntrada } from '@/app/lib/mockup-image'
 import { normalizarMockup } from '@/app/lib/imagem-normalizar'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+// 300, NÃO 60 — 12/09/2026.
+//
+// Mesmo motivo da rota irmã gerar-mockup: a geração de imagem mediu de 21 s a
+// 78 s em produção, e 60 s de teto mata a chamada no talo — sem resposta e sem
+// log, que neste projeto é diagnóstico perdido.
+export const maxDuration = 300
 
 const MAX_BYTES = 14 * 1024 * 1024
 

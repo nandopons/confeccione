@@ -60,7 +60,14 @@ export async function POST(req: Request, ctx: Ctx) {
     }
     if (p.data.ia !== undefined) {
       if (!p.data.ia || p.data.ia.length === 0) delete novo.ia
-      else novo.ia = p.data.ia
+      // O `fotos` logo acima passa por guardarImagem; o `ia` não passava, e o
+      // navegador devolve aqui a URL de EXIBIÇÃO que nós mesmos geramos. Daí as
+      // 5 linhas do campo em formato de URL em vez de `storage:` — que o
+      // `lerImagem` recusava calado no ajuste de mockup. `guardarImagem` é
+      // idempotente: `storage:` que já veio pronto passa intacto.
+      else novo.ia = await Promise.all(
+        p.data.ia.map(async (it) => ({ ...it, url: await guardarImagem(it.url, id) }))
+      )
     }
     if (Object.keys(novo).length === 0 || (!novo.liso && !novo.arte && (!novo.fotos || novo.fotos.length === 0) && (!novo.ia || novo.ia.length === 0))) delete mapa[k]
     else mapa[k] = novo
