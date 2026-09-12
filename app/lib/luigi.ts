@@ -2812,6 +2812,20 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
 }
 
 /**
+ * Marca o fim do bloco de ferramentas para o cache.
+ *
+ * Só a ÚLTIMA leva a marca: `cache_control` é marco de FIM DE PREFIXO, não
+ * atributo do item. Espalhar gastaria os 4 pontos que a API permite sem ganhar
+ * nada — mesma lição de `comCacheNoFim`, em gestao-whatsapp.ts.
+ */
+function comCacheNasFerramentas(tools: Anthropic.Messages.Tool[]): Anthropic.Messages.Tool[] {
+  if (tools.length === 0) return tools
+  const ultima = tools[tools.length - 1]
+  return [...tools.slice(0, -1), { ...ultima, cache_control: { type: 'ephemeral' } } as Anthropic.Messages.Tool]
+}
+
+
+/**
  * Junta ao histórico o anexo que acabou de chegar — imagem ou PDF. O webhook
  * grava e responde quase junto, então o arquivo do cliente pode não estar na
  * leitura acima, e sem isto ele apareceria como "[imagem]" ou "[documento]"
@@ -2912,8 +2926,36 @@ async function rodarLuigi(
         {
           model: MODELO,
           max_tokens: MAX_TOKENS_RESPOSTA,
+          // CACHE NAS FERRAMENTAS, NÃO NO SISTEMA — 12/09/2026.
+          //
+          // O Luigi rodava sem cache nenhum enquanto o gestao-whatsapp cacheia
+          // desde 09/09. Medido em 3 dias: 678 turnos, 15.258 tokens de entrada
+          // em média, 0% de cache, US$ 32,24 — a rota mais cara do sistema.
+          //
+          // A ordem de render é `tools` → `system` → `messages`, então a marca
+          // vai no ÚLTIMO bloco do que se quer cachear. Aqui ela fica nas
+          // FERRAMENTAS (~5.775 tokens), que são byte a byte idênticas em toda
+          // conversa e toda rodada.
+          //
+          // NÃO no `system`, e isso foi medido: o prompt começa com
+          // `agoraRecife()`, que tem MINUTO, no caractere 265 de 33.834 — o
+          // invalidador silencioso clássico. Com ele lá dentro, o bloco muda a
+          // cada virada de minuto, e 57,5% dos turnos têm UMA rodada só. Marcar
+          // ali custaria uma escrita de cache (1,25×) sem leitura nenhuma
+          // depois, na maioria dos turnos: mais caro que não cachear.
+          //
+          // O HISTÓRICO também não leva marca, por outro motivo: ver
+          // `historicoConversa` — `slice(-IMAGENS_NO_HISTORICO)` faz imagem nova
+          // reescrever mensagens ANTIGAS do array (a que sai do slice perde o
+          // bloco base64). Prefixo que muda no meio invalida tudo depois dele.
+          //
+          // Falta cachear o corpo estático do prompt (~8.458 tokens), e para
+          // isso ele precisa ser partido: estático primeiro, volátil (relógio,
+          // saudação, nome, telefone, pedidos) depois do ponto de cache. É
+          // reordenação de um prompt de 33 mil caracteres e fica pra uma decisão
+          // própria, com medição.
           system: promptSistema(modo, ctx, jaSeApresentou),
-          tools: ferramentasDoModo(modo, ctx.ehFornecedor),
+          tools: comCacheNasFerramentas(ferramentasDoModo(modo, ctx.ehFornecedor)),
           messages: historico,
         },
         { signal: controlador.signal }
