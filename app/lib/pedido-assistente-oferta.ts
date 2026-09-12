@@ -138,6 +138,8 @@ export type FornecedorOpcao = {
 // repo já importava daqui.
 export {
   MARGEM_PEDIDO_MINIMO,
+  MOTIVO_PECA_DECLARADA,
+  MOTIVO_PECA_LEGADA,
   pontuarFornecedor,
   ordenarFornecedoresPara,
   type MatchFornecedor,

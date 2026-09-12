@@ -426,3 +426,42 @@ superfície**, uma tela por vez, com a regra de match já pronta em
 isso o banco não responde.
 
 ---
+
+## 🟠 A ponte legada achata o ranking — e o conserto é de OPERAÇÃO, não de código
+
+**Registrado em:** 2026-09-12, no primeiro pedido real a passar pela ordenação nova.
+
+### O quê
+`leads_fornecedores` tem dois vocabulários: `pecas` (catálogo novo, `pecas.ts`) e
+`tipos_produto` (categorias antigas: `interclasse`, `private_label`, `fardamento`…).
+**26 dos 41 fornecedores aprovados só falam o antigo.**
+
+No pedido `20260900293` (scrub hospitalar, peça derivada = `uniforme`), **28 fornecedores**
+receberam o mesmo selo "faz esse tipo de peça" — e só **2** batiam pelo vocabulário novo.
+Dos outros 26, **15 entravam só por `interclasse`**, que é "faz camiseta de turma". Pra um
+scrub, isso é encosto, não ofício.
+
+### O que já foi feito em código (e não resolve)
+Dois ajustes, nenhum no volume de oferta:
+1. **Selos separados** — verde "faz esse tipo de peça" só pra quem declarou no vocabulário
+   novo; cinza "pode fazer (categoria X)" pra quem só encosta pela ponte, com a categoria
+   nomeada. No 293: de 28 selos verdes iguais pra **2 verdes + 26 cinzas**.
+2. **Especificidade pesa** — `legadoDasPecas` devolve as categorias da mais específica pra
+   menos (`uniforme` → `['fardamento','interclasse']`); casar a primeira vale 20, as demais
+   10. Medido: muda o 1º da lista em 28 de 135 pedidos (20,7%), o top-3 em 66 (48,9%), e na
+   direção certa — quem tem `fardamento` sobe acima de quem só tem `interclasse`.
+
+Isso torna o achatamento **visível**. Não o remove: o ranking continua decidido por
+categoria antiga pra 26 dos 41.
+
+### O conserto de verdade
+**Fazer as confecções declararem `pecas`.** É captação/cadastro — a tela de cadastro do
+fornecedor, a conversa de onboarding, o Luigi quando fala com lead. **Ação de operação, não
+de engenharia**: nenhuma linha de código melhora o ranking enquanto 63% do cadastro só
+souber dizer "private label".
+
+Métrica pra acompanhar: `select count(*) filter (where cardinality(pecas) > 0), count(*)
+from leads_fornecedores where aprovacao_status='aprovado' and status='ativo'` — hoje
+**15 de 41**.
+
+---

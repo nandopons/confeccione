@@ -40,6 +40,18 @@ export type MatchFornecedor = {
 
 export const MARGEM_PEDIDO_MINIMO = 0.2
 
+/** A confecção DECLAROU esta peça no vocabulário novo (`leads_fornecedores.pecas`). */
+export const PESO_PECA_DECLARADA = 20
+/** Casou a categoria legada mais específica da peça (ou a do próprio pedido). */
+export const PESO_CATEGORIA_PRINCIPAL = 20
+/** Casou uma categoria legada secundária — evidência de encosto, não de ofício. */
+export const PESO_CATEGORIA_SECUNDARIA = 10
+
+/** Os dois motivos de peça. A tela pinta cada um de um jeito — ver o comentário
+ *  no bloco de peça, em `pontuarFornecedor`. */
+export const MOTIVO_PECA_DECLARADA = 'faz esse tipo de peça'
+export const MOTIVO_PECA_LEGADA = 'pode fazer'
+
 function normalizar(t: string | null | undefined): string {
   return (t ?? '')
     .normalize('NFD')
@@ -108,15 +120,62 @@ export function pontuarFornecedor(
   // ==========================================================================
   const pedidas = pecasDoPedido(pedido)
   const fazPecasNovo = (f.pecas ?? []).filter(Boolean)
-  const bateNoVocabularioNovo = pedidas.length > 0 && fazPecasNovo.length > 0 && pedidas.some((q) => fazPecasNovo.includes(q))
+  const bateNoVocabularioNovo =
+    pedidas.length > 0 && fazPecasNovo.length > 0 && pedidas.some((q) => fazPecasNovo.includes(q))
 
-  const querLegado = [pedido.categoria, ...legadoDasPecas(pedidas)].map(normalizar).filter(Boolean)
-  const fazPecas: string[] = (f.tipos_produto ?? []).map(normalizar).filter(Boolean)
-  const bateNoLegado = querLegado.length > 0 && fazPecas.length > 0 && querLegado.some((q) => fazPecas.some((p) => p.includes(q) || q.includes(p)))
+  // ==========================================================================
+  // DUAS EVIDÊNCIAS, DOIS PESOS — 12/09/2026.
+  //
+  // O primeiro pedido real a passar por aqui (20260900293, scrub) expôs um
+  // achatamento: VINTE E OITO fornecedores receberam o mesmo "faz esse tipo de
+  // peça", e só DOIS batiam pelo vocabulário novo. Os outros 26 entraram pela
+  // ponte legada — e 15 deles só por `interclasse`, que é "faz camiseta de
+  // turma". Pra um scrub hospitalar isso é evidência fraca, e ficava com o
+  // mesmo selo de quem declarou fardamento.
+  //
+  // Duas correções, nenhuma no volume:
+  //
+  //  1. MOTIVO DIFERENTE. Quem declarou a peça no vocabulário novo diz "faz esse
+  //     tipo de peça". Quem só encosta pela categoria antiga diz "pode fazer
+  //     (categoria X)" — e a tela pinta diferente. Ordem sem motivo é mágica, e
+  //     dois motivos iguais pra evidências diferentes é pior que mágica.
+  //
+  //  2. ESPECIFICIDADE PESA. `legadoDasPecas` devolve as categorias na ordem do
+  //     catálogo, da mais específica pra menos: `uniforme` → ['fardamento',
+  //     'interclasse']. Casar a PRIMEIRA vale mais que casar as seguintes.
+  //     Medido em 135 pedidos com peça derivada: muda o 1º da lista em 28
+  //     (20,7%) e o top-3 em 66 (48,9%) — e na direção certa (no 293, quem tem
+  //     fardamento sobe acima de quem só tem interclasse).
+  //
+  // Os pesos abaixo são os que foram MEDIDOS. Em particular, a peça declarada
+  // vale o mesmo que a primeira categoria legada (20): dar mais a ela seria uma
+  // terceira mudança, não medida, num ranking que acabou de mudar duas vezes.
+  // ==========================================================================
+  const tipos = (f.tipos_produto ?? []).map(normalizar).filter(Boolean)
+  const catPedido = normalizar(pedido.categoria)
+  const legado = legadoDasPecas(pedidas)
 
-  if (bateNoVocabularioNovo || bateNoLegado) {
-    pontos += 20
-    motivos.push('faz esse tipo de peça')
+  let pontosLegado = 0
+  let legadoCasou: string | null = null
+  if (catPedido && tipos.some((t) => t.includes(catPedido) || catPedido.includes(t))) {
+    // A categoria do próprio pedido é o sinal mais direto que a era antiga tem.
+    pontosLegado = PESO_CATEGORIA_PRINCIPAL
+    legadoCasou = (pedido.categoria ?? '').trim()
+  } else {
+    for (let i = 0; i < legado.length; i++) {
+      if (!tipos.includes(normalizar(legado[i]))) continue
+      pontosLegado = i === 0 ? PESO_CATEGORIA_PRINCIPAL : PESO_CATEGORIA_SECUNDARIA
+      legadoCasou = legado[i]
+      break
+    }
+  }
+
+  if (bateNoVocabularioNovo) {
+    pontos += PESO_PECA_DECLARADA
+    motivos.push(MOTIVO_PECA_DECLARADA)
+  } else if (pontosLegado > 0) {
+    pontos += pontosLegado
+    motivos.push(`${MOTIVO_PECA_LEGADA} (${(legadoCasou ?? '').replace(/_/g, ' ')})`)
   }
 
   // Pedido mínimo, com 20% de margem pra baixo. Mínimo 30 aceita a partir de

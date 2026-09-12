@@ -5,7 +5,7 @@ import { tipoLabel } from '@/app/lib/ofertas-labels'
 import { INFO_ETAPA, MOTIVO_LABEL, MOTIVOS_ENCERRAMENTO, ehEtapa, type Etapa, type GrupoEtapa, type MotivoEncerramento } from '@/app/lib/etapas-pedido-catalogo'
 // Módulo PURO (sem supabase) — ver o cabeçalho dele. É o que permite ordenar
 // aqui, no client, sem uma rota nova.
-import { ordenarFornecedoresPara } from '@/app/lib/match-fornecedor'
+import { ordenarFornecedoresPara, MOTIVO_PECA_DECLARADA, MOTIVO_PECA_LEGADA } from '@/app/lib/match-fornecedor'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 type Estampa = { posicao?: string | null; tamanho?: string | null }
@@ -823,11 +823,32 @@ export default function PedidosPagosAdmin() {
                               {x.pedido_minimo != null && x.pedido_minimo > 0 && (
                                 <span className="text-xs text-gray-500">mín. {x.pedido_minimo} pç</span>
                               )}
-                              {x.match.motivos[0] && (
-                                <span className={'text-xs rounded px-1.5 py-0.5 ' + (x.match.viavel ? 'bg-[#E1F5EE] text-[#0F6E56]' : 'bg-amber-50 text-amber-700')}>
-                                  {x.match.motivos[0]}
-                                </span>
-                              )}
+                              {/* DOIS SELOS, DUAS EVIDÊNCIAS — 12/09/2026.
+                                  Verde só pra quem DECLAROU a peça no cadastro
+                                  novo. Cinza pra quem apenas encosta pela
+                                  categoria antiga — 26 dos 41 fornecedores
+                                  aprovados só falam esse vocabulário, então o
+                                  selo forte pra todos não distinguia nada.
+                                  O motivo do topo (cidade/estado) continua
+                                  aparecendo; o de peça vem ao lado quando é
+                                  outro. */}
+                              {x.match.motivos.map((m) => {
+                                const forte = m === MOTIVO_PECA_DECLARADA
+                                const fraco = m.startsWith(MOTIVO_PECA_LEGADA)
+                                if (!forte && !fraco && m !== x.match.motivos[0]) return null
+                                const cor = !x.match.viavel
+                                  ? 'bg-amber-50 text-amber-700'
+                                  : forte
+                                    ? 'bg-[#E1F5EE] text-[#0F6E56] font-medium'
+                                    : fraco
+                                      ? 'bg-gray-100 text-gray-500'
+                                      : 'bg-[#E1F5EE] text-[#0F6E56]'
+                                return (
+                                  <span key={m} className={'text-xs rounded px-1.5 py-0.5 ' + cor}>
+                                    {m}
+                                  </span>
+                                )
+                              })}
                             </div>
                             {(x.tipos_produto?.length ?? 0) > 0 && (
                               <div className="text-xs text-gray-500 truncate">
