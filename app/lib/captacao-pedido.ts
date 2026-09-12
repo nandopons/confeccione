@@ -41,6 +41,7 @@ import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
 import { URL_CADASTRO_FORNECEDOR } from './captacao-templates'
 import { estaEmHorarioComercial } from './horario'
 import { avisarGestor, marcarEscalada } from './luigi'
+import { definirStatusOferta } from './pedido-assistente-oferta'
 import { ehModoLuigi, type ModoLuigi } from './luigi-catalogo'
 
 const MODELO = 'claude-sonnet-4-6'
@@ -950,6 +951,167 @@ async function cadastrarConfeccaoDaConversa(
   }
 }
 
+
+// ─── Aceite da oferta na conversa ───────────────────────────────────────────
+/**
+ * A confecção assume o pedido, pelo WhatsApp, sem abrir a tela.
+ *
+ * NÃO REIMPLEMENTA O ACEITE. `definirStatusOferta` é o mesmo ponto que a tela e
+ * o app usam, e é ele que cancela as concorrentes, marca `orcamento_status`,
+ * troca os contatos dos dois lados e manda o PDF. Se algum efeito não couber no
+ * WhatsApp, o ajuste é DENTRO dela — dois caminhos com efeitos diferentes pro
+ * mesmo ato é como eles divergem na próxima mudança.
+ *
+ * O aceite dispara sete coisas, e é por isso que as travas abaixo existem:
+ * cancela as ofertas das OUTRAS confecções, entrega os dados pessoais do cliente
+ * a um terceiro, entrega os dados dela ao cliente, e manda ao cliente uma
+ * mensagem afirmando quem vai produzir. Desfazer exige `reabrirPedido`, que
+ * zera o orçamento.
+ *
+ * PRAZO DE PRODUÇÃO NÃO ENTRA AQUI, de propósito: ele pertence ao ORÇAMENTO,
+ * que é o momento seguinte e é onde ele varia. Aceite é "eu pego"; orçamento é
+ * "por quanto e em quantos dias". Perguntar nos dois lugares daria duas
+ * respostas diferentes pra mesma pergunta.
+ */
+async function aceitarOfertaDaConversa(
+  cand: CandidatoLinha,
+  entrada: Record<string, unknown>,
+  waId: string
+): Promise<{ ok: boolean; aviso: string }> {
+  // TRAVA 1 — ELA TEM QUE TER CONFIRMADO O RESUMO EM NÚMEROS.
+  if (entrada.confirmado_por_ela !== true) {
+    return {
+      ok: false,
+      aviso:
+        'Você ainda não confirmou com ela. Repita numa mensagem só: peça, quantidade, cidade do cliente e o prazo ' +
+        'que ele pediu, e pergunte se ela assume. Só chame esta ferramenta depois do sim dela.',
+    }
+  }
+  const frase = str(entrada.frase_dela)
+  if (!frase) return { ok: false, aviso: 'Mande em frase_dela o que ela escreveu confirmando, textual.' }
+
+  // TRAVA 2 — A OFERTA TEM QUE SER DELA.
+  // Sem isto uma confecção aceita a oferta de outra por id errado: a ferramenta
+  // não recebe ofertaId justamente pra o modelo não poder escolher um.
+  const { data: contato } = await supabaseAdmin
+    .from('wa_contatos').select('fornecedor_id').eq('wa_id', waId).maybeSingle<{ fornecedor_id: string | null }>()
+  if (!contato?.fornecedor_id) {
+    return { ok: false, aviso: 'Ela ainda não tem cadastro nesta conversa. Cadastre com cadastrar_confeccao antes.' }
+  }
+  if (!cand.pedido_id) return { ok: false, aviso: 'Esta conversa não está ligada a um pedido.' }
+
+  const { data: oferta } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id, status')
+    .eq('pedido_id', cand.pedido_id)
+    .eq('fornecedor_id', contato.fornecedor_id)
+    .maybeSingle<{ id: string; status: string }>()
+  if (!oferta) {
+    return {
+      ok: false,
+      aviso:
+        'Este pedido ainda não foi ofertado a ela — não há o que aceitar. Diga que você vai acertar isso e chame ' +
+        'chamar_humano: quem oferta é o Fernando.',
+    }
+  }
+
+  // TRAVA 3 — A CORRIDA, E ELA É NO UPDATE.
+  //
+  // Hoje o aceite é uma pessoa clicando numa tela. Abrindo pro Luigi, duas
+  // confecções em duas conversas paralelas podem dizer sim ao mesmo tempo — e o
+  // `definirStatusOferta` cancela as concorrentes, então a segunda aceitaria uma
+  // oferta que acabou de ser cancelada.
+  //
+  // Ler-e-depois-escrever passa em todo teste e quebra no primeiro caso real —
+  // a mesma classe do `array_length('{}')` que devolve NULL e parece zero. O
+  // claim condicional é a única leitura que vale: se voltou linha, é nossa.
+  const { data: claim } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .update({ status: 'aceita', respondido_em: new Date().toISOString() })
+    .eq('id', oferta.id)
+    .eq('status', 'ofertada')
+    .select('id')
+
+  if ((claim ?? []).length === 0) {
+    return {
+      ok: false,
+      aviso:
+        'Esse pedido já foi fechado com outra confecção enquanto vocês conversavam. Diga isso a ela sem rodeio, ' +
+        'agradeça, e avise que o próximo que combinar com ela você manda aqui.',
+    }
+  }
+
+  // Daqui pra frente a oferta JÁ É DELA no banco. O que vem é notificação: se
+  // falhar, o aceite não se desfaz, e ela não tem como saber que falhou.
+  try {
+    await definirStatusOferta(oferta.id, 'aceita')
+  } catch (e) {
+    console.error('[captacao] notificação de aceite falhou', oferta.id, e)
+  }
+  await supabaseAdmin.from('pedidos_assistente').update({ status: 'em_alinhamento' }).eq('id', cand.pedido_id)
+
+  // O FERNANDO SABE NA HORA, com a frase dela — simultâneo, não antes.
+  // Aprovar antes recriaria o gargalo que a conversa existe pra tirar; saber
+  // depois do cliente responder é tarde. Com a frase textual ele julga se o
+  // Luigi interpretou um "pode ser" como sim.
+  void avisarGestor(
+    `${cand.nome ?? waId} ACEITOU o pedido ${cand.pedido_id} pelo WhatsApp. ` +
+      `O que ela escreveu: "${frase.slice(0, 200)}". Contatos já trocados dos dois lados.`
+  )
+
+  // A PERDEDORA MERECE SABER — dentro da janela, e só dentro dela.
+  // Quem respondeu, analisou e ficou esperando é o ativo escasso. Mas fora da
+  // janela isso seria template pago pra dar notícia ruim, e a gente registra em
+  // vez de gastar — sem o registro ninguém saberia quantas vezes ficou calado.
+  await avisarPerdedoras(cand.pedido_id, contato.fornecedor_id)
+
+  return {
+    ok: true,
+    aviso:
+      'Pedido assumido. O contato do cliente já foi pro WhatsApp dela e o dela pro cliente, com a ficha técnica. ' +
+      'Diga que está fechado e que ela pode falar com o cliente. NÃO combine preço nem prazo: isso é entre eles, no orçamento.',
+  }
+}
+
+/**
+ * Avisa quem perdeu o pedido. Só dentro da janela de 24 h.
+ *
+ * Fora dela seria template pago pra dar notícia ruim — e template tem custo e
+ * conta pra qualidade do número. Mas ficar calado sem deixar rastro é parte de
+ * por que o Rodolfo cancelou 9 de 15 ofertas: ele não sabe o que acontece
+ * depois que responde. Então quando não dá pra avisar, fica escrito na oferta
+ * QUE não avisou e por quê.
+ */
+async function avisarPerdedoras(pedidoId: string, vencedorId: string): Promise<void> {
+  const { data: perdedoras } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id, fornecedor_id, leads_fornecedores(nome, whatsapp)')
+    .eq('pedido_id', pedidoId)
+    .neq('fornecedor_id', vencedorId)
+    .eq('status', 'cancelada')
+
+  for (const o of (perdedoras ?? []) as unknown as Array<{
+    id: string
+    leads_fornecedores: { nome: string | null; whatsapp: string | null } | null
+  }>) {
+    const tel = o.leads_fornecedores?.whatsapp
+    if (!tel) continue
+    const waIdDela = normalizarWaId(tel)
+    if (!(await janela24hAberta(waIdDela))) {
+      await supabaseAdmin
+        .from('ofertas_pedido_assistente')
+        .update({ observacao: 'não avisada do fechamento: janela de 24h fechada, não gastamos template' })
+        .eq('id', o.id)
+      continue
+    }
+    const texto =
+      'Esse pedido acabou fechando com outra confecção. Obrigado por ter olhado e respondido, de verdade. ' +
+      'Você continua na fila, e o próximo que combinar com vocês eu mando aqui.'
+    const r = await enviarTexto(waIdDela, texto)
+    if (r.ok) await registrarSaidaInbox(waIdDela, o.leads_fornecedores?.nome ?? null, r.wamid, texto, null, 'luigi')
+  }
+}
+
 // ─── PDF de sondagem (sem nome nem contato do cliente) ──────────────────────
 
 export async function pdfSondagem(pedidoId: string): Promise<{ bytes: Uint8Array; nomeArquivo: string } | null> {
@@ -1775,6 +1937,16 @@ DEPOIS DE GRAVAR, diga LITERAL, conforme o galho:
 • Ela não faz: "${FALAS_CADASTRO.prontoNaoFaz}" — repare que esta NÃO fala da região nem sugere que o pedido de agora vai. Ela disse que não faz; prometer esse pedido é mentir na primeira frase do relacionamento.
 NÃO prometa volume nem número de pedidos: são 4 pedidos entregues em 229.
 
+ASSUMIR O PEDIDO, DEPOIS DO CADASTRO E SEPARADO DELE.
+Feito o cadastro, o pedido que motivou a conversa pode ser dela — mas isso é UM SEGUNDO SIM, e ela precisa ver o que está assumindo. Mostre o RESUMO EM NÚMEROS numa mensagem só, sem prosa:
+"Então: 10 scrubs, entrega em Joinville/SC, o cliente pediu 13 dias. Você monta o orçamento direto com ele. Confirma que quer esse pedido?"
+Peça, quantidade, cidade do cliente e o prazo que ELE pediu. Só isso — são os números que ela precisa pra dizer sim sabendo do que se trata.
+Com o sim dela, chame aceitar_oferta com confirmado_por_ela: true e frase_dela com o que ela escreveu, TEXTUAL.
+
+NÃO COMBINE PREÇO NEM PRAZO NO ACEITE. Os dois são da negociação entre ela e o cliente, e o prazo de produção ela informa no orçamento, que é o passo seguinte. Aceite é "eu pego"; orçamento é "por quanto e em quantos dias". Se ela perguntar quanto vai receber, diga que ela mesma define no orçamento.
+
+Se a ferramenta disser que o pedido já foi fechado com outra confecção, diga isso a ela sem rodeio e sem culpa, agradeça, e avise que o próximo que combinar com ela você manda aqui.
+
 CADASTRAR NÃO É ASSUMIR O PEDIDO — 12/09/2026.
 São dois consentimentos diferentes: "pode me cadastrar" e "quero esse pedido". Depois de gravar o cadastro você PARA. NÃO diga que o pedido é dela, NÃO mande os dados do cliente, NÃO prometa que ele vai chegar agora. Assumir a produção é outra conversa, com outra confirmação — o Fernando conduz. Juntar as duas é o atalho que faz a pessoa aceitar o que não leu, e o que ela assume aqui é obrigação de produzir.
 
@@ -1908,6 +2080,26 @@ const FERRAMENTAS_CANDIDATO: Anthropic.Messages.Tool[] = [
         },
       },
       required: ['cidade', 'estado', 'pedido_minimo', 'confirmado_por_ela'],
+    },
+  },
+  {
+    name: 'aceitar_oferta',
+    description:
+      'A confecção assume o pedido que está ofertado pra ela. Só depois de você repetir o resumo EM NÚMEROS ' +
+      '(peça, quantidade, cidade do cliente, prazo que ele pediu) e ela confirmar. Troca os contatos dos dois lados.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        confirmado_por_ela: {
+          type: 'boolean',
+          description: 'true SÓ se você mostrou o resumo em números e ela respondeu confirmando. Sem isso a ferramenta recusa.',
+        },
+        frase_dela: {
+          type: 'string',
+          description: 'O que ela escreveu confirmando, TEXTUAL, nas palavras dela. Vai no aviso ao Fernando.',
+        },
+      },
+      required: ['confirmado_por_ela', 'frase_dela'],
     },
   },
   {
@@ -2145,6 +2337,9 @@ export async function responderCandidato(params: {
           const ok = cand.pedido_id ? await enviarPdfNaConversa(waId, params.nome ?? cand.nome, cand.pedido_id) : false
           if (ok) pdfJaEnviado = true
           resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify({ ok, aviso: ok ? 'PDF enviado nesta conversa.' : 'Não deu pra mandar o PDF agora; diga que manda em seguida.' }) })
+        } else if (uso.name === 'aceitar_oferta') {
+          const r = await aceitarOfertaDaConversa(cand, entrada, waId)
+          resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify(r) })
         } else if (uso.name === 'cadastrar_confeccao') {
           const r = await cadastrarConfeccaoDaConversa(cand, entrada, waId, params.nome)
           if (r.ok && r.pendente) escalada = 'confecção faz algo fora do catálogo de peças — confira o cadastro'
