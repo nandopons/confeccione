@@ -97,6 +97,18 @@ o Luigi, não pra assumir.
 - Nunca rode `git` a partir de um container que monta esta pasta: ele escreve mas
   não apaga, quebra no meio e deixa `.git/index.lock` órfão travando o repo.
 
+**O `promptSistema` devolve DOIS blocos, e a ordem é a economia.** Estático
+primeiro (identidade, FAQ, etapas, regras) com `cache_control` no fim dele;
+volátil depois (relógio, saudação, quem está falando, pedidos do contato,
+apresentação). **O volátil nunca volta pro começo.** Cache da Anthropic é
+casamento de PREFIXO: qualquer coisa que muda a cada turno colocada antes do
+marcador invalida tudo que vem depois. Medido em 12/09/2026, com o mesmo
+prompt palavra por palavra, só reordenado: **11,4% de leitura de cache antes,
+78,3% em 18 rodadas reais depois** — uma conversa que montou um pedido inteiro.
+Mover o relógio ou o nome pro topo "porque fica mais legível" derruba isso sem
+quebrar teste nenhum, e a conta só aparece no faturamento. O bloco estático
+precisa passar de 1.024 tokens pro marcador pegar (hoje tem ~10.900).
+
 ## Antes de teorizar sobre o Luigi, leia o log
 
 `luigi_whatsapp_log` tem `status`, `escalado`, `rodadas`, `ferramentas`, `erro` e

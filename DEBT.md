@@ -784,3 +784,49 @@ aparece vivo só por ter oferta passaria a aparecer como não-liberado, e isso m
 Fernando vê no painel de manhã.
 
 ---
+## A imagem que o cliente manda não chega no pedido — 12/09/2026
+
+O Luigi **lê** a foto e descreve bem (o pedido `20260900302` tem
+`descricao: "...logo Midi Jovens no peito esquerdo"`), mas o arquivo não é gravado:
+`mockups` fica `{}` e o PDF, que lê `mockups`, sai sem nada. Pra "logo Midi Jovens"
+isso é fatal — ninguém produz um logo a partir de texto.
+
+Hoje anexar depende de o modelo lembrar de chamar a ferramenta. É a regra do repo
+invertida: **efeito que mora só no prompt não acontece.**
+
+### A medição — 68 imagens de entrada, 30 dias, 21 conversas
+
+| onde a imagem cai | imagens | conversas |
+|---|---|---|
+| **com pedido já aberto** | **36** | 11 |
+| antes do pedido, e depois virou pedido | **17** | 7 |
+| antes do pedido, e nunca virou pedido | 15 | 4 |
+
+Das 36 que chegaram com pedido aberto, os 11 pedidos correspondentes somam **19 fotos
+anexadas** (e isso é teto: algumas dessas 19 podem ter vindo de foto anterior ao pedido).
+**5 dos 11 pedidos estão com zero.**
+
+Nas 17 do segundo caso, o tempo entre a foto e o pedido nascer: **mediana 11,4 min,
+média 42,8 min, máximo 3h33.** O teste de hoje é esse caso — foto às 20:08, pedido às
+20:18. O Johnnes é misto.
+
+### São dois consertos, não um
+
+**(1) Com pedido aberto — 36 imagens, 53% do total.** Anexar no caminho, sem depender de
+ferramenta: a imagem entra, o pedido existe, grava. É o conserto barato e pega a maioria.
+
+**(2) Antes do pedido — 17 imagens que viram pedido, 25%.** Precisa de fila: a imagem fica
+pendurada na conversa e é anexada quando o pedido nascer. A mediana de 11 minutos diz que a
+janela é curta, mas o máximo de 3h33 diz que "últimos 15 minutos" perderia casos reais.
+Prender por conversa, não por tempo.
+
+As 15 que nunca viraram pedido não têm onde ser anexadas — só entram se a fila guardar por
+conversa e o pedido nascer depois.
+
+### Antes de escrever
+A decisão que falta é **quais imagens entram**: hoje entra o que o modelo escolhe, e a regra
+"toda imagem entra" precisa das duas medições que ainda não foram feitas — quanto do que chega
+é peça de referência e quanto é print, comprovante ou foto solta. Anexar lixo ao pedido que vai
+pra confecção tem custo próprio.
+
+---
