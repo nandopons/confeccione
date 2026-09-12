@@ -185,11 +185,15 @@ function comFotosParqueadas(
     if (!Array.isArray(fotos)) continue
     for (const f of fotos) if (typeof f === 'string' && !jaTem.has(f) && !parque.includes(f)) parque.push(f)
   }
-  const antesPend = (anterior[CHAVE_PENDENTES] as { fotos?: unknown } | undefined)?.fotos
-  const herdadas = Array.isArray(antesPend) ? antesPend.filter((f): f is string => typeof f === 'string') : []
+  const pendAntes = anterior[CHAVE_PENDENTES] as { fotos?: unknown; de?: unknown } | undefined
+  const herdadas = Array.isArray(pendAntes?.fotos) ? pendAntes.fotos.filter((f): f is string => typeof f === 'string') : []
   const todas = [...herdadas, ...parque].filter((f) => !jaTem.has(f))
   if (todas.length === 0) return novo
-  return { ...novo, [CHAVE_PENDENTES]: { fotos: todas } }
+  // `de` diz de qual wa_mensagens veio cada foto. Reconstruir `pendentes` só com
+  // `fotos` apagaria isso na primeira troca de lista, e "veio do backfill" e "o
+  // cliente mandou agora" voltariam a ser indistinguíveis.
+  const de = pendAntes?.de && typeof pendAntes.de === 'object' ? pendAntes.de : undefined
+  return { ...novo, [CHAVE_PENDENTES]: de ? { fotos: todas, de } : { fotos: todas } }
 }
 
 export type ResultadoEdicao =

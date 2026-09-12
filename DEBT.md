@@ -851,3 +851,49 @@ mecânica estiver certa**, não antes: consertar retenção com o anexo quebrado
 otimizar o topo de um funil que vaza embaixo.
 
 ---
+## O que ficou medido e não virou código — 12/09/2026, fim do dia
+
+Três frentes com número fechado. **Amanhã começa lendo isto, não remedindo.**
+
+### 1. A atribuição da peça — 8 imagens, 3 pedidos
+O que sobrou depois que o anexo na entrada (`anexo-entrada.ts`) e o backfill de
+`pendentes` cobriram o resto. São as imagens que chegam com o pedido já tendo
+**2 ou 3 peças definidas** — nenhum caso de 5+ em 30 dias.
+
+**O que a medição derrubou:** não precisa de heurística nem de mecanismo novo.
+Em **3 dos 8 turnos o Luigi já chamou `anexar_foto_ao_modelo` sozinho**, e num
+deles fez a pergunta certa: *"Foto presa na beca. Essa mesma imagem serve de
+referência pra estola também, ou você tem outra?"* O comportamento existe e vem
+do prompt (`luigi.ts:2603`). **Não pode regredir.**
+
+**O que falta é o momento, não a informação.** O caso dominante não é "qual das
+N peças": é o pedido chegar com UMA linha de placeholder (`cor: "a definir"`),
+receber M fotos, e as peças nascerem 0,6 a 16,8 min depois. Nos 5 pedidos
+medidos o placeholder virou 2, 2, 1, 11 e 2 peças. O único instante em que a
+descrição da foto e a peça existem juntas é o turno em que `definir_pecas_pedido`
+roda. **A forma: a ferramenta aceitar a foto por peça.** Se isso tornar
+`anexar_foto_ao_modelo` redundante, tudo bem; se as duas competirem, o modelo
+escolhe mal.
+
+Hoje as 18 fotos do backfill estão em `mockups.pendentes` com a `wa_mensagens.id`
+de origem em `pendentes.de` — são o material de teste real do conserto.
+
+### 2. Os 11 `unsupported` que o cliente nunca sabe que falharam
+60 dias, `code 131051` da Meta, "Message type is currently not supported". **Nada
+é descartado calado**: o webhook grava `tipo`, `corpo` e o payload inteiro. O
+buraco é o outro lado — a pessoa mandou um arquivo, ele não abriu, e ninguém
+avisa. Ela acha que mandou. Uma linha no prompt resolve; não foi escrita porque
+não era a urgência.
+
+### 3. O penhasco dos 89 — com o achado que faltava
+Pedido nasce no site com UMA linha de placeholder. **`definir_pecas_pedido` não
+convive com o placeholder: quando roda, substitui a lista inteira e ele some.**
+Então o penhasco é o caso em que ele **nunca roda** — a pessoa abre o pedido e
+não volta. Aí `linhas.length === 1` faz o pedido parecer que tem peça, e é o mesmo
+defeito que faz 44% dos pedidos do site parecerem "sem modelo" (`f801d61`, #173).
+
+Junto disto, do mesmo território: **17 imagens em 6 conversas que nunca viraram
+pedido**. Mandar foto é sinal mais forte que mandar "oi" — quem fotografa a peça
+já decidiu. É perda ANTES da mecânica, e não melhora consertando anexo.
+
+---
