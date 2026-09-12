@@ -76,8 +76,17 @@ o Luigi, não pra assumir.
 
 ## Fluxo de trabalho
 
-- Commit em **UMA linha**, sem `->`, sem aspas internas. Multi-linha já criou
-  arquivo fantasma e engoliu o comando seguinte.
+- **Use `npm run ship -- "mensagem em uma linha"`.** Ele roda `tsc`, roda
+  `eslint` nos arquivos alterados, **para se qualquer um falhar**, e só então
+  commita e empurra. Em 12/09 a regra "tsc limpo antes de commitar" morava só
+  aqui neste arquivo, e foi quebrada juntando tudo numa linha: o commit
+  aconteceu antes de alguém ler a saída do tsc e o build da Vercel falhou.
+  Produção não serviu código quebrado por sorte do pipeline. Agora juntar as
+  etapas numa linha É o caminho certo, porque a linha é o `ship`.
+  `--no-push` no fim commita local. É a mesma regra do resto do projeto: efeito
+  se trava dentro da ferramenta, nunca só no texto.
+- Commit em **UMA linha**, sem `->`, sem aspas internas (o `ship` recusa os
+  dois). Multi-linha já criou arquivo fantasma e engoliu o comando seguinte.
 - `npx tsc --noEmit` acusa 3–4 erros em `.next/**/validator.ts` de páginas
   deletadas. É cache de build, não é seu código. **Zero erros fora de `.next/`**
   é o que conta.
