@@ -32,7 +32,37 @@ import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
 import { lerImagem } from './imagens-pedido-storage'
 import { nomeProprio } from './nome'
 
-async function vincularContato(waId: string): Promise<{ clienteId: string | null; fornecedorId: string | null }> {
+/**
+ * O MESMO NÚMERO NAS DUAS PONTAS — 12/09/2026.
+ *
+ * `5511968670046` existe em três lugares com três nomes: fornecedora "Lucilaine
+ * Aparecida", cliente "Larissa Longo" e contato "💕Nany💕". Não é colisão dos
+ * últimos 8 dígitos — é o número inteiro repetido. O contato ganhou
+ * `fornecedor_id` em silêncio e levou duas sondagens de captação sendo cliente.
+ *
+ * E MESMO ASSIM CONTINUA VINCULANDO OS DOIS, de propósito. Medido: 4 contatos
+ * têm o número nas duas pontas, e DOIS são legítimos — a Marcella é fornecedora
+ * com 2 ofertas aceitas E cliente; o Ednelson é dono da Conquisst e também
+ * comprou. Não vincular faria um fornecedor real sumir do funil sem ninguém ver,
+ * que é um erro pior que o da Nany por ser invisível.
+ *
+ * Também não dá pra desempatar por nome: bate na Marcella (idênticos) e falha no
+ * Ednelson (pessoa física × empresa, legítimo). Os dois casos errados são
+ * errados por motivos que o dado não guarda.
+ *
+ * Então: vincula os dois e DEVOLVE O CONFLITO. Quem chama avisa — o aviso É o
+ * registro, mesmo padrão do `chamar_humano`, e é o que dispensa coluna nova.
+ * Esta função não avisa porque `avisarGestor` mora em luigi.ts, que importa
+ * DESTE arquivo: puxar de lá fecharia um ciclo.
+ */
+export type VinculoContato = {
+  clienteId: string | null
+  fornecedorId: string | null
+  /** Frase pronta pro gestor quando o número está nas duas pontas. Null = sem conflito. */
+  conflito: string | null
+}
+
+export async function vincularContato(waId: string, nomeContato?: string | null): Promise<VinculoContato> {
   const last8 = waId.slice(-8)
   const bate = (tel: string | null) => {
     if (!tel) return false
@@ -40,12 +70,22 @@ async function vincularContato(waId: string): Promise<{ clienteId: string | null
     return dig.endsWith(last8) || waId.endsWith(dig.slice(-8))
   }
   const [clientes, fornecedores] = await Promise.all([
-    supabaseAdmin.from('contas_clientes').select('id, whatsapp').ilike('whatsapp', `%${last8}`).limit(2),
-    supabaseAdmin.from('leads_fornecedores').select('id, whatsapp').ilike('whatsapp', `%${last8}`).limit(2),
+    supabaseAdmin.from('contas_clientes').select('id, nome, whatsapp').ilike('whatsapp', `%${last8}`).limit(2),
+    supabaseAdmin.from('leads_fornecedores').select('id, nome, whatsapp').ilike('whatsapp', `%${last8}`).limit(2),
   ])
   const cliente = (clientes.data ?? []).find((c) => bate(c.whatsapp))
   const fornecedor = (fornecedores.data ?? []).find((f) => bate(f.whatsapp))
-  return { clienteId: cliente?.id ?? null, fornecedorId: fornecedor?.id ?? null }
+
+  // Os TRÊS NOMES na frase: foi comparar os três que resolveu a Nany. "Conflito
+  // de vínculo" sozinho não diz se é erro ou se é a mesma pessoa nos dois papéis.
+  const conflito =
+    cliente && fornecedor
+      ? `Número ${waId} está como cliente (${(cliente as { nome?: string }).nome ?? 'sem nome'}) e como fornecedor ` +
+        `(${(fornecedor as { nome?: string }).nome ?? 'sem nome'}). O contato aparece como ${nomeContato?.trim() || 'sem nome'}. ` +
+        'Vinculei os dois, se estiver errado me diz.'
+      : null
+
+  return { clienteId: cliente?.id ?? null, fornecedorId: fornecedor?.id ?? null, conflito }
 }
 
 /** Garante wa_contatos + wa_conversas pro telefone; retorna conversaId (ou null). */
@@ -93,7 +133,7 @@ async function garantirConversa(waId: string, nomeBruto: string | null): Promise
 
   let contatoId = contatoExistente?.id as string | undefined
   if (!contatoId) {
-    const { clienteId, fornecedorId } = await vincularContato(waId)
+    const { clienteId, fornecedorId } = await vincularContato(waId, nome)
     const { data: novo, error } = await supabaseAdmin
       .from('wa_contatos')
       .insert({ wa_id: waId, nome, cliente_id: clienteId, fornecedor_id: fornecedorId })

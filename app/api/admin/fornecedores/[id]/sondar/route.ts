@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { enviarTemplate, normalizarWaId } from '@/app/lib/whatsapp-cloud'
+import { APROVACAO_QUE_DESCLASSIFICA } from '@/app/lib/classificacao-contato'
 import { registrarSaidaInbox } from '@/app/lib/whatsapp-notify'
 import { templateDuvidaPedidoAgora, TEMPLATES_DUVIDA_PEDIDO } from '@/app/lib/whatsapp-templates'
 
@@ -69,6 +70,22 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     .maybeSingle<{ id: string; nome: string | null; whatsapp: string | null; aprovacao_status: string | null }>()
   if (!f) return NextResponse.json({ erro: 'Fornecedor não encontrado' }, { status: 404 })
   if (!f.whatsapp) return NextResponse.json({ erro: 'Esse cadastro não tem WhatsApp' }, { status: 400 })
+
+  // REPROVADO NÃO RECEBE SONDAGEM — 12/09/2026.
+  //
+  // A rota já LIA `aprovacao_status` no select e nunca olhava o valor. Segunda
+  // porta pro mesmo erro da Nany: o contato dela apontava pro cadastro da
+  // "Lucilaine Aparecida", e mesmo depois de a Lucilaine virar `reprovado` esta
+  // rota continuaria sondando — porque o filtro do matching (matching.ts:218)
+  // nunca chegou aqui.
+  //
+  // `reprovado` é a mesma constante que a classificação de contato usa: quem foi
+  // desclassificado não é fornecedor em lugar nenhum, e sondar é falar com ele
+  // como se fosse. `pendente` continua podendo — sondar é justamente como o
+  // Fernando decide aprovar.
+  if (f.aprovacao_status === APROVACAO_QUE_DESCLASSIFICA) {
+    return NextResponse.json({ erro: 'Esse cadastro está reprovado — sondar reabriria conversa com quem foi desclassificado.' }, { status: 409 })
+  }
 
   const waId = normalizarWaId(f.whatsapp)
   const primeiroNome = (f.nome ?? '').trim().split(/\s+/)[0] || 'tudo bem'

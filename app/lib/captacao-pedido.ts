@@ -35,7 +35,7 @@ import { normalizarWhatsApp } from './phone'
 import { pedidosPorEtapa, pedidoEtapa, type PedidoEtapa } from './etapas-pedido'
 import { normalizarWaId, enviarTemplate, enviarTexto, enviarMidiaPorId, uploadMidia, marcarComoLida, listarTemplates } from './whatsapp-cloud'
 import { consultarTemplatesWhatsApp } from './whatsapp-templates'
-import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
+import { janela24hAberta, registrarSaidaInbox, vincularContato } from './whatsapp-notify'
 import { emailSondagemProducao } from './email'
 import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
 import { URL_CADASTRO_FORNECEDOR } from './captacao-templates'
@@ -1103,6 +1103,17 @@ export async function enviarSondagem(id: string, c: { nome: string | null; email
       whatsapp = false
       erros.push(`whatsapp: template ${TEMPLATE_SONDAGEM} ainda não aprovado na Meta`)
     } else {
+      // O NÚMERO JÁ É CLIENTE? — 12/09/2026.
+      //
+      // A Nany levou duas sondagens sendo cliente, porque o contato dela tinha
+      // sido carimbado com o `fornecedor_id` de outra pessoa. Aqui é o último
+      // ponto antes de a mensagem sair: se o número está nas duas pontas, o
+      // Fernando fica sabendo AGORA, com os três nomes, em vez de descobrir na
+      // conversa. Não bloqueia o envio — quem decide é ele, e bloquear em cima
+      // de um empate que 2 em 4 vezes é legítimo tiraria confecção de verdade.
+      const vinculo = await vincularContato(normalizarWaId(c.whatsapp), c.nome)
+      if (vinculo.conflito) void avisarGestor(`Captação ia sondar um número que também é cliente. ${vinculo.conflito}`)
+
       const r = await enviarTemplate(c.whatsapp, TEMPLATE_SONDAGEM, IDIOMA_TEMPLATE_SONDAGEM, [
         { type: 'body', parameters: [{ type: 'text', text: (c.nome || 'pessoal').slice(0, 60) }] },
       ])
