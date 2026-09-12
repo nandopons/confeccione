@@ -280,18 +280,45 @@ function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
 }
 
-/** Celular brasileiro (11 dígitos com 9) vira wa_id; fixo fica só como telefone. */
+/**
+ * O NÚMERO DA CONFECÇÃO, EM E.164 — 12/09/2026.
+ *
+ * UMA FUNÇÃO SÓ, e isso é o ponto. Antes eram duas regras contraditórias sobre
+ * o mesmo dado: esta separava fixo (mandava pra coluna `telefone`, deixava
+ * `whatsapp` nulo, de propósito) e a gravação em `abordarCandidato` desfazia com
+ * `c.whatsapp ?? c.telefone`, escrevendo o fixo cru na coluna `whatsapp`. A de
+ * baixo venceu, e 12 leads (30% dos que tinham número) ficaram com 10 dígitos e
+ * sem o 55 — a Meta recusa, a sondagem nunca saiu, e template recusado derruba o
+ * quality rating da WABA.
+ *
+ * É a mesma lição do selo FORNECEDOR de doze horas antes: duas funções contando
+ * histórias diferentes sobre o mesmo fato é pior que as duas erradas do mesmo
+ * jeito, porque some a chance de alguém perceber.
+ *
+ * E A PREMISSA ANTIGA ERA FALSA. "Fixo não tem WhatsApp" foi desmentido pelo
+ * 8132247097 — fixo de 10 dígitos que FOI ENTREGUE quando saiu com o 55. Fixo
+ * comercial tem WhatsApp Business. Não se filtra fixo; normaliza-se.
+ *
+ * O nono dígito continua entrando quando o número é celular no formato antigo
+ * (DDD + 8 dígitos começando em 6–9), que é site desatualizado. Fixo começa em
+ * 2–5, então não há ambiguidade.
+ */
 function telefoneParaWaId(v: string | null): { whatsapp: string | null; telefone: string | null } {
   if (!v) return { whatsapp: null, telefone: null }
   const dig = v.replace(/\D/g, '').replace(/^0+/, '')
   if (dig.length < 10) return { whatsapp: null, telefone: null }
   const nacional = dig.startsWith('55') && dig.length >= 12 ? dig.slice(2) : dig
-  if (nacional.length === 11 && nacional[2] === '9') return { whatsapp: `55${nacional}`, telefone: null }
-  // Celular no formato antigo (DDD + 8 dígitos começando em 6–9): site desatualizado.
-  // Fixo começa em 2–5, então não há ambiguidade — entra o nono dígito.
-  if (nacional.length === 10 && /[6-9]/.test(nacional[2])) return { whatsapp: `55${nacional.slice(0, 2)}9${nacional.slice(2)}`, telefone: null }
-  if (nacional.length === 10 || nacional.length === 11) return { whatsapp: null, telefone: nacional }
-  return { whatsapp: null, telefone: null }
+  // Celular no formato antigo: entra o nono dígito antes de normalizar.
+  const comNove =
+    nacional.length === 10 && /[6-9]/.test(nacional[2])
+      ? `${nacional.slice(0, 2)}9${nacional.slice(2)}`
+      : nacional
+  if (comNove.length !== 10 && comNove.length !== 11) return { whatsapp: null, telefone: null }
+  // `normalizarWaId` é a MESMA função que o resto do sistema usa pra falar com a
+  // Meta. O critério dela é COMPRIMENTO, nunca prefixo — e isso importa:
+  // 5591342110 é Caxias do Sul (DDD 55, 10 dígitos), e uma regra do tipo "se não
+  // começa com 55, prefixa" deixaria essa linha quebrada pra sempre.
+  return { whatsapp: normalizarWaId(comNove), telefone: null }
 }
 
 function emailValido(v: string | null): string | null {
@@ -748,7 +775,10 @@ export async function abordarCandidato(c: Candidato, perfil: PerfilBusca, enviar
   // coluna, flag e envio. Se o número não for de WhatsApp, o envio falha com
   // erro de verdade e o `reabordarPendentes` tenta de novo até MAX_TENTATIVAS —
   // que é o comportamento certo pra um palpite, e é visível.
-  const numero = c.whatsapp ?? c.telefone
+  // Sem `?? c.telefone` cru: o fallback antigo escrevia fixo não normalizado na
+  // coluna `whatsapp` e furava a classificação acima. O número vem de uma regra
+  // só, e ela já devolve E.164.
+  const numero = telefoneParaWaId(c.whatsapp ?? c.telefone).whatsapp
   const { data: linha, error } = await supabaseAdmin
     .from('captacao_fornecedores')
     .insert({
