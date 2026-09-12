@@ -74,8 +74,27 @@ async function postMessages(body: Record<string, unknown>): Promise<EnvioResulta
     const data = await res.json().catch(() => null)
 
     if (!res.ok) {
-      const erro: string = data?.error?.message || `HTTP ${res.status}`
-      console.error('[wa-cloud] envio falhou', { tipo: body.type, status: res.status, erro })
+      // O CÓDIGO JUNTO DA MENSAGEM — 12/09/2026.
+      //
+      // A gente guardava só `error.message`, em português da Meta, e jogava o
+      // código fora. Aí distinguir "não é nosso problema" de "nossa reputação"
+      // virava casar string — e a string muda quando eles quiserem.
+      //
+      // Os três que apareceram nas 18 falhas de sondagem em 15 dias:
+      //   130472  "User's number is part of an experiment" — experimento da
+      //           própria Meta com uma fatia de usuários. Sem opt-out, reenviar
+      //           dá o mesmo erro, e não é cobrado. NADA A FAZER.
+      //   131026  "Message undeliverable" — número que não recebe WhatsApp.
+      //   131049  "not delivered to maintain healthy ecosystem engagement" —
+      //           teto de frequência de marketing por usuário. ESSE É NOSSO: é
+      //           reputação, e ignorar derruba a entrega de todo o resto.
+      //
+      // Com o código na frente da mensagem, a contagem por tipo vira uma query
+      // em vez de um `ilike` que quebra na primeira tradução nova.
+      const codigo: number | undefined = data?.error?.code
+      const msg: string = data?.error?.message || `HTTP ${res.status}`
+      const erro: string = codigo ? `${codigo}: ${msg}` : msg
+      console.error('[wa-cloud] envio falhou', { tipo: body.type, status: res.status, codigo, erro })
       return { ok: false, erro }
     }
 
