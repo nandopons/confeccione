@@ -121,9 +121,15 @@ export function resumirDiffLinhas(antes: LinhaPedido[], depois: LinhaPedido[]): 
   return { resumo: partes.join('\n'), lidsAlterados: lids, mudou }
 }
 
+/** Chave não-numérica: o PDF e o visualizador leem mockups[0], [1], … por
+ *  POSIÇÃO, então nada aqui dentro é mostrado como foto de peça nenhuma. */
+export const CHAVE_PENDENTES = 'pendentes'
+
 /**
  * Re-mapeia o mapa de mockups (chave = índice da linha) pra nova ordem.
  * Linhas novas não têm mockup; linhas removidas perdem o mockup (era delas).
+ *
+ * `pendentes` atravessa: não é de posição nenhuma, então reordenar não mexe nele.
  */
 function remapearMockups(mk: MapaMockups | null, novas: Array<{ origIdx: number | null }>): MapaMockups {
   if (!mk || typeof mk !== 'object') return {}
@@ -133,7 +139,57 @@ function remapearMockups(mk: MapaMockups | null, novas: Array<{ origIdx: number 
     const v = mk[String(l.origIdx)]
     if (v !== undefined) out[String(novoIdx)] = v
   })
+  const pend = mk[CHAVE_PENDENTES]
+  if (pend !== undefined) out[CHAVE_PENDENTES] = pend
   return out
+}
+
+/**
+ * FOTO DE CLIENTE NÃO MORRE NUMA TROCA DE LINHAS — 12/09/2026.
+ *
+ * `definirPecasPedido` substitui a lista inteira e monta toda linha com
+ * `origIdx: null`. Como `remapearMockups` pula linha sem origIdx, o mapa voltava
+ * VAZIO: definir as peças APAGAVA as fotos. O `20260900298` recebeu 9 imagens do
+ * cliente e está hoje com `mockups: {}`.
+ *
+ * Isso é metade do "11 de 19 pedidos com zero foto": não era o anexo que faltava,
+ * era o anexo sendo desfeito no passo seguinte.
+ *
+ * Por que PARK e não "põe na peça 1": o pedido nesse momento tem uma linha só, o
+ * placeholder `cor: "a definir"` — e nos 5 pedidos medidos ele virou 2, 2, 1, 11 e
+ * 2 peças. Empurrar as fotos pra primeira peça é apostar que a foto é da primeira
+ * das onze, e foto na peça errada faz a confecção produzir errado: é pior que foto
+ * faltando, porque ninguém percebe. Então os bytes ficam guardados, sem afirmar
+ * peça, e quem atribui é quem sabe.
+ */
+function comFotosParqueadas(
+  anterior: MapaMockups | null,
+  novo: MapaMockups,
+  novas: Array<{ origIdx: number | null }>
+): MapaMockups {
+  if (!anterior || typeof anterior !== 'object') return novo
+  // SÓ na troca da lista inteira (toda linha sem origIdx), que é o que
+  // `definirPecasPedido` faz. Fornecedor que APAGA uma peça continua apagando as
+  // fotos dela: ali sumir é a intenção, não o acidente — e parquear viraria foto
+  // de peça excluída voltando pro pedido depois.
+  if (novas.length === 0 || novas.some((l) => l.origIdx != null)) return novo
+  const jaTem = new Set<string>()
+  for (const v of Object.values(novo)) {
+    const fotos = (v as { fotos?: unknown })?.fotos
+    if (Array.isArray(fotos)) for (const f of fotos) if (typeof f === 'string') jaTem.add(f)
+  }
+  const parque: string[] = []
+  for (const [k, v] of Object.entries(anterior)) {
+    if (k === CHAVE_PENDENTES) continue
+    const fotos = (v as { fotos?: unknown })?.fotos
+    if (!Array.isArray(fotos)) continue
+    for (const f of fotos) if (typeof f === 'string' && !jaTem.has(f) && !parque.includes(f)) parque.push(f)
+  }
+  const antesPend = (anterior[CHAVE_PENDENTES] as { fotos?: unknown } | undefined)?.fotos
+  const herdadas = Array.isArray(antesPend) ? antesPend.filter((f): f is string => typeof f === 'string') : []
+  const todas = [...herdadas, ...parque].filter((f) => !jaTem.has(f))
+  if (todas.length === 0) return novo
+  return { ...novo, [CHAVE_PENDENTES]: { fotos: todas } }
 }
 
 export type ResultadoEdicao =
@@ -173,7 +229,7 @@ export async function salvarLinhasEditadas(params: {
 
   const patch: Record<string, unknown> = {
     linhas: linhasFinais,
-    mockups: remapearMockups(ped.mockups, novas),
+    mockups: comFotosParqueadas(ped.mockups, remapearMockups(ped.mockups, novas), novas),
     atualizado_em: new Date().toISOString(),
   }
   if (orcamentoReaberto) patch.orcamento_status = 'aguardando_fornecedor'
