@@ -4,6 +4,39 @@ Registro de débitos e decisões adiadas. Cada item diz **o que**, **por que imp
 
 ---
 
+## 🔴 A FAMÍLIA: entregar errado em silêncio
+
+Três casos já aconteceram, e são a mesma doença — o sistema entrega ao cliente uma coisa
+diferente do que ele pediu, **sem que nenhum dos dois lados tenha como saber**. Não há erro, não
+há log, não há reclamação: o cliente supõe que foi atendido. É a classe mais cara do projeto
+porque o custo só aparece quando ele some.
+
+| # | caso | o que o cliente recebia | como se descobriu |
+|---|---|---|---|
+| 1 | **PDF da prévia velha** | o resumo mostrava a prévia ANTERIOR junto com a nova — o Wesley viu lado a lado a versão que ele tinha mandado mudar | o Fernando abriu o PDF na mão |
+| 2 | **`descricao` que não gravava** | a peça saía sem os detalhes que ele descreveu | — |
+| 3 | **"Atualizar mockup" que regerava do zero** | pedia um retoque e recebia **outra peça** | caiu por acaso, olhando outro problema |
+
+### O caso 3, o mais caro da rodada de 12/09
+Em 5 pedidos, `mockups[i].ia[].url` estava no formato de URL de exibição. `lerImagem` devolvia
+`null` pra esse formato **sem uma linha de log**, e o `carregarImagens` faz
+`.filter((x) => x !== null)` — engole calado. Resultado: `baseAjuste` chegava nulo em
+`gerarMockupDoModelo`, e o "Atualizar mockup" caía no galho de geração NOVA em vez de ajuste.
+
+O cliente clicava em "Atualizar", esperava, e recebia uma peça diferente — não a dele retocada.
+Do lado dele parece que a gente não entendeu. Do nosso lado, não existia.
+
+### O que as três têm em comum
+**Um `null`, um `catch` ou um `?? []` tratado como "não tem", quando na verdade era "deu erro".**
+É o mesmo parágrafo do AGENTS.md sobre `(data ?? [])`, aplicado a imagem em vez de consulta.
+
+### Como não ter o quarto
+Filtro que descarta item de uma lista **tem que dizer quantos descartou** quando o número não
+for zero — no Postgres, não no console (ver a armadilha dos logs no AGENTS.md). Silêncio só é
+aceitável quando "vazio" e "falhou" são a mesma resposta, e quase nunca são.
+
+---
+
 ## 🔴 Geração de mockup estoura o tempo da função — e mata o turno no meio
 
 **Descoberto em:** 12/09/2026. Reformula um diagnóstico anterior que estava errado.
@@ -340,11 +373,9 @@ p.data.ia` **cru, vindo do navegador** — enquanto o `fotos` logo acima passava
 `guardarImagens`. O navegador tem a URL de exibição (`iaParaExibicao` a gerou), então todo
 round-trip por essa rota escrevia o formato errado de volta.
 
-**O custo, que era invisível:** `lerImagem` devolvia `null` pra esse formato **sem uma linha de
-log**, e `carregarImagens` filtra `null` calado. Resultado: nesses 5 pedidos o "Atualizar
-mockup" carregava `baseAjuste = null` e **regerava do zero em vez de ajustar** — o cliente
-pedia um retoque e recebia outra peça. Os arquivos nunca faltaram: a rota devolve HTTP 200 com
-o JPEG (conferido nos 4 ids).
+**O custo, que era invisível:** é o caso 3 da FAMÍLIA lá no topo deste arquivo — o "Atualizar
+mockup" regerava do zero em vez de ajustar. Os arquivos nunca faltaram: a rota devolve HTTP 200
+com o JPEG (conferido nos 4 ids).
 
 **Consertado:** (a) `lerImagem` passou a aceitar os dois formatos, tirando o id de dentro da
 própria URL; (b) a rota de mockup passou o `ia` por `guardarImagem`, igual ao `fotos`;
