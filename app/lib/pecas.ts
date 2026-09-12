@@ -234,7 +234,7 @@ const SINONIMOS: { peca: string; termos: string[] }[] = [
   { peca: 'bone', termos: ['bon[ée]s?', 'chap[ée]us?', 'viseiras?', 'toucas?', 'gorros?'] },
   { peca: 'bolsa', termos: ['mochilas?', 'sacochilas?', 'eco ?bags?', 'tote ?bags?', 'necessaires?', 'pochetes?', 'bolsas?'] },
   { peca: 'meia', termos: ['meias?'] },
-  { peca: 'cama_mesa_banho', termos: ['toalhas?', 'len[çc][óo]is', 'jogo de cama', 'pano de prato'] },
+  { peca: 'cama_mesa_banho', termos: ['toalhas?', 'len[çc][óo]is', 'jogo de cama', 'pano de prato', 'cama,? mesa e banho'] },
   { peca: 'uv', termos: ['prote[çc][ãa]o uv', 'camisa uv', '\\buv\\b'] },
   { peca: 'infantil', termos: ['beb[êe]', 'infantis'] },
   { peca: 'vestido', termos: ['vestidos?'] },

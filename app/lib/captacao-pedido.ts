@@ -30,6 +30,8 @@ import { supabaseAdmin } from './supabase-server'
 import { salvarFotoDaConversa } from './portfolio-fornecedor'
 import { salvarPerfil } from './perfil-producao'
 import { registrarUsoIa } from './uso-ia'
+import { pecaDaLinha } from './pecas'
+import { normalizarWhatsApp } from './phone'
 import { pedidosPorEtapa, pedidoEtapa, type PedidoEtapa } from './etapas-pedido'
 import { normalizarWaId, enviarTemplate, enviarTexto, enviarMidiaPorId, uploadMidia, marcarComoLida, listarTemplates } from './whatsapp-cloud'
 import { consultarTemplatesWhatsApp } from './whatsapp-templates'
@@ -57,6 +59,96 @@ const HISTORICO_MENSAGENS = 20
  * serve pra trocar de nome sem deploy.
  */
 export const TEMPLATE_SONDAGEM = process.env.WHATSAPP_TEMPLATE_SONDAGEM || 'sondagem_producao'
+
+
+/**
+ * AS FALAS DO CADASTRO POR CONVERSA — 12/09/2026.
+ *
+ * Constante e não prompt porque cada uma delas foi escrita contra um erro que
+ * já aconteceu na conversa da Bordado Mágico (10/09), e o modelo parafraseando
+ * desfaz a correção:
+ *
+ *   PRODUTOS   — DOIS GALHOS. Se ela FAZ a peça do pedido, a pergunta parte do
+ *                que ela acabou de dizer; se NÃO faz, vira aberta e a conversa
+ *                segue pro MESMO cadastro. Sem lista sugerida em nenhum dos
+ *                dois: existe todo tipo de fornecedor e a lista induz. Ela
+ *                responde em texto livre — quem traduz pro catálogo é
+ *                `pecaDaLinha`, no código, nunca o modelo.
+ *   LICENCA    — sem "em vez de preencher site". Chamar atenção pro atrito que
+ *                ela nem tinha pensado é criar o atrito.
+ *   MINIMO_ANCORA — "depende" não grava (a ferramenta recusa). A âncora é o que
+ *                transforma "depende" em número.
+ *   CONFIRMACAO — o formulário mostra o que ela preencheu antes de enviar; na
+ *                conversa isso só existe se for dito. Sem prazo: prazo varia de
+ *                negociação pra negociação, e aqui viraria chute. Ele volta no
+ *                ORÇAMENTO, onde é número assumido.
+ *   PRONTO     — dois também. Nascendo aprovada ela entra no matching na hora,
+ *                e essa é a prova de valor que o formulário nunca deu. Mas o
+ *                fecho do galho (b) NÃO fala da região nem sugere que o pedido
+ *                de agora vai: ela disse que não faz essa peça. Nenhum dos dois
+ *                promete volume — são 4 pedidos entregues em 229.
+ *
+ * O modelo preenche o que está entre {chaves}.
+ */
+export const FALAS_CADASTRO = {
+  /** Galho (a): ela FAZ a peça do pedido. Parte do que ela acabou de dizer —
+   *  perguntar "que tipo de produto vocês fazem" depois de ela confirmar a peça
+   *  é repetir a pergunta anterior. `{peça}` é a peça do pedido. */
+  produtosFaz: 'Além de {peça}, quais os principais produtos que vocês fazem? Pode ser 3.',
+  /** Galho (b): ela NÃO faz. Um "não" pra esta peça não é um "não" pra
+   *  plataforma — a conversa não acaba, muda de assunto. Aberta, sem âncora,
+   *  porque não há peça confirmada pra partir. */
+  produtosNaoFaz: 'Sem problema. E o que vocês fazem? Pode ser 3 — assim eu te mando o que combinar com vocês.',
+  licenca: 'Posso te perguntar três coisas rápidas aqui mesmo?',
+  porque: 'É pra eu te mandar só pedido que combina com vocês, em vez de tudo.',
+  cidade: 'Vocês são de que cidade?',
+  minimo: 'Qual o pedido mínimo de vocês?',
+  minimoAncora: 'Me dá um número: abaixo de quanto não compensa ligar a máquina?',
+  confirmacao: 'Então: vocês fazem {peças}, em {cidade}/{UF}, mínimo {N} peças. Confere?',
+  /** Fecho do galho (a): ela faz a peça, então o pedido da região dela vale. */
+  prontoFaz:
+    'Pronto, já está valendo. Assim que entrar pedido da sua região que combine com o que vocês fazem, você recebe aqui.',
+  /** Fecho do galho (b): NÃO pode sugerir que ESTE pedido vai — ela disse que
+   *  não faz esta peça. Fica no genérico. */
+  prontoNaoFaz: 'Pronto, já está valendo. Assim que entrar pedido que combine com vocês, você recebe aqui.',
+} as const
+
+/**
+ * A COMISSÃO, COM O NÚMERO. TEXTO FIXO, PELO MESMO MOTIVO DA GARANTIA.
+ *
+ * Estava solta no bloco "COMO FUNCIONA" e o modelo parafraseava — "uma comissão
+ * sobre o valor fechado", sem número. Dizer a garantia com precisão e o preço
+ * com vaguidão é assimetria que a pessoa sente sem saber nomear, e é a que faz
+ * ela desconfiar depois, quando descobre o número sozinha.
+ *
+ * O 3% vem de COMISSAO_PCT (pedido-assistente-oferta.ts). Se mudar lá, muda
+ * aqui — e é de propósito que a frase seja literal em vez de interpolada: o
+ * número que a confecção ouve não pode variar por acidente de import.
+ */
+
+export const TEXTO_COMISSAO =
+  'Como funciona: a Confeccione te manda os pedidos que combinam com o que vocês fazem, vocês dizem o preço e o prazo, ' +
+  'e o cliente decide. A Confeccione fica com uma comissão de 3% sobre o valor fechado, só quando o pedido fecha.'
+
+/**
+ * O PAGAMENTO, DITO DO LADO DELA — 12/09/2026. TEXTO FIXO, NÃO PROMPT.
+ *
+ * O Luigi dizia: "o cliente paga à Confeccione e a gente repassa depois da
+ * entrega. Ninguém manda pix pra ninguém fora da plataforma." Mesmo fato, dono
+ * da frase errado: descreve o mecanismo do ponto de vista da plataforma e
+ * termina numa proibição. Pra quem ouve, soa "eles seguram meu dinheiro".
+ *
+ * A Bordado Mágico pediu pix na primeira conversa ("manda o pedido e te passo o
+ * pix") e recebeu exatamente essa frase. Não voltou.
+ *
+ * Invertido: quem costura pra terceiro tem um medo só, e é calote. O mesmo
+ * mecanismo, contado como garantia contra ele. É TEXTO FIXO porque o agente
+ * parafraseia e perde a inversão justamente na hora em que ela importa — foi o
+ * que aconteceu em 10/09.
+ */
+export const TEXTO_PAGAMENTO_GARANTIA =
+  'Sobre o pagamento: o cliente paga antes, e o dinheiro fica na Confeccione até você entregar. ' +
+  'Na prática você não corre risco de produzir e não receber, porque quando você começa a produzir o valor já está garantido.'
 const IDIOMA_TEMPLATE_SONDAGEM = 'pt_BR'
 
 export type StatusTemplateSondagem = {
@@ -679,6 +771,183 @@ async function contatadosDoPedido(pedidoId: string): Promise<number> {
     .not('ultimo_contato_em', 'is', null)
   if (error) throw new Error(`contagem do teto do pedido ${pedidoId}: ${error.message}`)
   return count ?? 0
+}
+
+
+// ─── Cadastro feito na conversa ─────────────────────────────────────────────
+/**
+ * Cria a confecção em `leads_fornecedores` a partir da conversa, JÁ APROVADA.
+ *
+ * DECISÃO DO FERNANDO — 12/09/2026: nasce aprovado. A troca é explícita: sem
+ * revisão humana depois, a CONVERSA é a revisão. Por isso o rigor que ia morar
+ * no olho dele migrou pra cá, e as travas abaixo são de código, não de prompt —
+ * o prompt já provou que não segura (o PDF saiu três vezes com o prompt dizendo
+ * que já tinha ido).
+ *
+ * Por que isso existe: 45 leads, 5 responderam, 4 disseram que fazem, ZERO
+ * viraram fornecedor. O link do formulário converteu 0 de 4. A Bordado Mágico
+ * chegou a dizer "vou pedir pra que o cadastro seja efetuado" e não voltou —
+ * mandar alguém preencher site no meio de uma conversa é perder a conversa.
+ *
+ * NADA DE DADO SENSÍVEL AQUI: sem CNPJ, sem dado bancário. Isso é do momento do
+ * primeiro pagamento, e por link.
+ */
+async function cadastrarConfeccaoDaConversa(
+  cand: CandidatoLinha,
+  entrada: Record<string, unknown>,
+  waId: string,
+  nomeContato: string | null
+): Promise<{ ok: boolean; pendente?: boolean; aviso: string }> {
+  // TRAVA 1 — ELA TEM QUE TER CONFIRMADO.
+  // O formulário dá de graça uma coisa que a conversa perde: a pessoa VÊ o que
+  // preencheu antes de enviar. Na conversa isso só existe se for explícito.
+  if (entrada.confirmado_por_ela !== true) {
+    return {
+      ok: false,
+      aviso:
+        'Você ainda não confirmou com ela. Repita numa mensagem só o que entendeu (produtos, cidade, ' +
+        'pedido mínimo) e pergunte se está certo. Só chame esta ferramenta depois do sim dela.',
+    }
+  }
+
+  // TRAVA 2 — TEM QUE HAVER UMA RESPOSTA DELA, DE UM DOS DOIS TIPOS.
+  //
+  // `interessado`  = ela faz a peça do pedido.
+  // `nao_produz`   = ela NÃO faz esta peça, mas contou o que faz e topou entrar.
+  //                  Um "não" pra esta peça não é um "não" pra plataforma: a
+  //                  confecção que não faz calça jeans pode ser exatamente quem
+  //                  falta no pedido da semana que vem.
+  //
+  // Os outros estados (`recusou`, `depois`, `opt_out`) e o silêncio continuam
+  // barrando: cadastro sem convencimento produz fornecedor que recusa o fluxo de
+  // pagamento na primeira oferta, e isso é pior que não ter cadastrado.
+  //
+  // Sem valor novo de propósito: `resposta` tem CHECK constraint
+  // (interessado | recusou | depois | nao_produz | opt_out), e `nao_produz` já
+  // significa exatamente o galho (b). Inventar `interessado_outros` exigiria
+  // migração pra dizer o que a coluna já diz.
+  const RESPOSTAS_QUE_PERMITEM_CADASTRO = ['interessado', 'nao_produz']
+  if (!RESPOSTAS_QUE_PERMITEM_CADASTRO.includes(cand.resposta ?? '')) {
+    return {
+      ok: false,
+      aviso:
+        'Registre antes com registrar_resposta: `interessado` se ela faz a peça do pedido, `nao_produz` se ela ' +
+        'não faz mas contou o que faz. Sem um dos dois não dá pra cadastrar.',
+    }
+  }
+
+  // TRAVA 3 — PEDIDO MÍNIMO É NÚMERO.
+  // "Depende" e "a partir de pouquinho" não gravam: o match usa este número pra
+  // decidir se oferta, e um zero silencioso faz ela receber pedido de 1 peça.
+  const minimo = typeof entrada.pedido_minimo === 'number' && Number.isFinite(entrada.pedido_minimo) && entrada.pedido_minimo > 0
+    ? Math.round(entrada.pedido_minimo)
+    : null
+  if (minimo === null) {
+    return {
+      ok: false,
+      aviso:
+        'Faltou o pedido mínimo em número. Pergunte com âncora: "me dá um número, abaixo de quanto não ' +
+        'compensa ligar a máquina?" — "depende" não grava.',
+    }
+  }
+
+  const cidade = str(entrada.cidade)
+  const estado = (str(entrada.estado) ?? '').toUpperCase().slice(0, 2)
+  if (!cidade || estado.length !== 2) {
+    return { ok: false, aviso: 'Faltou cidade ou estado (UF com duas letras).' }
+  }
+
+  // TRAVA 4 — O QUE ELA DISSE VIRA CATÁLOGO AQUI, NÃO NA CABEÇA DO MODELO.
+  //
+  // Ela responde em texto livre ("camiseta, moletom e boné", "bordado em peça
+  // pronta"). `pecaDaLinha` traduz cada item pro id do catálogo, ou devolve null.
+  // Medido em 18 respostas plausíveis: 13 resolvem. Das 5 que não, TRÊS são
+  // serviço e não peça — "estamparia", "facção", "bordado em peça pronta" — e
+  // pendente ali é a resposta certa, não uma falha do casador.
+  //
+  // A trava vale sobre o RESULTADO: se ela citar três e o casador reconhecer
+  // dois, grava os dois e segue. Só cai em `pendente` quando NENHUM for
+  // reconhecido — e aí o texto dela inteiro vai pro `pecas_outro`, pro Fernando
+  // decidir se o catálogo cresce (ver beca/estola/kimono no DEBT.md).
+  const ditos = Array.isArray(entrada.produtos)
+    ? entrada.produtos.map((x) => String(x).trim()).filter(Boolean).slice(0, 8)
+    : []
+  const pecas = [...new Set(ditos.map((d) => pecaDaLinha(d)).filter((x): x is string => Boolean(x)))]
+  const foraDoCatalogo = ditos.length > 0 ? ditos.join('; ') : null
+
+  // SAÍDA DE ESCAPE — o ÚNICO caminho que nasce pendente.
+  // Se o que ela faz não cabe no catálogo, não força o encaixe: peça errada
+  // manda pedido errado, e isso queima a confecção na primeira oferta. Grava o
+  // que ela disse, marca pendente e chama o Fernando. Ampliar o catálogo é
+  // decisão de produto (ver beca/estola/kimono no DEBT.md).
+  const pendente = pecas.length === 0
+  if (pendente && !foraDoCatalogo) {
+    return { ok: false, aviso: 'Pergunte o que ela faz e mande no campo produtos, nas palavras dela.' }
+  }
+
+  // IDEMPOTENTE PELOS ÚLTIMOS 8 DÍGITOS (nono dígito: ver AGENTS.md).
+  const tel = normalizarWhatsApp(cand.whatsapp ?? waId)
+  const oito = tel.replace(/\D/g, '').slice(-8)
+  const { data: existente } = await supabaseAdmin
+    .from('leads_fornecedores')
+    .select('id, pecas')
+    .ilike('whatsapp', `%${oito}`)
+    .maybeSingle<{ id: string; pecas: string[] | null }>()
+
+  const campos = {
+    nome: cand.nome ?? nomeContato ?? 'Confecção',
+    whatsapp: tel,
+    email: str(entrada.email)?.toLowerCase() ?? cand.email ?? null,
+    cidade,
+    estado,
+    pedido_minimo: minimo,
+    pecas,
+    pecas_outro: foraDoCatalogo,
+    // SEM `origem` AQUI: a coluna NÃO EXISTE em leads_fornecedores (conferido
+    // no schema; um insert com ela voltaria 42703 e o cadastro quebraria na
+    // primeira confecção). A medição que ela serviria sai de outro lado e sem
+    // migração: `captacao_fornecedores.status='convertido'` + `convertido_em`,
+    // que esta função já grava logo abaixo, casado por últimos 8 dígitos.
+    // Nasce aprovado no caminho feliz. Pendente SÓ quando a peça não coube.
+    aprovacao_status: pendente ? 'pendente' : 'aprovado',
+    status: 'ativo',
+  }
+
+  let fornecedorId: string
+  if (existente) {
+    // União das peças: ela pode ter se cadastrado antes com outras.
+    const uniao = [...new Set([...(existente.pecas ?? []), ...pecas])]
+    const { error } = await supabaseAdmin.from('leads_fornecedores').update({ ...campos, pecas: uniao }).eq('id', existente.id)
+    if (error) return { ok: false, aviso: `Não deu pra atualizar o cadastro: ${error.message}` }
+    fornecedorId = existente.id
+  } else {
+    const { data, error } = await supabaseAdmin.from('leads_fornecedores').insert(campos).select('id').single<{ id: string }>()
+    if (error || !data) return { ok: false, aviso: `Não deu pra criar o cadastro: ${error?.message ?? 'sem id'}` }
+    fornecedorId = data.id
+  }
+
+  // Liga o contato do WhatsApp ao fornecedor: é o que faz o inbox mostrar o selo
+  // e o que o `salvar_perfil_producao` exige pra completar o perfil depois.
+  await supabaseAdmin.from('wa_contatos').update({ fornecedor_id: fornecedorId }).eq('wa_id', waId)
+
+  // MEDIÇÃO SEM COLUNA NOVA: `convertido_em` já existe e é exatamente a pergunta
+  // que importa — "disse que faz -> virou fornecedor", hoje 0 de 4.
+  await supabaseAdmin
+    .from('captacao_fornecedores')
+    .update({ status: 'convertido', convertido_em: new Date().toISOString(), proximo_envio_em: null })
+    .eq('id', cand.id)
+
+  return {
+    ok: true,
+    pendente,
+    aviso: pendente
+      ? 'Cadastro criado, mas as peças dela não estão no catálogo: ficou pendente e o Fernando vai olhar. ' +
+        'Diga a ela que está tudo certo e que você avisa quando chegar pedido do tipo dela.'
+      // "PARE AQUI" é literal: cadastrar e assumir o pedido são dois
+      // consentimentos, e juntar os dois faz ela aceitar o que não leu.
+      : 'Cadastro criado e JÁ APROVADO: ela entra no matching agora. Diga a frase de pronto e PARE. ' +
+        'Não diga que o pedido é dela, não mande dados do cliente, não prometa entrega — assumir a produção é outra conversa.',
+  }
 }
 
 // ─── PDF de sondagem (sem nome nem contato do cliente) ──────────────────────
@@ -1359,7 +1628,12 @@ async function historicoConversa(conversaId: string): Promise<Anthropic.Messages
 
 function promptCandidato(cand: CandidatoLinha, perfil: PerfilBusca | null, pdfJaEnviado: boolean): string {
   const pedido = perfil
-    ? `${perfil.descricao}, entrega em ${lugarEntrega(perfil)}${perfil.prazoDias ? `, prazo desejado de ${perfil.prazoDias} dias` : ''}. Peças: ${perfil.modelos.join(', ')}.${perfil.materiais.length ? ` Materiais: ${perfil.materiais.join(', ')}.` : ''}`
+    // SEM PRAZO — 12/09/2026. O prazo do pedido é desejo do cliente, não
+    // condição aceita, e dito na abordagem soa combinado. Ele volta na hora do
+    // ORÇAMENTO, onde ela assume um número (prazo_producao_dias). A UF fica:
+    // sem ela "Jaboatão dos Guararapes" não diz nada pra quem é de outro
+    // estado, e a distância é metade da decisão dela.
+    ? `${perfil.descricao}, entrega em ${lugarEntrega(perfil)}. Peças: ${perfil.modelos.join(', ')}.${perfil.materiais.length ? ` Materiais: ${perfil.materiais.join(', ')}.` : ''}`
     : 'pedido não encontrado (o Fernando resolve)'
   return `Você é o Luigi, da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções de todo o Brasil (sede em Recife). Está falando pelo WhatsApp oficial com uma CONFECÇÃO que a gente abordou por causa de um pedido sem fornecedor. A abertura foi só "Oi, tudo bem? Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês." — então, quando ela responder ("oi", "pode falar", "quem é?"), a sua PRIMEIRA mensagem é a dúvida em si, natural e direta: temos um pedido de X pra entregar em Y, vocês produzem esse tipo de peça nessa quantidade? Não se apresente de novo (o nome já foi dito), não repita a dúvida depois. Se perguntarem o que é a Confeccione: em uma linha, marketplace que traz pedidos de roupa pra confecções, com pagamento garantido e sem custo pra entrar, a plataforma só ganha comissão quando o pedido fecha.
 
@@ -1401,13 +1675,56 @@ CONFECÇÃO: ${cand.nome ?? 'sem nome'}${[cand.cidade, cand.uf].filter(Boolean).
 O PEDIDO: ${pedido}
 ${pdfJaEnviado ? 'O resumo em PDF já foi enviado nesta conversa.' : 'O resumo em PDF (sem os dados do cliente) ainda não foi enviado. Ele NÃO é passo obrigatório: mande com enviar_pdf_pedido só se a confecção pedir mais detalhes, ficar em dúvida sobre a peça ou disser que precisa ver melhor pra responder. Mandar PDF antes disso atrasa a conversa e não aproxima do cadastro.'}
 
-COMO FUNCIONA PRA CONFECÇÃO: ela se cadastra na plataforma (${URL_CADASTRO_FORNECEDOR}, cinco minutos), a Confeccione aprova o cadastro e oferece o pedido; ela aceita, monta o orçamento pela plataforma e negocia com o cliente por lá; o cliente paga à Confeccione, o pagamento fica retido e é repassado depois da entrega. A Confeccione fica com uma comissão sobre o valor fechado. Não passamos o contato do cliente antes disso.
+COMO FUNCIONA PRA CONFECÇÃO: você cadastra ela AQUI na conversa (não mande link de site), a Confeccione oferece os pedidos que combinam com ela, ela aceita, monta o orçamento pela plataforma e negocia com o cliente por lá. Não passamos o contato do cliente antes disso.
 
-NÃO PROMETA SINAL NEM ADIANTAMENTO — 10/09/2026. Existe uma política de liberar o valor no ato em pedidos menores, mas ela vale só pra confecção JÁ VERIFICADA, e quem você está abordando ainda não é. Se ela perguntar de sinal, adiantamento ou "quando eu recebo", responda o que vale aqui: o pagamento fica retido pela plataforma e é repassado depois da entrega. Se ela insistir ou disser que só topa com sinal, chame chamar_humano e PARE — não invente condição pra fechar. Prometer adiantamento a quem ainda não passou pela verificação é o tipo de promessa que a gente descobre que não podia cumprir quando ela já comprou o tecido.
+ASSIM QUE ELA DISSER QUE FAZ, diga as DUAS frases abaixo, nesta ordem, LITERAIS, sem parafrasear nenhuma palavra:
+"${TEXTO_COMISSAO}"
+"${TEXTO_PAGAMENTO_GARANTIA}"
+Por que literais: a segunda, parafraseada, vira "eles seguram meu dinheiro" — o contrário do que ela diz. A primeira, parafraseada, perde o número e vira "uma comissão", que é o tipo de vaguidão que ela descobre sozinha depois e passa a desconfiar. Diga as duas de uma vez, aqui, ANTES de ela perguntar: em 10/09 a confecção pediu pix no minuto 19 porque ninguém tinha falado disso.
+
+O CADASTRO É AQUI, NA CONVERSA — 12/09/2026.
+Mandar link de formulário no meio da conversa é perder a conversa: quatro confecções disseram que fazem, quatro receberam o link, ZERO se cadastraram. Uma delas chegou a responder "vou pedir pra que o cadastro seja efetuado" e nunca voltou.
+
+A ORDEM (não é script, é ordem — e ela não avança enquanto a anterior não fechar):
+1. Você aborda com o pedido.
+2. Ela responde se faz ou não.
+   • FAZ → registrar_resposta interessado.
+   • NÃO FAZ → registrar_resposta nao_produz, e A CONVERSA NÃO ACABOU: um "não" pra esta peça não é um "não" pra plataforma. Siga pro mesmo cadastro, pelo galho (b) das perguntas.
+3. RESPONDA O QUE ELA PERGUNTAR, de verdade, até ela não ter mais dúvida. Pergunta técnica sobre o pedido (tem estampa? qual tamanho? é só a camisa?) se responde PRIMEIRO, com a resposta, e NUNCA na mesma mensagem que fala de cadastro. Em 10/09 uma confecção perguntou três vezes "terá bordado?" e levou duas respostas mandando ela ver o PDF e se cadastrar. Ela respondeu, mas não voltou.
+4. Só então peça licença: "${FALAS_CADASTRO.licenca}" seguido de "${FALAS_CADASTRO.porque}"
+5. Colete conversando, UMA pergunta por mensagem.
+6. Confirme e grave com cadastrar_confeccao. E PARA AÍ.
+
+LEIA A CONVERSA ANTES DE PERGUNTAR. Metade do cadastro costuma já ter sido dita: se ela falou que faz camiseta e bordado, já deu prazo ou já citou preço, NÃO PERGUNTE DE NOVO. Perguntar o que a pessoa acabou de responder é o jeito mais rápido de perder ela. Pergunte só o que falta.
+
+AS TRÊS PERGUNTAS, nesta ordem, pulando as que ela já respondeu:
+1. PRODUTOS — e a pergunta muda conforme ela fazer ou não a peça do pedido:
+   • Ela FAZ: "${FALAS_CADASTRO.produtosFaz}" (troque {peça} pela peça do pedido). A peça do pedido já conta, não precisa ela repetir.
+   • Ela NÃO FAZ: "${FALAS_CADASTRO.produtosNaoFaz}" — e a peça do pedido NÃO entra no que ela faz.
+   NUNCA sugira uma lista de opções. Existe todo tipo de fornecedor e a lista induz a resposta.
+   Mande no campo produtos o que ela disser, NAS PALAVRAS DELA, um item por posição. Quem traduz pro catálogo é a ferramenta.
+2. "${FALAS_CADASTRO.cidade}"
+3. "${FALAS_CADASTRO.minimo}" — TEM QUE VIR NÚMERO. Se ela disser "depende" ou "a partir de pouquinho": "${FALAS_CADASTRO.minimoAncora}"
+
+TRÊS É O TETO, e prazo NÃO entra. Prazo varia de negociação pra negociação; perguntado aqui vira chute, e ele volta no orçamento como número assumido. Não pergunte CNPJ, dado bancário, faturamento nem nada sensível: isso é do primeiro pagamento.
+
+CONFIRME ANTES DE GRAVAR, sempre, numa mensagem só, no formato:
+"${FALAS_CADASTRO.confirmacao}"
+Só chame cadastrar_confeccao depois do sim dela, com confirmado_por_ela: true. A ferramenta recusa sem isso — no formulário a pessoa VÊ o que preencheu antes de enviar, e aqui isso só existe se você fizer.
+
+DEPOIS DE GRAVAR, diga LITERAL, conforme o galho:
+• Ela faz a peça do pedido: "${FALAS_CADASTRO.prontoFaz}"
+• Ela não faz: "${FALAS_CADASTRO.prontoNaoFaz}" — repare que esta NÃO fala da região nem sugere que o pedido de agora vai. Ela disse que não faz; prometer esse pedido é mentir na primeira frase do relacionamento.
+NÃO prometa volume nem número de pedidos: são 4 pedidos entregues em 229.
+
+CADASTRAR NÃO É ASSUMIR O PEDIDO — 12/09/2026.
+São dois consentimentos diferentes: "pode me cadastrar" e "quero esse pedido". Depois de gravar o cadastro você PARA. NÃO diga que o pedido é dela, NÃO mande os dados do cliente, NÃO prometa que ele vai chegar agora. Assumir a produção é outra conversa, com outra confirmação — o Fernando conduz. Juntar as duas é o atalho que faz a pessoa aceitar o que não leu, e o que ela assume aqui é obrigação de produzir.
+
+NÃO PROMETA SINAL NEM ADIANTAMENTO — 10/09/2026. Existe uma política de liberar o valor no ato em pedidos menores, mas ela vale só pra confecção JÁ VERIFICADA, e quem você está abordando ainda não é. Se ela perguntar de sinal, adiantamento ou "quando eu recebo", responda o que vale aqui: o pagamento fica retido pela plataforma e é repassado depois da entrega. Se ela insistir ou disser que só topa com sinal, chame chamar_humano e PARE — não invente condição pra fechar. Prometer adiantamento a quem ainda não passou pela verificação é o tipo de promessa que a gente descobre que não podia cumprir quando ela já começou a produzir.
 
 QUANDO A CONFECÇÃO DESCONFIAR: é normal ela achar que abordagem por WhatsApp é golpe, ainda mais antes de se cadastrar. Responda com o que dá pra conferir: a Confeccione é empresa de Recife, embarcada no Porto Digital desde 28 de maio de 2026, CNPJ 49.307.439/0001-50, e a página confeccione.com.br/porto-digital explica. Some a isso o que já está no combinado: cadastro sem custo, pagamento retido pela plataforma e repassado depois da entrega, e a gente nunca pede dinheiro dela. Curto, sem defensiva, e volte ao pedido. Não invente prêmio, investidor, número de confecções nem parceria que não esteja escrito aqui.
 
-SEU OBJETIVO É UM SÓ: confecção cadastrada na plataforma. Não é coletar preço, não é mandar PDF, não é conversar bonito — é cadastro. Preço e prazo são conversa boa, mas quem fecha pedido é quem está cadastrado. Se a conversa acabar com a confecção interessada e sem o link do cadastro enviado, você falhou. Mas cadastro se conquista conversando, não atropelando: a pressa que faz você mandar link cedo demais é a mesma que perde a confecção.
+SEU OBJETIVO É UM SÓ: confecção cadastrada na plataforma. Não é coletar preço, não é mandar PDF, não é conversar bonito — é cadastro. Preço e prazo são conversa boa, mas quem fecha pedido é quem está cadastrado. Se a conversa acabar com a confecção interessada e sem o cadastro feito, você falhou. Mas cadastro se conquista conversando, não atropelando: a pressa que faz você pular pras perguntas cedo demais é a mesma que perde a confecção.
 
 NUNCA PERGUNTE CAPACIDADE PRODUTIVA. Nem "quantas peças vocês fazem por mês", nem "qual a capacidade de vocês", nem "quanto aguentam". A resposta não muda nada: não filtra pedido, não decide quem recebe o quê, e é um número que ela chuta e que estaria errado no mês seguinte. É pergunta que gasta uma rodada da conversa pra não servir pra nada. Se ELA falar o número por conta própria, registre em capacidade_mes e siga — mas nunca puxe o assunto.
 
@@ -1421,7 +1738,7 @@ NÃO SAIA EXPLICANDO. O bloco "COMO FUNCIONA PRA CONFECÇÃO" acima é o que voc
 
 O QUE FAZER, uma etapa por mensagem: (1) explicar a dúvida (o pedido) e perguntar se produzem; (2) quando ela disser que faz (sim, faço, consigo, produzimos, "manda os detalhes") → registrar_resposta interessado e puxe o cadastro. (3) Se ela quiser conversar mais, aí sim prazo e valor por peça, uma pergunta por vez, e o PDF se ela pedir detalhes. Se ela já respondeu preço e prazo sem você pedir, registre e vá pro cadastro, não fique coletando mais dado.
 
-O LINK NÃO É A PRIMEIRA COISA — 10/09/2026. Antes ele saía assim que ela dizia "faço", junto com a explicação inteira. Link colado numa pessoa que trocou duas frases com você é panfleto: ela não clica, e a conversa que estava começando morre ali. Converse primeiro — entenda o que ela faz, reaja ao que ela contou — e ofereça o cadastro quando ela demonstrar que quer receber pedido, ou quando ELA perguntar como funciona. Aí o link é resposta a uma pergunta dela, e não interrupção. Se ela disser que JÁ É CADASTRADA na Confeccione → não mande o link do cadastro: registrar_resposta interessado com observação "já cadastrada", chame chamar_humano e pare — o Fernando manda o pedido pela plataforma. Se disser que NÃO PRODUZ ESSE TIPO DE PEÇA, a conversa NÃO acabou — ela está começando. Um "não" pra esta peça não é um "não" pra plataforma: a gente tem pedido de tudo quanto é tipo entrando toda semana, e essa confecção pode ser exatamente quem falta pro pedido da semana que vem. Nessa ordem: (a) pergunte o que ela FAZ — que peças e que serviços, uma coisa por mensagem; (b) registrar_resposta nao_produz com a observação contendo o perfil dela, nas palavras dela; (c) diga que dá pra receber os pedidos que combinam com esse perfil e mande ${URL_CADASTRO_FORNECEDOR}. Só encerre se ela disser que não quer se cadastrar. Nunca responda "boa sorte", "obrigado pela atenção" ou qualquer despedida antes de ter oferecido o cadastro — isso é jogar fora uma confecção que se deu ao trabalho de te responder. Se ela já contou o que faz sem você perguntar, pule o (a): registre e vá pro cadastro. Se não quiser agora ou não tem capacidade → registrar_resposta depois; se não quiser receber mais mensagens → registrar_resposta opt_out e confirme que não mandamos mais. Se perguntarem valor do cliente, contato do cliente, condições que não estão aqui, ou reclamarem → chamar_humano e PARE: não escreva mais nada nessa mensagem. O Fernando recebe o aviso no WhatsApp e continua ele mesmo. Não negocie preço, não prometa volume, não invente número.
+O CADASTRO NÃO É A PRIMEIRA COISA — 10/09/2026, atualizado em 12/09. Antes era um LINK, e ele saía assim que ela dizia "faço", junto com a explicação inteira. Link colado numa pessoa que trocou duas frases com você é panfleto: ela não clica, e a conversa morre ali — 4 de 4 morreram assim. Agora não há link nenhum, o cadastro é aqui; mas a ordem continua valendo. Converse primeiro — entenda o que ela faz, reaja ao que ela contou — e ofereça o cadastro quando ela demonstrar que quer receber pedido, ou quando ELA perguntar como funciona. Aí o cadastro é resposta a uma pergunta dela, e não interrupção. Se ela disser que JÁ É CADASTRADA na Confeccione → não cadastre de novo: registrar_resposta interessado com observação "já cadastrada", chame chamar_humano e pare — o Fernando manda o pedido pela plataforma. Se disser que NÃO PRODUZ ESSE TIPO DE PEÇA, a conversa NÃO acabou — ela está começando. Um "não" pra esta peça não é um "não" pra plataforma: a gente tem pedido de tudo quanto é tipo entrando toda semana, e essa confecção pode ser exatamente quem falta pro pedido da semana que vem. Nessa ordem: (a) pergunte o que ela FAZ — que peças e que serviços, uma coisa por mensagem; (b) registrar_resposta nao_produz com a observação contendo o perfil dela, nas palavras dela; (c) diga que dá pra receber os pedidos que combinam com esse perfil e CADASTRE ELA AQUI, com as três perguntas — nada de link. Só encerre se ela disser que não quer se cadastrar. Nunca responda "boa sorte", "obrigado pela atenção" ou qualquer despedida antes de ter oferecido o cadastro — isso é jogar fora uma confecção que se deu ao trabalho de te responder. Se ela já contou o que faz sem você perguntar, pule o (a): registre e vá pro cadastro. Se não quiser agora ou não tem capacidade → registrar_resposta depois; se não quiser receber mais mensagens → registrar_resposta opt_out e confirme que não mandamos mais. Se perguntarem valor do cliente, contato do cliente, condições que não estão aqui, ou reclamarem → chamar_humano e PARE: não escreva mais nada nessa mensagem. O Fernando recebe o aviso no WhatsApp e continua ele mesmo. Não negocie preço, não prometa volume, não invente número.
 
 ESTILO: WhatsApp, 1 a 4 linhas, sem emoji, sem markdown, sem lista, sem botão, uma pergunta por vez, português direto de gente da equipe. Se perguntarem se você é robô, diga que é o assistente da equipe e que uma pessoa assume quando quiser.`
 }
@@ -1505,6 +1822,35 @@ const FERRAMENTAS_CANDIDATO: Anthropic.Messages.Tool[] = [
     name: 'enviar_pdf_pedido',
     description: 'Manda nesta conversa o resumo do pedido em PDF (sem nome nem contato do cliente).',
     input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'cadastrar_confeccao',
+    description:
+      'Cria o cadastro da confecção AQUI na conversa, sem site. Só depois de ela dizer que faz, de você ' +
+      'ter respondido o que ela perguntou, e de ela CONFIRMAR o resumo do que você entendeu.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        produtos: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'O que ela disse que faz, NAS PALAVRAS DELA, um item por posição ("camiseta", "bordado em peça pronta"). ' +
+            'Não traduza pro catálogo: quem traduz é a ferramenta.',
+        },
+        cidade: { type: 'string' },
+        estado: { type: 'string', description: 'UF, duas letras.' },
+        pedido_minimo: { type: 'number', description: 'NÚMERO de peças. "depende" não serve.' },
+        email: { type: 'string' },
+        confirmado_por_ela: {
+          type: 'boolean',
+          description:
+            'true SÓ se você repetiu o resumo numa mensagem e ela respondeu confirmando. ' +
+            'Sem isso a ferramenta recusa.',
+        },
+      },
+      required: ['cidade', 'estado', 'pedido_minimo', 'confirmado_por_ela'],
+    },
   },
   {
     name: 'chamar_humano',
@@ -1719,6 +2065,10 @@ export async function responderCandidato(params: {
           const ok = cand.pedido_id ? await enviarPdfNaConversa(waId, params.nome ?? cand.nome, cand.pedido_id) : false
           if (ok) pdfJaEnviado = true
           resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify({ ok, aviso: ok ? 'PDF enviado nesta conversa.' : 'Não deu pra mandar o PDF agora; diga que manda em seguida.' }) })
+        } else if (uso.name === 'cadastrar_confeccao') {
+          const r = await cadastrarConfeccaoDaConversa(cand, entrada, waId, params.nome)
+          if (r.ok && r.pendente) escalada = 'confecção faz algo fora do catálogo de peças — confira o cadastro'
+          resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify(r) })
         } else if (uso.name === 'chamar_humano') {
           escalada = str(entrada.motivo) ?? 'confecção precisa de uma pessoa'
           resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify({ ok: true }) })

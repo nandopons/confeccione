@@ -465,3 +465,49 @@ from leads_fornecedores where aprovacao_status='aprovado' and status='ativo'` �
 **15 de 41**.
 
 ---
+
+## 🟡 O catálogo descreve PEÇA e não descreve SERVIÇO
+
+**Registrado em:** 2026-09-12, ao escrever o cadastro por conversa.
+
+### O quê
+`pecaDaLinha` traduz o que a confecção diz pro catálogo de `pecas.ts`. Medido em 18 respostas
+plausíveis, **13 resolvem**. Das 5 que não, **três são serviço e não peça**:
+
+```
+pendente  "bordado em peça pronta"
+pendente  "estamparia e silk"
+pendente  "só facção, costuro o que mandarem"
+```
+
+**Isso é a resposta certa, não falha do casador.** Uma confecção que só borda não FAZ camiseta,
+ela ACABA camiseta. Forçar `camiseta` no cadastro dela faria o matching mandar pedido de
+confecção completa pra quem só tem máquina de bordar — e queimar a confecção na primeira
+oferta, que é o ativo que não se repõe.
+
+### Por que importa: não é cauda longa
+**7 dos 45 candidatos já abordados têm bordado, estamparia ou silk NO PRÓPRIO NOME — 1 em 6:**
+
+```
+ATG Estamparia – Fardamentos e Camisas Personalizada
+Bordado Mágico – Uniformes Profissionais
+Bordados & CIA
+Estamparia RJ – Camisas Personalizadas Niterói
+JHP Gráfica e Estamparia
+Promoestampa Estamparia
+Sheik Estamparia
+```
+
+Duas delas — Bordado Mágico e Promoestampa — estão entre as **quatro** que disseram que fazem
+e não viraram fornecedor.
+
+### Como revisitar
+É a mesma pergunta de beca/estola/kimono, de outro ângulo: **o que o catálogo ainda não sabe
+dizer.** Lá falta uma peça; aqui falta um eixo — a confecção tem PEÇA e tem SERVIÇO, e hoje só
+a primeira existe no vocabulário do matching.
+
+Enquanto não existir, o caminho já está escrito e é honesto: cai em `pendente`, o texto dela
+inteiro vai pro `pecas_outro` nas palavras dela, e o Fernando decide. `fornecedor_perfil.servicos`
+já guarda serviço — mas o matching não lê, e é isso que precisaria mudar.
+
+---
