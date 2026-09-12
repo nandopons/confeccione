@@ -748,3 +748,39 @@ Coluna própria pra nota interna (`observacoes_internas`), e o PDF passa a ler s
 próximo formato de nota interna não precise de ninguém lembrar de nada.
 
 ---
+
+## 🔴 Ofertar RECLASSIFICA o pedido pro sistema todo — a view olha `ofertas_total`
+
+**Descoberto em:** 2026-09-12, ao tentar ofertar o `20260900293`.
+
+### O quê
+`pedidos_assistente_etapas` classifica por **`status='confirmado' OR ofertas_total > 0`**. Quer
+dizer que **criar uma oferta faz o pedido PARECER liberado** pro resto do sistema, mesmo com
+`confirmado_em` vazio — e a fila automática, que lê a view, adota o pedido e segue ofertando
+sozinha.
+
+**Foi assim que 24 pedidos foram ofertados sem o cliente ter liberado.**
+
+### Por que isso é maior que um pedido
+A trava em `ofertarPedido` (10/09) recusa `!pago && !confirmado_em` e **não pode ser
+contornada**. Não é burocracia: sem ela, um clique numa tela de admin reclassifica o pedido e
+liga uma fila automática. O caso concreto que a originou está no comentário — o Joaquim aceitou
+o `20260900274` e montou orçamento de algo que a cliente nunca soltou.
+
+**A consequência prática, que não é óbvia:** quando o pedido está pronto mas sem
+`confirmado_em`, o caminho não é forçar a oferta. É fazer o cliente liberar — tocando em
+"Buscar fornecedor", ou pelo Luigi com o sim dele. Hoje (12/09) o Luigi está em `sugere`, e
+`ferramentasDoModo` só entrega `liberar_para_fornecedores` no modo `responde`: em `sugere` a
+lista é `[chamar_humano, motivo_parada]`. Então esse caminho exige trocar o modo, que é global.
+
+### Como revisitar
+A view derivar "liberado" de `ofertas_total > 0` é a raiz. Enquanto for assim, **toda escrita
+de oferta é também uma escrita de etapa**, e ninguém que oferta está pensando nisso. O conserto
+é a view classificar por `confirmado_em`/`pagamento_status` e deixar `ofertas_total` descrever
+só o que ele diz — quantas ofertas existem.
+
+Antes de mexer: medir quantos dos 229 mudariam de etapa com o critério novo. Pedido que hoje
+aparece vivo só por ter oferta passaria a aparecer como não-liberado, e isso muda o que o
+Fernando vê no painel de manhã.
+
+---
