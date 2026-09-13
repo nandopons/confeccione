@@ -955,6 +955,33 @@ async function liberarSeEleConfirmou(
   return { liberou: true, codigo: alvo.codigo }
 }
 
+/**
+ * Quantas vezes a MESMA divergência (mesma peça, mesmo texto) já fez
+ * `liberar_para_fornecedores` recusar nesta conversa. Lê o que já é gravado —
+ * nenhuma coluna nova. Ver o uso em liberar_para_fornecedores.
+ */
+async function recusasAnterioresDaMesmaDivergencia(conversaId: string, divergencias: Array<{ o_que: string }>): Promise<number> {
+  if (divergencias.length === 0) return 0
+  const { data, error } = await supabaseAdmin
+    .from('luigi_whatsapp_log')
+    .select('ferramentas')
+    .eq('conversa_id', conversaId)
+    .order('criado_em', { ascending: false })
+    .limit(40)
+  // Consulta que falha não escala: na dúvida, pergunta — que é o de hoje.
+  if (error || !data) return 0
+  const alvos = divergencias.map((d) => d.o_que)
+  let n = 0
+  for (const linha of data as Array<{ ferramentas: unknown }>) {
+    const fs = Array.isArray(linha.ferramentas) ? (linha.ferramentas as ChamadaFerramenta[]) : []
+    const bateu = fs.some(
+      (f) => f.nome === 'liberar_para_fornecedores' && f.ok === false && alvos.some((a) => (f.erro ?? '').includes(a))
+    )
+    if (bateu) n++
+  }
+  return n
+}
+
 async function montarContexto(conversaId: string, waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
   const [pedidos, conta, cadastroFornecedor] = await Promise.all([
     pedidosDoContato(waId, clienteId),
@@ -1150,6 +1177,8 @@ const FERRAMENTA_AJUSTAR_PECA: Anthropic.Messages.Tool = {
   description:
     'Altera uma peça do pedido quando o CLIENTE pedir a mudança nesta conversa: material/tecido, modelo, cor, quantidade, ' +
     'grade de tamanhos ou descrição. Informe só o que muda — mas se a peça tem grade e a quantidade muda, mande os dois: ' +
+    'Quando a revisão acusar ambiguidade (duas cores na mesma peça, por exemplo) e ELE responder, grave a resposta ' +
+    'em "confirmado_pelo_cliente": é isso que faz a pergunta parar de voltar, e é isso que a confecção lê. ' +
     'é a soma da grade que vale como total. A peça é identificada pela posição (1 = primeira do pedido, como aparece no ' +
     'contexto). Antes de chamar, repita o que entendeu e espere ele confirmar. Depois de alterar, diga o que ficou. ' +
     'Se o orçamento já estava definido, ele volta pro fornecedor refazer — avise isso ao cliente. Pedido pago não altera: ' +
@@ -1163,6 +1192,14 @@ const FERRAMENTA_AJUSTAR_PECA: Anthropic.Messages.Tool = {
       modelo: { type: 'string', maxLength: 120 },
       cor: { type: 'string', maxLength: 80 },
       quantidade: { type: 'number', minimum: 1, maximum: 100000 },
+      confirmado_pelo_cliente: {
+        type: 'string',
+        maxLength: 300,
+        description:
+          'O que ELE confirmou sobre esta peça quando você perguntou, em português e como vai pra ficha da ' +
+          'confecção: "peça única bicolor: metade azul marinho, metade branca (confirmado com o cliente)". ' +
+          'Só preencha DEPOIS de ele responder — isto vale como resposta dele pra quem vai produzir.',
+      },
       tamanhos: {
         type: 'array',
         description: 'Grade nova. Obrigatória junto da quantidade quando a peça já tem grade — a soma é o total.',
@@ -2062,6 +2099,7 @@ async function executarFerramenta(
         quantidade: num(entrada.quantidade),
         descricao: str(entrada.descricao),
         tamanhos: gradeDaFerramenta(entrada.tamanhos),
+        confirmado_pelo_cliente: str(entrada.confirmado_pelo_cliente),
       })
 
       const r = await editarLinhasPedidoCliente({ pedidoId: p.id, linhas })
@@ -2449,6 +2487,23 @@ async function executarFerramenta(
         // mencionada e o sistema pediu pra confirmar". Do lado do cliente isso
         // é um funcionário lendo um alerta em voz alta, e a dúvida deixa de ter
         // dono. Quem reparou foi ele; quem pergunta é ele.
+        // PERGUNTA QUE NÃO RESOLVEU DUAS VEZES NÃO É PERGUNTA, É BUG — 12/09/2026.
+        //
+        // No 20260900305 a MESMA divergência foi recusada às 22:14, 22:31 e
+        // 22:34, e o cliente tinha respondido três vezes. Na terceira, quem
+        // precisa ver isso é o Fernando, não o cliente — insistir é transformar
+        // um defeito nosso em desgaste dele.
+        //
+        // Sem estado novo: `luigi_whatsapp_log.ferramentas[].erro` já guarda o
+        // texto da recusa com a posição da peça dentro. Contar é consulta.
+        const jaRecusou = await recusasAnterioresDaMesmaDivergencia(ctx.conversaId, r.divergencias ?? [])
+        if (jaRecusou >= 2) {
+          throw new Error(
+            `esta mesma dúvida já foi perguntada ${jaRecusou} vezes e o pedido continua barrado. NÃO pergunte de novo: ` +
+              'chame chamar_humano agora e diga ao cliente, em uma linha, que uma pessoa da equipe vai resolver isso ' +
+              'e volta aqui. Perguntar uma terceira vez transforma um problema nosso em desgaste dele.'
+          )
+        }
         const comoFalar =
           '\n[como levar isto ao cliente] A dúvida é SUA, não de um sistema. Nunca diga "o sistema pediu", ' +
           '"apareceu um alerta", "preciso confirmar no cadastro" nem cite validação, campo ou descrição. ' +

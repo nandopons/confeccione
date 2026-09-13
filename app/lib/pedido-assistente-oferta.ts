@@ -49,6 +49,15 @@ export type LinhaPedido = {
   descricao?: string | null
   preco_unit_centavos?: number | null // LÍQUIDO/un definido pelo fornecedor
   lid?: string | null
+  /**
+   * O que o CLIENTE confirmou sobre esta peça quando a revisão acusou
+   * ambiguidade — em português, como vai pra ficha da confecção:
+   * "peça única bicolor: metade azul marinho, metade branca (confirmado com o
+   * cliente)". Campo próprio, e não texto dentro de `descricao`, porque
+   * `descricao` é justamente o que a regra 2 lê: a frase que isenta a peça
+   * passaria a alimentar a regra que deveria isentá-la. Ver revisarPecas.
+   */
+  confirmado_pelo_cliente?: string | null
 }
 
 export type PedidoPago = {

@@ -531,6 +531,25 @@ export function revisarPecas(linhas: LinhaPedido[]): Divergencia[] {
     const cor = (l.cor ?? '').trim()
     const desc = (l.descricao ?? '').trim()
     const publico = ((l as { publico?: string | null }).publico ?? '').trim().toLowerCase()
+    // DIVERGÊNCIA QUE O CLIENTE JÁ RESPONDEU PARA DE SER DIVERGÊNCIA — 12/09/2026.
+    //
+    // Antes disto a revisão era regra sobre TEXTO, e a resposta do cliente não
+    // escrevia em campo nenhum: pergunta → resposta → mesma recusa → mesma
+    // pergunta. No 20260900305 ele respondeu TRÊS vezes ("uma polo só com duas
+    // cores" 21:11, "correto" 22:00, "pode liberar o pedido" 22:33) e a
+    // liberação foi recusada as três. Loop por construção.
+    //
+    // Em 30 dias, `liberar_para_fornecedores` recusou 9 de 15 vezes e 100% das
+    // recusas foram divergência, em 8 pedidos.
+    //
+    // ISENTA SÓ AS REGRAS 1 E 2, SÓ NESTA LINHA. Não é passe livre pela revisão:
+    // confirmar que a peça é bicolor não pode fazer o público sumir sem ninguém
+    // reparar, e a checagem de público está logo abaixo, no mesmo forEach.
+    //
+    // Não existe trava garantindo que ele perguntou antes de preencher — não dá
+    // pra fazer isso sem voltar a regex sobre frase, que é o que acabou de
+    // falhar. O campo é auditável de propósito: quem pega abuso é a contagem.
+    const confirmado = ((l as { confirmado_pelo_cliente?: string | null }).confirmado_pelo_cliente ?? '').trim()
 
     // ==================================================================
     // DUAS CORES, OU UMA PEÇA BICOLOR? — 12/09/2026.
@@ -565,7 +584,7 @@ export function revisarPecas(linhas: LinhaPedido[]): Divergencia[] {
     // treina o agente a ignorar o aviso, que é pior que não ter aviso.
     // A separação de verdade está nomeada como trabalho da Fase 2.
     // ==================================================================
-    if (/\s+e\s+|\s*\/\s*|\s*,\s*|\s*\+\s*/.test(cor) && cor.length > 3 && !CONECTOR_BICOLOR.test(cor)) {
+    if (!confirmado && /\s+e\s+|\s*\/\s*|\s*,\s*|\s*\+\s*/.test(cor) && cor.length > 3 && !CONECTOR_BICOLOR.test(cor)) {
       achados.push({
         posicao,
         o_que: `a peça ${posicao} tem mais de uma cor no mesmo item ("${cor}") — a confecção precisa de uma linha por cor pra orçar`,
@@ -575,7 +594,7 @@ export function revisarPecas(linhas: LinhaPedido[]): Divergencia[] {
 
     // A descrição fala de cor ou tamanho que não está nos campos — sinal de que
     // o cliente detalhou no texto o que deveria estar estruturado.
-    if (desc.length > 40 && /\b(azul|branca|branco|preta|preto|verde|vermelh|amarel|cinza|rosa)\b/i.test(desc) && cor) {
+    if (!confirmado && desc.length > 40 && /\b(azul|branca|branco|preta|preto|verde|vermelh|amarel|cinza|rosa)\b/i.test(desc) && cor) {
       const coresNaDesc = (desc.match(/\b(azul|branca|branco|preta|preto|verde|vermelh\w*|amarel\w*|cinza|rosa)\b/gi) ?? []).map((c) =>
         c.toLowerCase()
       )

@@ -533,6 +533,11 @@ const FERRAMENTAS: Anthropic.Messages.Tool[] = [
         modelo: { type: 'string', maxLength: 120 },
         cor: { type: 'string', maxLength: 80 },
         quantidade: { type: 'number', minimum: 1, maximum: 100000 },
+        confirmado_pelo_cliente: {
+          type: 'string',
+          maxLength: 300,
+          description: 'O que o cliente confirmou sobre a peça, como vai pra ficha: "peça única bicolor: metade azul marinho, metade branca (confirmado com o cliente)".',
+        },
         tamanhos: {
           type: 'array',
           description: 'Grade nova. Obrigatória junto da quantidade quando a peça já tem grade — a soma é o total.',
@@ -820,6 +825,7 @@ async function executarFerramenta(nome: string, entrada: Entrada): Promise<unkno
         quantidade: num(entrada.quantidade),
         descricao: str(entrada.descricao),
         tamanhos: gradeDaFerramenta(entrada.tamanhos),
+        confirmado_pelo_cliente: str(entrada.confirmado_pelo_cliente),
       })
       const r = await editarLinhasPedidoCliente({ pedidoId: p.id, linhas })
       if (!r.ok) throw new Error(r.erro)

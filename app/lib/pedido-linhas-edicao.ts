@@ -69,7 +69,7 @@ function normalizarLinha(raw: LinhaEditada, anterior: LinhaPedido | null): Linha
     origIdx: typeof raw.origIdx === 'number' && raw.origIdx >= 0 ? raw.origIdx : null,
   }
   // Campos extras que o visualizador do cliente usa (não perdem no round-trip).
-  const extras: Array<keyof LinhaEditada> = ['publico', 'estampado', 'acabamentos', 'categoria', 'objetivo_material']
+  const extras: Array<keyof LinhaEditada> = ['publico', 'estampado', 'acabamentos', 'categoria', 'objetivo_material', 'confirmado_pelo_cliente']
   for (const k of extras) {
     const v = raw[k] !== undefined ? raw[k] : (anterior as LinhaEditada | null)?.[k]
     if (v !== undefined) (out as Record<string, unknown>)[k] = v
@@ -397,6 +397,8 @@ export type AjusteDeLinha = {
   quantidade?: number | null
   descricao?: string | null
   tamanhos?: Array<{ tamanho: string; qtd: number }> | null
+  /** Ver LinhaPedido.confirmado_pelo_cliente. Isenta ESTA linha das regras 1 e 2. */
+  confirmado_pelo_cliente?: string | null
 }
 
 /** Grade como as ferramentas dos agentes mandam: [{tamanho, qtd}]. */
@@ -456,6 +458,8 @@ export function linhasComAjuste(atuais: LinhaPedido[], posicao: number, ajuste: 
       total: ajuste.quantidade ?? l.total,
       descricao: ajuste.descricao ?? l.descricao,
       tamanhos: gradeNova ?? l.tamanhos,
+      confirmado_pelo_cliente:
+        ajuste.confirmado_pelo_cliente ?? (l as LinhaEditada).confirmado_pelo_cliente ?? null,
     }
   })
 }

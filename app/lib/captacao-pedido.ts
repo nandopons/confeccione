@@ -1238,7 +1238,15 @@ export async function pdfSondagem(pedidoId: string): Promise<{ bytes: Uint8Array
   const pedido: ResumoPedido = {
     id: String(data.id),
     nome: null,
-    linhas: Array.isArray(data.linhas) ? (data.linhas as ResumoPedido['linhas']) : [],
+    // `confirmado_pelo_cliente` sai daqui pela MESMA razão de `observacoes`
+    // logo abaixo: é campo livre, escrito pelo modelo a partir da fala do
+    // cliente, e este PDF promete "sem os dados do cliente". Nas outras duas
+    // fichas ele entra — lá a confecção já assumiu e precisa da informação.
+    linhas: (Array.isArray(data.linhas) ? (data.linhas as ResumoPedido['linhas']) : []).map((l) => {
+      const { confirmado_pelo_cliente, ...resto } = l as ResumoPedido['linhas'][number] & { confirmado_pelo_cliente?: unknown }
+      void confirmado_pelo_cliente
+      return resto
+    }),
     prazoDias: (data.prazo_dias as number | null) ?? null,
     cidade: (data.cidade as string | null) ?? null,
     uf: (data.uf as string | null) ?? null,

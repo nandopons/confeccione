@@ -319,6 +319,18 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
     }
     if (l.publico) linha(`Público: ${l.publico}`, { size: 10 })
     if (l.descricao) linha(`Obs.: ${l.descricao}`, { size: 10, cor: ESCURO })
+    // RENDERIZAR NÃO É OPCIONAL — 12/09/2026.
+    //
+    // `confirmado_pelo_cliente` existe pra isentar a peça da revisão de
+    // ambiguidade. Se a ficha não imprimir, a gente troca uma recusa eterna por
+    // um DADO INVISÍVEL — e a confecção perde justamente a informação que a
+    // trava existia pra garantir.
+    //
+    // O precedente está medido nesta base: `observacoes` preenchida em 217 de
+    // 236 pedidos, e nenhuma confecção jamais viu nenhuma, porque não havia
+    // linha na ficha. Um escritor, um leitor, no mesmo ponto.
+    const confirmado = (l as { confirmado_pelo_cliente?: string | null }).confirmado_pelo_cliente
+    if (confirmado) linha(`Confirmado com o cliente: ${confirmado}`, { size: 10, cor: ESCURO })
     const imgsProd = imagensDoProduto(pedido.mockups, i)
     if (imgsProd.length > 0) {
       algumaImagem = true
