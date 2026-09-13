@@ -1945,7 +1945,14 @@ async function executarFerramenta(
         .eq('id', p.id)
         .maybeSingle<{ linhas: LinhaPedidoCompleta[] | null }>()
       const atuais: LinhaPedidoCompleta[] = Array.isArray(ped?.linhas) ? ped.linhas : []
-      if (posicao > atuais.length) throw new Error(`o pedido tem ${atuais.length} peça(s); não existe a ${posicao}ª`)
+      if (posicao > atuais.length) {
+        throw new Error(
+          `o pedido tem ${atuais.length} peça(s); não existe a ${posicao}ª. ` +
+            'Não desista da mudança: ele pediu algo e está esperando.' +
+            '\n[como levar isto ao cliente] Pergunte de qual peça ele fala, citando as que existem pelo nome ' +
+            '("a camiseta preta ou o moletom?"). Nunca cite posição, índice nem nome de ferramenta.'
+        )
+      }
 
       const linhas = linhasComAjuste(atuais, posicao, {
         material: str(entrada.material),
@@ -2041,9 +2048,30 @@ async function executarFerramenta(
         })),
       })
       if (!r.ok) throw new Error(r.erro ?? 'não foi possível abrir o pedido')
-      // Reaproveitado não é criação: sem isto o modelo anuncia "abri seu
-      // pedido" duas vezes e o cliente fica sem saber quantos pedidos tem.
-      if (r.reaproveitado) return { ok: true, reaproveitado: true, codigo: r.codigo, aviso: r.erro }
+      // RECUSA NÃO SE VESTE DE SUCESSO — 12/09/2026.
+      //
+      // Reaproveitado não é criação: sem isto o modelo anuncia "abri seu pedido"
+      // duas vezes e o cliente fica sem saber quantos pedidos tem. Mas até hoje
+      // isto voltava como `ok: true` com a instrução rebaixada a `aviso` — e o
+      // resultado era não-determinístico, que é pior que errado sempre:
+      //
+      //   20:22, pedido 302, 3 ferramentas no turno, a conversa ERA sobre a
+      //   grade: leu o aviso, chamou ajustar_peca_pedido, gravou as 50 peças.
+      //   21:16, pedido 303, 6 ferramentas no turno ("fecha tudo"): leu ok:true,
+      //   seguiu o plano (fotos, mockups, resumo) e as 30 polos se perderam. O
+      //   cliente confirmou 30 e recebeu PDF de 20.
+      //
+      // Mesmo texto, dois resultados: um aviso é sinal OPCIONAL disputando com o
+      // resto do plano do turno. Erro não disputa. Trava que às vezes funciona é
+      // pior que trava que nunca funciona, porque a gente para de desconfiar.
+      if (r.reaproveitado) {
+        throw new Error(
+          `${r.erro ?? `esta pessoa já tem o pedido ${r.codigo} em aberto — ajuste ele, não crie outro`}` +
+            '\n[como levar isto ao cliente] Ele não está esperando um pedido novo: está esperando a mudança que pediu. ' +
+            'Não diga que abriu pedido, não diga que deu erro, não cite pedido em aberto nem ferramenta. ' +
+            'Faça o ajuste e confirme em uma linha o que ficou.'
+        )
+      }
       const pronto = await conferirPedido(r.pedidoId!)
       return {
         ok: true,
@@ -2092,7 +2120,13 @@ async function executarFerramenta(
       // recente fazia duas chamadas com modelos diferentes gravarem o mesmo
       // arquivo, e a foto anterior ficava inalcançável pra sempre.
       const fotos = await fotosDaConversa(ctx.conversaId)
-      if (fotos.length === 0) throw new Error('não achei foto que ele tenha mandado nesta conversa')
+      if (fotos.length === 0) {
+        throw new Error(
+          'não achei foto que ele tenha mandado nesta conversa.' +
+            '\n[como levar isto ao cliente] Peça a foto de novo em uma linha, sem explicar por quê ' +
+            '("me manda a foto da peça que eu já anexo aqui"). Não diga que não achou, não fale de sistema.'
+        )
+      }
       const nFoto = num(entrada.foto)
       // Uma foto só: não tem o que desambiguar. Várias e sem dizer qual: RECUSA.
       // Chutar aqui é o erro caro — foto na peça errada vai pra confecção e
