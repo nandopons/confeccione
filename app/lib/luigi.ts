@@ -1220,12 +1220,15 @@ const FERRAMENTA_FOTO_MODELO: Anthropic.Messages.Tool = {
     '"anexei"): fale da peça. E passe o que você entendeu da imagem pra descrição do modelo com ajustar_peca — ' +
     'quem costura lê o texto, não adivinha a foto. ' +
     'Diga a POSIÇÃO do modelo como ele conta: 1 = Modelo 1. ' +
+    'E diga QUAL foto em "foto": toda imagem dele aparece no histórico marcada [foto 1], [foto 2]… — use esse número. ' +
+    'Com mais de uma foto na conversa, sem isso a ferramenta recusa, porque adivinhar põe a imagem na peça errada. ' +
     'Se o pedido tem mais de um modelo e você não tem certeza de qual é a foto, PERGUNTE antes ' +
     '("essa foto é da camiseta preta ou da branca?") — foto na peça errada faz a confecção produzir errado.',
   input_schema: {
     type: 'object',
     properties: {
       modelo: { type: 'number', minimum: 1, maximum: 50, description: 'Posição do modelo: 1 = Modelo 1, 2 = Modelo 2…' },
+      foto: { type: 'number', minimum: 1, maximum: 200, description: 'Número da foto como aparece no histórico: [foto 1], [foto 2]…' },
       pedido: { type: 'string', description: 'Código ou id. Sem isto, usa o pedido em foco.' },
     },
     required: ['modelo'],
@@ -2085,18 +2088,24 @@ async function executarFerramenta(
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
       const posicao = num(entrada.modelo)
       if (!posicao) throw new Error('diga a posição do modelo (1 = Modelo 1)')
-      // A foto é a última que ELE mandou nesta conversa — nunca de outra pessoa.
-      const { data: foto } = await supabaseAdmin
-        .from('wa_mensagens')
-        .select('id, midia_path')
-        .eq('conversa_id', ctx.conversaId)
-        .eq('direcao', 'entrada')
-        .eq('tipo', 'image')
-        .not('midia_path', 'is', null)
-        .order('criado_em', { ascending: false })
-        .limit(1)
-        .maybeSingle<{ id: string; midia_path: string | null }>()
-      if (!foto?.midia_path) throw new Error('não achei foto que ele tenha mandado nesta conversa')
+      // QUAL foto, não "a última". Ver fotosDaConversa: pegar sempre a mais
+      // recente fazia duas chamadas com modelos diferentes gravarem o mesmo
+      // arquivo, e a foto anterior ficava inalcançável pra sempre.
+      const fotos = await fotosDaConversa(ctx.conversaId)
+      if (fotos.length === 0) throw new Error('não achei foto que ele tenha mandado nesta conversa')
+      const nFoto = num(entrada.foto)
+      // Uma foto só: não tem o que desambiguar. Várias e sem dizer qual: RECUSA.
+      // Chutar aqui é o erro caro — foto na peça errada vai pra confecção e
+      // ninguém percebe, ao contrário da que falta.
+      if (!nFoto && fotos.length > 1) {
+        throw new Error(
+          `esta conversa tem ${fotos.length} fotos (numeradas [foto 1] a [foto ${fotos.length}] no histórico). ` +
+            `Diga QUAL em "foto" — e se não estiver claro de qual peça ela é, pergunte a ele antes.`
+        )
+      }
+      const escolhida = nFoto ? fotos[nFoto - 1] : fotos[fotos.length - 1]
+      if (!escolhida) throw new Error(`esta conversa tem ${fotos.length} foto(s); não existe a [foto ${nFoto}]`)
+      const foto = { id: escolhida.id, midia_path: escolhida.midia_path }
       const r = await anexarFotoDaConversaAoModelo({ pedidoId: p.id, posicao, midiaPath: foto.midia_path })
       if (!r.ok) throw new Error(r.erro ?? 'não deu pra anexar a foto')
       // Marca por QUAL caminho entrou. Sem isto, daqui a um mês "foto sem anexo"
@@ -2610,7 +2619,7 @@ Certo: "Me passa o CNPJ pra nota fiscal. Se você não tiver, o CPF resolve."
 
 E EVITE "SÓ FALTA" COM QUEM ESTÁ ESPERANDO. Tecnicamente é verdade e emocionalmente é "ainda não acabou". Diga o que você VAI FAZER e o que precisa pra isso: "me passa o CEP e eu fecho" em vez de "só falta o CEP".
 
-FOTO QUE ELE MANDA VOCÊ PRENDE NA PEÇA. Toda foto de referência — a peça que ele quer, a arte, a estampa, o print de um concorrente — vale pra quem vai PRODUZIR, não só pra você entender. Chame anexar_foto_ao_modelo com a posição do modelo (1 = Modelo 1). Sem isso a foto fica só na conversa e a confecção produz às cegas, com a descrição em texto. Se o pedido tem mais de um modelo e a foto pode ser de qualquer um, pergunte curto antes: "essa foto é da preta ou da branca?" — foto na peça errada é pior que foto nenhuma. Depois de prender, confirme em uma linha e siga; não peça a mesma foto de novo.
+FOTO QUE ELE MANDA VOCÊ PRENDE NA PEÇA. Toda foto de referência — a peça que ele quer, a arte, a estampa, o print de um concorrente — vale pra quem vai PRODUZIR, não só pra você entender. Chame anexar_foto_ao_modelo com a posição do modelo (1 = Modelo 1) e o número da foto — toda imagem dele aparece marcada [foto 1], [foto 2] no histórico, e é esse número que vai em "foto". Uma chamada por foto: duas peças com fotos diferentes são duas chamadas, cada uma com o seu número. Sem isso a foto fica só na conversa e a confecção produz às cegas, com a descrição em texto. Se o pedido tem mais de um modelo e a foto pode ser de qualquer um, pergunte curto antes: "essa foto é da preta ou da branca?" — foto na peça errada é pior que foto nenhuma. Depois de prender, confirme em uma linha e siga; não peça a mesma foto de novo.
 
 VOCÊ ENXERGA AS IMAGENS: quando o cliente manda foto, você a vê de verdade. Use o que está nela — modelo da peça, cor, estampa, referência que ele mandou — pra preencher o pedido e pra confirmar com ele o que entendeu ("essa camisa é gola careca, certo?"). Nunca peça pra ele descrever o que já está na foto. Diga o que vê de forma concreta, e pergunte só o que a imagem não responde (quantidade, tamanhos, público). Se a foto estiver ruim ou não der pra concluir, diga o que não deu pra ver em vez de adivinhar.
 
@@ -2859,6 +2868,36 @@ async function blocoDaImagem(path: string, mime: string | null): Promise<BlocoIm
   }
 }
 
+/**
+ * As fotos que o cliente mandou nesta conversa, em ordem, numeradas de 1.
+ *
+ * TODA IMAGEM PRECISA DE NOME — 12/09/2026.
+ *
+ * `anexar_foto_ao_modelo` pegava SEMPRE a última imagem da conversa, qualquer
+ * que fosse o modelo pedido: o argumento decidia onde gravar, nunca O QUÊ. No
+ * pedido 20260900303 o modelo chamou certo, `{modelo:1}` e `{modelo:2}`, e a
+ * ferramenta gravou a MESMA foto (a do moletom) nas duas peças — a da polo, que
+ * tinha chegado 6 minutos antes, virou inalcançável: assim que entra uma imagem
+ * mais nova, nenhuma chamada consegue mais escolher a anterior.
+ *
+ * A atribuição existia e estava certa; era descartada uma linha depois. O que
+ * faltava era a foto ter identidade dos dois lados — no histórico que ele lê e
+ * no argumento que ele manda. Daí este número ser UM só, calculado aqui e usado
+ * pelos dois: duas numerações seriam o mesmo bug com outra cara.
+ */
+async function fotosDaConversa(conversaId: string): Promise<Array<{ midia_path: string; midia_mime: string | null; id: string }>> {
+  const { data, error } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('id, midia_path, midia_mime')
+    .eq('conversa_id', conversaId)
+    .eq('direcao', 'entrada')
+    .eq('tipo', 'image')
+    .not('midia_path', 'is', null)
+    .order('criado_em', { ascending: true })
+  if (error) throw new Error(`fotos da conversa: ${error.message}`)
+  return (data ?? []) as Array<{ midia_path: string; midia_mime: string | null; id: string }>
+}
+
 function textoDaLinha(m: LinhaMensagem): string {
   if (m.corpo && m.corpo.trim()) return m.corpo.trim()
   switch (m.tipo) {
@@ -2888,6 +2927,10 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
   // ("respondendo a uma mensagem anterior") ainda é melhor que nada.
   const porWamid = new Map(linhas.filter((m) => m.wamid).map((m) => [m.wamid as string, m]))
 
+  // Numeração absoluta na conversa (não na janela do histórico): o rótulo que
+  // ele lê e o argumento que ele manda têm que significar a mesma coisa.
+  const numeroDaFoto = new Map((await fotosDaConversa(conversaId)).map((f, i) => [f.midia_path, i + 1]))
+
   const comImagem = linhas.filter((m) => m.direcao === 'entrada' && m.tipo === 'image' && m.midia_path)
   const blocos = new Map<string, BlocoImagem | BlocoPdf>()
   await Promise.all(
@@ -2913,9 +2956,11 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
   for (const m of linhas) {
     const role: 'user' | 'assistant' = m.direcao === 'entrada' ? 'user' : 'assistant'
     const bloco = m.midia_path ? blocos.get(m.midia_path) : undefined
+    const nFoto = m.midia_path ? numeroDaFoto.get(m.midia_path) : undefined
+    const etiqueta = nFoto ? `[foto ${nFoto}] ` : ''
     const base = bloco
-      ? m.corpo?.trim() || (bloco.type === 'document' ? 'Mandei este arquivo.' : 'Mandei esta imagem.')
-      : textoDaLinha(m)
+      ? `${etiqueta}${m.corpo?.trim() || (bloco.type === 'document' ? 'Mandei este arquivo.' : 'Mandei esta imagem.')}`
+      : `${etiqueta}${textoDaLinha(m)}`
 
     // Citação na frente da fala: o "essa" do cliente ganha referente.
     const citada = m.responde_a_wamid ? porWamid.get(m.responde_a_wamid) : undefined
