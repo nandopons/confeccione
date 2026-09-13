@@ -1055,3 +1055,38 @@ A contagem de linhas isentas diz se o caminho está sendo usado; se ela subir e 
 `ok=false` não cair, o campo virou carimbo.
 
 ---
+## Janela curta do debounce: 20 s pra resposta de uma palavra — 12/09/2026
+
+O piso da espera do Luigi são ~39 s (30 s de debounce + ~9 s de modelo). Baixar o
+debounce global é ruim: **61,5% dos intervalos entre mensagens do cliente passam
+de 30 s**, então cortar todo mundo vira resposta dobrada.
+
+O recorte seguro, medido em 30 dias (n=1.066 entradas): **352 mensagens (33%) são
+respostas curtas logo depois de uma pergunta do Luigi**, e dessas só **87 (25%)**
+fragmentaram em menos de 30 s — 20 em <5 s, 53 em <10 s, 63 em <15 s, 74 em <20 s.
+Em 20 s escapam **13 das 352 (~4%)** e corta-se 10 s em um terço dos turnos.
+
+Condiciona em duas coisas baratas e determinísticas — o que o Luigi acabou de
+dizer (termina em "?") e o tamanho do que ele respondeu (≤ 25 chars) — e é
+REDUÇÃO de janela, não supressão: qualquer falha de consulta cai nos 30 s.
+
+Os dois valores ficam em `agentes_config.config` (`debounce_curta_ms`,
+`debounce_curta_max_chars`), ao lado de `debounce_ms` — dá pra mexer sem deploy.
+`janelaCurtaMs` é clampado pra nunca exceder `janelaMs`: invertidos no painel, a
+"redução" viraria aumento silencioso.
+
+### LINHA DE BASE — 12/09/2026, antes do `e64648f`
+| medida (30 dias) | valor |
+|---|---|
+| `duracao_ms` mediana, curta após pergunta | **36.741 ms** (279 turnos) |
+| `duracao_ms` mediana, resto | **35.766 ms** (337 turnos) |
+| turnos dobrados (2 turnos na mesma conversa em < 60 s) | **105**, em 27 conversas |
+
+A primeira linha tem que cair ~10 s e a segunda não. **Se os turnos dobrados
+subirem, o 20 ficou curto** — e o ajuste é no banco, sem deploy.
+
+Nota de método: "duas SAÍDAS do Luigi em menos de 60 s" dá 385 e **não serve** —
+ele divide a resposta em dois blocos de propósito. O que mede resposta dobrada é
+dois TURNOS (linhas de `luigi_whatsapp_log`), não duas mensagens.
+
+---
