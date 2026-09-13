@@ -236,6 +236,25 @@ const LIMITE_TEXTO = 1500
 const DEBOUNCE_MS_PADRAO = 45_000
 const DEBOUNCE_TETO_MS_PADRAO = 60_000
 /** Fatia de sono entre consultas — reconsulta a última entrada a cada 3 s. */
+/**
+ * Janela curta: resposta de UMA PALAVRA logo depois de uma pergunta do Luigi.
+ *
+ * O piso da espera são ~39 s (debounce + modelo), e baixar o debounce global é
+ * ruim: 61,5% dos intervalos entre mensagens do cliente passam de 30 s, então
+ * cortar todo mundo vira resposta dobrada. Mas há um recorte seguro, medido em
+ * 30 dias (n=1.066 entradas): 352 mensagens (33%) são respostas curtas logo
+ * depois de uma pergunta, e dessas só 87 (25%) fragmentaram em menos de 30 s —
+ * 20 em menos de 5 s, 53 em menos de 10, 63 em menos de 15, 74 em menos de 20.
+ *
+ * Em 20 s escapam 13 das 352 (~4%) e corta-se 10 s em um terço dos turnos.
+ *
+ * É o formato da trava de liberação que funcionou hoje: condiciona no que o
+ * Luigi acabou de dizer MAIS no que o cliente respondeu, os dois determinísticos
+ * e baratos. E é REDUÇÃO de janela, não supressão: na dúvida, os 30 s.
+ */
+const DEBOUNCE_CURTA_MS_PADRAO = 20_000
+const DEBOUNCE_CURTA_CHARS_PADRAO = 25
+
 const DEBOUNCE_FATIA_MS = 3_000
 
 /**
@@ -3976,7 +3995,7 @@ async function fornecedorVigente(fornecedorId: string): Promise<boolean> {
 
 
 /** Janelas do debounce, ajustáveis sem deploy (agentes_config → luigi). */
-async function janelasDoDebounce(): Promise<{ janelaMs: number; tetoMs: number }> {
+async function janelasDoDebounce(): Promise<{ janelaMs: number; tetoMs: number; janelaCurtaMs: number; curtaMaxChars: number }> {
   const { data, error } = await supabaseAdmin
     .from('agentes_config')
     .select('config')
@@ -3984,12 +4003,17 @@ async function janelasDoDebounce(): Promise<{ janelaMs: number; tetoMs: number }
     .maybeSingle<{ config: Record<string, unknown> | null }>()
   const num = (v: unknown, padrao: number, min: number, max: number) =>
     typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(Math.round(v), min), max) : padrao
-  if (error) return { janelaMs: DEBOUNCE_MS_PADRAO, tetoMs: DEBOUNCE_TETO_MS_PADRAO }
+  if (error) return { janelaMs: DEBOUNCE_MS_PADRAO, tetoMs: DEBOUNCE_TETO_MS_PADRAO, janelaCurtaMs: DEBOUNCE_CURTA_MS_PADRAO, curtaMaxChars: DEBOUNCE_CURTA_CHARS_PADRAO }
   const janelaMs = num(data?.config?.debounce_ms, DEBOUNCE_MS_PADRAO, 0, 120_000)
+  // Janela curta: mesma configuração, sem constante nova e sem deploy pra mexer.
+  // Nunca maior que a janela normal — se alguém inverter os dois no painel, a
+  // "redução" viraria aumento e ninguém perceberia.
+  const janelaCurtaMs = Math.min(num(data?.config?.debounce_curta_ms, DEBOUNCE_CURTA_MS_PADRAO, 0, 120_000), janelaMs)
+  const curtaMaxChars = num(data?.config?.debounce_curta_max_chars, DEBOUNCE_CURTA_CHARS_PADRAO, 1, 200)
   // O teto tem MÁXIMO DURO de 60 s: acima disso a soma das três fatias estoura
   // o maxDuration do webhook. Ver o comentário de ORCAMENTO_MS.
   const tetoMs = Math.max(num(data?.config?.debounce_teto_ms, DEBOUNCE_TETO_MS_PADRAO, 0, 60_000), janelaMs)
-  return { janelaMs, tetoMs }
+  return { janelaMs, tetoMs, janelaCurtaMs, curtaMaxChars }
 }
 
 /**
@@ -4003,20 +4027,40 @@ async function janelasDoDebounce(): Promise<{ janelaMs: number; tetoMs: number }
  * Dorme em fatias e reconsulta em vez de dormir tudo de uma vez, porque ceder
  * cedo libera a execução (e o tempo cobrado) da invocação que não vai responder.
  */
+/** A última coisa que o Luigi disse terminou em pergunta? */
+async function ultimaFalaFoiPergunta(conversaId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('corpo')
+    .eq('conversa_id', conversaId)
+    .eq('direcao', 'saida')
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ corpo: string | null }>()
+  if (error) return false
+  return /\?\s*$/.test((data?.corpo ?? '').trim())
+}
+
 async function esperarOClienteTerminar(params: {
   conversaId: string
   wamid: string
   criadoEm: string
+  corpo: string | null
 }): Promise<'seguir' | 'ceder'> {
-  const { janelaMs, tetoMs } = await janelasDoDebounce()
+  const { janelaMs, tetoMs, janelaCurtaMs, curtaMaxChars } = await janelasDoDebounce()
+  // Ver DEBOUNCE_CURTA_MS_PADRAO. As duas condições são baratas e locais: o
+  // tamanho do que ele escreveu, e se a última coisa que o Luigi disse foi
+  // pergunta. Qualquer falha de consulta cai na janela normal — na dúvida, 30 s.
+  const curta = (params.corpo ?? '').trim().length > 0 && (params.corpo ?? '').trim().length <= curtaMaxChars
+  const espera = curta && (await ultimaFalaFoiPergunta(params.conversaId)) ? janelaCurtaMs : janelaMs
   const comecou = Date.now()
   const meuEm = new Date(params.criadoEm).getTime()
 
   while (true) {
     const decorrido = Date.now() - comecou
     if (decorrido >= tetoMs) return 'seguir'
-    if (decorrido >= janelaMs) return 'seguir'
-    await dormir(Math.min(DEBOUNCE_FATIA_MS, janelaMs - decorrido, tetoMs - decorrido))
+    if (decorrido >= espera) return 'seguir'
+    await dormir(Math.min(DEBOUNCE_FATIA_MS, espera - decorrido, tetoMs - decorrido))
 
     const { data: ultima } = await supabaseAdmin
       .from('wa_mensagens')
@@ -4172,6 +4216,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
         conversaId: params.conversaId,
         wamid: params.wamid,
         criadoEm: params.criadoEm,
+        corpo: params.corpo,
       })
       if (espera === 'ceder') return
     }
