@@ -924,3 +924,58 @@ mensagens.** Depois do corte do prompt (`a5d179d`), US$0,0022 por rodada contra
 US$0,0055 antes.
 
 ---
+## O gargalo do fim do funil: o cliente confirma e o Luigi repergunta — 12/09/2026
+
+`liberar_para_fornecedores` é o último passo antes do pedido virar oferta. **Ele não
+estava sendo chamado quando o cliente confirmava.**
+
+### O que foi medido
+**6 pedidos** ouviram a pergunta de fechamento ("posso confirmar e mandar pras
+confecções?") e seguem com `confirmado_em` nulo. A pergunta foi feita **10 vezes**
+nesses 6 — o Johnnes (`20260900300`) respondeu **três vezes** que sim, às 19:00,
+19:06 e 19:09, e nenhuma virou liberação. Em **todos** os turnos de resposta
+afirmativa sobre pedido não liberado, `liberar_para_fornecedores` foi chamado
+**zero** vezes. A ferramenta existe e está na lista do modo `responde`.
+
+Efeito no painel: pedido pronto, cliente já disse sim, e a view mostra
+`etapa=pedido_completo, grupo=entrada` — a coluna de quem ainda está montando.
+Quem olha de manhã não vê ninguém esperando.
+
+### A causa, e ela não é de redação
+O retorno do `enviar_resumo_pedido` **já dizia** "com o sim, chame
+liberar_para_fornecedores na mesma vez". Estava lá às 22:13 do `20260900305`, o
+cliente disse "pode" às 22:14, e nada. **Resultado de ferramenta não sobrevive ao
+turno:** `historicoConversa` remonta a conversa de `wa_mensagens`, então o
+`tool_result` do turno anterior não existe no turno seguinte. Instrução que precisa
+valer no turno em que o cliente RESPONDE tem que estar no contexto, que é remontado
+toda vez — não no resultado da ferramenta do turno que PERGUNTOU.
+
+### O que foi feito
+`proximo_passo` no contexto do pedido quando `etapa = 'pedido_completo'` (que é
+exatamente "pronto e não liberado", derivado pela view — nenhum estado novo). E as
+três frases obrigatórias no sucesso do liberar, com proibição de reperguntar.
+
+**É hipótese, não trava:** nenhum código força o modelo a chamar ferramenta. Por
+isso nasce com o instrumento junto.
+
+### Como medir se funcionou (sem coluna nova)
+```sql
+select to_char(l.criado_em at time zone 'America/Recife','DD/MM HH24:MI') q, p.codigo,
+       left(l.mensagem,26) disse,
+       (select count(*) from jsonb_array_elements(coalesce(l.ferramentas,'[]')::jsonb) f
+         where f->>'nome'='liberar_para_fornecedores') liberou
+from luigi_whatsapp_log l join pedidos_assistente p on p.id = l.pedido_id
+where lower(btrim(coalesce(l.mensagem,''))) ~ '^(pode|sim|isso|ok|manda|libera|confirmo|beleza|perfeito)'
+  and (p.confirmado_em is null or p.confirmado_em > l.criado_em)
+order by l.criado_em desc;
+```
+**Linha de base de hoje: `liberou = 0` em todas as linhas.** Qualquer número maior
+que zero é melhora; continuar em zero em duas semanas significa que a hipótese
+falhou e o caminho é outro (a liberação virar efeito de código, não de chamada).
+
+### Aberto
+`buscando_fornecedor` **não é status, é etapa derivada** (`status='confirmado' OR
+ofertas_total>0`). Gravar esse valor em `status` não tem CHECK que barre, cai no
+`ELSE` da cascata e **o pedido sumiria da coluna de fornecedor**. Não criar.
+
+---

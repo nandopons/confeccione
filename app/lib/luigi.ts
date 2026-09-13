@@ -541,6 +541,8 @@ type PedidoContexto = {
    * outro caminho.
    */
   falta_para_liberar: string[]
+  /** Só em pedido pronto e ainda não liberado. Ver montarContexto. */
+  proximo_passo?: string
   /**
    * O que JÁ temos deste cliente, dito com todas as letras.
    *
@@ -919,6 +921,29 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
       fornecedor: fornecedores.get(p.id) ?? null,
       falta_para_liberar: dadosCliente.get(p.id)?.falta ?? [],
       ja_temos: dadosCliente.get(p.id)?.temos ?? [],
+      // O PRÓXIMO PASSO MORA NO CONTEXTO, NÃO NO RESULTADO DA FERRAMENTA — 12/09/2026.
+      //
+      // O retorno do enviar_resumo_pedido já dizia "com o sim, chame
+      // liberar_para_fornecedores na mesma vez". Estava lá às 22:13 do pedido
+      // 20260900305, o cliente disse "pode" às 22:14, e a ferramenta não foi
+      // chamada: ele refez criar_pedido e ajustar_peca (as duas recusaram) e
+      // reperguntou "posso liberar?".
+      //
+      // O motivo é mecânico, não de redação: o histórico de cada turno é
+      // reconstruído de `wa_mensagens`, então tool_result do turno anterior NÃO
+      // existe no turno seguinte. Instrução que precisa valer no turno em que o
+      // cliente responde tem que estar no contexto, que é remontado sempre.
+      //
+      // `pedido_completo` é exatamente "pronto e ainda não liberado" — a view
+      // deriva isso de status <> 'confirmado' e ofertas_total = 0. Nenhum estado
+      // novo: quando liberar_para_fornecedores grava status='confirmado', a
+      // etapa vira buscando_fornecedor sozinha e este campo some.
+      proximo_passo:
+        p.etapa === 'pedido_completo'
+          ? 'PRONTO E NÃO LIBERADO. Se ele já viu o resumo e disser que pode ("pode", "sim", "manda"), ' +
+            'chame liberar_para_fornecedores AGORA, neste mesmo turno. Não pergunte de novo: ' +
+            'ele já respondeu, e repetir a pergunta é o que faz o pedido parar aqui.'
+          : undefined,
       // Só faz sentido perseguir imagem em pedido que ainda vai pro cliente.
       // Pedido pago/produzindo já foi aprovado como está; mexer nele agora só
       // criaria diferença entre o que a confecção recebeu e o que está na tela.
@@ -2361,8 +2386,12 @@ async function executarFerramenta(
         ja_estava_liberado: r.jaEstava,
         aviso:
           'O pedido já está com as confecções. Conte isso ao cliente com as SUAS palavras — nada de "pedido ' +
-          'liberado" ou "status atualizado": diga que as confecções já vão ver e que o orçamento chega por aqui. ' +
-          'Não prometa prazo nem valor.',
+          'liberado" ou "status atualizado". Não prometa prazo nem valor.' +
+          '\n[como levar isto ao cliente] UMA mensagem, com estas três coisas e nada de pergunta no fim: ' +
+          '(1) o pedido foi pras confecções; (2) quando uma aceitar, ele recebe a confirmação aqui e o contato dela; ' +
+          '(3) a Confeccione acompanha o processo — ele não fica sozinho com o fornecedor. ' +
+          'Não pergunte se pode liberar: já liberou. Pergunta repetida aqui é a forma que "não sei se gravei" ' +
+          'tem de aparecer pro cliente.',
       }
     }
     default:
