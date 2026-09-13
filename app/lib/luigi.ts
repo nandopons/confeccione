@@ -879,6 +879,71 @@ function modelosParaGerarMockup(linhas: unknown, mockups: MapaMockups): number[]
   return alvos
 }
 
+/**
+ * "Pode" tem que virar liberação, e quem garante isso é o código — 12/09/2026.
+ *
+ * `liberar_para_fornecedores` é o último passo antes do pedido virar oferta, e a
+ * medição de hoje diz que ele NUNCA acontecia sozinho: 6 pedidos ouviram a
+ * pergunta de fechamento, ela foi repetida 10 vezes, e a ferramenta foi chamada
+ * ZERO vezes em turno de confirmação. O Johnnes disse sim três vezes (19:00,
+ * 19:06, 19:09) e as três viraram outra pergunta.
+ *
+ * Pôr a instrução no contexto (ver `proximo_passo`) é hipótese: depende de o
+ * modelo lembrar. Aqui é a regra do repo — efeito se trava DENTRO da ferramenta.
+ *
+ * É CAMADA, NÃO SUBSTITUIÇÃO. O código pega o caso óbvio; `proximo_passo` segue
+ * no contexto e o modelo continua podendo chamar o que sobrar. Por isso o
+ * reconhecimento é deliberadamente estreito: a mensagem inteira precisa ser o
+ * "sim", nada é inferido de frase longa, e na dúvida NÃO libera.
+ *
+ * E só vale na janela de um turno: se a última coisa que o Luigi disse não foi a
+ * pergunta de fechamento, um "sim" solto pode ser resposta a outra coisa.
+ */
+const RESPOSTA_AFIRMATIVA =
+  /^\s*(pode(\s+sim)?|sim(\s+pode)?|isso(\s+mesmo)?|confirma|confirmo|confirmado|manda|mande|pode\s+mandar|pode\s+liberar|ok|okay|blz|beleza|perfeito|claro|positivo)\s*[.!]*\s*$/i
+
+/** A pergunta de fechamento, como ele de fato a escreve (ver luigi_whatsapp_log). */
+const PERGUNTA_DE_FECHAMENTO = /posso\s+(confirmar|liberar)[^?]{0,80}confec|liberar\s+pras\s+confec|mandar\s+pras\s+confec/i
+
+async function liberarSeEleConfirmou(
+  ctx: Contexto,
+  corpo: string | null,
+  conversaId: string
+): Promise<{ liberou: boolean; codigo: string | null }> {
+  const nao = { liberou: false, codigo: null }
+  if (ctx.ehFornecedor) return nao
+  if (!RESPOSTA_AFIRMATIVA.test((corpo ?? '').trim())) return nao
+
+  const alvo = ctx.pedidos.find((p) => p.etapa === 'pedido_completo')
+  if (!alvo) return nao
+
+  const { data: ultimaSaida, error } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('corpo')
+    .eq('conversa_id', conversaId)
+    .eq('direcao', 'saida')
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ corpo: string | null }>()
+  // Consulta que falha não libera: na dúvida o modelo ainda tem o proximo_passo.
+  if (error || !PERGUNTA_DE_FECHAMENTO.test(ultimaSaida?.corpo ?? '')) return nao
+
+  // Divergência continua barrando de propósito: é ambiguidade que a confecção
+  // não consegue adivinhar, e quem resolve é a conversa. O modelo recebe o erro
+  // com o [como levar isto ao cliente] e pergunta.
+  const r = await liberarParaFornecedores(alvo.id, {})
+  if (!r.ok) return nao
+
+  // A fala vem no mesmo ato: o campo que dizia "libere" passa a dizer "já foi".
+  alvo.proximo_passo =
+    'ACABOU DE SER LIBERADO AGORA, neste turno. NÃO pergunte se pode liberar — já está feito. ' +
+    'Diga numa única mensagem, sem pergunta no fim: (1) o pedido foi pras confecções; ' +
+    '(2) quando uma aceitar, ele recebe a confirmação aqui e o contato dela; ' +
+    '(3) a Confeccione acompanha o processo — ele não fica sozinho com o fornecedor. ' +
+    'Com as SUAS palavras, sem "liberado" nem "status atualizado", e sem prometer prazo ou valor.'
+  return { liberou: true, codigo: alvo.codigo }
+}
+
 async function montarContexto(conversaId: string, waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
   const [pedidos, conta, cadastroFornecedor] = await Promise.all([
     pedidosDoContato(waId, clienteId),
@@ -3093,7 +3158,14 @@ async function comAnexoRecente(
 
 // ─── O loop ─────────────────────────────────────────────────────────────────
 
-type ChamadaFerramenta = { nome: string; argumentos: Entrada; ok: boolean; erro?: string }
+type ChamadaFerramenta = {
+  nome: string
+  argumentos: Entrada
+  ok: boolean
+  erro?: string
+  /** Só quando NÃO foi o modelo que chamou. Ausente = o modelo chamou. */
+  via?: 'codigo'
+}
 
 type ResultadoAgente = {
   texto: string
@@ -4054,8 +4126,16 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       mensagens = [...mensagens, { role: 'user', content: `[nota do Fernando, o cliente NÃO vê isto] ${params.retomada}` }]
     }
 
+    // Antes do modelo falar: se ele confirmou, o pedido JÁ vai pras confecções.
+    const auto = await liberarSeEleConfirmou(ctx, params.corpo, params.conversaId).catch(() => ({ liberou: false, codigo: null }))
+
     const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada))
     const pedidoId = ctx.pedidoEmFoco?.id ?? null
+    // `via` diz QUEM liberou. Sem isto, em duas semanas não dá pra saber se a
+    // hipótese do contexto valeu alguma coisa ou se o código carregou tudo.
+    if (auto.liberou) {
+      r.ferramentas.unshift({ nome: 'liberar_para_fornecedores', argumentos: { pedido: auto.codigo }, ok: true, via: 'codigo' })
+    }
 
     if (modo === 'sugere') {
       await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: Boolean(r.escalada), motivo_escalada: r.escalada?.motivo ?? null, status: 'sugerida', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: null })

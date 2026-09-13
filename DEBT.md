@@ -962,8 +962,9 @@ isso nasce com o instrumento junto.
 ```sql
 select to_char(l.criado_em at time zone 'America/Recife','DD/MM HH24:MI') q, p.codigo,
        left(l.mensagem,26) disse,
-       (select count(*) from jsonb_array_elements(coalesce(l.ferramentas,'[]')::jsonb) f
-         where f->>'nome'='liberar_para_fornecedores') liberou
+       (select string_agg(coalesce(f->>'via','modelo'), ',')
+          from jsonb_array_elements(coalesce(l.ferramentas,'[]')::jsonb) f
+         where f->>'nome'='liberar_para_fornecedores') liberou_via
 from luigi_whatsapp_log l join pedidos_assistente p on p.id = l.pedido_id
 where lower(btrim(coalesce(l.mensagem,''))) ~ '^(pode|sim|isso|ok|manda|libera|confirmo|beleza|perfeito)'
   and (p.confirmado_em is null or p.confirmado_em > l.criado_em)
@@ -974,13 +975,17 @@ order by l.criado_em desc;
 | medida | valor |
 |---|---|
 | turnos de resposta afirmativa em pedido não liberado com `liberar` chamado | **0** |
+| liberações por `via='codigo'` (a trava de `bc61d0b`+) | **0** — não existia |
 | chamadas de `liberar_para_fornecedores` em turno de confirmação | **0** |
 | pedidos que ouviram a pergunta de fechamento e seguem sem `confirmado_em` | **6** |
 | vezes que a pergunta foi repetida nesses 6 | **10** (o `20260900300` sozinho: 3) |
 
-Comparar **em 26/09/2026**. Qualquer número maior que zero na primeira linha é
-melhora; continuar em zero significa que a hipótese falhou e o caminho é outro —
-a liberação vira efeito de código, não chamada do modelo.
+Comparar **em 26/09/2026**. `liberou_via` diz QUEM liberou: `codigo` é a trava
+(reconhecimento estreito do "sim" logo depois da pergunta de fechamento), `modelo`
+é o `proximo_passo` no contexto tendo funcionado. **É essa coluna que diz se a
+hipótese do contexto valeu alguma coisa ou se o código carregou tudo** — sem ela a
+gente conserta e nunca aprende. Só `codigo` em duas semanas significa que instrução
+no contexto não move o modelo, e o caminho pro resto da lista é travar em código.
 
 ### Aberto
 `buscando_fornecedor` **não é status, é etapa derivada** (`status='confirmado' OR
