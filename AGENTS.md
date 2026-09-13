@@ -66,6 +66,36 @@ Efeito de ferramenta se trava DENTRO da ferramenta, nunca só no prompt. Toda ve
 que uma regra virou só instrução de texto, ela foi desobedecida em produção — e
 o custo apareceu em cliente real. Se a regra importa, ela é código.
 
+**Se o código PRECISA que o modelo faça algo, isso não pode ser campo opcional —
+tem que ser erro.** Sinal opcional perde pra plano, e o mesmo código dá dois
+resultados conforme o turno esteja cheio ou vazio. O par que prova, em 12/09/2026,
+com a MESMA trava e o MESMO texto de recusa:
+
+| | 302, 20:22 | 303, 21:16 |
+|---|---|---|
+| cliente disse | "10 P 15M 15 G 10 GG" | "sim" |
+| o turno era sobre | a grade | fechar o pedido inteiro |
+| ferramentas no turno | 3 | 6 |
+| o que fez com a recusa | obedeceu, gravou as 50 peças | ignorou, perdeu as 30 |
+
+Não é teimosia do modelo: é concorrência. Três instâncias no mesmo dia —
+`mudou: false` dentro de `ok: true`; o `ok` do log significando só "não estourou";
+e `aviso: r.erro` numa recusa que precisava virar ação. Todas custaram a mesma
+coisa: o Luigi anunciou ao cliente algo que não aconteceu. **Recusa é `throw`.**
+
+**E recusa que o cliente precisa ouvir leva `[como levar isto ao cliente]`** no
+fim do texto do erro, dizendo o que FALAR — não o que aconteceu. Já existia em
+`liberar_para_fornecedores` sem estar escrito aqui; é a parte copiável da regra:
+
+```
+'\n[como levar isto ao cliente] Ele não está esperando um pedido novo: está '
+'esperando a mudança que pediu. Não diga que abriu pedido, não diga que deu '
+'erro, não cite ferramenta. Faça o ajuste e confirme em uma linha o que ficou.'
+```
+
+Sem essa linha, o conserto troca "mentir sucesso" por silêncio — e pro cliente
+que pediu 30 peças, os dois são a mesma coisa.
+
 O que eu escrevo em resultado de ferramenta é **nota interna**, não frase pronta:
 o modelo copia verbatim pro cliente se deixarem. Já saiu nome de coluna do banco
 em mensagem de WhatsApp.
