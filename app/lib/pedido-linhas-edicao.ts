@@ -69,7 +69,25 @@ function normalizarLinha(raw: LinhaEditada, anterior: LinhaPedido | null): Linha
     origIdx: typeof raw.origIdx === 'number' && raw.origIdx >= 0 ? raw.origIdx : null,
   }
   // Campos extras que o visualizador do cliente usa (não perdem no round-trip).
-  const extras: Array<keyof LinhaEditada> = ['publico', 'estampado', 'acabamentos', 'categoria', 'objetivo_material', 'confirmado_pelo_cliente']
+  // CONFIRMAÇÃO NÃO SOBREVIVE AO QUE ELA DESCREVE — 13/09/2026.
+  //
+  // `confirmado_pelo_cliente` isenta a linha das regras de cor/descrição da
+  // revisão. Herdá-la como os outros extras a tornava WRITE-ONCE: não dava pra
+  // limpar, e ela seguia colada na linha mesmo depois de a peça mudar. O cliente
+  // troca pra 15 azul + 15 branca, o modelo ajusta `cor` e `total`, e a ficha vai
+  // pra confecção dizendo "peça única bicolor" num pedido que virou dois.
+  //
+  // Então: mexeu em `cor` ou `descricao` sem reconfirmar, a confirmação CAI. É
+  // determinístico e vale pros QUATRO escritores — o helper do agente, o editor
+  // do fornecedor, o admin e o definirPecas — porque mora aqui, e não em quem
+  // chama. Se a peça nova ainda for ambígua, a revisão recusa de novo e o modelo
+  // reconfirma no mesmo turno; não depende de ninguém lembrar de limpar.
+  const mudouOQueFoiConfirmado =
+    anterior != null && (str(raw.cor) !== (str(anterior.cor) ?? null) || str(raw.descricao) !== (str(anterior.descricao) ?? null))
+  out.confirmado_pelo_cliente =
+    str(raw.confirmado_pelo_cliente) ?? (mudouOQueFoiConfirmado ? null : str(anterior?.confirmado_pelo_cliente) ?? null)
+
+  const extras: Array<keyof LinhaEditada> = ['publico', 'estampado', 'acabamentos', 'categoria', 'objetivo_material']
   for (const k of extras) {
     const v = raw[k] !== undefined ? raw[k] : (anterior as LinhaEditada | null)?.[k]
     if (v !== undefined) (out as Record<string, unknown>)[k] = v
@@ -458,8 +476,10 @@ export function linhasComAjuste(atuais: LinhaPedido[], posicao: number, ajuste: 
       total: ajuste.quantidade ?? l.total,
       descricao: ajuste.descricao ?? l.descricao,
       tamanhos: gradeNova ?? l.tamanhos,
-      confirmado_pelo_cliente:
-        ajuste.confirmado_pelo_cliente ?? (l as LinhaEditada).confirmado_pelo_cliente ?? null,
+      // SÓ o que o modelo mandou. Herdar aqui carregaria o valor antigo pra
+      // frente e normalizarLinha nunca veria a ausência — a queda nunca
+      // dispararia. Quem herda é um só, e é lá, que tem a linha anterior.
+      confirmado_pelo_cliente: ajuste.confirmado_pelo_cliente ?? null,
     }
   })
 }
