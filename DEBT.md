@@ -969,9 +969,18 @@ where lower(btrim(coalesce(l.mensagem,''))) ~ '^(pode|sim|isso|ok|manda|libera|c
   and (p.confirmado_em is null or p.confirmado_em > l.criado_em)
 order by l.criado_em desc;
 ```
-**Linha de base de hoje: `liberou = 0` em todas as linhas.** Qualquer número maior
-que zero é melhora; continuar em zero em duas semanas significa que a hipótese
-falhou e o caminho é outro (a liberação virar efeito de código, não de chamada).
+**LINHA DE BASE — 12/09/2026, 22:2x, antes do deploy `bc61d0b`:**
+
+| medida | valor |
+|---|---|
+| turnos de resposta afirmativa em pedido não liberado com `liberar` chamado | **0** |
+| chamadas de `liberar_para_fornecedores` em turno de confirmação | **0** |
+| pedidos que ouviram a pergunta de fechamento e seguem sem `confirmado_em` | **6** |
+| vezes que a pergunta foi repetida nesses 6 | **10** (o `20260900300` sozinho: 3) |
+
+Comparar **em 26/09/2026**. Qualquer número maior que zero na primeira linha é
+melhora; continuar em zero significa que a hipótese falhou e o caminho é outro —
+a liberação vira efeito de código, não chamada do modelo.
 
 ### Aberto
 `buscando_fornecedor` **não é status, é etapa derivada** (`status='confirmado' OR
