@@ -897,3 +897,30 @@ pedido**. Mandar foto é sinal mais forte que mandar "oi" — quem fotografa a p
 já decidiu. É perda ANTES da mecânica, e não melhora consertando anexo.
 
 ---
+## Custo de IA não tem um lugar só — 12/09/2026
+
+**`uso_ia` não cobre geração de imagem.** `gerar_mockup_do_modelo` não grava linha
+nenhuma, nem quando falha: as duas chamadas que falharam no `20260900303` às
+21:16 não deixaram rastro em `uso_ia`, e o campo `erro` do turno ficou **nulo** —
+a falha da ferramenta não sobe pro log do turno. Com o Gemini também fora,
+**todo número de custo por pedido tirado de `uso_ia` é PISO, não total**, e
+geração de imagem é provavelmente o item mais caro por chamada que existe aqui.
+
+Enquanto for assim, não dá pra avaliar em dinheiro a régua de pedido incompleto —
+que é justamente onde a economia apareceria.
+
+### Amarrar rodada a pedido não precisa de migração hoje
+`uso_ia` tem só `rota`, `modelo`, tokens, custo e `criado_em`. Mas
+`luigi_whatsapp_log` **já tem `pedido_id` e `rodadas` por turno**, e casa com
+`uso_ia` por janela de tempo. Funciona **porque só uma conversa fica ativa por
+vez** — com duas simultâneas, embaralha. Uma coluna `conversa_id` em `uso_ia`
+resolve de vez e é barata; fica pra quando o volume subir.
+
+### O que já dá pra afirmar
+Rodada não é mensagem: 8 turnos da conversa de teste consumiram 13 rodadas de API,
+porque cada turno com ferramenta é ferramenta → resultado → ferramenta → resultado,
+reenviando o contexto. **O custo mora no vaivém de ferramenta, não no número de
+mensagens.** Depois do corte do prompt (`a5d179d`), US$0,0022 por rodada contra
+US$0,0055 antes.
+
+---
