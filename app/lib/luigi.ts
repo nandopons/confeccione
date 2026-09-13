@@ -900,7 +900,17 @@ function modelosParaGerarMockup(linhas: unknown, mockups: MapaMockups): number[]
  * pergunta de fechamento, um "sim" solto pode ser resposta a outra coisa.
  */
 const RESPOSTA_AFIRMATIVA =
-  /^\s*(pode(\s+sim)?|sim(\s+pode)?|isso(\s+mesmo)?|confirma|confirmo|confirmado|manda|mande|pode\s+mandar|pode\s+liberar|ok|okay|blz|beleza|perfeito|claro|positivo)\s*[.!]*\s*$/i
+  /^\s*(pode(\s+sim)?|sim(\s+pode)?|isso(\s+mesmo)?|confirma|confirmo|confirmado|manda|mande|ok|okay|blz|beleza|perfeito|claro|positivo)\s*[.!]*\s*$/i
+
+/**
+ * O mesmo sim com complemento: "pode liberar o pedido" (literal, 22:33 de
+ * 12/09) não casava com a regex acima, que é ancorada na mensagem inteira. Sem
+ * isto a medição de `via='codigo'` daria zero pelo motivo errado. Continua
+ * estreito: o VERBO tem que ser o da liberação, então "pode ser, mas antes muda
+ * a cor" segue de fora.
+ */
+const AFIRMATIVA_COM_COMPLEMENTO =
+  /^\s*(?:(?:pode|podes|vamos|bora)\s+)?(?:liber(?:a|ar)|confirm(?:a|ar)|mand(?:a|ar|e)|envi(?:a|ar)|segu(?:e|ir))(?:\s+(?:o|meu|esse|este))?(?:\s+pedido)?(?:\s+(?:pras?|para\s+as)\s+confec\S*)?\s*[.!]*\s*$/i
 
 /** A pergunta de fechamento, como ele de fato a escreve (ver luigi_whatsapp_log). */
 const PERGUNTA_DE_FECHAMENTO = /posso\s+(confirmar|liberar)[^?]{0,80}confec|liberar\s+pras\s+confec|mandar\s+pras\s+confec/i
@@ -912,7 +922,8 @@ async function liberarSeEleConfirmou(
 ): Promise<{ liberou: boolean; codigo: string | null }> {
   const nao = { liberou: false, codigo: null }
   if (ctx.ehFornecedor) return nao
-  if (!RESPOSTA_AFIRMATIVA.test((corpo ?? '').trim())) return nao
+  const dito = (corpo ?? '').trim()
+  if (!RESPOSTA_AFIRMATIVA.test(dito) && !AFIRMATIVA_COM_COMPLEMENTO.test(dito)) return nao
 
   const alvo = ctx.pedidos.find((p) => p.etapa === 'pedido_completo')
   if (!alvo) return nao
@@ -4127,7 +4138,15 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     }
 
     // Antes do modelo falar: se ele confirmou, o pedido JÁ vai pras confecções.
-    const auto = await liberarSeEleConfirmou(ctx, params.corpo, params.conversaId).catch(() => ({ liberou: false, codigo: null }))
+    //
+    // SÓ EM `responde` — 12/09/2026. Em `sugere` a fala do Luigi vira rascunho
+    // que o Fernando pode descartar ou reescrever; liberar ali seria efeito
+    // IRREVERSÍVEL no modo que existe justamente pra não ter efeito. O pedido
+    // iria pras confecções e a mensagem talvez nunca saísse.
+    const auto =
+      modo === 'responde'
+        ? await liberarSeEleConfirmou(ctx, params.corpo, params.conversaId).catch(() => ({ liberou: false, codigo: null }))
+        : { liberou: false, codigo: null }
 
     const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada))
     const pedidoId = ctx.pedidoEmFoco?.id ?? null
