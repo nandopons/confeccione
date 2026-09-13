@@ -22,6 +22,7 @@ type Oferta = {
   ofertaId: string
   pedidoId: string
   status: 'ofertada' | 'aceita' | 'recusada' | 'cancelada'
+  prazoVencido: boolean
   fornecedorNome: string | null
   totalPecas: number
   linhas: Linha[]
@@ -389,8 +390,21 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
         {status === 'recusada' && (
           <div className="text-center py-4 text-gray-500">Você recusou esta oferta. Obrigado por avisar!</div>
         )}
+        {/* `cancelada` tem dois sentidos e a data é o que separa: com prazo
+            vencido foi o relógio, sem prazo foi cancelamento. Dizer "outro
+            fornecedor assumiu" pra quem só perdeu a hora é afirmar uma coisa
+            que não aconteceu. Ver o comentário em carregarOfertaParaFornecedor. */}
         {status === 'cancelada' && (
-          <div className="text-center py-4 text-gray-500">Esta oferta não está mais disponível — o pedido já foi assumido por outro fornecedor.</div>
+          oferta.prazoVencido ? (
+            <div className="text-center py-4 text-gray-600">
+              <p>O prazo para responder a esta oferta terminou.</p>
+              <p className="mt-2 text-sm text-gray-500">
+                Se você ainda quiser produzir este pedido, responda a mensagem da Confeccione no WhatsApp que a gente verifica se ele continua disponível.
+              </p>
+            </div>
+          ) : (
+            <div className="text-center py-4 text-gray-500">Esta oferta não está mais disponível — o pedido já foi assumido por outro fornecedor.</div>
+          )
         )}
       </div>
 

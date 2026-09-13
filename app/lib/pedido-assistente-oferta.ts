@@ -871,6 +871,8 @@ export type OfertaDetalheFornecedor = {
   ofertaId: string
   pedidoId: string
   status: StatusOferta
+  /** `cancelada` por PRAZO, não por cancelamento. Ver o comentário no return. */
+  prazoVencido: boolean
   fornecedorNome: string | null
   totalPecas: number
   linhas: LinhaPedido[]
@@ -894,7 +896,7 @@ export async function carregarOfertaParaFornecedor(
 ): Promise<OfertaDetalheFornecedor | null> {
   const { data: oferta } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
-    .select('id, pedido_id, status, valor_repasse_centavos, leads_fornecedores(nome)')
+    .select('id, pedido_id, status, expira_em, valor_repasse_centavos, leads_fornecedores(nome)')
     .eq('id', ofertaId)
     .maybeSingle<any>()
   if (!oferta) return null
@@ -950,6 +952,24 @@ export async function carregarOfertaParaFornecedor(
     ofertaId: oferta.id,
     pedidoId: pedido.id,
     status: oferta.status,
+    // `cancelada` quer dizer DUAS coisas — 13/09/2026.
+    //
+    // `expirarVencidas` grava 'cancelada' quando o prazo vence, e a tela dizia
+    // "o pedido já foi assumido por outro fornecedor". Pra quem só perdeu o
+    // prazo isso é FALSO, e é a pior frase possível: a confecção lê que a gente
+    // deu o trabalho dela pra outra pessoa. Já são 50 linhas com esse status,
+    // misturando os dois sentidos.
+    //
+    // O que separa é a data: com `expira_em` no passado, foi prazo. Sem ela,
+    // foi cancelamento de verdade. Não criei status novo de propósito — 'status'
+    // não tem CHECK no banco e 28 pontos do app leem 'cancelada'; valor novo
+    // sumiria das telas sem erro, que é a armadilha do buscando_fornecedor.
+    // Calculado AQUI, no servidor: a tela é componente de cliente e comparar
+    // com Date.now() lá dentro é impuro (relógio do visitante, hidratação).
+    prazoVencido: Boolean(
+      (oferta as { expira_em?: string | null }).expira_em &&
+        new Date((oferta as { expira_em?: string | null }).expira_em as string).getTime() < Date.now()
+    ),
     fornecedorNome: oferta.leads_fornecedores?.nome ?? null,
     totalPecas,
     linhas,
