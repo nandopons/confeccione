@@ -993,3 +993,65 @@ ofertas_total>0`). Gravar esse valor em `status` não tem CHECK que barre, cai n
 `ELSE` da cascata e **o pedido sumiria da coluna de fornecedor**. Não criar.
 
 ---
+## O muro da divergência: o cliente responde e a recusa não muda — 12/09/2026
+
+`liberar_para_fornecedores` **é chamado** — o gargalo nunca foi o modelo. Em 30
+dias no log: `ok=true` 6, `ok=false` 9. **As 9 recusas foram 100% divergência**,
+em 8 pedidos distintos — 5 pela regra da cor, 6 pela regra da descrição, nenhuma
+por público.
+
+### O loop, e por que ele é por construção
+`revisarPecas` é regra sobre TEXTO, e a resposta do cliente não escrevia em campo
+nenhum. Pergunta → resposta → mesma recusa → mesma pergunta. No `20260900305` ele
+respondeu **três vezes** — "uma polo só com duas cores" (21:11), "correto"
+(22:00), "pode liberar o pedido" (22:33) — e a liberação foi recusada as três
+(22:14, 22:31, 22:34).
+
+A ironia que fecha o diagnóstico: `CONECTOR_BICOLOR` não tem a palavra "bicolor".
+O modelo transcreveu a fala do cliente com fidelidade — "Polo bicolor, metade azul
+marinho e metade branca" — e **foi a fidelidade que armou a regra da descrição**.
+Acrescentar palavra na regex não é o conserto: é o mesmo remendo que já está
+escrito lá como parcial, e a próxima frase do próximo cliente fura de novo.
+
+### O que foi feito
+`linha.confirmado_pelo_cliente` — texto, escrito pelo modelo via
+`ajustar_peca_pedido`, passando pelo `linhasComAjuste` (helper único). Isenta
+**as regras 1 e 2, só naquela linha**. Não é passe livre pela revisão: o público
+continua sendo checado logo abaixo, no mesmo forEach.
+
+Campo próprio, **não texto dentro de `descricao`**, e a razão é medida: `descricao`
+é o campo que a regra 2 LÊ — a frase que isenta a peça passaria a alimentar a
+regra que deveria isentá-la, e qualquer regra futura herdaria a contaminação. Além
+disso `descricao` passaria a significar "o que o cliente disse" OU "o que a gente
+confirmou" conforme a linha: a mesma armadilha do `pedidos.pecas` e do
+`linhas[].modelo`.
+
+A frase vai pra ficha técnica e pro resumo (`resumo-pdf.ts`, linha própria), e
+**fica fora do PDF da sondagem** pela mesma regra do `observacoes`: aquele promete
+"sem dados do cliente" e isto é campo livre.
+
+**Não existe trava garantindo que o modelo perguntou antes de preencher.** Não dá
+pra fazer isso sem voltar a regex sobre frase, que é o que acabou de falhar. O
+campo é auditável de propósito: quem pega abuso é a contagem, não uma validação
+que finge certeza. A pergunta a fazer daqui a duas semanas é se a isenção foi
+GANHA ou se o modelo preencheu pra passar do muro — é a família do `mudou: false`,
+sinal que o modelo controla e que faz o erro sumir.
+
+### E a terceira recusa chama o Fernando
+Mesma divergência + mesma linha pela terceira vez → `chamar_humano`, não uma quarta
+pergunta. Na segunda ainda pergunta. Sem estado novo: `ferramentas[].erro` já
+guarda o texto da recusa com a posição da peça dentro.
+
+### LINHA DE BASE — 12/09/2026
+| medida | valor |
+|---|---|
+| `liberar_para_fornecedores` com `ok=false` (30 dias) | **9 de 15** |
+| das recusas, por divergência | **100%**, em 8 pedidos |
+| pedidos abertos com linha que a regra 1 ou 2 pegaria | **5 de 121** |
+| linhas isentas por `confirmado_pelo_cliente` | **0** |
+
+**É o `ok=false` que tem que cair — não a contagem de chamadas**, que já acontece.
+A contagem de linhas isentas diz se o caminho está sendo usado; se ela subir e o
+`ok=false` não cair, o campo virou carimbo.
+
+---
