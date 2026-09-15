@@ -139,13 +139,48 @@ export type AcaoPedidoChat = 'excluir' | 'lembrete' | 'feedback' | 'feedback_neg
 export async function acaoPedidoChat(id: string, acao: AcaoPedidoChat): Promise<{ ok: boolean; erro?: string; whats?: boolean; email?: boolean }> {
   const { data: p } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, nome, telefone, email')
+    .select('id, nome, telefone, email, observacoes')
     .eq('id', id)
-    .maybeSingle<{ id: string; nome: string | null; telefone: string | null; email: string | null }>()
+    .maybeSingle<{ id: string; nome: string | null; telefone: string | null; email: string | null; observacoes: string | null }>()
   if (!p) return { ok: false, erro: 'Pedido não encontrado' }
 
+  // EXCLUIR É ENCERRAR, NÃO APAGAR — 14/09/2026.
+  //
+  // Isto era `.delete()` de verdade. Levou o 20260900302, o 303 e o 305 sem
+  // deixar `encerrado_em`, motivo nem rastro — e junto foi a prova de que a
+  // liberação por código tinha funcionado (`ferramentas[].via`,
+  // `confirmado_pelo_cliente`, `confirmado_em`).
+  //
+  // E é a causa do "id fantasma": o Luigi guarda o id do pedido no histórico da
+  // conversa, o pedido some do banco, ele não acha e cria outro. Medido em
+  // 14/09: 6 ids de 43 (14%) e 60 turnos de 437 apontam pra pedido que não
+  // existe mais, em 3 conversas — a Ana Vitória passou 6 h e 23 turnos assim.
+  // Nunca foi teimosia do modelo: era o banco mudando embaixo dele.
+  //
+  // `encerrado_motivo` tem CHECK com cinco valores (achou_caro, data,
+  // atendimento, sumiu, outro), então o motivo real vai em `observacoes` — no
+  // formato [dd/mm hh:mm] que o resumo-pdf.ts já filtra pra não vazar nota
+  // interna pra confecção. Todas as views e a régua já entendem `encerrado_em`;
+  // nada mais precisa mudar.
+  //
+  // Purgar pedido de teste de verdade é caminho separado e explícito, nunca o
+  // mesmo botão que atende pedido real.
   if (acao === 'excluir') {
-    const { error } = await supabaseAdmin.from('pedidos_assistente').delete().eq('id', id)
+    const agora = new Date()
+    const carimbo = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Recife', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+    }).format(agora).replace(',', '')
+    const nota = `[${carimbo}] excluído pelo admin`
+    const { error } = await supabaseAdmin
+      .from('pedidos_assistente')
+      .update({
+        encerrado_em: agora.toISOString(),
+        encerrado_motivo: 'outro',
+        encerrado_por: 'admin',
+        observacoes: p.observacoes ? `${p.observacoes}\n${nota}` : nota,
+        atualizado_em: agora.toISOString(),
+      })
+      .eq('id', id)
     if (error) return { ok: false, erro: error.message }
     return { ok: true }
   }
