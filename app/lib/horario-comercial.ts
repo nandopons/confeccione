@@ -86,3 +86,29 @@ export function somarHorasComerciais(horas: number, inicio: Date = new Date()): 
 
   return cursor
 }
+
+/** Quanto tempo a confecção tem pra responder, em horas comerciais. */
+export const HORAS_PARA_RESPONDER = 3
+
+/**
+ * Pedido com prazo apertado não pode esperar 3 horas por confecção.
+ *
+ * O cliente diz o prazo na conversa e ele vai gravado em `prazo_dias`: dos 204
+ * pedidos dos últimos 90 dias, 160 têm prazo, a média é 17 dias — e 37 pedem
+ * 10 dias ou menos, com o menor em 7.
+ *
+ * Com fila de um por vez, cada silêncio custa 3 horas comerciais, ou seja meio
+ * dia útil. Cinco confecções caladas viram dois dias corridos só pra descobrir
+ * que ninguém pegou. Num pedido de 7 dias isso queima um terço do prazo antes
+ * de existir fornecedor — e aí não adianta mais aceitar.
+ *
+ * Então a janela encolhe junto com o prazo. Continua uma confecção por vez (é
+ * ela que decide), só que o "não respondeu" chega mais rápido quando o
+ * calendário aperta.
+ */
+export function horasParaResponder(prazoDias: number | null | undefined): number {
+  if (prazoDias == null) return HORAS_PARA_RESPONDER
+  if (prazoDias <= 7) return 1
+  if (prazoDias <= 15) return 2
+  return HORAS_PARA_RESPONDER
+}

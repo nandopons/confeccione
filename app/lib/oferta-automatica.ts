@@ -21,34 +21,14 @@
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
-import { dentroDoHorarioComercial, somarHorasComerciais } from './horario-comercial'
+// HORAS_PARA_RESPONDER e horasParaResponder moraram aqui até 16/09/2026. Saíram
+// pro `horario-comercial` porque `pedido-assistente-oferta` passou a precisar
+// deles pra gravar o prazo NO INSERT, e importar daqui criaria ciclo (este
+// arquivo importa `ofertarPedido` de lá). Não deixei reexport: ninguém mais
+// consome esses nomes, e casca de compatibilidade sem consumidor é dívida que
+// alguém acha daqui a um mês sem saber se pode remover.
+import { dentroDoHorarioComercial } from './horario-comercial'
 import { ofertarPedido, ordenarFornecedoresPara, resumirLinhas, type FornecedorOpcao, type LinhaPedido } from './pedido-assistente-oferta'
-
-/** Quanto tempo a confecção tem pra responder, em horas comerciais. */
-export const HORAS_PARA_RESPONDER = 3
-
-/**
- * Pedido com prazo apertado não pode esperar 3 horas por confecção.
- *
- * O cliente diz o prazo na conversa e ele vai gravado em `prazo_dias`: dos 204
- * pedidos dos últimos 90 dias, 160 têm prazo, a média é 17 dias — e 37 pedem
- * 10 dias ou menos, com o menor em 7.
- *
- * Com fila de um por vez, cada silêncio custa 3 horas comerciais, ou seja meio
- * dia útil. Cinco confecções caladas viram dois dias corridos só pra descobrir
- * que ninguém pegou. Num pedido de 7 dias isso queima um terço do prazo antes
- * de existir fornecedor — e aí não adianta mais aceitar.
- *
- * Então a janela encolhe junto com o prazo. Continua uma confecção por vez (é
- * ela que decide), só que o "não respondeu" chega mais rápido quando o
- * calendário aperta.
- */
-export function horasParaResponder(prazoDias: number | null | undefined): number {
-  if (prazoDias == null) return HORAS_PARA_RESPONDER
-  if (prazoDias <= 7) return 1
-  if (prazoDias <= 15) return 2
-  return HORAS_PARA_RESPONDER
-}
 
 /** Ofertas em aberto que uma confecção pode segurar ao mesmo tempo. */
 export const MAX_OFERTAS_ABERTAS = 2
@@ -255,17 +235,13 @@ export async function rodarFilaDeOfertas(): Promise<ResultadoFila> {
       continue
     }
 
-    const r = await ofertarPedido(p.id, [escolhido.id])
+    // O prazo e a origem saíram deste UPDATE em 16/09/2026 e passaram a nascer
+    // dentro do `ofertarPedido` — ver o comentário lá. O remendo aqui funcionava
+    // pra ESTA porta e deixava as outras três sem prazo nenhum; e ele já falhava
+    // calado quando a oferta já existia como 'ofertada' (a idempotência devolve
+    // `criadas: 0` e o UPDATE nem era alcançado).
+    const r = await ofertarPedido(p.id, [escolhido.id], { origem: 'automatica' })
     if (!r.ok || r.criadas === 0) continue
-
-    // O prazo é gravado DEPOIS do envio, com a hora do envio: é o combinado
-    // que a confecção viu, e não muda se a janela mudar amanhã.
-    await supabaseAdmin
-      .from('ofertas_pedido_assistente')
-      .update({ expira_em: somarHorasComerciais(horasParaResponder(p.prazo_dias)).toISOString(), origem: 'automatica' })
-      .eq('pedido_id', p.id)
-      .eq('fornecedor_id', escolhido.id)
-      .eq('status', 'ofertada')
 
     ofertados.push({ pedido: p.codigo ?? p.id, fornecedor: escolhido.nome ?? escolhido.id })
   }

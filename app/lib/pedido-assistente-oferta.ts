@@ -24,6 +24,7 @@ import { pedidoTemListaAbertaIncompleta } from '@/app/lib/listas-externas'
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
+import { somarHorasComerciais, horasParaResponder } from './horario-comercial'
 import { APROVACAO_QUE_DESCLASSIFICA } from './classificacao-contato'
 import { registrarVersaoOrcamento } from './orcamento-versoes'
 import { enviarTextoSimples } from './whatsapp-cloud'
@@ -367,7 +368,16 @@ export async function ofertarPedido(
    * O motivo fica gravado em `ofertas_pedido_assistente.observacao`, pra ninguém
    * ler "notificadas: 0" daqui a três meses e achar que foi silêncio.
    */
-  opts?: { notificar?: boolean; motivoSemNotificar?: string }
+  opts?: {
+    notificar?: boolean
+    motivoSemNotificar?: string
+    /**
+     * Quem ofertou. Default 'manual' porque é o que as três portas humanas são;
+     * só a fila automática se declara. Antes disto a coluna ficava NULL em tudo
+     * que não fosse a fila, e "origem = manual" era dedução de quem lia.
+     */
+    origem?: 'manual' | 'automatica'
+  }
 ): Promise<{ ok: boolean; criadas: number; notificadas: number; erro?: string }> {
   const notificar = opts?.notificar !== false
   const { data: pedido } = await supabaseAdmin
@@ -464,11 +474,32 @@ export async function ofertarPedido(
 
     if (existente && existente.status === 'ofertada') continue
 
+    // OFERTA NASCE COM PRAZO — 16/09/2026.
+    //
+    // `expira_em` era gravado DEPOIS, e só por `rodarFilaDeOfertas`. As outras
+    // três portas que ofertam — o botão do admin, a rota de produto e a oferta
+    // na conversa do Luigi — criavam oferta que NUNCA expira, porque
+    // `expirarVencidas` exige `expira_em is not null`. Medido em 16/09: 39 de 39
+    // ofertas em aberto sem prazo, 24 delas com mais de 7 dias, a mais antiga de
+    // 19/06. E elas contam no teto de 2 por confecção: 12 das 41 aprovadas
+    // estavam invisíveis pra fila por causa de oferta que morreu em junho.
+    //
+    // O prazo vem pro INSERT porque é aqui que a oferta existe. Remendo por
+    // caller é o defeito que se repete: quem escrever a quinta porta amanhã não
+    // vai lembrar do UPDATE, exatamente como as três de hoje não lembraram.
+    //
+    // A hora é a do envio, não a do pedido: é o combinado que a confecção viu, e
+    // não muda se a janela mudar amanhã.
+    const expiraEm = somarHorasComerciais(horasParaResponder(pedido.prazo_dias)).toISOString()
+    const origem = opts?.origem ?? 'manual'
+
     let ofertaId: string
     if (existente) {
+      // Reativação é oferta nova pra quem recebe: prazo novo também. Sem isto a
+      // oferta reaberta herdaria o silêncio da anterior.
       const { error } = await supabaseAdmin
         .from('ofertas_pedido_assistente')
-        .update({ status: 'ofertada', valor_repasse_centavos: repasse, respondido_em: null })
+        .update({ status: 'ofertada', valor_repasse_centavos: repasse, respondido_em: null, expira_em: expiraEm, origem })
         .eq('id', existente.id)
       if (error) continue
       ofertaId = existente.id
@@ -480,6 +511,8 @@ export async function ofertarPedido(
           fornecedor_id: fid,
           status: 'ofertada',
           valor_repasse_centavos: repasse,
+          expira_em: expiraEm,
+          origem,
         })
         .select('id')
         .single()
