@@ -252,6 +252,18 @@ const DEBOUNCE_TETO_MS_PADRAO = 60_000
  * Luigi acabou de dizer MAIS no que o cliente respondeu, os dois determinísticos
  * e baratos. E é REDUÇÃO de janela, não supressão: na dúvida, os 30 s.
  */
+/**
+ * SALDO É SÓ SALDO — 15/09/2026.
+ *
+ * Este padrão dispara um WhatsApp dizendo "o Luigi parou pra TODO MUNDO". Ele
+ * era `/credit balance|insufficient|quota/`, e "quota"/"insufficient" são
+ * vocabulário de OUTROS provedores: um estouro de cota do Gemini (geração de
+ * imagem) viraria alarme de plataforma parada no celular do Fernando, às 3 h da
+ * manhã, com a Anthropic funcionando perfeitamente. Alarme que mente uma vez é
+ * alarme que ninguém lê na segunda.
+ */
+const SEM_SALDO_ANTHROPIC = /credit balance/i
+
 const DEBOUNCE_CURTA_MS_PADRAO = 20_000
 const DEBOUNCE_CURTA_CHARS_PADRAO = 25
 
@@ -3958,6 +3970,15 @@ export type MensagemCliente = {
    * que faltava era um MOTIVO pra voltar a falar, e é isso que vai aqui.
    */
   retomada?: string
+  /**
+   * Pula a espera do debounce.
+   *
+   * O debounce existe pra fragmento que AINDA VEM: o cliente escreveu "quero" e
+   * o resto chega em três segundos. Reprocessar mensagem de horas atrás não tem
+   * fragmento nenhum pendente — ela já chegou inteira —, e esperar mais 30 s ali
+   * só gasta o orçamento do cron. Ver reprocessarTurnosQueFalharam.
+   */
+  semDebounce?: boolean
 }
 
 /**
@@ -4054,7 +4075,7 @@ async function turnosSemSaldoNaUltimaHora(wamidAtual: string): Promise<{ primeir
     .from('luigi_whatsapp_log')
     .select('wamid_entrada')
     .gt('criado_em', desde)
-    .ilike('erro', '%credit balance%')
+    .ilike('erro', '%credit balance%') // mesmo recorte de SEM_SALDO_ANTHROPIC
     .limit(200)
   if (error || !data) return { primeiro: true, quantos: 0 }
   // A linha DESTE turno já foi gravada logo acima — sem tirá-la, a contagem
@@ -4234,7 +4255,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // Na devolução manual não há o que esperar: a mensagem dela é de horas
     // atrás e quem está do outro lado é o Fernando, olhando o botão girar. Os
     // 30 s aqui eram metade do tempo que ele ficava vendo "Chamando…".
-    if (!params.retomada) {
+    if (!params.retomada && !params.semDebounce) {
       const espera = await esperarOClienteTerminar({
         conversaId: params.conversaId,
         wamid: params.wamid,
@@ -4607,7 +4628,10 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
         // mundo, e o aviso tem que dizer isso na primeira vez, não na nona.
         // Em 6 dias aconteceu duas vezes (09/09 e 15/09) e o texto genérico não
         // deixava distinguir de um erro de conversa.
-        const semSaldo = /credit balance|insufficient|quota/i.test(erro)
+        // Só "credit balance". "quota"/"insufficient" são de outros provedores
+        // e virariam alarme de plataforma parada por cota do Gemini. Ver
+        // SEM_SALDO_ANTHROPIC.
+        const semSaldo = SEM_SALDO_ANTHROPIC.test(erro)
         const quem = nomeOuNumero(params.nome, waId)
         // UM AVISO POR APAGÃO, NÃO UM POR CLIENTE — 15/09/2026.
         //

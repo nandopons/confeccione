@@ -18,6 +18,20 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
+/**
+ * ESTE CRON RODAVA NO DEFAULT — 15/09/2026.
+ *
+ * Todas as outras rotas de rotina declaram `maxDuration` (60 a 300); esta, que
+ * é a mais pesada, não declarava nenhum. Passou despercebido enquanto as onze
+ * tarefas eram SQL rápido, e virou risco no dia em que uma delas passou a
+ * chamar o modelo: três turnos de reprocesso somam dezenas de segundos, e o que
+ * estourasse o orçamento morreria calado no meio da lista.
+ *
+ * 300 é o mesmo teto do botão do visualizador, pela mesma razão: é melhor a
+ * função ter folga sobrando do que uma tarefa sumir sem deixar linha.
+ */
+export const maxDuration = 300
+
 export async function GET(req: Request) {
   // Validação de segurança: só aceita chamadas com o secret correto.
   // O Vercel Cron envia automaticamente o header Authorization: Bearer <CRON_SECRET>.
@@ -73,6 +87,19 @@ export async function GET(req: Request) {
     fechamento = { erro: e instanceof Error ? e.message : String(e) }
   }
 
+  // TAREFA 11 ANTES DA 10, DE PROPÓSITO — 15/09/2026.
+  //
+  // O aviso é barato (duas somas em `uso_ia`) e o reprocesso é caro (até 3
+  // turnos de modelo). Se o caro vier primeiro e o orçamento da função acabar,
+  // o alarme de saldo nunca executa — justamente no dia em que ele importa,
+  // que é o dia em que há muita coisa pra reprocessar. Barato e crítico primeiro.
+  let consumoIa: Awaited<ReturnType<typeof vigiarConsumoIa>> | { erro: string }
+  try {
+    consumoIa = await vigiarConsumoIa()
+  } catch (e) {
+    consumoIa = { erro: e instanceof Error ? e.message : String(e) }
+  }
+
   // TAREFA 10: responder quem ficou sem resposta por falha de API (15/09/2026)
   //
   // ANTES DA PORTEIRA, pela mesma razão do fechador: é RESPOSTA a alguém que
@@ -95,6 +122,7 @@ export async function GET(req: Request) {
       pulado: 'fora do horário comercial',
       fechamento_automatico: fechamento,
       reprocesso_ia: reprocesso,
+      consumo_ia: consumoIa,
       duracao_ms: Date.now() - inicio,
     })
   }
@@ -370,22 +398,11 @@ export async function GET(req: Request) {
     cutucada = { erro: e instanceof Error ? e.message : String(e) }
   }
 
-  // TAREFA 11: vigiar o consumo de IA (15/09/2026)
-  //
-  // DEPOIS da porteira de propósito: isto é aviso pro Fernando, não resposta a
-  // cliente, e não precisa acordar ninguém de madrugada. Dois alarmes, os dois
-  // derivados de `uso_ia`: teto diário (pega o dia anômalo) e saldo estimado
-  // (pega o que o teto não pega — em 15/09 a conta zerou num dia de US$ 3,25).
-  let consumoIa: Awaited<ReturnType<typeof vigiarConsumoIa>> | { erro: string }
-  try {
-    consumoIa = await vigiarConsumoIa()
-  } catch (e) {
-    consumoIa = { erro: e instanceof Error ? e.message : String(e) }
-  }
-
-  // As TAREFAS 9 (fechar pedido pronto) e 10 (reprocessar turno que falhou por
-  // API) rodam lá em cima, antes da porteira de horário comercial — as duas
-  // respondem alguém que já está esperando. Ver os comentários no topo.
+  // As TAREFAS 9 (fechar pedido pronto), 10 (reprocessar turno que falhou por
+  // API) e 11 (vigiar consumo de IA) rodam lá em cima, antes da porteira de
+  // horário comercial. As duas primeiras respondem alguém que já está esperando;
+  // a 11 vai junto porque saldo zerado de madrugada precisa de aviso de
+  // madrugada — quando amanhece, já parou.
 
   return NextResponse.json({
     ok: true,

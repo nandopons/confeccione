@@ -25,7 +25,8 @@ import { supabaseAdmin } from './supabase-server'
 import { avisarGestor, responderCliente } from './luigi'
 
 /** Erros de API que merecem nova tentativa — falha de infra, não de conversa. */
-const ERRO_DE_API = /credit balance|insufficient|quota|rate_limit|overloaded|api_error|timeout|ECONNRESET|fetch failed|50\d\b|529/i
+const ERRO_DE_API = /credit balance|rate_limit|overloaded|api_error|timeout|ECONNRESET|fetch failed|50\d\b|529/i
+
 
 /**
  * Quantos turnos reprocessar por rodada.
@@ -56,10 +57,19 @@ export async function reprocessarTurnosQueFalharam(): Promise<ResultadoReprocess
   const saida: ResultadoReprocesso = { candidatos: 0, reprocessados: [], pulados: [] }
   const desde = new Date(Date.now() - JANELA_HORAS * 60 * 60_000).toISOString()
 
+  // SÓ TURNO QUE NÃO CHEGOU A RODAR — `rodadas = 0`.
+  //
+  // `timeout` e `overloaded` pegam turno que JÁ executou ferramenta: pedido
+  // criado, mockup gerado, resumo enviado, e só então a chamada seguinte
+  // estourou. Reprocessar ali roda tudo de novo POR CIMA — segundo pedido,
+  // segundo PDF. Saldo zerado morre na primeira chamada e é sempre rodadas 0,
+  // que é exatamente o caso que esta tarefa existe pra cobrir. Qualquer turno
+  // que chegou a rodar fica fora, sem exceção.
   const { data: falhas, error } = await supabaseAdmin
     .from('luigi_whatsapp_log')
     .select('id, conversa_id, wa_id, wamid_entrada, erro, criado_em')
     .eq('status', 'falhou')
+    .eq('rodadas', 0)
     .gt('criado_em', desde)
     .not('wamid_entrada', 'is', null)
     .order('criado_em', { ascending: true })
@@ -125,6 +135,7 @@ export async function reprocessarTurnosQueFalharam(): Promise<ResultadoReprocess
         criadoEm: msg.criado_em,
         tipo: msg.tipo,
         corpo: msg.corpo,
+        semDebounce: true,
       })
       saida.reprocessados.push(f.wamid_entrada)
     } catch (err) {
