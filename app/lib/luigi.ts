@@ -4041,6 +4041,29 @@ async function ultimaFalaFoiPergunta(conversaId: string): Promise<boolean> {
   return /\?\s*$/.test((data?.corpo ?? '').trim())
 }
 
+/**
+ * Este turno é o primeiro de uma rajada de saldo zerado?
+ *
+ * Lê o que já é gravado — nenhuma coluna nova. Consulta que falha devolve
+ * `primeiro: true`: na dúvida avisa, porque o custo de um aviso a mais é bem
+ * menor que o de um apagão silencioso.
+ */
+async function turnosSemSaldoNaUltimaHora(wamidAtual: string): Promise<{ primeiro: boolean; quantos: number }> {
+  const desde = new Date(Date.now() - 60 * 60_000).toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('luigi_whatsapp_log')
+    .select('wamid_entrada')
+    .gt('criado_em', desde)
+    .ilike('erro', '%credit balance%')
+    .limit(200)
+  if (error || !data) return { primeiro: true, quantos: 0 }
+  // A linha DESTE turno já foi gravada logo acima — sem tirá-la, a contagem
+  // nunca seria zero e o aviso nunca sairia. Conta as de todas as conversas de
+  // propósito: o apagão é global, não desta conversa.
+  const anteriores = (data as Array<{ wamid_entrada: string | null }>).filter((l) => l.wamid_entrada !== wamidAtual)
+  return { primeiro: anteriores.length === 0, quantos: anteriores.length + 1 }
+}
+
 async function esperarOClienteTerminar(params: {
   conversaId: string
   wamid: string
@@ -4512,8 +4535,24 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // propósito. Não inventei um status novo só pra isso — o check do banco
     // aceita seis, e um sétimo por causa de rótulo é dívida barata de criar e
     // cara de manter.
-    const soEscalou = partes.length === 0 && Boolean(r.escalada)
-    await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: Boolean(r.escalada), motivo_escalada: r.escalada?.motivo ?? null, status: soEscalou ? 'ignorada' : envio.ok ? 'enviada' : 'falhou', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: soEscalou || envio.ok ? null : envio.erro })
+    // SILÊNCIO POR ESCOLHA NÃO É FALHA — 15/09/2026.
+    //
+    // O caso "escalou e calou" já era 'ignorada'. Faltava o gêmeo: o modelo
+    // rodar, decidir que não há o que dizer, e não escalar. Isso caía em
+    // 'falhou' com erro "sem texto pra enviar" e inflava a estatística de
+    // escalada — medido em 12 casos de 30 dias, e o que o cliente tinha
+    // escrito era "Ta certo", "Ok", "Obrigada", "Certo", "Perfeito, Luigi!".
+    // São fechos de conversa; ficar calado ali é defensável.
+    //
+    // (As seis de 11/09 20:28–20:54, "sim" e "pode confirmar", eram outra
+    // coisa: o loop da liberação, consertado em bc61d0b.)
+    //
+    // Continua 'falhou' quando o texto foi BARRADO por vocabulário interno —
+    // ali houve resposta e ela foi impedida, que é problema de verdade.
+    const semTexto = partes.length === 0 && !vazandoInterno
+    const soEscalou = semTexto && Boolean(r.escalada)
+    const calouPorEscolha = semTexto && !r.escalada
+    await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: Boolean(r.escalada), motivo_escalada: r.escalada?.motivo ?? (calouPorEscolha ? 'sem resposta por escolha' : null), status: soEscalou || calouPorEscolha ? 'ignorada' : envio.ok ? 'enviada' : 'falhou', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: soEscalou || calouPorEscolha || envio.ok ? null : envio.erro })
     if (r.escalada) await escalar(params.conversaId, { nome, waId }, r.escalada.motivo, modo)
   } catch (err) {
     const erro = err instanceof Error ? err.message : String(err)
@@ -4570,21 +4609,28 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
         // deixava distinguir de um erro de conversa.
         const semSaldo = /credit balance|insufficient|quota/i.test(erro)
         const quem = nomeOuNumero(params.nome, waId)
+        // UM AVISO POR APAGÃO, NÃO UM POR CLIENTE — 15/09/2026.
+        //
+        // Saldo no zero derruba TODOS os turnos: dez clientes numa hora viravam
+        // dez WhatsApps iguais, e é assim que o Fernando para de ler os avisos
+        // (a mesma lição da Cybelle, em escalar()). Só avisa quando este turno é
+        // o PRIMEIRO da rajada — nenhum outro erro de saldo na última hora. O
+        // lembrete enquanto durar é do cron, que sabe a hora; aqui é o disparo.
+        const rajada = semSaldo ? await turnosSemSaldoNaUltimaHora(params.wamid) : { primeiro: true, quantos: 0 }
+        const avisaSaldo = semSaldo && rajada.primeiro
         if (persistente) {
           // A escalada continua valendo com saldo zerado: é exatamente o caso em
           // que o cliente precisa de gente, e é o que o comentário acima previu.
           await marcarEscalada(params.conversaId)
-          await avisarGestor(
-            semSaldo
-              ? `SALDO DA API NO ZERO — o Luigi parou pra TODO MUNDO, não só pra ${quem}. Recarregue a conta da Anthropic. A conversa dele foi pra você (/admin/whatsapp). Erro: ${erro.slice(0, 140)}`
-              : `O Luigi falhou duas vezes seguidas com ${quem} e passou a conversa pra você (/admin/whatsapp). Erro: ${erro.slice(0, 180)}`
-          )
-        } else {
-          await avisarGestor(
-            semSaldo
-              ? `SALDO DA API NO ZERO — o Luigi parou pra TODO MUNDO, não só pra ${quem}. Recarregue a conta da Anthropic agora. Erro: ${erro.slice(0, 140)}`
-              : `Um turno do Luigi falhou com ${quem} — a conversa segue com ele, a próxima mensagem é atendida normal. Erro: ${erro.slice(0, 180)}`
-          )
+          if (avisaSaldo) {
+            await avisarGestor(`SALDO DA API NO ZERO — o Luigi parou pra TODO MUNDO. Recarregue a conta da Anthropic. A conversa de ${quem} foi pra você (/admin/whatsapp). Erro: ${erro.slice(0, 140)}`)
+          } else if (!semSaldo) {
+            await avisarGestor(`O Luigi falhou duas vezes seguidas com ${quem} e passou a conversa pra você (/admin/whatsapp). Erro: ${erro.slice(0, 180)}`)
+          }
+        } else if (avisaSaldo) {
+          await avisarGestor(`SALDO DA API NO ZERO — o Luigi parou pra TODO MUNDO, não só pra ${quem}. Recarregue a conta da Anthropic agora. Erro: ${erro.slice(0, 140)}`)
+        } else if (!semSaldo) {
+          await avisarGestor(`Um turno do Luigi falhou com ${quem} — a conversa segue com ele, a próxima mensagem é atendida normal. Erro: ${erro.slice(0, 180)}`)
         }
       } else {
         // Caiu antes de saber o modo — quase sempre o banco fora do ar, e aí a
