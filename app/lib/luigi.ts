@@ -4544,11 +4544,47 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       if (modo) {
         const persistente = await falhouNaVezAnterior(params.conversaId)
         await gravarLog({ conversa_id: params.conversaId, wa_id: waId, wamid_entrada: params.wamid, modo, mensagem: params.corpo, resposta: null, pedido_id: null, ferramentas: [], escalado: persistente, motivo_escalada: persistente ? 'erro interno do Luigi (segunda falha seguida)' : null, status: 'falhou', modelo: MODELO, rodadas: 0, tokens_entrada: 0, tokens_saida: 0, duracao_ms: Date.now() - inicio, erro })
+
+        // O CLIENTE NÃO PODE RECEBER SILÊNCIO — 15/09/2026.
+        //
+        // Até aqui a falha era invisível pra quem estava do outro lado: ele
+        // escrevia e não acontecia NADA. Em 15/09 três clientes bateram no
+        // `credit balance is too low` (10:55, 11:49, 13:22) e ficaram sem
+        // resposta sem saber por quê. Do lado deles isso não é "sistema fora",
+        // é a empresa que parou de responder no meio da conversa.
+        //
+        // Uma linha neutra, sem explicar máquina: ele não tem sistema, tem um
+        // pedido. E só na PRIMEIRA falha — na segunda a conversa vai pro
+        // Fernando e quem fala é gente, então repetir "já te respondo" seria
+        // prometer duas vezes o que não foi cumprido uma.
+        //
+        // Só em `responde`: em `sugere` o Luigi não fala com o cliente.
+        if (!persistente && modo === 'responde') {
+          const aviso = await enviarTexto(waId, 'Deixa eu confirmar uma coisa aqui e já te respondo.')
+          if (aviso.ok) await registrarSaidaInbox(waId, params.nome ?? null, aviso.wamid, 'Deixa eu confirmar uma coisa aqui e já te respondo.', null, 'luigi')
+        }
+
+        // Saldo zerado não é "um turno torto": é a plataforma parada pra TODO
+        // mundo, e o aviso tem que dizer isso na primeira vez, não na nona.
+        // Em 6 dias aconteceu duas vezes (09/09 e 15/09) e o texto genérico não
+        // deixava distinguir de um erro de conversa.
+        const semSaldo = /credit balance|insufficient|quota/i.test(erro)
+        const quem = nomeOuNumero(params.nome, waId)
         if (persistente) {
+          // A escalada continua valendo com saldo zerado: é exatamente o caso em
+          // que o cliente precisa de gente, e é o que o comentário acima previu.
           await marcarEscalada(params.conversaId)
-          await avisarGestor(`O Luigi falhou duas vezes seguidas com ${nomeOuNumero(params.nome, waId)} e passou a conversa pra você (/admin/whatsapp). Erro: ${erro.slice(0, 180)}`)
+          await avisarGestor(
+            semSaldo
+              ? `SALDO DA API NO ZERO — o Luigi parou pra TODO MUNDO, não só pra ${quem}. Recarregue a conta da Anthropic. A conversa dele foi pra você (/admin/whatsapp). Erro: ${erro.slice(0, 140)}`
+              : `O Luigi falhou duas vezes seguidas com ${quem} e passou a conversa pra você (/admin/whatsapp). Erro: ${erro.slice(0, 180)}`
+          )
         } else {
-          await avisarGestor(`Um turno do Luigi falhou com ${nomeOuNumero(params.nome, waId)} — a conversa segue com ele, a próxima mensagem é atendida normal. Erro: ${erro.slice(0, 180)}`)
+          await avisarGestor(
+            semSaldo
+              ? `SALDO DA API NO ZERO — o Luigi parou pra TODO MUNDO, não só pra ${quem}. Recarregue a conta da Anthropic agora. Erro: ${erro.slice(0, 140)}`
+              : `Um turno do Luigi falhou com ${quem} — a conversa segue com ele, a próxima mensagem é atendida normal. Erro: ${erro.slice(0, 180)}`
+          )
         }
       } else {
         // Caiu antes de saber o modo — quase sempre o banco fora do ar, e aí a
