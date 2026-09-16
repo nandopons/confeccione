@@ -18,6 +18,7 @@ Fernando, sozinho. **Nada aqui é laboratório: tem cliente do outro lado.**
 | agente do WhatsApp | `app/lib/luigi.ts` |
 | cron principal | `app/api/cron/scheduler/route.ts` + `vercel.json` (`*/15`) |
 | pedidos vivos | tabela `pedidos_assistente` + view `pedidos_assistente_etapas` |
+| agente local no Windows (gestão + captação-busca fora da nuvem) | `docs/agente-local.md` — **leia inteiro antes de tocar nisso**; Luigi NÃO vai |
 
 Projeto Supabase `oumfvryxxxfgflvpqeow`. Vercel: team `team_w61bCCYbamjhUMFpg9UySFbS`,
 projeto `prj_OK1W2iHYHy1Bby7VnmrIftjV6ch6`.
