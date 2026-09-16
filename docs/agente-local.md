@@ -182,7 +182,10 @@ Estão no `AGENTS.md`; as que mais mordem neste trabalho:
 
 ## Linha de base (16/09/2026), pra comparar depois
 
-- `uso_ia` 14 dias: US$ 85,58; gestão 27%, captacao-busca 12%.
+- `uso_ia` 14 dias: US$ 85,58; gestão 27%, captacao-busca 12%. **Atenção ao
+  comparar: 15/09 fechou em US$ 3,25 porque o saldo zerou das 10:55 às 13:22 —
+  foi dia PARADO, não dia barato.** Dia útil com movimento fica em US$ 10–18;
+  o pico de 27,68 (09/09) foi o agente de gestão descontrolado.
 - captacao-busca: 26 chamadas, US$ 0,38 cada, cache 0%.
 - Sondagem 7 dias: 80 → 50 entregues → 24 responderam → **0 cadastros**
   (o fechamento da captação é problema separado, pendente — ver
@@ -191,7 +194,9 @@ Estão no `AGENTS.md`; as que mais mordem neste trabalho:
 
 ## Pendências que NÃO são deste trabalho (pra não misturar)
 
-Fila de oferta automática parada no passo 1 de 5 (`f498c9a`); captação itens
-1, 2, 4, 6, 7; portfólio da confecção por foto; os 26 em `pedido_completo`.
+Fila de oferta automática em andamento (passo 2 de 5 fechou em `2381c12`,
+16/09 — o estado dela muda todo dia, não confie neste parágrafo, confie no
+`DEBT.md`); captação itens 1, 2, 4, 6, 7; portfólio da confecção por foto; os
+26 em `pedido_completo`.
 Estão no `DEBT.md` e nas memórias do Cowork. Este documento é só o agente
 local.

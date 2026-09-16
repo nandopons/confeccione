@@ -179,10 +179,25 @@ async function candidatosDisponiveis(pedidoId: string): Promise<FornecedorOpcao[
   const viram = new Set(((jaViu ?? []) as Array<{ fornecedor_id: string }>).map((o) => o.fornecedor_id))
 
   // Quantas ofertas em aberto cada uma segura agora.
+  //
+  // SÓ CONTA OFERTA COM PRAZO VIVO — 16/09/2026.
+  //
+  // `status='ofertada'` sozinho contava zumbi: oferta sem `expira_em`, que
+  // `expirarVencidas` nunca alcança (ela exige `expira_em is not null`) e que
+  // por isso fica "em aberto" pra sempre. Medido em 16/09: 39 de 39 ofertas
+  // abertas sem prazo, 24 com mais de 7 dias, a mais antiga de 19/06 — e elas
+  // seguravam 12 das 41 confecções aprovadas no teto de 2. Um terço da rede
+  // invisível pra fila por causa de oferta que morreu em junho.
+  //
+  // A causa raiz morreu em 2381c12 (oferta nasce com prazo). Isto aqui é o
+  // outro lado: enquanto existir oferta sem prazo — as antigas, ou qualquer
+  // caminho que escape amanhã —, ela não bloqueia ninguém. Oferta que não pode
+  // vencer não pode ocupar vaga.
   const { data: abertas, error: errAbertas } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
     .select('fornecedor_id')
     .eq('status', 'ofertada')
+    .gt('expira_em', new Date().toISOString())
   if (errAbertas) throw new Error(`fila: carga de ofertas abertas — ${errAbertas.message}`)
   const carga = new Map<string, number>()
   for (const o of (abertas ?? []) as Array<{ fornecedor_id: string }>) {
