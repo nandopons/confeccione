@@ -1587,7 +1587,12 @@ const FERRAMENTA_PORTFOLIO: Anthropic.Messages.Tool = {
   },
 }
 
-function ferramentasDoModo(modo: Exclude<ModoLuigi, 'desligado'>, ehFornecedor = false): Anthropic.Messages.Tool[] {
+function ferramentasDoModo(
+  modo: Exclude<ModoLuigi, 'desligado'>,
+  ehFornecedor = false,
+  /** Ver `acabouDeLiberar` em rodarLuigi: criar_pedido sai da lista deste turno. */
+  semCriarPedido = false
+): Anthropic.Messages.Tool[] {
   // Confecção não tem pedido pra montar: dar a ela as ferramentas de peça seria
   // oferecer ao modelo a chance de editar o pedido de OUTRA pessoa. O que ela
   // precisa é registrar o próprio perfil e mandar foto.
@@ -1604,7 +1609,7 @@ function ferramentasDoModo(modo: Exclude<ModoLuigi, 'desligado'>, ehFornecedor =
         FERRAMENTA_ENCERRAR,
         FERRAMENTA_AJUSTAR_PECA,
         FERRAMENTA_DEFINIR_PECAS,
-        FERRAMENTA_CRIAR_PEDIDO,
+        ...(semCriarPedido ? [] : [FERRAMENTA_CRIAR_PEDIDO]),
         FERRAMENTA_FOTO_MODELO,
         FERRAMENTA_MOCKUP_IA,
         FERRAMENTA_PAUSAR_LEMBRETES,
@@ -3297,7 +3302,25 @@ async function rodarLuigi(
   jaSeApresentou: boolean,
   mensagens: Anthropic.Messages.MessageParam[],
   /** O Fernando devolveu esta conversa à mão. Muda o que o Luigi pode recusar. */
-  devolucaoManual = false
+  devolucaoManual = false,
+  /**
+   * O código acabou de liberar o pedido neste turno — ver liberarSeEleConfirmou.
+   *
+   * CRIAR PEDIDO SAI DA MESA — 16/09/2026.
+   *
+   * Caso da Clau, 15/09 15:27: o código gravou `confirmado_em` no 20260900295 e
+   * SETE SEGUNDOS depois, no mesmo turno, o modelo chamou criar_pedido e nasceu
+   * o 20260900310. Ele tinha lido "ACABOU DE SER LIBERADO AGORA" no contexto e
+   * chegou a DIZER ao cliente "vi que você já tem um pedido completo com essas
+   * mesmas camisetas" — e criou assim mesmo. Dois minutos depois liberou o
+   * duplicado.
+   *
+   * Instrução no contexto é sinal opcional, e sinal opcional perde pra plano:
+   * é a terceira vez que isso aparece (o `aviso` do criar_pedido, o `mudou:
+   * false`, agora isto). A ferramenta some da lista do turno — o que não está
+   * na mesa não é escolhido.
+   */
+  acabouDeLiberar = false
 ): Promise<ResultadoAgente> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY ausente')
@@ -3369,7 +3392,7 @@ async function rodarLuigi(
           // reordenação de um prompt de 33 mil caracteres e fica pra uma decisão
           // própria, com medição.
           system: promptSistema(modo, ctx, jaSeApresentou),
-          tools: comCacheNasFerramentas(ferramentasDoModo(modo, ctx.ehFornecedor)),
+          tools: comCacheNasFerramentas(ferramentasDoModo(modo, ctx.ehFornecedor, acabouDeLiberar)),
           messages: historico,
         },
         { signal: controlador.signal }
@@ -4302,7 +4325,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
         ? await liberarSeEleConfirmou(ctx, params.corpo, params.conversaId).catch(() => ({ liberou: false, codigo: null }))
         : { liberou: false, codigo: null }
 
-    const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada))
+    const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada), auto.liberou)
     const pedidoId = ctx.pedidoEmFoco?.id ?? null
     // `via` diz QUEM liberou. Sem isto, em duas semanas não dá pra saber se a
     // hipótese do contexto valeu alguma coisa ou se o código carregou tudo.

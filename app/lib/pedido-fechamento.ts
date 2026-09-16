@@ -383,8 +383,21 @@ export async function criarPedidoParaContato(params: {
   // Trava por CONTEÚDO pegaria 2 de 48. Por CONTATO pega os 23.
   //
   // Então: existe pedido ABERTO desta pessoa? Devolve ele, com as linhas, e
-  // manda ajustar. Aberto = nem confirmado nem encerrado — pedido já confirmado
-  // é história, e a pessoa tem direito a um segundo pedido depois dele.
+  // manda ajustar.
+  //
+  // CONFIRMADO NÃO É HISTÓRIA — 16/09/2026.
+  //
+  // "Aberto" era `confirmado_em IS NULL`, e isso abriu um buraco no dia em que a
+  // liberação virou efeito de código. Caso da Clau, 15/09 15:27:37: o código
+  // gravou `confirmado_em` no pedido 20260900295 e SETE SEGUNDOS depois, no mesmo
+  // turno, o modelo chamou criar_pedido — a trava consultou, não achou pedido
+  // "aberto" (acabara de confirmar o único) e deixou nascer o 20260900310. O
+  // Luigi chegou a DIZER "vi que você já tem um pedido completo com essas mesmas
+  // camisetas" e criou assim mesmo. Dois minutos depois liberou o duplicado.
+  //
+  // Pedido confirmado em buscando_fornecedor é o MAIS aberto que existe: está na
+  // rua, sendo ofertado. O que encerra a vida dele é `encerrado_em`, ou ter sido
+  // pago/finalizado — aí sim a pessoa tem direito a um segundo pedido.
   //
   // SEM JANELA DE TEMPO de propósito: "há quanto tempo" nunca foi a pergunta.
   // A pergunta é se ela já tem um pedido em aberto, e isso não caduca.
@@ -393,9 +406,14 @@ export async function criarPedidoParaContato(params: {
     .from('pedidos_assistente')
     .select('id, codigo, linhas, criado_em')
     .like('telefone', `%${tel8}`)
-    .is('confirmado_em', null)
     .is('encerrado_em', null)
+    .is('finalizado_em', null)
     .neq('status', 'cancelado')
+    // `.neq('pagamento_status','pago')` NÃO serve: `pagamento_status` é NULL em
+    // 234 dos 242 pedidos, e `NULL <> 'pago'` é NULL — o filtro excluiria quase
+    // toda a base e a trava voltaria a deixar criar duplicata, com o conserto
+    // virando o bug. É a armadilha do NULL que o AGENTS.md já nomeia.
+    .or('pagamento_status.is.null,pagamento_status.neq.pago')
     .order('criado_em', { ascending: false })
     .limit(1)
     .maybeSingle<{ id: string; codigo: string | null; linhas: unknown; criado_em: string }>()
