@@ -351,12 +351,31 @@ export async function pausarLembretesDoPedido(params: {
  * do mesmo telefone. Se não houver, ficam nulos e o pedido segue incompleto
  * até alguém preencher, que é o comportamento normal do funil.
  */
+/** [dd/mm hh:mm] em Recife — o formato de nota interna que o PDF filtra. */
+function carimboRecife(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Recife', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).format(d).replace(',', '')
+}
+
 export async function criarPedidoParaContato(params: {
   telefone: string
   nome?: string | null
   pecas: PecaEntrada[]
   prazoDias?: number | null
   observacoes?: string | null
+  /**
+   * Código do pedido aberto do qual ESTE é separado — a resposta do cliente à
+   * pergunta "é pedido novo ou mudança naquele?".
+   *
+   * O CLIENTE É QUEM SABE — 16/09/2026. A trava de duplicata recusava e mandava
+   * chamar_humano, como se "segundo pedido" fosse decisão nossa. Não é: só ele
+   * sabe se as 60 camisetas são outra compra ou a mesma com número novo. A
+   * pergunta vai pra ele, e a resposta dele vira DADO aqui — mesmo padrão do
+   * `confirmado_pelo_cliente` nas linhas, pelo mesmo motivo: resposta que não
+   * escreve em campo nenhum faz a pergunta voltar pra sempre.
+   */
+  separadoDoPedido?: string | null
 }): Promise<{ ok: boolean; erro?: string; pedidoId?: string; codigo?: string; resumo?: string; reaproveitado?: boolean }> {
   const tel = params.telefone.replace(/\D/g, '')
   if (tel.length < 10) return { ok: false, erro: 'telefone do contato inválido' }
@@ -417,7 +436,27 @@ export async function criarPedidoParaContato(params: {
     .order('criado_em', { ascending: false })
     .limit(1)
     .maybeSingle<{ id: string; codigo: string | null; linhas: unknown; criado_em: string }>()
-  if (aberto) {
+  // O cliente respondeu que é pedido NOVO: confere e deixa passar.
+  //
+  // Confere de verdade — o código tem que ser de um pedido ABERTO DESTE contato.
+  // Sem isso o campo vira senha: qualquer string liberaria a criação, e a trava
+  // que custou 23 duplicatas viraria enfeite.
+  const separado = (params.separadoDoPedido ?? '').trim()
+  let liberadoPeloCliente: string | null = null
+  if (separado && aberto) {
+    const bate = separado === aberto.codigo || separado === aberto.id
+    if (!bate) {
+      return {
+        ok: false,
+        erro:
+          `"${separado}" não é o pedido aberto desta pessoa (o aberto é ${aberto.codigo ?? aberto.id}). ` +
+          `Se ele disse que é um pedido novo, separado daquele, repita o código certo em separado_do_pedido.`,
+      }
+    }
+    liberadoPeloCliente = aberto.codigo ?? aberto.id
+  }
+
+  if (aberto && !liberadoPeloCliente) {
     // Devolve AS LINHAS junto: sem elas o Luigi não sabe o que já está lá e
     // pergunta tudo de novo, que é o comportamento que fez a Ana Vitória
     // repetir a mesma correção três vezes.
@@ -431,10 +470,11 @@ export async function criarPedidoParaContato(params: {
       pedidoId: aberto.id,
       codigo: aberto.codigo ?? undefined,
       erro:
-        `esta pessoa JÁ TEM o pedido ${aberto.codigo ?? aberto.id} em aberto. NÃO crie outro: ` +
-        `use ajustar_peca_pedido pra mudar o que ela pediu, ou definir_pecas_pedido pra trocar a lista inteira. ` +
-        `O que já está nele: ${resumoAtual || '(nenhuma peça ainda)'}. ` +
-        `Se for mesmo um SEGUNDO pedido, diferente deste, chame chamar_humano — quem decide isso é o Fernando.`,
+        `existe o pedido ${aberto.codigo ?? aberto.id} aberto, com: ${resumoAtual || '(nenhuma peça ainda)'}. ` +
+        `NÃO crie outro por conta própria. ` +
+        `PERGUNTE AO CLIENTE, numa frase: é um pedido NOVO, separado do ${aberto.codigo ?? aberto.id}, ou é mudança nesse? ` +
+        `Se ele disser que é novo, chame criar_pedido de novo com separado_do_pedido: "${aberto.codigo ?? aberto.id}". ` +
+        `Se disser que é mudança, use ajustar_peca_pedido (ou definir_pecas_pedido pra trocar a lista inteira).`,
     }
   }
 
@@ -465,7 +505,15 @@ export async function criarPedidoParaContato(params: {
       cidade: (anterior?.cidade as string | null) ?? null,
       uf: (anterior?.uf as string | null) ?? null,
       prazo_dias: params.prazoDias ?? null,
-      observacoes: params.observacoes ?? null,
+      // A resposta do cliente vira DADO, não some no ar: daqui a um mês dá pra
+      // saber que este segundo pedido foi escolha dele, e não a trava falhando.
+      // Formato [dd/mm hh:mm] é o que o resumo-pdf.ts filtra pra não vazar nota
+      // interna pra confecção.
+      observacoes: liberadoPeloCliente
+        ? [params.observacoes, `[${carimboRecife()}] segundo pedido, separado do ${liberadoPeloCliente}, a pedido do cliente`]
+            .filter(Boolean)
+            .join('\n')
+        : params.observacoes ?? null,
     })
     .select('id, codigo')
     .single<{ id: string; codigo: string | null }>()

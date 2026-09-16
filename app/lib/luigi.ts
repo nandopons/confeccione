@@ -1301,7 +1301,10 @@ const FERRAMENTA_CRIAR_PEDIDO: Anthropic.Messages.Tool = {
     'em nenhum pedido que ela já tem — porque não tem nenhum, ou porque o que tem já foi liberado pras confecções e não ' +
     'pode mais receber peça. NÃO use pra completar pedido vazio (é definir_pecas_pedido) nem pra mudar peça existente ' +
     '(é ajustar_peca_pedido). O pedido nasce parado: depois de criar, mande o resumo em PDF e só libere com o sim dela. ' +
-    'Endereço e cadastro são copiados do pedido anterior dela — não pergunte de novo o que ela já deu.',
+    'Endereço e cadastro são copiados do pedido anterior dela — não pergunte de novo o que ela já deu. ' +
+    'Se ela JÁ TEM pedido aberto, a ferramenta recusa e manda você PERGUNTAR a ela se é pedido novo ou mudança naquele. ' +
+    'Só depois da resposta dela, e só se ela disser que é novo, chame de novo com "separado_do_pedido" igual ao código que ' +
+    'a recusa citou. Nunca preencha esse campo por conta própria: ele registra a resposta DELA.',
   input_schema: {
     type: 'object',
     properties: {
@@ -1338,6 +1341,13 @@ const FERRAMENTA_CRIAR_PEDIDO: Anthropic.Messages.Tool = {
         },
       },
       prazo_dias: { type: 'number', minimum: 1, maximum: 365, description: 'Prazo que ELA pediu, em dias. Só se ela disser.' },
+      separado_do_pedido: {
+        type: 'string',
+        maxLength: 40,
+        description:
+          'Código do pedido aberto do qual este é separado. Preencha SÓ depois de o cliente responder que é um pedido novo, ' +
+          'com o código que a recusa citou. É a resposta dele virando registro, não um jeito de passar pela trava.',
+      },
       observacoes: { type: 'string', maxLength: 500, description: 'Entrega, referência de pedido anterior, o que não cabe na peça.' },
     },
     required: ['pecas'],
@@ -2206,6 +2216,7 @@ async function executarFerramenta(
         nome: ctx.contato.nome,
         prazoDias: num(entrada.prazo_dias) ?? null,
         observacoes: str(entrada.observacoes) ?? null,
+        separadoDoPedido: str(entrada.separado_do_pedido),
         pecas: lista.map((x) => ({
           modelo: str(x.modelo) ?? null,
           cor: str(x.cor) ?? null,
@@ -2242,9 +2253,9 @@ async function executarFerramenta(
       if (r.reaproveitado) {
         throw new Error(
           `${r.erro ?? `esta pessoa já tem o pedido ${r.codigo} em aberto — ajuste ele, não crie outro`}` +
-            '\n[como levar isto ao cliente] Ele não está esperando um pedido novo: está esperando a mudança que pediu. ' +
-            'Não diga que abriu pedido, não diga que deu erro, não cite pedido em aberto nem ferramenta. ' +
-            'Faça o ajuste e confirme em uma linha o que ficou.'
+            '\n[como levar isto ao cliente] Quem decide se é pedido novo ou mudança é ELE, não você e não a equipe. ' +
+            'Pergunte numa frase curta, com as palavras da peça, sem citar código de pedido nem ferramenta: ' +
+            '"isso é um pedido separado do outro, ou é pra mudar aquele mesmo?". Uma pergunta, e espere a resposta.'
         )
       }
       const pronto = await conferirPedido(r.pedidoId!)
