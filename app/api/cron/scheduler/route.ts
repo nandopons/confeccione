@@ -11,6 +11,7 @@ import {
   proximoAgendamento,
   jaConverteu,
 } from '@/app/lib/captacao'
+import { reprocessarTurnosQueFalharam, vigiarConsumoIa } from '@/app/lib/saude-ia'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -72,6 +73,20 @@ export async function GET(req: Request) {
     fechamento = { erro: e instanceof Error ? e.message : String(e) }
   }
 
+  // TAREFA 10: responder quem ficou sem resposta por falha de API (15/09/2026)
+  //
+  // ANTES DA PORTEIRA, pela mesma razão do fechador: é RESPOSTA a alguém que
+  // está esperando, não abordagem. Em 15/09 o saldo zerou e três clientes
+  // escreveram entre 10:55 e 13:22 sem receber nada; quando voltou, ninguém
+  // voltou atrás. O Luigi agora promete "já te respondo" no catch — isto é o
+  // que cumpre a promessa, e sem isto aquela frase é mentira com outra roupa.
+  let reprocesso: Awaited<ReturnType<typeof reprocessarTurnosQueFalharam>> | { erro: string }
+  try {
+    reprocesso = await reprocessarTurnosQueFalharam()
+  } catch (e) {
+    reprocesso = { erro: e instanceof Error ? e.message : String(e) }
+  }
+
   // Fora do horário comercial: cron acorda mas não dispara nada novo.
   // Apenas registra que rodou e sai. Isso evita mandar WhatsApp de madrugada.
   if (!estaEmHorarioComercial()) {
@@ -79,6 +94,7 @@ export async function GET(req: Request) {
       ok: true,
       pulado: 'fora do horário comercial',
       fechamento_automatico: fechamento,
+      reprocesso_ia: reprocesso,
       duracao_ms: Date.now() - inicio,
     })
   }
@@ -354,8 +370,22 @@ export async function GET(req: Request) {
     cutucada = { erro: e instanceof Error ? e.message : String(e) }
   }
 
-  // A TAREFA 9 (fechar pedido pronto) roda lá em cima, antes da porteira de
-  // horário comercial — ver o comentário longo no topo deste arquivo.
+  // TAREFA 11: vigiar o consumo de IA (15/09/2026)
+  //
+  // DEPOIS da porteira de propósito: isto é aviso pro Fernando, não resposta a
+  // cliente, e não precisa acordar ninguém de madrugada. Dois alarmes, os dois
+  // derivados de `uso_ia`: teto diário (pega o dia anômalo) e saldo estimado
+  // (pega o que o teto não pega — em 15/09 a conta zerou num dia de US$ 3,25).
+  let consumoIa: Awaited<ReturnType<typeof vigiarConsumoIa>> | { erro: string }
+  try {
+    consumoIa = await vigiarConsumoIa()
+  } catch (e) {
+    consumoIa = { erro: e instanceof Error ? e.message : String(e) }
+  }
+
+  // As TAREFAS 9 (fechar pedido pronto) e 10 (reprocessar turno que falhou por
+  // API) rodam lá em cima, antes da porteira de horário comercial — as duas
+  // respondem alguém que já está esperando. Ver os comentários no topo.
 
   return NextResponse.json({
     ok: true,
@@ -363,5 +393,7 @@ export async function GET(req: Request) {
     ...resumo,
     cutucada_pos_resumo: cutucada,
     fechamento_automatico: fechamento,
+    reprocesso_ia: reprocesso,
+    consumo_ia: consumoIa,
   })
 }
