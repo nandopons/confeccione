@@ -46,7 +46,7 @@ import { enviarImagemDoPedido, janela24hAberta, registrarSaidaInbox } from './wh
 // descricao. Pra editar a peça de verdade usamos o tipo canônico do produto.
 import { type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
 import { editarLinhasPedidoCliente, gradeDaFerramenta, linhasComAjuste } from './pedido-linhas-edicao'
-import { anexarFotoDaConversaAoModelo, conferirPedido, salvarDadosDoCliente, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores, pausarLembretesDoPedido } from './pedido-fechamento'
+import { anexarFotoDaConversaAoModelo, conferirPedido, salvarDadosDoCliente, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores, pausarLembretesDoPedido, type Divergencia } from './pedido-fechamento'
 import {
   faltaParaMockup,
   fotosDoModelo,
@@ -924,57 +924,240 @@ function modelosParaGerarMockup(linhas: unknown, mockups: MapaMockups): number[]
  *
  * É CAMADA, NÃO SUBSTITUIÇÃO. O código pega o caso óbvio; `proximo_passo` segue
  * no contexto e o modelo continua podendo chamar o que sobrar. Por isso o
- * reconhecimento é deliberadamente estreito: a mensagem inteira precisa ser o
- * "sim", nada é inferido de frase longa, e na dúvida NÃO libera.
+ * reconhecimento é deliberadamente estreito: cada linha que ele escreveu
+ * precisa ser um sim (ou cortesia), nada é inferido de frase longa, e na
+ * dúvida NÃO libera.
  *
  * E só vale na janela de um turno: se a última coisa que o Luigi disse não foi a
  * pergunta de fechamento, um "sim" solto pode ser resposta a outra coisa.
+ *
+ * A RESPOSTA É TUDO QUE ELE ESCREVEU DESDE A PERGUNTA, LINHA A LINHA — 17/09/2026.
+ *
+ * A versão anterior olhava só a mensagem que disparou o turno, inteira, contra
+ * uma regex. O John (20260900312) disse que podia CINCO vezes em dez minutos e
+ * recebeu quatro PDFs iguais de volta:
+ *
+ *   10:54  "Ok⏎Pode sim"                      duas linhas — a regex, ancorada na
+ *                                             mensagem inteira, não casou nenhuma
+ *   10:56  "Ja conferi" + "Pode confirmar!"   casou (a última), e a liberação foi
+ *                                             BARRADA pela divergência de cor —
+ *                                             em silêncio, ver abaixo
+ *   10:58  "Pode liberar pra confecção"       idem
+ *   11:04  "Tudo certo." + "Pode liberar"     liberou
+ *
+ * Em 30 dias, das respostas à pergunta de fechamento que eram um sim, metade
+ * virou outro PDF: "Tudo certo", "Isso mesmo", "Sim obrigada", "claro",
+ * "Está certo" — vocabulário real que a lista não tinha. Agora o texto é o que
+ * ele escreveu desde a última fala do Luigi (o cliente responde em duas, três
+ * mensagens curtas, e o debounce já junta as duas no mesmo turno), quebrado em
+ * linhas: TODAS precisam ser sim ou cortesia ("obrigado"), e ao menos uma
+ * precisa ser sim. "Sim, mas muda a cor" continua de fora porque a linha
+ * inteira não é um sim; "Pode liberar⏎Obrigado" entra.
+ *
+ * A RECUSA DO CÓDIGO NÃO É MAIS MUDA — 17/09/2026. Quando a liberação batia na
+ * divergência, isto devolvia `nao` e pronto: nada no log, nada no contexto. O
+ * modelo, sem saber que alguém tentou, seguia o plano do turno — mockup, PDF,
+ * a MESMA pergunta — e o cliente respondia sim de novo (John às 10:56 e 10:58;
+ * o 20260900311 às 16:04 de 16/09). Agora a recusa vai pro `proximo_passo` com
+ * o [como levar isto ao cliente], no mesmo texto que a ferramenta devolveria se
+ * o modelo tivesse chamado, e pro log como `via: 'codigo', ok: false` — que é o
+ * que `recusasAnterioresDaMesmaDivergencia` conta pra escalar na terceira. E no
+ * turno da recusa o resumo sai da mesa — ver `FORA_DA_MESA`.
  */
-const RESPOSTA_AFIRMATIVA =
-  /^\s*(pode(\s+sim)?|sim(\s+pode)?|isso(\s+mesmo)?|confirma|confirmo|confirmado|manda|mande|ok|okay|blz|beleza|perfeito|claro|positivo)\s*[.!]*\s*$/i
 
+/** Uma linha do que o cliente escreveu, pronta pra comparar: minúscula, sem acento, sem emoji, sem pontuação. */
+function normalizarLinha(t: string): string {
+  return t
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// As peças da linha de sim, sobre texto já normalizado. Cada uma é uma forma
+// que apareceu no log; nenhuma é inferida.
+/** O que vem ANTES e não muda o sentido: "ok, pode", "sim sim", "isso, pode liberar", "arrasou, isso mesmo". */
+const PREFIXO_SIM =
+  'sim|ok|okay|claro|beleza|blz|isso|isso mesmo|certo|certinho|perfeito|show|top|otimo|entao|ta|ta bom|boa|ja|agora|pronto|opa|ah|arrasou|massa|curti|amei|adorei'
+/** O que vem DEPOIS e também não muda: "pode liberar sim", "pode mandar por favor", "sim obrigado", "tudo certo e pode liberar". */
+const SUFIXO_SIM =
+  'sim|mesmo|ai|entao|ja|agora|hoje|por favor|pfv|pf|por gentileza|obrigad[oa]|obg|vlw|valeu|viu|ta|ok|beleza|blz|show|top|perfeito|otimo|e'
+const PALAVRA_SIM =
+  'sim+|ok+|okay|okey|oks|pode|isso|isso mesmo|isso ai|e isso|e isso mesmo|e isso ai|exato|exatamente|correto|corretissimo|certo|certinho|' +
+  'confirmo|confirmado|confirma|confirmar|fechado|fechou|combinado|beleza|blz|bele|show|show de bola|top|otimo|perfeito|perfeita|' +
+  'maravilha|excelente|boa|joia|positivo|afirmativo|claro|claro que sim|com certeza|certeza|logico|obvio|vamos|vamo|bora|partiu|' +
+  'aprovado|aprovo|autorizo|autorizado|de acordo|concordo|liberado|manda|mande|manda ver|segue|prossiga|prossegue|pode ir|pode seguir|' +
+  'arrasou|massa|curti|amei|adorei'
+/** "tudo certo", "tá tudo certo", "ficou bom", "tudo ok". */
+const ESTADO_CERTO =
+  '(?:ta|esta|tudo|ficou|ta tudo|esta tudo|tudo esta|tudo ta|ficou tudo) (?:certo|certinho|ok|bom|otimo|perfeito|show|top|bem|correto|em ordem)(?: sim| assim| mesmo| pra mim)?'
+/** "já conferi", "vi sim", "gostei", "pode deixar assim". */
+const CONFERIDO =
+  '(?:ja |eu |eu ja )?(?:conferi|vi|olhei|li|chequei|revisei|confiro|analisei)(?: sim| tudo| o pdf| o resumo| o arquivo| aqui| o pedido| tudo certo)?|conferido|' +
+  'gostei|ficou (?:bom|otimo|perfeito|certo|show|top|lindo|massa|excelente)|assim mesmo|(?:pode )?deixar? assim|(?:pode )?ficar assim|' +
+  'do jeito que (?:ta|esta)|(?:ta|esta) (?:bom|certo|otimo|perfeito) assim'
+/** "não precisa ajustar nada", "sem alteração" — o único "não" que é sim. */
+const SEM_MUDANCA =
+  '(?:nao|n|nem) (?:precisa|preciso|quero|queremos|tem|tem que|vou|vai|precisamos|tenho)(?: de)? (?:ajustar|mudar|alterar|trocar|mexer|corrigir|editar|modificar)(?: em)?(?: mais)?(?: nada| em nada| nenhuma coisa)?|' +
+  'nada (?:a|pra|para|de) (?:ajustar|mudar|alterar|corrigir|mexer)|sem (?:ajustes?|alteracao|alteracoes|mudancas?|correcao|correcoes)|' +
+  'nao tem (?:o que|nada pra|nada para|nada a|nada que) (?:ajustar|mudar|alterar|corrigir|mexer)|nao (?:tem|ha) (?:ajuste|alteracao|mudanca)'
 /**
- * O mesmo sim com complemento: "pode liberar o pedido" (literal, 22:33 de
- * 12/09) não casava com a regex acima, que é ancorada na mensagem inteira. Sem
- * isto a medição de `via='codigo'` daria zero pelo motivo errado. Continua
- * estreito: o VERBO tem que ser o da liberação, então "pode ser, mas antes muda
- * a cor" segue de fora.
+ * O sim com o verbo da liberação: "pode liberar o pedido" (literal, 22:33 de
+ * 12/09), "pode confirmar sim", "manda pras confecções". O VERBO tem que ser o
+ * da liberação, então "pode ser, mas antes muda a cor" segue de fora.
  */
-const AFIRMATIVA_COM_COMPLEMENTO =
-  /^\s*(?:(?:pode|podes|vamos|bora)\s+)?(?:liber(?:a|ar)|confirm(?:a|ar)|mand(?:a|ar|e)|envi(?:a|ar)|segu(?:e|ir))(?:\s+(?:o|meu|esse|este))?(?:\s+pedido)?(?:\s+(?:pras?|para\s+as)\s+confec\S*)?\s*[.!]*\s*$/i
+const VERBO_LIBERAR =
+  '(?:(?:pode|podes|podem|vamos|vamo|bora|ja pode|sim pode|pode sim|so) )?' +
+  '(?:libera|liberar|liberado|confirma|confirmar|confirmado|manda|mandar|mande|envia|enviar|segue|seguir|prossiga|prosseguir|fecha|fechar|encaminha|encaminhar|autoriza|autorizar|aprova|aprovar)' +
+  '(?: (?:o|a|meu|esse|este|isso|ai|la|logo|tudo|ele))*(?: pedido)?(?: (?:em|pra|para) frente)?' +
+  '(?: (?:pras?|para as?|pra as|as|pros?|para os?|aos?|nas?) (?:confec\\w*|fabricas?|fornecedor\\w*|producao|costureiras?|equipe|eles|elas))?'
+const NUCLEO_SIM = `${PALAVRA_SIM}|${ESTADO_CERTO}|${CONFERIDO}|${SEM_MUDANCA}|${VERBO_LIBERAR}`
+/** Prefixos, UM sim, e depois só sufixos ou mais sins: "tudo certo, não precisa ajustar nada" é uma linha com dois. */
+const LINHA_DE_SIM = new RegExp(`^(?:(?:${PREFIXO_SIM}) )*(?:${NUCLEO_SIM})(?: (?:${SUFIXO_SIM}|${NUCLEO_SIM}))*$`)
+/** Cortesia que não conta nem a favor nem contra: "Pode liberar⏎Obrigado" é um sim. */
+const LINHA_NEUTRA = /^(?:obrigad[oa]s?|obg|obgd|obgda|vlw|valeu|k+|(?:ha|he|hi|hu|ka|rs)+|bom dia|boa tarde|boa noite|oi+|ola|opa|e ai|eai|fala|fala ai|(?:oi |ola |opa )?luigi)$/
 
 /** A pergunta de fechamento, como ele de fato a escreve (ver luigi_whatsapp_log). */
 const PERGUNTA_DE_FECHAMENTO = /posso\s+(confirmar|liberar)[^?]{0,80}confec|liberar\s+pras\s+confec|mandar\s+pras\s+confec/i
 
-async function liberarSeEleConfirmou(
-  ctx: Contexto,
-  corpo: string | null,
-  conversaId: string
-): Promise<{ liberou: boolean; codigo: string | null }> {
-  const nao = { liberou: false, codigo: null }
-  if (ctx.ehFornecedor) return nao
-  const dito = (corpo ?? '').trim()
-  if (!RESPOSTA_AFIRMATIVA.test(dito) && !AFIRMATIVA_COM_COMPLEMENTO.test(dito)) return nao
+/**
+ * Ele disse que pode? Frase a frase (linha, vírgula ou ponto separam): toda
+ * frase é sim ou cortesia, e há ao menos um sim. Interrogação em qualquer
+ * linha é pergunta, não resposta. `null` = tinha foto ou arquivo no meio, que
+ * nunca é um sim puro.
+ */
+function eleDisseQuePode(linhas: string[] | null): boolean {
+  if (!linhas) return false
+  let sins = 0
+  for (const bruta of linhas) {
+    if (bruta.includes('?')) return false
+    for (const frase of bruta.split(/[,;.!]+/)) {
+      const linha = normalizarLinha(frase)
+      if (!linha) continue
+      if (LINHA_NEUTRA.test(linha)) continue
+      if (!LINHA_DE_SIM.test(linha)) return false
+      sins++
+    }
+  }
+  return sins > 0
+}
 
+type MensagemRecente = { direcao: 'entrada' | 'saida'; tipo: string | null; corpo: string | null; autor: string | null }
+
+/**
+ * O que o cliente escreveu desde a última fala do Luigi, e se essa fala foi a
+ * pergunta de fechamento.
+ *
+ * Anda do fim pro começo: primeiro as entradas (a resposta dele, que pode ser
+ * duas ou três mensagens), depois as saídas até a entrada anterior (o turno
+ * do Luigi — o PDF, a pergunta, às vezes um "qualquer dúvida" depois). A
+ * pergunta pode estar em qualquer fala desse turno, mas o turno tem que ser
+ * do Luigi: template da régua ou fala de gente no meio muda o que o "sim"
+ * está respondendo. `null` = a consulta falhou (na dúvida, não libera).
+ */
+async function respostaAoFechamento(conversaId: string, corpoAtual: string): Promise<{ fechamento: boolean; linhas: string[] | null } | null> {
+  const { data, error } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('direcao, tipo, corpo, autor')
+    .eq('conversa_id', conversaId)
+    .order('criado_em', { ascending: false })
+    .limit(12)
+  if (error || !data) return null
+  const entradas: MensagemRecente[] = []
+  const saidas: MensagemRecente[] = []
+  for (const m of data as MensagemRecente[]) {
+    if (m.direcao === 'entrada') {
+      if (saidas.length > 0) break
+      entradas.push(m)
+    } else {
+      saidas.push(m)
+    }
+  }
+  const deGente = (m: MensagemRecente) => m.autor !== null && m.autor !== 'luigi'
+  const fechamento = saidas.length > 0 && !saidas.some(deGente) && saidas.some((s) => PERGUNTA_DE_FECHAMENTO.test(s.corpo ?? ''))
+  if (!fechamento) return { fechamento: false, linhas: null }
+  // Áudio chega transcrito e botão de template vem com o texto do botão; foto,
+  // arquivo e figurinha são outra coisa que não um sim.
+  if (entradas.some((m) => !['text', 'audio', 'button'].includes(m.tipo ?? ''))) return { fechamento: true, linhas: null }
+  // O relógio da Meta é em segundos e o nosso em milissegundos: a mensagem que
+  // disparou o turno pode estar ordenada ANTES da fala que ela responde. Aí
+  // vale ela mesma, que é o que a versão anterior sempre leu.
+  const textos = entradas.length > 0 ? entradas.map((m) => m.corpo ?? '') : [corpoAtual]
+  return { fechamento: true, linhas: textos.flatMap((t) => t.split(/\r?\n/)) }
+}
+
+/**
+ * O texto de uma liberação recusada, do jeito que o modelo precisa ler: o
+ * motivo, cada divergência com o que perguntar, e o [como levar isto ao
+ * cliente]. Um texto só, servido pela ferramenta e pela trava por código —
+ * duas cópias já divergiram uma vez em `ajustar_peca_pedido`.
+ *
+ * PERGUNTA QUE NÃO RESOLVEU DUAS VEZES NÃO É PERGUNTA, É BUG — 12/09/2026.
+ * No 20260900305 a MESMA divergência foi recusada às 22:14, 22:31 e 22:34, e o
+ * cliente tinha respondido três vezes. Na terceira, quem precisa ver isso é o
+ * Fernando, não o cliente — insistir é transformar um defeito nosso em
+ * desgaste dele. Sem estado novo: `luigi_whatsapp_log.ferramentas[].erro` já
+ * guarda o texto da recusa com a posição da peça dentro. Contar é consulta.
+ */
+async function textoDaRecusaDeLiberacao(
+  conversaId: string,
+  r: { erro?: string; divergencias?: Divergencia[] }
+): Promise<{ texto: string; escalar: boolean }> {
+  const pontos = (r.divergencias ?? []).map((d) => `- ${d.o_que} → pergunte ${d.pergunte}`).join('\n')
+  const jaRecusou = await recusasAnterioresDaMesmaDivergencia(conversaId, r.divergencias ?? [])
+  if (jaRecusou >= 2) {
+    return {
+      escalar: true,
+      texto:
+        `esta mesma dúvida já foi perguntada ${jaRecusou} vezes e o pedido continua barrado. NÃO pergunte de novo: ` +
+        'chame chamar_humano agora e diga ao cliente, em uma linha, que uma pessoa da equipe vai resolver isso ' +
+        'e volta aqui. Perguntar uma terceira vez transforma um problema nosso em desgaste dele.',
+    }
+  }
+  // A DÚVIDA É SUA, NÃO DO SISTEMA — 10/09/2026.
+  // Sem esta linha o Luigi repassa a divergência como recado de máquina: ao
+  // Dan ele disse "a descrição da beca ficou com mais de uma cor mencionada e
+  // o sistema pediu pra confirmar". Do lado do cliente isso é um funcionário
+  // lendo um alerta em voz alta, e a dúvida deixa de ter dono. Quem reparou
+  // foi ele; quem pergunta é ele.
+  const comoFalar =
+    '\n[como levar isto ao cliente] A dúvida é SUA, não de um sistema. Nunca diga "o sistema pediu", ' +
+    '"apareceu um alerta", "preciso confirmar no cadastro" nem cite validação, campo ou descrição. ' +
+    'Pergunte como quem olhou o pedido e reparou, dizendo por que importa pra peça sair certa: ' +
+    '"a beca é toda preta, com o veludo vinho só nas mangas — é isso?". Uma dúvida por mensagem.'
+  return { escalar: false, texto: `${r.erro}${pontos ? `\n${pontos}` : ''}${comoFalar}` }
+}
+
+type LiberacaoPorCodigo = { liberou: boolean; codigo: string | null; recusa?: string }
+
+async function liberarSeEleConfirmou(ctx: Contexto, corpo: string | null, conversaId: string): Promise<LiberacaoPorCodigo> {
+  const nao: LiberacaoPorCodigo = { liberou: false, codigo: null }
+  if (ctx.ehFornecedor) return nao
   const alvo = ctx.pedidos.find((p) => p.etapa === 'pedido_completo')
   if (!alvo) return nao
 
-  const { data: ultimaSaida, error } = await supabaseAdmin
-    .from('wa_mensagens')
-    .select('corpo')
-    .eq('conversa_id', conversaId)
-    .eq('direcao', 'saida')
-    .order('criado_em', { ascending: false })
-    .limit(1)
-    .maybeSingle<{ corpo: string | null }>()
   // Consulta que falha não libera: na dúvida o modelo ainda tem o proximo_passo.
-  if (error || !PERGUNTA_DE_FECHAMENTO.test(ultimaSaida?.corpo ?? '')) return nao
+  const resposta = await respostaAoFechamento(conversaId, (corpo ?? '').trim())
+  if (!resposta || !resposta.fechamento || !eleDisseQuePode(resposta.linhas)) return nao
 
   // Divergência continua barrando de propósito: é ambiguidade que a confecção
-  // não consegue adivinhar, e quem resolve é a conversa. O modelo recebe o erro
-  // com o [como levar isto ao cliente] e pergunta.
+  // não consegue adivinhar, e quem resolve é a conversa. O modelo recebe a
+  // recusa com o [como levar isto ao cliente] e pergunta — e o resumo sai da
+  // mesa neste turno, porque ele já viu e já disse que pode.
   const r = await liberarParaFornecedores(alvo.id, {})
-  if (!r.ok) return nao
+  if (!r.ok) {
+    const recusa = await textoDaRecusaDeLiberacao(conversaId, r)
+    alvo.proximo_passo =
+      'ELE ACABOU DE DIZER QUE PODE. A liberação foi tentada AGORA, neste turno, e foi BARRADA por isto: ' +
+      recusa.texto +
+      (recusa.escalar
+        ? ''
+        : '\nNão pergunte de novo se pode liberar e não mande outro resumo: ele já viu e já respondeu. ' +
+          'Faça só a pergunta que resolve o que barrou.')
+    return { liberou: false, codigo: alvo.codigo, recusa: recusa.texto }
+  }
 
   // A fala vem no mesmo ato: o campo que dizia "libere" passa a dizer "já foi".
   alvo.proximo_passo =
@@ -1597,11 +1780,60 @@ const FERRAMENTA_PORTFOLIO: Anthropic.Messages.Tool = {
   },
 }
 
+/** O que o código fez com o fechamento ANTES de o modelo falar — ver liberarSeEleConfirmou. */
+type FechamentoPorCodigo = 'liberou' | 'recusou' | null
+
+/**
+ * O QUE SAI DA MESA NO TURNO DE FECHAMENTO — 16/09 e 17/09/2026.
+ *
+ * Instrução no contexto é sinal opcional, e sinal opcional perde pra plano.
+ * A ferramenta some da lista do turno — o que não está na mesa não é escolhido.
+ *
+ * `liberou` (o código gravou confirmado_em neste turno): a única coisa a fazer
+ * é DIZER que foi. Cada ferramenta desta lista reabriu o fechamento em produção:
+ *   - criar_pedido: Clau, 15/09 15:27 — sete segundos depois de liberar o 295
+ *     o modelo abriu o 310, tendo lido "ACABOU DE SER LIBERADO" no contexto.
+ *   - definir_pecas_pedido: 20260900311, 16/09 16:06 — liberado pelo código, o
+ *     modelo redefiniu as mesmas peças (o que apaga `confirmado_pelo_cliente`),
+ *     leu a divergência de volta e perguntou a cor de novo. Cinco "sim" depois.
+ *   - enviar_resumo_pedido: 13/09 13:29 — liberado pelo código e o PDF saiu de
+ *     novo no mesmo turno, com a mesma pergunta.
+ *   - ajustar_peca_pedido e gerar_mockup_do_modelo: o retoque cosmético de cada
+ *     turno (redescrever a peça, tentar o mockup que está sem crédito) é o que
+ *     muda `atualizado_em` e faz o resumo poder sair "porque o pedido mudou".
+ *   - liberar_para_fornecedores: já foi; chamar de novo só repete a pergunta.
+ *
+ * `recusou` (o código tentou e a divergência barrou): o que cabe é UMA pergunta,
+ * a que resolve o que barrou. Sem resumo (ele já viu e já disse que pode) e sem
+ * redefinir peça (apaga a confirmação que a resposta dele vai gravar). Ajustar
+ * a peça e liberar ficam: se a dúvida já foi respondida antes na conversa, o
+ * modelo grava em `confirmado_pelo_cliente` e libera no mesmo turno.
+ */
+const FORA_DA_MESA: Record<Exclude<FechamentoPorCodigo, null>, ReadonlySet<string>> = {
+  liberou: new Set(['criar_pedido', 'definir_pecas_pedido', 'ajustar_peca_pedido', 'gerar_mockup_do_modelo', 'enviar_resumo_pedido', 'liberar_para_fornecedores']),
+  recusou: new Set(['criar_pedido', 'definir_pecas_pedido', 'enviar_resumo_pedido']),
+}
+
+/** Etapas em que o pedido já saiu da mão do cliente — o resumo não volta a sair. */
+const JA_FOI_PRAS_CONFECCOES: ReadonlySet<Etapa> = new Set<Etapa>([
+  'buscando_fornecedor',
+  'sem_fornecedor',
+  'em_negociacao',
+  'orcamento_atrasado',
+  'aguardando_pagamento',
+  'sem_resposta',
+  'orcamento_vencido',
+  'pago',
+  'em_producao',
+  'pronto',
+  'entregue',
+])
+
 function ferramentasDoModo(
   modo: Exclude<ModoLuigi, 'desligado'>,
   ehFornecedor = false,
-  /** Ver `acabouDeLiberar` em rodarLuigi: criar_pedido sai da lista deste turno. */
-  semCriarPedido = false
+  /** Ver FORA_DA_MESA: no turno em que o código fechou (ou tentou), parte da lista some. */
+  fechamento: FechamentoPorCodigo = null
 ): Anthropic.Messages.Tool[] {
   // Confecção não tem pedido pra montar: dar a ela as ferramentas de peça seria
   // oferecer ao modelo a chance de editar o pedido de OUTRA pessoa. O que ela
@@ -1611,6 +1843,7 @@ function ferramentasDoModo(
       ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_CORRIGIR_TIPO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO, FERRAMENTA_COTAR_FRETE]
       : [FERRAMENTA_CHAMAR_HUMANO]
   }
+  const fora = fechamento ? FORA_DA_MESA[fechamento] : null
   return modo === 'responde'
     ? [
         FERRAMENTA_CHAMAR_HUMANO,
@@ -1619,14 +1852,14 @@ function ferramentasDoModo(
         FERRAMENTA_ENCERRAR,
         FERRAMENTA_AJUSTAR_PECA,
         FERRAMENTA_DEFINIR_PECAS,
-        ...(semCriarPedido ? [] : [FERRAMENTA_CRIAR_PEDIDO]),
+        FERRAMENTA_CRIAR_PEDIDO,
         FERRAMENTA_FOTO_MODELO,
         FERRAMENTA_MOCKUP_IA,
         FERRAMENTA_PAUSAR_LEMBRETES,
         FERRAMENTA_DADOS_CLIENTE,
         FERRAMENTA_RESUMO_PDF,
         FERRAMENTA_LIBERAR,
-      ]
+      ].filter((f) => !fora?.has(f.name))
     : [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_MOTIVO_PARADA]
 }
 
@@ -2484,6 +2717,25 @@ async function executarFerramenta(
       const p = await acharNoContexto(ctx, str(entrada.pedido))
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
 
+      // PEDIDO QUE JÁ FOI PRAS CONFECÇÕES NÃO RECEBE RESUMO DE NOVO — 17/09/2026.
+      //
+      // O 20260900311 foi liberado pelo código às 16:06 de 16/09, e às 16:13 e
+      // 16:14 o Luigi mandou o PDF de novo e perguntou "posso confirmar e mandar
+      // pras confecções?" — pra um pedido que já estava lá. O cliente disse sim
+      // cinco vezes. O resumo existe pra ele aprovar ANTES de liberar; depois,
+      // reenviar com a pergunta de fechamento é reabrir uma etapa que já fechou.
+      const noContexto = ctx.pedidos.find((x) => x.id === p.id)
+      if (noContexto && JA_FOI_PRAS_CONFECCOES.has(noContexto.etapa)) {
+        throw new Error(
+          `este pedido já está com as confecções (${noContexto.etapa_label.toLowerCase()}` +
+            `${noContexto.nesta_etapa_ha_dias != null ? `, há ${noContexto.nesta_etapa_ha_dias} dia(s)` : ''}). ` +
+            'O resumo que ele recebeu antes de liberar é o que vale; ajuste gravado depois já entra no pedido que a confecção lê. ' +
+            'Não reenvie e NÃO pergunte se pode confirmar ou liberar: já foi.' +
+            '\n[como levar isto ao cliente] Uma linha, sem pergunta no fim: o pedido já está com as confecções e ele recebe aqui ' +
+            'a confirmação quando uma aceitar. Se ele pediu o PDF de novo, diga que é o mesmo resumo que ele já recebeu.'
+        )
+      }
+
       // O PDF SAI DEPOIS DAS IMAGENS, E QUEM GARANTE ISSO É O CÓDIGO — 10/09/2026.
       //
       // No pedido do Dan (600 peças, beca + estola) o Luigi gerou o mockup do
@@ -2526,38 +2778,10 @@ async function executarFerramenta(
       const p = await acharNoContexto(ctx, str(entrada.pedido))
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
       const r = await liberarParaFornecedores(p.id, { ignorarDivergencias: entrada.cliente_ja_confirmou === true })
-      if (!r.ok) {
-        const pontos = (r.divergencias ?? []).map((d) => `- ${d.o_que} → pergunte ${d.pergunte}`).join('\n')
-        // A DÚVIDA É SUA, NÃO DO SISTEMA — 10/09/2026.
-        // Sem esta linha o Luigi repassa a divergência como recado de máquina:
-        // ao Dan ele disse "a descrição da beca ficou com mais de uma cor
-        // mencionada e o sistema pediu pra confirmar". Do lado do cliente isso
-        // é um funcionário lendo um alerta em voz alta, e a dúvida deixa de ter
-        // dono. Quem reparou foi ele; quem pergunta é ele.
-        // PERGUNTA QUE NÃO RESOLVEU DUAS VEZES NÃO É PERGUNTA, É BUG — 12/09/2026.
-        //
-        // No 20260900305 a MESMA divergência foi recusada às 22:14, 22:31 e
-        // 22:34, e o cliente tinha respondido três vezes. Na terceira, quem
-        // precisa ver isso é o Fernando, não o cliente — insistir é transformar
-        // um defeito nosso em desgaste dele.
-        //
-        // Sem estado novo: `luigi_whatsapp_log.ferramentas[].erro` já guarda o
-        // texto da recusa com a posição da peça dentro. Contar é consulta.
-        const jaRecusou = await recusasAnterioresDaMesmaDivergencia(ctx.conversaId, r.divergencias ?? [])
-        if (jaRecusou >= 2) {
-          throw new Error(
-            `esta mesma dúvida já foi perguntada ${jaRecusou} vezes e o pedido continua barrado. NÃO pergunte de novo: ` +
-              'chame chamar_humano agora e diga ao cliente, em uma linha, que uma pessoa da equipe vai resolver isso ' +
-              'e volta aqui. Perguntar uma terceira vez transforma um problema nosso em desgaste dele.'
-          )
-        }
-        const comoFalar =
-          '\n[como levar isto ao cliente] A dúvida é SUA, não de um sistema. Nunca diga "o sistema pediu", ' +
-          '"apareceu um alerta", "preciso confirmar no cadastro" nem cite validação, campo ou descrição. ' +
-          'Pergunte como quem olhou o pedido e reparou, dizendo por que importa pra peça sair certa: ' +
-          '"a beca é toda preta, com o veludo vinho só nas mangas — é isso?". Uma dúvida por mensagem.'
-        throw new Error(`${r.erro}${pontos ? `\n${pontos}` : ''}${comoFalar}`)
-      }
+      // O texto da recusa (motivo, o que perguntar, [como levar isto ao
+      // cliente], e a escalada na terceira vez) mora em textoDaRecusaDeLiberacao,
+      // que a trava por código também usa — ver liberarSeEleConfirmou.
+      if (!r.ok) throw new Error((await textoDaRecusaDeLiberacao(ctx.conversaId, r)).texto)
       return {
         ok: true,
         codigo: p.codigo,
@@ -3315,7 +3539,8 @@ async function rodarLuigi(
   /** O Fernando devolveu esta conversa à mão. Muda o que o Luigi pode recusar. */
   devolucaoManual = false,
   /**
-   * O código acabou de liberar o pedido neste turno — ver liberarSeEleConfirmou.
+   * O que o código fez com o fechamento antes desta rodada — ver
+   * liberarSeEleConfirmou. Decide o que sai da mesa (FORA_DA_MESA).
    *
    * CRIAR PEDIDO SAI DA MESA — 16/09/2026.
    *
@@ -3329,9 +3554,10 @@ async function rodarLuigi(
    * Instrução no contexto é sinal opcional, e sinal opcional perde pra plano:
    * é a terceira vez que isso aparece (o `aviso` do criar_pedido, o `mudou:
    * false`, agora isto). A ferramenta some da lista do turno — o que não está
-   * na mesa não é escolhido.
+   * na mesa não é escolhido. Em 17/09 a mesma regra cobriu o resto do
+   * fechamento (resumo, definir peça, mockup) — a lista está em FORA_DA_MESA.
    */
-  acabouDeLiberar = false
+  fechamentoPorCodigo: FechamentoPorCodigo = null
 ): Promise<ResultadoAgente> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY ausente')
@@ -3403,7 +3629,7 @@ async function rodarLuigi(
           // reordenação de um prompt de 33 mil caracteres e fica pra uma decisão
           // própria, com medição.
           system: promptSistema(modo, ctx, jaSeApresentou),
-          tools: comCacheNasFerramentas(ferramentasDoModo(modo, ctx.ehFornecedor, acabouDeLiberar)),
+          tools: comCacheNasFerramentas(ferramentasDoModo(modo, ctx.ehFornecedor, fechamentoPorCodigo)),
           messages: historico,
         },
         { signal: controlador.signal }
@@ -4331,17 +4557,21 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // que o Fernando pode descartar ou reescrever; liberar ali seria efeito
     // IRREVERSÍVEL no modo que existe justamente pra não ter efeito. O pedido
     // iria pras confecções e a mensagem talvez nunca saísse.
-    const auto =
-      modo === 'responde'
-        ? await liberarSeEleConfirmou(ctx, params.corpo, params.conversaId).catch(() => ({ liberou: false, codigo: null }))
-        : { liberou: false, codigo: null }
+    const semLiberacao: LiberacaoPorCodigo = { liberou: false, codigo: null }
+    const auto: LiberacaoPorCodigo =
+      modo === 'responde' ? await liberarSeEleConfirmou(ctx, params.corpo, params.conversaId).catch(() => semLiberacao) : semLiberacao
+    const fechamento: FechamentoPorCodigo = auto.liberou ? 'liberou' : auto.recusa ? 'recusou' : null
 
-    const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada), auto.liberou)
+    const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada), fechamento)
     const pedidoId = ctx.pedidoEmFoco?.id ?? null
     // `via` diz QUEM liberou. Sem isto, em duas semanas não dá pra saber se a
     // hipótese do contexto valeu alguma coisa ou se o código carregou tudo.
+    // A recusa também vai pro log: é ela que recusasAnterioresDaMesmaDivergencia
+    // conta, e antes de 17/09 a tentativa do código sumia sem rastro.
     if (auto.liberou) {
       r.ferramentas.unshift({ nome: 'liberar_para_fornecedores', argumentos: { pedido: auto.codigo }, ok: true, via: 'codigo' })
+    } else if (auto.recusa) {
+      r.ferramentas.unshift({ nome: 'liberar_para_fornecedores', argumentos: { pedido: auto.codigo }, ok: false, erro: auto.recusa, via: 'codigo' })
     }
 
     if (modo === 'sugere') {
