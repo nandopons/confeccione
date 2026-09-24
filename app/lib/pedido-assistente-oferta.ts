@@ -30,6 +30,7 @@ import { registrarVersaoOrcamento } from './orcamento-versoes'
 import { enviarTextoSimples } from './whatsapp-cloud'
 import { avisoOficial, notificarOfertaFornecedor, enviarResumoPdfPedido } from './whatsapp-notify'
 import { refPedido } from './mensagens-whatsapp'
+import { corrigirTelefoneDoPedidoSePreciso, telefoneCanonicoDoCliente } from './telefone-cliente'
 import { SITE_URL, ofertaFornecedorUrl } from './url'
 import { emailOfertaPedidoAssistente, emailFornecedorDefinido } from './email'
 import { enviarEmailOrcamentoFinal } from './email-pedido'
@@ -605,6 +606,14 @@ async function notificarAceiteEContatos(ofertaId: string, pedidoId: string, forn
     ])
     if (!pedido) return
 
+    // O NÚMERO QUE VAI PRA CONFECÇÃO É O QUE A META ENTREGOU — 24/09/2026.
+    // Ver telefone-cliente.ts: o digitado da Melissa era "55387531589" e a
+    // confecção clicou em "número inválido". Aqui é o primeiro lugar em que o
+    // telefone do cliente sai pra fora; corrige no pedido de uma vez, com o
+    // digitado preservado em telefone_digitado.
+    const corr = await corrigirTelefoneDoPedidoSePreciso(pedidoId).catch(() => ({ corrigiu: false, de: pedido.telefone, para: pedido.telefone }))
+    if (corr.corrigiu && corr.para) pedido.telefone = corr.para
+
     const pago = pedido.pagamento_status === 'pago'
     const linkOrcamento = `${SITE_URL}/fornecedor/oferta/${ofertaId}/orcamento`
     // O PDF sai como DOCUMENTO logo abaixo (enviarResumoPdfPedido), mas isso
@@ -1019,7 +1028,7 @@ export async function carregarOfertaParaFornecedor(
     // Contato liberado assim que a oferta é aceita (não depende mais do
     // pagamento) — decisão jul/2026, ver comentário no topo do arquivo.
     contatoCliente: aceita
-      ? { nome: pedido.nome, telefone: pedido.telefone, email: pedido.email, cidade: pedido.cidade, uf: pedido.uf }
+      ? { nome: pedido.nome, telefone: await telefoneCanonicoDoCliente(pedido.telefone), email: pedido.email, cidade: pedido.cidade, uf: pedido.uf }
       : null,
     linkOrcamento: aceita ? `/fornecedor/oferta/${oferta.id}/orcamento` : null,
     temListaAberta,

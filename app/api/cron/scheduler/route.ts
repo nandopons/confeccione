@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import { estaEmHorarioComercial, estaEmJanelaRetryPassivo } from '@/app/lib/horario'
 import { rodarCutucadaPosResumo } from '@/app/lib/cutucada-pos-resumo'
+import { rodarCutucadaCaptacao } from '@/app/lib/cutucada-captacao'
 import { fecharPedidosProntos } from '@/app/lib/fechar-pedido-automatico'
 // criarEDispararOferta, avisarGestor, enviarTextoSimples e
 // emailAdminFornecedorExpirou saíram em 10/09/2026 junto com o reenvio da era
@@ -398,6 +399,19 @@ export async function GET(req: Request) {
     cutucada = { erro: e instanceof Error ? e.message : String(e) }
   }
 
+  // TAREFA 12: a confecção que respondeu à sondagem e sumiu (17/09/2026)
+  //
+  // Mesma família da 8, do outro lado do balcão: o agente de captação só fala
+  // quando a confecção escreve, e 5 de 6 conversas perdidas em 14 dias
+  // terminaram com o nosso balão por último. Uma cutucada, dentro da janela,
+  // uma vez por candidato. Depois da porteira: é abordagem, não resposta.
+  let cutucadaCaptacao: Awaited<ReturnType<typeof rodarCutucadaCaptacao>> | { erro: string }
+  try {
+    cutucadaCaptacao = await rodarCutucadaCaptacao()
+  } catch (e) {
+    cutucadaCaptacao = { erro: e instanceof Error ? e.message : String(e) }
+  }
+
   // As TAREFAS 9 (fechar pedido pronto), 10 (reprocessar turno que falhou por
   // API) e 11 (vigiar consumo de IA) rodam lá em cima, antes da porteira de
   // horário comercial. As duas primeiras respondem alguém que já está esperando;
@@ -409,6 +423,7 @@ export async function GET(req: Request) {
     duracao_ms: Date.now() - inicio,
     ...resumo,
     cutucada_pos_resumo: cutucada,
+    cutucada_captacao: cutucadaCaptacao,
     fechamento_automatico: fechamento,
     reprocesso_ia: reprocesso,
     consumo_ia: consumoIa,

@@ -25,6 +25,7 @@ import { baixarMidia, lerPayloadFeedbackNeg, QUICK_REPLY_ATENDENTE } from '@/app
 import { responderFeedbackNegociacao, responderPedidoAtendente } from '@/app/lib/whatsapp-notify'
 import { ehNumeroGestao, responderGestao } from '@/app/lib/gestao-whatsapp'
 import { responderCliente } from '@/app/lib/luigi'
+import { TEMPLATE_SONDAGEM, registrarFalhaDeEntregaSondagem } from '@/app/lib/captacao-pedido'
 import { anexarImagemNaEntrada } from '@/app/lib/anexo-entrada'
 import { ehAudioTranscritivel, transcreverAudio } from '@/app/lib/transcricao'
 
@@ -457,12 +458,29 @@ async function processarStatus(st: MetaStatus): Promise<void> {
 
   // Não regride status (ex: 'read' chega antes de 'delivered' atrasado)
   const ordem = ['enviando', 'enviado', 'entregue', 'lido']
-  const { data: atual } = await supabaseAdmin.from('wa_mensagens').select('id, status').eq('wamid', st.id).maybeSingle()
+  const { data: atual } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('id, status, conversa_id, template_nome')
+    .eq('wamid', st.id)
+    .maybeSingle<{ id: string; status: string; conversa_id: string | null; template_nome: string | null }>()
   if (!atual) return
   if (novo !== 'falhou' && ordem.indexOf(novo) <= ordem.indexOf(atual.status)) return
 
-  const erro = st.status === 'failed' ? st.errors?.[0]?.message || st.errors?.[0]?.title || 'Falha no envio' : null
+  // O CÓDIGO NA FRENTE DA MENSAGEM, igual em whatsapp-cloud.ts: é por ele que
+  // se distingue "número sem WhatsApp" de "a Meta nos limitou", e a frase deles
+  // muda quando eles quiserem.
+  const falha = st.status === 'failed' ? st.errors?.[0] : undefined
+  const erro = falha ? [falha.code, falha.message || falha.title || 'Falha no envio'].filter(Boolean).join(': ') : null
   await supabaseAdmin.from('wa_mensagens').update({ status: novo, erro }).eq('id', atual.id)
+
+  // A FALHA DA SONDAGEM VOLTA PRO CANDIDATO — 17/09/2026. Até aqui ela morria
+  // nesta linha: `captacao_fornecedores` seguia "abordada" e a vaga do pedido
+  // ficava ocupada por um número que nunca recebeu nada (30% delas, em 14 dias).
+  if (novo === 'falhou' && atual.template_nome === TEMPLATE_SONDAGEM && atual.conversa_id) {
+    await registrarFalhaDeEntregaSondagem(atual.conversa_id, erro).catch((err) =>
+      console.error('[wa-webhook] falha da sondagem não voltou pro candidato', { wamid: st.id, err })
+    )
+  }
 }
 
 // ---------------------------------------------------------------------------

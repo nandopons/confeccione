@@ -27,6 +27,7 @@ import { garanteContaPorEmail } from './cliente-auth'
 import { guardarImagem } from './imagens-pedido-storage'
 import { salvarLinhasEditadas, type LinhaEditada } from './pedido-linhas-edicao'
 import { enviarResumoPdfPedido } from './whatsapp-notify'
+import { CAMPOS_DO_RESUMO, hashDoResumo } from './resumo-hash'
 import type { LinhaPedido } from './pedido-assistente-oferta'
 import { ehPublicoValido } from './pecas'
 
@@ -233,7 +234,7 @@ export async function anexarFotoDaConversaAoModelo(params: {
   posicao: number
   /** Caminho no bucket wa-midia, da mensagem que o cliente mandou. */
   midiaPath: string
-}): Promise<{ ok: boolean; erro?: string; modelo?: string; totalFotos?: number }> {
+}): Promise<{ ok: boolean; erro?: string; modelo?: string; totalFotos?: number; jaEstava?: boolean }> {
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
     .select('id, linhas, mockups')
@@ -266,7 +267,22 @@ export async function anexarFotoDaConversaAoModelo(params: {
   const chave = String(i)
   const atual = mapa[chave] ?? {}
   const fotos = Array.isArray(atual.fotos) ? [...atual.fotos] : []
-  // Mesma foto duas vezes acontece quando o cliente reenvia; não duplica.
+  const l = linhas[i]
+  const nome = [l?.modelo, l?.cor].filter(Boolean).join(' ') || `modelo ${params.posicao}`
+  // FOTO QUE JÁ ESTÁ NO MODELO NÃO ESCREVE NADA — 24/09/2026.
+  //
+  // Mesma foto duas vezes acontece quando o cliente reenvia — e quando o
+  // Luigi re-anexa por conta própria, o que ele faz em quase todo turno de
+  // fechamento. Antes o dedupe segurava a duplicata na lista mas o UPDATE
+  // rodava assim mesmo, com `atualizado_em` novo. Era esse carimbo que fazia
+  // `enviarResumoParaCliente` ler "o pedido mudou" e mandar o PDF de novo: o
+  // Miguel (20260900317, 20/09 01:32) recebeu três resumos idênticos em quatro
+  // minutos, um por turno, cada um precedido de um re-anexo da mesma foto.
+  // Nada mudou, então nada é gravado — e a data de atualização passa a dizer
+  // a verdade.
+  if (fotos.includes(ref) && !atual.liso && !atual.arte) {
+    return { ok: true, modelo: nome, totalFotos: fotos.length, jaEstava: true }
+  }
   if (!fotos.includes(ref)) fotos.push(ref)
   // O campo legado liso/arte sai quando o modelo passa a ter lista de fotos —
   // é o que a rota de mockup do site faz, e os dois formatos não convivem.
@@ -280,9 +296,7 @@ export async function anexarFotoDaConversaAoModelo(params: {
     .eq('id', pedido.id)
   if (error) return { ok: false, erro: error.message }
 
-  const l = linhas[i]
-  const nome = [l?.modelo, l?.cor].filter(Boolean).join(' ') || `modelo ${params.posicao}`
-  return { ok: true, modelo: nome, totalFotos: fotos.length }
+  return { ok: true, modelo: nome, totalFotos: fotos.length, jaEstava: false }
 }
 
 /** Teto do silêncio: nem o cliente que diz "ano que vem" some pra sempre. */
@@ -815,14 +829,21 @@ export async function enviarResumoParaCliente(
 ): Promise<{ ok: boolean; erro?: string; jaEnviado?: boolean }> {
   const { data: p } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('nome, telefone, atualizado_em, resumo_enviado_em')
+    .select(`telefone, atualizado_em, resumo_enviado_em, resumo_enviado_hash, ${CAMPOS_DO_RESUMO}`)
     .eq('id', pedidoId)
-    .maybeSingle<{ nome: string | null; telefone: string | null; atualizado_em: string | null; resumo_enviado_em: string | null }>()
+    .maybeSingle<Record<string, unknown> & { telefone: string | null; atualizado_em: string | null; resumo_enviado_em: string | null; resumo_enviado_hash: string | null }>()
   if (!p?.telefone) return { ok: false, erro: 'pedido sem telefone do cliente' }
 
+  const hash = hashDoResumo(p)
   if (!opts.forcar && p.resumo_enviado_em) {
     const enviado = new Date(p.resumo_enviado_em).getTime()
-    const mudou = p.atualizado_em ? new Date(p.atualizado_em).getTime() > enviado : false
+    // Com assinatura gravada, quem decide é o CONTEÚDO. Sem ela (resumo
+    // anterior a 24/09), vale a data — é o melhor que aquele registro tem.
+    const mudou = p.resumo_enviado_hash
+      ? p.resumo_enviado_hash !== hash
+      : p.atualizado_em
+        ? new Date(p.atualizado_em).getTime() > enviado
+        : false
     if (!mudou) {
       const hora = new Date(p.resumo_enviado_em).toLocaleTimeString('pt-BR', {
         timeZone: 'America/Recife',
@@ -832,7 +853,7 @@ export async function enviarResumoParaCliente(
       return {
         ok: true,
         jaEnviado: true,
-        erro: `o resumo já foi enviado às ${hora} e o pedido não mudou desde então — não mande de novo, fale com o cliente sobre o que ele já recebeu`,
+        erro: `o resumo já foi enviado às ${hora} e o que vai no PDF é idêntico ao que ele já recebeu — não mande de novo, fale com o cliente sobre o que ele já tem em mãos`,
       }
     }
   }
@@ -842,7 +863,7 @@ export async function enviarResumoParaCliente(
     destinos: [
       {
         telefone: p.telefone,
-        nome: p.nome,
+        nome: (p.nome as string | null) ?? null,
         legenda: 'Resumo do seu pedido. Confere se está tudo certo e me diz se quer ajustar alguma coisa.',
       },
     ],
@@ -852,13 +873,9 @@ export async function enviarResumoParaCliente(
     autor: 'luigi',
   })
   if (r.enviados === 0) return { ok: false, erro: 'não foi possível enviar o PDF agora' }
-
-  // Gravado só depois do envio confirmado: marcar antes deixaria o cliente sem
-  // PDF nenhum se a entrega falhasse.
-  await supabaseAdmin
-    .from('pedidos_assistente')
-    .update({ resumo_enviado_em: new Date().toISOString() })
-    .eq('id', pedidoId)
+  // QUEM CARIMBA É O ENVIO, NÃO O CHAMADOR — 24/09/2026. `resumo_enviado_em` e
+  // a assinatura são gravados dentro de enviarResumoPdfPedido, no momento em
+  // que o PDF chega ao CLIENTE — por qualquer caminho. Ver a nota lá.
   return { ok: true }
 }
 

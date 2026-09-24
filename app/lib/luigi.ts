@@ -341,6 +341,29 @@ function saudacaoAgora(agora = new Date()): string {
   return 'boa noite'
 }
 
+/**
+ * A SAUDAÇÃO ERRADA É TROCADA NA SAÍDA — 24/09/2026.
+ *
+ * O prompt diz a hora E diz a saudação certa, com "use essa e nenhuma outra,
+ * mesmo que ela tenha escrito outra antes". A Rayssa escreveu "Boa tarde,
+ * algum retorno?" num domingo às 13:53; na quarta às 11:16 o Luigi abriu com
+ * "Boa tarde, Rayssa" — contra o relógio e contra a instrução. Segunda vez
+ * (o Kaiky levou "boa tarde" às 21h em 09/09, e a instrução nasceu daí).
+ * Instrução que foi desobedecida duas vezes em produção vira código: aqui só
+ * a saudação de ABERTURA é trocada, e só quando é outra que não a da hora.
+ * "Bom dia" citado no meio da frase ("ela disse bom dia") não é tocado.
+ */
+export function corrigirSaudacao(texto: string, agora = new Date()): string {
+  const certa = saudacaoAgora(agora)
+  // Só a abertura: início do texto, ou logo depois de "Oi!"/"Olá,". Fim de
+  // texto conta como limite (a saudação pode ser a mensagem inteira).
+  return texto.replace(/^(\s*(?:(?:oi+|ol[aá]|opa)[,!.]?\s+)?)(bom dia|boa tarde|boa noite)(?=[\s,.!]|$)/i, (_m, espaco: string, dita: string) => {
+    if (dita.toLowerCase() === certa) return `${espaco}${dita}`
+    const maiuscula = dita[0] === dita[0].toUpperCase()
+    return `${espaco}${maiuscula ? certa[0].toUpperCase() + certa.slice(1) : certa}`
+  })
+}
+
 function reais(centavos: number | null | undefined): string {
   return (Number(centavos ?? 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
@@ -2561,6 +2584,12 @@ async function executarFerramenta(
       const foto = { id: escolhida.id, midia_path: escolhida.midia_path }
       const r = await anexarFotoDaConversaAoModelo({ pedidoId: p.id, posicao, midiaPath: foto.midia_path })
       if (!r.ok) throw new Error(r.erro ?? 'não deu pra anexar a foto')
+      // Já estava: nada foi gravado e nada mudou no pedido. Dito aqui pra o
+      // modelo não anunciar "anexei" de novo nem achar que o resumo precisa
+      // sair outra vez por causa disto.
+      if (r.jaEstava) {
+        return { ok: true, codigo: p.codigo, modelo: r.modelo, fotos_neste_modelo: r.totalFotos, ja_estava: true, aviso: 'Essa foto já estava neste modelo. Nada mudou no pedido — não anuncie nem reenvie nada por causa disto.' }
+      }
       // Marca por QUAL caminho entrou. Sem isto, daqui a um mês "foto sem anexo"
       // e "foto anexada pela ferramenta" ficam indistinguíveis, e não dá pra
       // saber se o automático substituiu a ferramenta ou só somou com ela.
@@ -2636,6 +2665,15 @@ async function executarFerramenta(
       if (!r.ok && r.tipo === 'indisponivel') {
         // Libera a trava do resumo: sem provedor, imagem deixa de ser exigência.
         ctx.mockupIndisponivel = true
+        // NÃO É ASSUNTO DO CLIENTE, MAS É DO FERNANDO — 24/09/2026.
+        //
+        // "Não comente isso com o cliente" está certo, e virou "ninguém fica
+        // sabendo": o crédito do Gemini zerou em 12/09 15:23 e só foi
+        // recarregado em 24/09 — 12 dias, 42 tentativas, 12 pedidos sem
+        // mockup, 7 deles liberados pras confecções só com a foto do cliente.
+        // A conta da Anthropic tem alarme desde 15/09; esta não tinha. Uma
+        // linha no WhatsApp dele, na primeira falha do dia, e não a cada turno.
+        void avisarMockupIndisponivelUmaVezPorDia(r.motivo ?? 'sem motivo').catch(() => undefined)
         // Provedor sem crédito não é assunto do cliente: seguir o pedido sem
         // imagem é pior que ter imagem, e muito melhor que explicar a ele que
         // uma peça interna nossa está fora do ar.
@@ -3762,7 +3800,7 @@ async function rodarLuigi(
     // Sem texto: quando o Luigi escala, quem fala em seguida é o Fernando.
     texto = ''
   }
-  return { texto: paraWhatsApp(texto), ferramentas, rodadas, tokensEntrada, tokensSaida, escalada: estado.escalada }
+  return { texto: corrigirSaudacao(paraWhatsApp(texto)), ferramentas, rodadas, tokensEntrada, tokensSaida, escalada: estado.escalada }
 }
 
 // ─── Log ────────────────────────────────────────────────────────────────────
@@ -3929,6 +3967,33 @@ export async function marcarEscalada(conversaId: string): Promise<void> {
  * estiver aberta (fora dela, a marca no inbox e a pauta cobrem). Devolve se
  * algum aviso saiu.
  */
+/**
+ * Primeira falha de mockup por indisponibilidade nas últimas 24 h, em qualquer
+ * conversa → aviso ao gestor. As seguintes ficam só no log. Lê o próprio
+ * rastro (`ferramentas[].erro` de `luigi_whatsapp_log`), sem coluna nova — o
+ * turno atual ainda não gravou a linha dele, então "zero nas últimas 24 h"
+ * significa "esta é a primeira".
+ */
+async function avisarMockupIndisponivelUmaVezPorDia(motivo: string): Promise<void> {
+  const { data, error } = await supabaseAdmin
+    .from('luigi_whatsapp_log')
+    .select('ferramentas')
+    .gte('criado_em', new Date(Date.now() - 24 * 3_600_000).toISOString())
+    .filter('ferramentas', 'cs', JSON.stringify([{ nome: 'gerar_mockup_do_modelo', ok: false }]))
+    .limit(50)
+  if (error) return
+  const jaFalhouHoje = ((data ?? []) as Array<{ ferramentas: unknown }>).some((l) =>
+    (Array.isArray(l.ferramentas) ? (l.ferramentas as ChamadaFerramenta[]) : []).some(
+      (f) => f.nome === 'gerar_mockup_do_modelo' && f.ok === false && /indispon[íi]vel/i.test(f.erro ?? '')
+    )
+  )
+  if (jaFalhouHoje) return
+  await avisarGestor(
+    `Mockup de IA fora do ar: ${motivo}. O Luigi segue fechando pedidos SEM imagem até voltar. ` +
+      'Se for crédito, é recarregar no ai.studio (Faturamento). Este aviso sai uma vez por dia.'
+  )
+}
+
 export async function avisarGestor(aviso: string): Promise<boolean> {
   let enviou = false
   for (const numero of numerosGestao()) {
@@ -4345,6 +4410,94 @@ async function turnosSemSaldoNaUltimaHora(wamidAtual: string): Promise<{ primeir
   return { primeiro: anteriores.length === 0, quantos: anteriores.length + 1 }
 }
 
+/**
+ * UM TURNO POR CONVERSA, EM SÉRIE — 24/09/2026.
+ *
+ * O Miguel (20260900317) escreveu "ela ficara igual a sp5der" à 01:31:47 e
+ * "por favor." à 01:32:11. A primeira, curta e logo depois de uma pergunta
+ * do Luigi, caiu na janela de 20 s do debounce; a segunda chegou 24 s depois
+ * — quatro segundos tarde demais pra ser absorvida. Nasceram dois turnos, e
+ * NADA os impedia de correr juntos: o segundo montou o histórico às 01:32:31,
+ * sem o PDF que o primeiro mandaria às 01:32:35, e mandou o dele às 01:32:50.
+ * A trava de "resposta repetida" descartou os dois TEXTOS — mas o PDF é efeito
+ * de ferramenta, sai no meio do turno, e ela só olha o fim. Três resumos
+ * idênticos em quatro minutos.
+ *
+ * O debounce resolve "duas mensagens em dez segundos"; isto resolve "duas
+ * mensagens em trinta". Cada instância da Vercel é um processo separado, então
+ * o mutex mora no banco: um UPDATE condicional em `wa_conversas` (a linha da
+ * conversa, que já existe) — quem escreveu a vez é dono dela; zero linhas é
+ * "outro turno está na vez". Postgres serializa os dois UPDATEs na mesma linha
+ * e o segundo reavalia o WHERE depois do primeiro: é mutex de verdade, não
+ * leitura-depois-escrita.
+ *
+ * Quem espera cede se, enquanto esperava, chegou mensagem mais nova — o turno
+ * dela vai montar o histórico com a minha dentro, igual ao debounce. Quem
+ * pega a vez monta o histórico DEPOIS, com tudo que o turno anterior mandou.
+ *
+ * A vez expira sozinha: turno que morreu no meio (função abortada, exceção
+ * antes do finally) não pode calar a conversa pra sempre. O teto de espera é
+ * igual ao de expiração, então esperar nunca é em vão — no pior caso a vez
+ * expira e o próximo entra.
+ */
+const VEZ_EXPIRA_MS = 120_000
+const VEZ_FATIA_MS = 1_500
+
+async function tomarAVez(conversaId: string, wamid: string): Promise<boolean> {
+  const agora = new Date()
+  const { data, error } = await supabaseAdmin
+    .from('wa_conversas')
+    .update({ luigi_turno_em: agora.toISOString(), luigi_turno_wamid: wamid })
+    .eq('id', conversaId)
+    .or(`luigi_turno_em.is.null,luigi_turno_em.lt.${new Date(agora.getTime() - VEZ_EXPIRA_MS).toISOString()}`)
+    .select('id')
+  // Consulta que falha não trava a conversa: sem lock é o comportamento de
+  // ontem, que é ruim mas responde. Com lock que nunca solta, ninguém responde.
+  if (error) return true
+  return (data ?? []).length > 0
+}
+
+async function liberarAVez(conversaId: string, wamid: string): Promise<void> {
+  // Só solta a vez que É minha: se ela expirou e outro turno já a tomou,
+  // zerar aqui abriria a porta pra um terceiro.
+  await supabaseAdmin
+    .from('wa_conversas')
+    .update({ luigi_turno_em: null, luigi_turno_wamid: null })
+    .eq('id', conversaId)
+    .eq('luigi_turno_wamid', wamid)
+}
+
+async function chegouMensagemMaisNova(conversaId: string, wamid: string, criadoEm: string): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('wamid, criado_em')
+    .eq('conversa_id', conversaId)
+    .eq('direcao', 'entrada')
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ wamid: string | null; criado_em: string }>()
+  return Boolean(data?.wamid && data.wamid !== wamid && new Date(data.criado_em).getTime() > new Date(criadoEm).getTime())
+}
+
+/** Espera a vez desta conversa. 'ceder' = chegou mensagem mais nova; o turno dela cobre esta. */
+async function esperarAVez(params: { conversaId: string; wamid: string; criadoEm: string }): Promise<'seguir' | 'ceder'> {
+  const comecou = Date.now()
+  while (true) {
+    if (await tomarAVez(params.conversaId, params.wamid)) {
+      // Peguei a vez, mas esperei: o mundo pode ter andado. Mensagem mais nova
+      // que a minha tem turno próprio, e ele vai me incluir no histórico.
+      if (Date.now() - comecou > VEZ_FATIA_MS && (await chegouMensagemMaisNova(params.conversaId, params.wamid, params.criadoEm))) {
+        await liberarAVez(params.conversaId, params.wamid)
+        return 'ceder'
+      }
+      return 'seguir'
+    }
+    if (Date.now() - comecou >= VEZ_EXPIRA_MS) return 'seguir'
+    await dormir(VEZ_FATIA_MS)
+    if (await chegouMensagemMaisNova(params.conversaId, params.wamid, params.criadoEm)) return 'ceder'
+  }
+}
+
 async function esperarOClienteTerminar(params: {
   conversaId: string
   wamid: string
@@ -4406,8 +4559,13 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // de cliente — a pessoa não tem pedido, tem uma sondagem pra responder.
     const candidato = await candidatoPeloWaId(waId)
     if (candidato) {
-      await dormir((await janelasDoDebounce()).janelaMs)
-      await responderCandidato({ conversaId: params.conversaId, waId, nome: params.nome, wamid: params.wamid, corpo: params.corpo, candidato })
+      // O MESMO DEBOUNCE DO CLIENTE, QUE CEDE — 17/09/2026. Aqui era um
+      // `dormir(30s)` fixo: duas mensagens da confecção em dez segundos viravam
+      // duas rodadas dormindo lado a lado, e as duas respondiam — a Brunx levou
+      // duas respostas contraditórias no mesmo minuto (09:37). Cede pra mais nova.
+      const espera = await esperarOClienteTerminar({ conversaId: params.conversaId, wamid: params.wamid, criadoEm: params.criadoEm, corpo: params.corpo })
+      if (espera === 'ceder') return
+      await responderCandidato({ conversaId: params.conversaId, waId, nome: params.nome, wamid: params.wamid, corpo: params.corpo, tipo: params.tipo, candidato })
       return
     }
 
@@ -4525,320 +4683,346 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       if (espera === 'ceder') return
     }
 
-    // Uma sugestão por conversa: a nova mensagem do cliente supera a anterior.
-    if (modo === 'sugere') await resolverSugestoes(params.conversaId, 'descartada').catch(() => undefined)
+    // A VEZ — ver esperarAVez. Depois do debounce e antes do histórico: o
+    // histórico tem que ser montado com tudo que o turno anterior mandou.
+    const vez = await esperarAVez({ conversaId: params.conversaId, wamid: params.wamid, criadoEm: params.criadoEm })
+    if (vez === 'ceder') {
+      await gravarLog({ ...base, resposta: null, pedido_id: null, ferramentas: [], escalado: false, motivo_escalada: null, status: 'descartada', rodadas: 0, tokens_entrada: 0, tokens_saida: 0, duracao_ms: Date.now() - inicio, erro: 'cedeu a vez — chegou mensagem mais nova enquanto esperava o turno anterior' })
+      return
+    }
+    try {
+      // Uma sugestão por conversa: a nova mensagem do cliente supera a anterior.
+      if (modo === 'sugere') await resolverSugestoes(params.conversaId, 'descartada').catch(() => undefined)
 
-    const [ctx, historico] = await Promise.all([montarContexto(params.conversaId, waId, nome, contato?.cliente_id ?? null, ehFornecedor), historicoConversa(params.conversaId)])
+      const [ctx, historico] = await Promise.all([montarContexto(params.conversaId, waId, nome, contato?.cliente_id ?? null, ehFornecedor), historicoConversa(params.conversaId)])
 
-    let mensagens = historico.msgs
-    const ultima = mensagens[mensagens.length - 1]
-    if (!historico.wamids.has(params.wamid) || !ultima || ultima.role !== 'user') {
-      const atual = (params.corpo ?? '').trim()
-      if (ultima && ultima.role === 'user' && typeof ultima.content === 'string') {
-        mensagens = [...mensagens.slice(0, -1), { role: 'user', content: `${ultima.content}\n\n${atual}` }]
-      } else {
-        mensagens = [...mensagens, { role: 'user', content: atual }]
+      let mensagens = historico.msgs
+      const ultima = mensagens[mensagens.length - 1]
+      if (!historico.wamids.has(params.wamid) || !ultima || ultima.role !== 'user') {
+        const atual = (params.corpo ?? '').trim()
+        if (ultima && ultima.role === 'user' && typeof ultima.content === 'string') {
+          mensagens = [...mensagens.slice(0, -1), { role: 'user', content: `${ultima.content}\n\n${atual}` }]
+        } else {
+          mensagens = [...mensagens, { role: 'user', content: atual }]
+        }
       }
-    }
 
-    if (params.tipo === 'image' || params.tipo === 'document') {
-      mensagens = await comAnexoRecente(mensagens, params.wamid, params.corpo, historico.wamids.has(params.wamid))
-    }
+      if (params.tipo === 'image' || params.tipo === 'document') {
+        mensagens = await comAnexoRecente(mensagens, params.wamid, params.corpo, historico.wamids.has(params.wamid))
+      }
 
-    // A nota de retomada entra por último, depois de todo o histórico: é a
-    // última coisa que ele lê antes de decidir o que fazer.
-    if (params.retomada) {
-      mensagens = [...mensagens, { role: 'user', content: `[nota do Fernando, o cliente NÃO vê isto] ${params.retomada}` }]
-    }
+      // A nota de retomada entra por último, depois de todo o histórico: é a
+      // última coisa que ele lê antes de decidir o que fazer.
+      if (params.retomada) {
+        mensagens = [...mensagens, { role: 'user', content: `[nota do Fernando, o cliente NÃO vê isto] ${params.retomada}` }]
+      }
 
-    // Antes do modelo falar: se ele confirmou, o pedido JÁ vai pras confecções.
-    //
-    // SÓ EM `responde` — 12/09/2026. Em `sugere` a fala do Luigi vira rascunho
-    // que o Fernando pode descartar ou reescrever; liberar ali seria efeito
-    // IRREVERSÍVEL no modo que existe justamente pra não ter efeito. O pedido
-    // iria pras confecções e a mensagem talvez nunca saísse.
-    const semLiberacao: LiberacaoPorCodigo = { liberou: false, codigo: null }
-    const auto: LiberacaoPorCodigo =
-      modo === 'responde' ? await liberarSeEleConfirmou(ctx, params.corpo, params.conversaId).catch(() => semLiberacao) : semLiberacao
-    const fechamento: FechamentoPorCodigo = auto.liberou ? 'liberou' : auto.recusa ? 'recusou' : null
+      // Antes do modelo falar: se ele confirmou, o pedido JÁ vai pras confecções.
+      //
+      // SÓ EM `responde` — 12/09/2026. Em `sugere` a fala do Luigi vira rascunho
+      // que o Fernando pode descartar ou reescrever; liberar ali seria efeito
+      // IRREVERSÍVEL no modo que existe justamente pra não ter efeito. O pedido
+      // iria pras confecções e a mensagem talvez nunca saísse.
+      const semLiberacao: LiberacaoPorCodigo = { liberou: false, codigo: null }
+      const auto: LiberacaoPorCodigo =
+        modo === 'responde' ? await liberarSeEleConfirmou(ctx, params.corpo, params.conversaId).catch(() => semLiberacao) : semLiberacao
+      const fechamento: FechamentoPorCodigo = auto.liberou ? 'liberou' : auto.recusa ? 'recusou' : null
 
-    const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada), fechamento)
-    const pedidoId = ctx.pedidoEmFoco?.id ?? null
-    // `via` diz QUEM liberou. Sem isto, em duas semanas não dá pra saber se a
-    // hipótese do contexto valeu alguma coisa ou se o código carregou tudo.
-    // A recusa também vai pro log: é ela que recusasAnterioresDaMesmaDivergencia
-    // conta, e antes de 17/09 a tentativa do código sumia sem rastro.
-    if (auto.liberou) {
-      r.ferramentas.unshift({ nome: 'liberar_para_fornecedores', argumentos: { pedido: auto.codigo }, ok: true, via: 'codigo' })
-    } else if (auto.recusa) {
-      r.ferramentas.unshift({ nome: 'liberar_para_fornecedores', argumentos: { pedido: auto.codigo }, ok: false, erro: auto.recusa, via: 'codigo' })
-    }
+      const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada), fechamento)
+      const pedidoId = ctx.pedidoEmFoco?.id ?? null
+      // `via` diz QUEM liberou. Sem isto, em duas semanas não dá pra saber se a
+      // hipótese do contexto valeu alguma coisa ou se o código carregou tudo.
+      // A recusa também vai pro log: é ela que recusasAnterioresDaMesmaDivergencia
+      // conta, e antes de 17/09 a tentativa do código sumia sem rastro.
+      if (auto.liberou) {
+        r.ferramentas.unshift({ nome: 'liberar_para_fornecedores', argumentos: { pedido: auto.codigo }, ok: true, via: 'codigo' })
+      } else if (auto.recusa) {
+        r.ferramentas.unshift({ nome: 'liberar_para_fornecedores', argumentos: { pedido: auto.codigo }, ok: false, erro: auto.recusa, via: 'codigo' })
+      }
 
-    if (modo === 'sugere') {
-      await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: Boolean(r.escalada), motivo_escalada: r.escalada?.motivo ?? null, status: 'sugerida', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: null })
-      if (r.escalada) await escalar(params.conversaId, { nome, waId }, r.escalada.motivo, modo)
-      return
-    }
-
-    // modo responde
-    if (!(await janela24hAberta(waId))) {
-      await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: Boolean(r.escalada), motivo_escalada: r.escalada?.motivo ?? null, status: 'falhou', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'janela de 24 h fechada' })
-      return
-    }
-    void marcarComoLida(params.wamid).catch(() => false)
-
-    // RESPOSTA VELHA NÃO SAI (09/09/2026)
-    //
-    // O Nelson mandou "Oi boa tarde!" às 15h12 e "Tudo bem Luigi?" às 15h13.
-    // Duas invocações do Luigi rodaram em paralelo e as duas responderam, com a
-    // mesma frase, no mesmo minuto — e no meio ainda entrou o agente de gestão
-    // pelo MCP. Quatro mensagens nossas seguidas na cara do cliente.
-    //
-    // A trava anterior (esperar e ver se chegou mensagem mais nova) não pega
-    // isso: quando a segunda chega 40 segundos depois, a primeira já passou da
-    // espera. Então o teste correto é no fim, e é sobre o que JÁ FOI DITO: se
-    // alguém — o próprio Luigi, o agente ou uma pessoa no inbox — falou com
-    // esse cliente depois da mensagem que eu estou respondendo, a minha
-    // resposta chegou tarde e não deve sair. Silêncio é melhor que repetição.
-    // O QUE EU MESMO MANDEI NESTE TURNO NÃO CONTA — 10/09/2026.
-    //
-    // As ferramentas do Luigi mandam coisa no meio do turno: a imagem do
-    // mockup, o PDF do resumo. Cada uma vira uma saída mais nova que a
-    // mensagem do cliente — e a trava abaixo lia isso como "alguém já
-    // respondeu" e descartava o TEXTO do próprio Luigi.
-    //
-    // No pedido do Dan foi exatamente assim: ele gerou o mockup, mandou a
-    // imagem e a pergunta "é isso que você tem em mente?" morreu no log. O
-    // cliente recebia figura sem pergunta e a conversa parava.
-    //
-    // O corte certo é o INÍCIO do turno: saída entre a mensagem do cliente e o
-    // meu começo é alguém que me passou na frente; saída depois disso sou eu.
-    const inicioDoTurno = new Date(inicio).toISOString()
-    const { data: ultimaSaida } = await supabaseAdmin
-      .from('wa_mensagens')
-      .select('criado_em, corpo, autor')
-      .eq('conversa_id', params.conversaId)
-      .eq('direcao', 'saida')
-      .lt('criado_em', inicioDoTurno)
-      .order('criado_em', { ascending: false })
-      .limit(1)
-      .maybeSingle<{ criado_em: string; corpo: string | null; autor: string | null }>()
-    // A DEVOLUÇÃO MANUAL PASSA POR CIMA DESTA TRAVA — 10/09/2026.
-    //
-    // "Devolver pro Luigi" reprocessa a ÚLTIMA mensagem da pessoa, que por
-    // definição é antiga — e por definição existe uma saída depois dela: é
-    // justamente a resposta ruim que fez o Fernando clicar no botão. Então a
-    // trava de resposta velha reprovava 100% das devoluções.
-    //
-    // Aconteceu com a Kelly às 19:47: o Luigi montou as 30 camisetas no pedido
-    // certinho (a ferramenta rodou, o pedido está lá), e o texto "Coloquei as
-    // 30 camisetas no pedido" foi DESCARTADO. O trabalho feito, e a cliente sem
-    // saber — pior que não ter rodado.
-    //
-    // Quando `retomada` está setado, quem mandou falar foi o Fernando, olhando
-    // a conversa. Ele sabe que tem mensagem nossa depois; é por isso que está
-    // devolvendo. A trava existe pra evitar atropelo automático, não pra vetar
-    // ordem humana.
-    // "JÁ RESPONDEMOS" É O LUIGI TER RESPONDIDO — 10/09/2026.
-    //
-    // Esta trava também contava mensagem digitada no inbox como resposta. Só que
-    // "só um momento, to gerando" não responde nada: é o Fernando segurando o
-    // cliente PORQUE o Luigi ainda não respondeu. Contar isso como resposta
-    // dada fazia o Luigi descartar exatamente a resposta que estava faltando —
-    // e essa trava roda antes da de baixo, então era ela quem derrubava primeiro.
-    //
-    // Agora só conta saída de agente. Mensagem de gente não consome o turno do
-    // cliente: a pergunta dele continua de pé até alguém responder de verdade.
-    const devolucaoManual = Boolean(params.retomada)
-    const respostaDeAgente =
-      ultimaSaida && AGENTES_SAIDA.has((ultimaSaida.autor ?? '').trim().toLowerCase()) ? ultimaSaida : null
-    if (!devolucaoManual && respostaDeAgente && new Date(respostaDeAgente.criado_em).getTime() > new Date(params.criadoEm).getTime()) {
-      await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'já respondemos depois dessa mensagem' })
-      return
-    }
-
-    // SE TEM GENTE NA CONVERSA, O LUIGI SAI DE CENA — 10/09/2026.
-    //
-    // Às 10:58 o Fernando estava respondendo à Vanessa sobre nota fiscal e
-    // Sefaz, pergunta por pergunta, e o Luigi entrou no meio com "Qualquer
-    // coisa que surgir pode chamar aqui. Bom trabalho!". Encerrou uma conversa
-    // que estava no melhor momento — ela aceitou o pedido dois minutos depois.
-    //
-    // A trava de resposta velha não pega isto: ela compara com a ÚLTIMA saída,
-    // e no vaivém rápido a mensagem dela chega depois da fala do Fernando. O
-    // teste certo é outro — tem humano ATIVO aqui? Se alguém da equipe falou
-    // nos últimos minutos, a conversa tem dono, e não é ele.
-    //
-    // O FILTRO É EM JS DE PROPÓSITO. Mensagem enviada pelo inbox grava `autor`
-    // NULO — são 229 das últimas 500 saídas. Em SQL, `autor NOT IN (...)` é
-    // NULL quando o campo é NULL, e NULL não passa no WHERE: o filtro no banco
-    // descartaria exatamente as mensagens do Fernando, que são as que esta
-    // trava existe pra respeitar. Aqui `null` é lido como gente, que é o que é.
-    // O corte em `inicioDoTurno` vale aqui também: anexo que a minha própria
-    // ferramenta gravou no meio do turno não pode me parecer gente. Cinto e
-    // suspensório — o `autor` já resolve o caso conhecido (o PDF do resumo),
-    // isto cobre o próximo envio que alguém esquecer de assinar.
-    const AGENTES = AGENTES_SAIDA
-    const { data: ultimasSaidas } = await supabaseAdmin
-      .from('wa_mensagens')
-      .select('autor, criado_em')
-      .eq('conversa_id', params.conversaId)
-      .eq('direcao', 'saida')
-      .gt('criado_em', new Date(Date.now() - MINUTOS_DONO_HUMANO * 60_000).toISOString())
-      .lt('criado_em', inicioDoTurno)
-      .order('criado_em', { ascending: false })
-      .limit(10)
-
-    const humanoRecente = ((ultimasSaidas ?? []) as Array<{ autor: string | null; criado_em: string }>).find(
-      (m) => !AGENTES.has((m.autor ?? '').trim().toLowerCase()),
-    )
-
-    // QUEM TIRA O LUIGI DA CONVERSA É O CLIQUE, NÃO A DIGITAÇÃO — 10/09/2026.
-    //
-    // A regra antiga era: humano falou nos últimos 15 min, o Luigi cala a boca.
-    // A intenção era boa — não falar por cima de quem assumiu. O efeito real foi
-    // um laço que prendeu o Fernando a noite inteira:
-    //
-    //   1. o Luigi trava num passo e não manda o que prometeu
-    //   2. o Fernando digita "só um momento, to gerando" pra segurar o cliente
-    //   3. essa mensagem emudece o Luigi por 15 minutos
-    //   4. o cliente responde, e a resposta do Luigi é DESCARTADA em silêncio
-    //   5. só sobra o Fernando digitar de novo — e recomeça
-    //
-    // O erro de leitura está no passo 3. O Fernando escrevendo "só um momento"
-    // não está assumindo a conversa: está cobrindo o Luigi pra ele continuar.
-    // Tomar a conversa é outro gesto, que já tem botão e marca próprios —
-    // `luigi_escalado_em`, o "Chamando…" no inbox, desfeito pelo "Devolver".
-    //
-    // Então o teste passa a ser o ESTADO da conversa, não a autoria da última
-    // mensagem. Conversa escalada: o Luigi fica quieto, é handover de verdade e
-    // está visível na tela. Conversa não escalada: ele responde, mesmo que o
-    // Fernando tenha acabado de escrever.
-    //
-    // Fica de pé só a proteção contra COLISÃO: se a mensagem humana tem menos de
-    // um minuto, os dois estão digitando ao mesmo tempo e um vai atropelar o
-    // outro. Isso é acidente de sincronia, não decisão de quem manda — e um
-    // minuto passa sozinho, sem ninguém precisar clicar nada.
-    // A CONTRAPARTIDA: CONVERSA ESCALADA, LUIGI QUIETO.
-    //
-    // A trava antiga cuidava disso por acidente — quem assumia digitava, e a
-    // digitação calava o Luigi. Agora que digitar não cala mais, o handover
-    // precisa ser lido de onde ele de fato mora: a marca da conversa. Sem esta
-    // checagem, afrouxar a de cima soltaria o Luigi por cima do Fernando
-    // justamente nas conversas que ele tomou pra si de propósito.
-    const { data: conv } = await supabaseAdmin
-      .from('wa_conversas')
-      .select('luigi_escalado_em')
-      .eq('id', params.conversaId)
-      .maybeSingle<{ luigi_escalado_em: string | null }>()
-    if (conv?.luigi_escalado_em && !devolucaoManual) {
-      await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'conversa está com o Fernando (Devolver pro Luigi solta)' })
-      return
-    }
-
-    const COLISAO_MS = 60_000
-    const colidindo =
-      humanoRecente && Date.now() - new Date(humanoRecente.criado_em).getTime() < COLISAO_MS
-    if (colidindo && !devolucaoManual) {
-      await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: `${humanoRecente?.autor ?? 'alguém da equipe'} escreveu agora mesmo — evitando atropelo` })
-      return
-    }
-
-    // E NÃO DIGA DE NOVO O QUE ACABOU DE DIZER — 10/09/2026.
-    //
-    // A trava acima pega resposta ATRASADA; esta pega resposta REPETIDA, que é
-    // outro caso: a rodada é legítima, chegou na hora, e mesmo assim o texto é
-    // o mesmo de antes. Acontece no fim da conversa, quando não sobrou assunto
-    // e cada mensagem dela arranca outro "qualquer coisa é só chamar aqui" — a
-    // Bordado Mágico levou quatro despedidas quase idênticas em dois minutos.
-    //
-    // Regra do prompt não resolve porque cada rodada é um processo separado,
-    // que não sabe o que a outra respondeu. A comparação é frouxa de propósito:
-    // o modelo troca a pontuação e a primeira palavra, não a frase.
-    if (r.texto && ultimaSaida?.corpo) {
-      const enxugar = (s: string) =>
-        s
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/[^a-z0-9 ]/g, '')
-          .replace(/\s+/g, ' ')
-          .trim()
-      const novo = enxugar(r.texto)
-      const anterior = enxugar(ultimaSaida.corpo)
-      if (novo.length > 0 && (novo === anterior || (novo.length > 25 && (anterior.includes(novo) || novo.includes(anterior))))) {
-        await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'resposta repetida — igual à anterior' })
+      if (modo === 'sugere') {
+        await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: Boolean(r.escalada), motivo_escalada: r.escalada?.motivo ?? null, status: 'sugerida', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: null })
+        if (r.escalada) await escalar(params.conversaId, { nome, waId }, r.escalada.motivo, modo)
         return
       }
-    }
 
-    // Vai em mensagens separadas, com pausa: é assim que gente escreve no
-    // WhatsApp, e o link sozinho ganha prévia em vez de sumir no meio do texto.
-    // ESCALOU, CALOU — E ISSO SE TRAVA AQUI, NÃO NO PROMPT. 10/09/2026.
-    //
-    // A regra "chame o Fernando e não escreva mais nada" existia no prompt e na
-    // resposta da ferramenta chamar_humano desde 09/09. O código, porém, só
-    // ROTULAVA o log (`soEscalou`) — se o modelo escalasse E escrevesse, o texto
-    // saía do mesmo jeito. Regra sem trava é sugestão.
-    //
-    // O custo apareceu com a Rafaella em 08/09: ela disse "já paguei e não foi
-    // esse", e o Luigi respondeu QUATRO vezes "alguém da equipe já vai verificar
-    // pra você, pode aguardar". Ninguém verificou por 43 horas. Cada uma dessas
-    // frases é uma promessa que a gente não tinha como cumprir, feita a quem
-    // está reclamando de dinheiro — o pior lugar possível pra prometer errado.
-    //
-    // Calar não é abandonar: `escalar()` logo abaixo avisa o Fernando no
-    // WhatsApp dele. O cliente prefere um silêncio curto seguido de resposta de
-    // gente a uma promessa automática que ninguém honra.
-    // A última peneira: vocabulário nosso não vira mensagem dele. Vale pra
-    // qualquer caminho — cobrança de promessa, devolução manual, ou o modelo
-    // simplesmente copiando um resultado de ferramenta.
-    const vazandoInterno = !r.escalada && Boolean(r.texto.trim()) && pareceRecadoInterno(r.texto)
-    if (vazandoInterno) {
-      console.error(`[luigi] resposta com vocabulário interno BARRADA em ${params.conversaId}: "${r.texto.slice(0, 160)}"`)
-      void avisarGestor(`Barrei uma resposta do Luigi pra ${nomeOuNumero(params.nome, waId)} porque ela tinha vocabulário interno. Veja a conversa no inbox: "${r.texto.slice(0, 120)}"`)
-    }
-    const partes = r.escalada || vazandoInterno ? [] : mensagensSeparadas(r.texto)
-    if (r.escalada && r.texto.trim()) {
-      console.log(`[luigi] escalou e tentou falar; texto descartado em ${params.conversaId}: "${r.texto.slice(0, 80)}"`)
-    }
-    let envio: Awaited<ReturnType<typeof enviarTexto>> = { ok: false, erro: 'sem texto pra enviar' }
-    for (const [i, parte] of partes.entries()) {
-      // A pausa é do tamanho do que VEM — quem digita leva o tempo de digitar.
-      if (i > 0) await dormir(pausaEntreMensagens(parte))
-      envio = await enviarTexto(waId, parte)
-      if (envio.ok) await registrarSaidaInbox(waId, nome, envio.wamid, parte, null, 'luigi')
-      // Se uma parte falha, parar: continuar deixaria a conversa sem sentido.
-      if (!envio.ok) break
-    }
+      // modo responde
+      if (!(await janela24hAberta(waId))) {
+        await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: Boolean(r.escalada), motivo_escalada: r.escalada?.motivo ?? null, status: 'falhou', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'janela de 24 h fechada' })
+        return
+      }
+      void marcarComoLida(params.wamid).catch(() => false)
 
-    // Escalar sem texto é o comportamento CERTO desde 09/09/2026 — o Luigi
-    // chama o Fernando e cala a boca. Registrar isso como 'falhou' encheria o
-    // log de erro justamente quando o sistema fez o que devia.
-    // 'ignorada' porque é isso que aconteceu do ponto de vista do cliente: o
-    // Luigi não respondeu. O par escalado=true + motivo é o que diz que foi de
-    // propósito. Não inventei um status novo só pra isso — o check do banco
-    // aceita seis, e um sétimo por causa de rótulo é dívida barata de criar e
-    // cara de manter.
-    // SILÊNCIO POR ESCOLHA NÃO É FALHA — 15/09/2026.
-    //
-    // O caso "escalou e calou" já era 'ignorada'. Faltava o gêmeo: o modelo
-    // rodar, decidir que não há o que dizer, e não escalar. Isso caía em
-    // 'falhou' com erro "sem texto pra enviar" e inflava a estatística de
-    // escalada — medido em 12 casos de 30 dias, e o que o cliente tinha
-    // escrito era "Ta certo", "Ok", "Obrigada", "Certo", "Perfeito, Luigi!".
-    // São fechos de conversa; ficar calado ali é defensável.
-    //
-    // (As seis de 11/09 20:28–20:54, "sim" e "pode confirmar", eram outra
-    // coisa: o loop da liberação, consertado em bc61d0b.)
-    //
-    // Continua 'falhou' quando o texto foi BARRADO por vocabulário interno —
-    // ali houve resposta e ela foi impedida, que é problema de verdade.
-    const semTexto = partes.length === 0 && !vazandoInterno
-    const soEscalou = semTexto && Boolean(r.escalada)
-    const calouPorEscolha = semTexto && !r.escalada
-    await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: Boolean(r.escalada), motivo_escalada: r.escalada?.motivo ?? (calouPorEscolha ? 'sem resposta por escolha' : null), status: soEscalou || calouPorEscolha ? 'ignorada' : envio.ok ? 'enviada' : 'falhou', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: soEscalou || calouPorEscolha || envio.ok ? null : envio.erro })
-    if (r.escalada) await escalar(params.conversaId, { nome, waId }, r.escalada.motivo, modo)
+      // RESPOSTA VELHA NÃO SAI (09/09/2026)
+      //
+      // O Nelson mandou "Oi boa tarde!" às 15h12 e "Tudo bem Luigi?" às 15h13.
+      // Duas invocações do Luigi rodaram em paralelo e as duas responderam, com a
+      // mesma frase, no mesmo minuto — e no meio ainda entrou o agente de gestão
+      // pelo MCP. Quatro mensagens nossas seguidas na cara do cliente.
+      //
+      // A trava anterior (esperar e ver se chegou mensagem mais nova) não pega
+      // isso: quando a segunda chega 40 segundos depois, a primeira já passou da
+      // espera. Então o teste correto é no fim, e é sobre o que JÁ FOI DITO: se
+      // alguém — o próprio Luigi, o agente ou uma pessoa no inbox — falou com
+      // esse cliente depois da mensagem que eu estou respondendo, a minha
+      // resposta chegou tarde e não deve sair. Silêncio é melhor que repetição.
+      // O QUE EU MESMO MANDEI NESTE TURNO NÃO CONTA — 10/09/2026.
+      //
+      // As ferramentas do Luigi mandam coisa no meio do turno: a imagem do
+      // mockup, o PDF do resumo. Cada uma vira uma saída mais nova que a
+      // mensagem do cliente — e a trava abaixo lia isso como "alguém já
+      // respondeu" e descartava o TEXTO do próprio Luigi.
+      //
+      // No pedido do Dan foi exatamente assim: ele gerou o mockup, mandou a
+      // imagem e a pergunta "é isso que você tem em mente?" morreu no log. O
+      // cliente recebia figura sem pergunta e a conversa parava.
+      //
+      // O corte certo é o INÍCIO do turno: saída entre a mensagem do cliente e o
+      // meu começo é alguém que me passou na frente; saída depois disso sou eu.
+      const inicioDoTurno = new Date(inicio).toISOString()
+      const { data: ultimaSaida } = await supabaseAdmin
+        .from('wa_mensagens')
+        .select('criado_em, corpo, autor')
+        .eq('conversa_id', params.conversaId)
+        .eq('direcao', 'saida')
+        .lt('criado_em', inicioDoTurno)
+        .order('criado_em', { ascending: false })
+        .limit(1)
+        .maybeSingle<{ criado_em: string; corpo: string | null; autor: string | null }>()
+      // A DEVOLUÇÃO MANUAL PASSA POR CIMA DESTA TRAVA — 10/09/2026.
+      //
+      // "Devolver pro Luigi" reprocessa a ÚLTIMA mensagem da pessoa, que por
+      // definição é antiga — e por definição existe uma saída depois dela: é
+      // justamente a resposta ruim que fez o Fernando clicar no botão. Então a
+      // trava de resposta velha reprovava 100% das devoluções.
+      //
+      // Aconteceu com a Kelly às 19:47: o Luigi montou as 30 camisetas no pedido
+      // certinho (a ferramenta rodou, o pedido está lá), e o texto "Coloquei as
+      // 30 camisetas no pedido" foi DESCARTADO. O trabalho feito, e a cliente sem
+      // saber — pior que não ter rodado.
+      //
+      // Quando `retomada` está setado, quem mandou falar foi o Fernando, olhando
+      // a conversa. Ele sabe que tem mensagem nossa depois; é por isso que está
+      // devolvendo. A trava existe pra evitar atropelo automático, não pra vetar
+      // ordem humana.
+      // "JÁ RESPONDEMOS" É O LUIGI TER RESPONDIDO — 10/09/2026.
+      //
+      // Esta trava também contava mensagem digitada no inbox como resposta. Só que
+      // "só um momento, to gerando" não responde nada: é o Fernando segurando o
+      // cliente PORQUE o Luigi ainda não respondeu. Contar isso como resposta
+      // dada fazia o Luigi descartar exatamente a resposta que estava faltando —
+      // e essa trava roda antes da de baixo, então era ela quem derrubava primeiro.
+      //
+      // Agora só conta saída de agente. Mensagem de gente não consome o turno do
+      // cliente: a pergunta dele continua de pé até alguém responder de verdade.
+      const devolucaoManual = Boolean(params.retomada)
+      const respostaDeAgente =
+        ultimaSaida && AGENTES_SAIDA.has((ultimaSaida.autor ?? '').trim().toLowerCase()) ? ultimaSaida : null
+      if (!devolucaoManual && respostaDeAgente && new Date(respostaDeAgente.criado_em).getTime() > new Date(params.criadoEm).getTime()) {
+        await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'já respondemos depois dessa mensagem' })
+        return
+      }
+
+      // SE TEM GENTE NA CONVERSA, O LUIGI SAI DE CENA — 10/09/2026.
+      //
+      // Às 10:58 o Fernando estava respondendo à Vanessa sobre nota fiscal e
+      // Sefaz, pergunta por pergunta, e o Luigi entrou no meio com "Qualquer
+      // coisa que surgir pode chamar aqui. Bom trabalho!". Encerrou uma conversa
+      // que estava no melhor momento — ela aceitou o pedido dois minutos depois.
+      //
+      // A trava de resposta velha não pega isto: ela compara com a ÚLTIMA saída,
+      // e no vaivém rápido a mensagem dela chega depois da fala do Fernando. O
+      // teste certo é outro — tem humano ATIVO aqui? Se alguém da equipe falou
+      // nos últimos minutos, a conversa tem dono, e não é ele.
+      //
+      // O FILTRO É EM JS DE PROPÓSITO. Mensagem enviada pelo inbox grava `autor`
+      // NULO — são 229 das últimas 500 saídas. Em SQL, `autor NOT IN (...)` é
+      // NULL quando o campo é NULL, e NULL não passa no WHERE: o filtro no banco
+      // descartaria exatamente as mensagens do Fernando, que são as que esta
+      // trava existe pra respeitar. Aqui `null` é lido como gente, que é o que é.
+      // O corte em `inicioDoTurno` vale aqui também: anexo que a minha própria
+      // ferramenta gravou no meio do turno não pode me parecer gente. Cinto e
+      // suspensório — o `autor` já resolve o caso conhecido (o PDF do resumo),
+      // isto cobre o próximo envio que alguém esquecer de assinar.
+      const AGENTES = AGENTES_SAIDA
+      const { data: ultimasSaidas } = await supabaseAdmin
+        .from('wa_mensagens')
+        .select('autor, criado_em')
+        .eq('conversa_id', params.conversaId)
+        .eq('direcao', 'saida')
+        .gt('criado_em', new Date(Date.now() - MINUTOS_DONO_HUMANO * 60_000).toISOString())
+        .lt('criado_em', inicioDoTurno)
+        .order('criado_em', { ascending: false })
+        .limit(10)
+
+      const humanoRecente = ((ultimasSaidas ?? []) as Array<{ autor: string | null; criado_em: string }>).find(
+        (m) => !AGENTES.has((m.autor ?? '').trim().toLowerCase()),
+      )
+
+      // QUEM TIRA O LUIGI DA CONVERSA É O CLIQUE, NÃO A DIGITAÇÃO — 10/09/2026.
+      //
+      // A regra antiga era: humano falou nos últimos 15 min, o Luigi cala a boca.
+      // A intenção era boa — não falar por cima de quem assumiu. O efeito real foi
+      // um laço que prendeu o Fernando a noite inteira:
+      //
+      //   1. o Luigi trava num passo e não manda o que prometeu
+      //   2. o Fernando digita "só um momento, to gerando" pra segurar o cliente
+      //   3. essa mensagem emudece o Luigi por 15 minutos
+      //   4. o cliente responde, e a resposta do Luigi é DESCARTADA em silêncio
+      //   5. só sobra o Fernando digitar de novo — e recomeça
+      //
+      // O erro de leitura está no passo 3. O Fernando escrevendo "só um momento"
+      // não está assumindo a conversa: está cobrindo o Luigi pra ele continuar.
+      // Tomar a conversa é outro gesto, que já tem botão e marca próprios —
+      // `luigi_escalado_em`, o "Chamando…" no inbox, desfeito pelo "Devolver".
+      //
+      // Então o teste passa a ser o ESTADO da conversa, não a autoria da última
+      // mensagem. Conversa escalada: o Luigi fica quieto, é handover de verdade e
+      // está visível na tela. Conversa não escalada: ele responde, mesmo que o
+      // Fernando tenha acabado de escrever.
+      //
+      // Fica de pé só a proteção contra COLISÃO: se a mensagem humana tem menos de
+      // um minuto, os dois estão digitando ao mesmo tempo e um vai atropelar o
+      // outro. Isso é acidente de sincronia, não decisão de quem manda — e um
+      // minuto passa sozinho, sem ninguém precisar clicar nada.
+      // A CONTRAPARTIDA: CONVERSA ESCALADA, LUIGI QUIETO.
+      //
+      // A trava antiga cuidava disso por acidente — quem assumia digitava, e a
+      // digitação calava o Luigi. Agora que digitar não cala mais, o handover
+      // precisa ser lido de onde ele de fato mora: a marca da conversa. Sem esta
+      // checagem, afrouxar a de cima soltaria o Luigi por cima do Fernando
+      // justamente nas conversas que ele tomou pra si de propósito.
+      const { data: conv } = await supabaseAdmin
+        .from('wa_conversas')
+        .select('luigi_escalado_em')
+        .eq('id', params.conversaId)
+        .maybeSingle<{ luigi_escalado_em: string | null }>()
+      if (conv?.luigi_escalado_em && !devolucaoManual) {
+        await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'conversa está com o Fernando (Devolver pro Luigi solta)' })
+        return
+      }
+
+      const COLISAO_MS = 60_000
+      const colidindo =
+        humanoRecente && Date.now() - new Date(humanoRecente.criado_em).getTime() < COLISAO_MS
+      if (colidindo && !devolucaoManual) {
+        await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: `${humanoRecente?.autor ?? 'alguém da equipe'} escreveu agora mesmo — evitando atropelo` })
+        return
+      }
+
+      // E NÃO DIGA DE NOVO O QUE ACABOU DE DIZER — 10/09/2026.
+      //
+      // A trava acima pega resposta ATRASADA; esta pega resposta REPETIDA, que é
+      // outro caso: a rodada é legítima, chegou na hora, e mesmo assim o texto é
+      // o mesmo de antes. Acontece no fim da conversa, quando não sobrou assunto
+      // e cada mensagem dela arranca outro "qualquer coisa é só chamar aqui" — a
+      // Bordado Mágico levou quatro despedidas quase idênticas em dois minutos.
+      //
+      // Regra do prompt não resolve porque cada rodada é um processo separado,
+      // que não sabe o que a outra respondeu. A comparação é frouxa de propósito:
+      // o modelo troca a pontuação e a primeira palavra, não a frase.
+      // O TURNO ANTERIOR PODE TER FALADO DEPOIS DO MEU INÍCIO — 24/09/2026.
+      // Com os turnos em série (esperarAVez), a última fala nossa costuma ser do
+      // turno que acabou de soltar a vez, DEPOIS de `inicio` — e `ultimaSaida`
+      // corta em `inicio`. Pra "repetida" o que importa é o último TEXTO que
+      // saiu, de quem quer que seja; o que este turno manda no meio é mídia
+      // (PDF, mockup), então texto é sempre de antes.
+      const { data: ultimoTexto } = await supabaseAdmin
+        .from('wa_mensagens')
+        .select('corpo')
+        .eq('conversa_id', params.conversaId)
+        .eq('direcao', 'saida')
+        .eq('tipo', 'text')
+        .order('criado_em', { ascending: false })
+        .limit(1)
+        .maybeSingle<{ corpo: string | null }>()
+      if (r.texto && ultimoTexto?.corpo) {
+        const enxugar = (s: string) =>
+          s
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9 ]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+        const novo = enxugar(r.texto)
+        const anterior = enxugar(ultimoTexto.corpo)
+        if (novo.length > 0 && (novo === anterior || (novo.length > 25 && (anterior.includes(novo) || novo.includes(anterior))))) {
+          await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'resposta repetida — igual à anterior' })
+          return
+        }
+      }
+
+      // Vai em mensagens separadas, com pausa: é assim que gente escreve no
+      // WhatsApp, e o link sozinho ganha prévia em vez de sumir no meio do texto.
+      // ESCALOU, CALOU — E ISSO SE TRAVA AQUI, NÃO NO PROMPT. 10/09/2026.
+      //
+      // A regra "chame o Fernando e não escreva mais nada" existia no prompt e na
+      // resposta da ferramenta chamar_humano desde 09/09. O código, porém, só
+      // ROTULAVA o log (`soEscalou`) — se o modelo escalasse E escrevesse, o texto
+      // saía do mesmo jeito. Regra sem trava é sugestão.
+      //
+      // O custo apareceu com a Rafaella em 08/09: ela disse "já paguei e não foi
+      // esse", e o Luigi respondeu QUATRO vezes "alguém da equipe já vai verificar
+      // pra você, pode aguardar". Ninguém verificou por 43 horas. Cada uma dessas
+      // frases é uma promessa que a gente não tinha como cumprir, feita a quem
+      // está reclamando de dinheiro — o pior lugar possível pra prometer errado.
+      //
+      // Calar não é abandonar: `escalar()` logo abaixo avisa o Fernando no
+      // WhatsApp dele. O cliente prefere um silêncio curto seguido de resposta de
+      // gente a uma promessa automática que ninguém honra.
+      // A última peneira: vocabulário nosso não vira mensagem dele. Vale pra
+      // qualquer caminho — cobrança de promessa, devolução manual, ou o modelo
+      // simplesmente copiando um resultado de ferramenta.
+      const vazandoInterno = !r.escalada && Boolean(r.texto.trim()) && pareceRecadoInterno(r.texto)
+      if (vazandoInterno) {
+        console.error(`[luigi] resposta com vocabulário interno BARRADA em ${params.conversaId}: "${r.texto.slice(0, 160)}"`)
+        void avisarGestor(`Barrei uma resposta do Luigi pra ${nomeOuNumero(params.nome, waId)} porque ela tinha vocabulário interno. Veja a conversa no inbox: "${r.texto.slice(0, 120)}"`)
+      }
+      const partes = r.escalada || vazandoInterno ? [] : mensagensSeparadas(r.texto)
+      if (r.escalada && r.texto.trim()) {
+        console.log(`[luigi] escalou e tentou falar; texto descartado em ${params.conversaId}: "${r.texto.slice(0, 80)}"`)
+      }
+      let envio: Awaited<ReturnType<typeof enviarTexto>> = { ok: false, erro: 'sem texto pra enviar' }
+      for (const [i, parte] of partes.entries()) {
+        // A pausa é do tamanho do que VEM — quem digita leva o tempo de digitar.
+        if (i > 0) await dormir(pausaEntreMensagens(parte))
+        envio = await enviarTexto(waId, parte)
+        if (envio.ok) await registrarSaidaInbox(waId, nome, envio.wamid, parte, null, 'luigi')
+        // Se uma parte falha, parar: continuar deixaria a conversa sem sentido.
+        if (!envio.ok) break
+      }
+
+      // Escalar sem texto é o comportamento CERTO desde 09/09/2026 — o Luigi
+      // chama o Fernando e cala a boca. Registrar isso como 'falhou' encheria o
+      // log de erro justamente quando o sistema fez o que devia.
+      // 'ignorada' porque é isso que aconteceu do ponto de vista do cliente: o
+      // Luigi não respondeu. O par escalado=true + motivo é o que diz que foi de
+      // propósito. Não inventei um status novo só pra isso — o check do banco
+      // aceita seis, e um sétimo por causa de rótulo é dívida barata de criar e
+      // cara de manter.
+      // SILÊNCIO POR ESCOLHA NÃO É FALHA — 15/09/2026.
+      //
+      // O caso "escalou e calou" já era 'ignorada'. Faltava o gêmeo: o modelo
+      // rodar, decidir que não há o que dizer, e não escalar. Isso caía em
+      // 'falhou' com erro "sem texto pra enviar" e inflava a estatística de
+      // escalada — medido em 12 casos de 30 dias, e o que o cliente tinha
+      // escrito era "Ta certo", "Ok", "Obrigada", "Certo", "Perfeito, Luigi!".
+      // São fechos de conversa; ficar calado ali é defensável.
+      //
+      // (As seis de 11/09 20:28–20:54, "sim" e "pode confirmar", eram outra
+      // coisa: o loop da liberação, consertado em bc61d0b.)
+      //
+      // Continua 'falhou' quando o texto foi BARRADO por vocabulário interno —
+      // ali houve resposta e ela foi impedida, que é problema de verdade.
+      const semTexto = partes.length === 0 && !vazandoInterno
+      const soEscalou = semTexto && Boolean(r.escalada)
+      const calouPorEscolha = semTexto && !r.escalada
+      await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: Boolean(r.escalada), motivo_escalada: r.escalada?.motivo ?? (calouPorEscolha ? 'sem resposta por escolha' : null), status: soEscalou || calouPorEscolha ? 'ignorada' : envio.ok ? 'enviada' : 'falhou', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: soEscalou || calouPorEscolha || envio.ok ? null : envio.erro })
+      if (r.escalada) await escalar(params.conversaId, { nome, waId }, r.escalada.motivo, modo)
+    } finally {
+      await liberarAVez(params.conversaId, params.wamid).catch(() => undefined)
+    }
   } catch (err) {
     const erro = err instanceof Error ? err.message : String(err)
     console.error('[luigi] responderCliente falhou', { erro })

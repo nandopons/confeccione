@@ -29,6 +29,7 @@ import {
   payloadFeedbackNeg,
 } from './whatsapp-cloud'
 import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
+import { CAMPOS_DO_RESUMO, hashDoResumo } from './resumo-hash'
 import { lerImagem } from './imagens-pedido-storage'
 import { nomeProprio } from './nome'
 
@@ -493,7 +494,7 @@ export async function enviarResumoPdfPedido(params: {
 
     const { data } = await supabaseAdmin
       .from('pedidos_assistente')
-      .select('id, codigo, nome, linhas, prazo_dias, cep, numero, complemento, logradouro, bairro, cidade, uf, mockups, imagens, observacoes')
+      .select(`id, codigo, telefone, ${CAMPOS_DO_RESUMO}`)
       .eq('id', params.pedidoId)
       .maybeSingle<Record<string, unknown>>()
     if (!data) return { enviados: 0, total }
@@ -530,6 +531,7 @@ export async function enviarResumoPdfPedido(params: {
 
     let enviados = 0
     for (const { waId, destino } of abertos) {
+      const agoraEnvio = new Date().toISOString()
       const r = await enviarMidiaPorId(waId, 'document', up.mediaId, {
         caption: destino.legenda.slice(0, 1024),
         filename: nomeArquivo,
@@ -585,6 +587,27 @@ export async function enviarResumoPdfPedido(params: {
         }
       } catch (err) {
         console.error('[wa-notify] registro inbox do PDF falhou', { err })
+      }
+
+      // O CLIENTE RECEBEU: O PEDIDO FICA SABENDO — 24/09/2026.
+      //
+      // Dois caminhos mandam este PDF pro cliente: o Luigi (enviarResumoParaCliente,
+      // que decide reenviar comparando com `resumo_enviado_em`/hash) e o aceite
+      // (notificarAceiteEContatos, quando o Fernando oferta antes de o Luigi
+      // fechar). Só o primeiro carimbava. A Renata (20260900324, 24/09 11:13)
+      // recebeu o resumo pelo aceite e, dois minutos depois, o mesmo PDF pelo
+      // Luigi — que leu "nunca enviado" e mandou. O carimbo mora aqui porque
+      // aqui é onde o arquivo chega, seja quem for que pediu. Fornecedor não
+      // conta: o campo é sobre o que o CLIENTE já viu.
+      const telCliente = String(data.telefone ?? '').replace(/\D/g, '').slice(-8)
+      if (telCliente.length === 8 && waId.slice(-8) === telCliente) {
+        await supabaseAdmin
+          .from('pedidos_assistente')
+          .update({ resumo_enviado_em: agoraEnvio, resumo_enviado_hash: hashDoResumo(data) })
+          .eq('id', params.pedidoId)
+          .then(({ error }) => {
+            if (error) console.error('[wa-notify] carimbo do resumo falhou', { erro: error.message })
+          })
       }
     }
     return { enviados, total }

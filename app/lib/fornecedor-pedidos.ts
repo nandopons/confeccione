@@ -8,6 +8,7 @@
 
 import { supabaseAdmin } from './supabase-server'
 import { resumirLinhas, type LinhaPedido, type StatusOferta } from './pedido-assistente-oferta'
+import { telefoneCanonicoDoCliente } from './telefone-cliente'
 
 // Estado derivado de uma oferta ACEITA, conforme o pagamento REAL do cliente:
 //  - 'orcar'              -> aceita, mas orcamento ainda nao enviado (orcamento_status !== 'definido')
@@ -118,6 +119,17 @@ async function buscar(fornecedorId: string, status: StatusOferta[]): Promise<Ofe
   }
 
   const ofertas = ((data ?? []) as unknown as Row[]).map(mapRow)
+
+  // O telefone que o fornecedor vê e clica é o canônico (o que a Meta
+  // entregou), não o digitado — ver telefone-cliente.ts. Só nos aceitos, que
+  // são os únicos que carregam telefone.
+  await Promise.all(
+    ofertas
+      .filter((o) => o.clienteTelefone)
+      .map(async (o) => {
+        o.clienteTelefone = await telefoneCanonicoDoCliente(o.clienteTelefone).catch(() => o.clienteTelefone)
+      })
+  )
 
   // Etapa de producao dos pedidos ja pagos. Consulta separada de proposito: a
   // linha em producao_pedido e criada sob demanda (pelo quadro do admin ou

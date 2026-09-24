@@ -106,6 +106,8 @@ export const FALAS_CADASTRO = {
   cidade: 'Vocês são de que cidade?',
   minimo: 'Qual o pedido mínimo de vocês?',
   minimoAncora: 'Me dá um número: abaixo de quanto não compensa ligar a máquina?',
+  /** Passo 2 do desenho do Fernando: a pergunta de negócio, antes de qualquer pergunta de cadastro. */
+  encaminhar: 'Posso encaminhar esse cliente pra vocês?',
   confirmacao: 'Então: vocês fazem {peças}, em {cidade}/{UF}, mínimo {N} peças. Confere?',
   /** Fecho do galho (a): ela faz a peça, então o pedido da região dela vale. */
   prontoFaz:
@@ -151,6 +153,23 @@ export const TEXTO_COMISSAO =
 export const TEXTO_PAGAMENTO_GARANTIA =
   'Sobre o pagamento: o cliente paga antes, e o dinheiro fica na Confeccione até você entregar. ' +
   'Na prática você não corre risco de produzir e não receber, porque quando você começa a produzir o valor já está garantido.'
+
+/**
+ * A MENSAGEM DEPOIS DO "FAZ" É UMA SÓ, E TERMINA EM PERGUNTA — 17/09/2026.
+ *
+ * As duas frases acima iam pro prompt entre aspas — `"${TEXTO_COMISSAO}"` — e
+ * o modelo copiava as aspas pro WhatsApp. Saíam como bloco citado, sem
+ * pergunta no fim (Tidy, 600 becas, 14/09: ela nunca mais escreveu) ou
+ * anunciadas como "antes de finalizar o cadastro" que ela não tinha pedido
+ * (Boxer Wear, 16/09). As duas únicas interessadas perdidas em 14 dias
+ * pararam exatamente nessa mensagem.
+ *
+ * Aqui ela é montada inteira, sem aspas, e fecha com a pergunta do passo 2 do
+ * desenho do Fernando: "posso encaminhar esse cliente pra vocês?". É pergunta
+ * de negócio — sim ou não — e não convite a questionário. As três perguntas
+ * do cadastro vêm depois do sim dela, com a licença de sempre.
+ */
+export const FALA_DEPOIS_DO_SIM = `${TEXTO_COMISSAO}\n${TEXTO_PAGAMENTO_GARANTIA}\n${FALAS_CADASTRO.encaminhar}`
 const IDIOMA_TEMPLATE_SONDAGEM = 'pt_BR'
 
 export type StatusTemplateSondagem = {
@@ -368,7 +387,24 @@ export type Candidato = {
   fonte: string | null
   evidencia: string | null
   confianca: 'alta' | 'media' | 'baixa'
+  /** O que a página diz que o negócio É. Loja, aluguel e gráfica são descartados antes de qualquer sondagem. */
+  tipo: TipoCandidato | null
 }
+
+/**
+ * O TIPO DO NEGÓCIO É CAMPO, NÃO INFERÊNCIA — 17/09/2026.
+ *
+ * A busca de 16/09 por calça country trouxe uma LOJA de roupa country de
+ * Goiânia (fonte: "tiktok.com/discover/lojas-country-na-44"); quem respondeu
+ * era vendedora, mandou dois áudios dizendo que não sabia de produção, e a
+ * conversa morreu. A Tidy é aluguel de trajes. Pedir ao modelo "só registre
+ * fabricante" não segurou; dar a ele um campo onde escrever "loja" segura —
+ * ele classifica com gosto quando tem onde, e o descarte vira código.
+ */
+export const TIPOS_CANDIDATO = ['confeccao', 'faccao', 'estamparia_bordado', 'industria', 'atelie', 'grafica', 'loja_revenda', 'aluguel', 'outro'] as const
+export type TipoCandidato = (typeof TIPOS_CANDIDATO)[number]
+/** Só quem produz pra terceiros recebe sondagem. */
+const TIPOS_QUE_PRODUZEM: ReadonlySet<TipoCandidato> = new Set<TipoCandidato>(['confeccao', 'faccao', 'estamparia_bordado', 'industria', 'atelie', 'grafica'])
 
 function str(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
@@ -449,6 +485,7 @@ function normalizarCandidato(raw: Record<string, unknown>): Candidato | null {
     fonte: str(raw.fonte)?.slice(0, 300) ?? null,
     evidencia: str(raw.evidencia)?.slice(0, 300) ?? null,
     confianca: conf === 'alta' || conf === 'baixa' ? conf : 'media',
+    tipo: (TIPOS_CANDIDATO as readonly string[]).includes(str(raw.tipo) ?? '') ? (str(raw.tipo) as TipoCandidato) : null,
   }
 }
 
@@ -520,8 +557,15 @@ const FERRAMENTA_REGISTRAR: Anthropic.Messages.Tool = {
             fonte: { type: 'string', description: 'URL onde achou o contato.' },
             evidencia: { type: 'string', description: 'Uma frase: por que ela produz esse pedido (o que a página diz).' },
             confianca: { type: 'string', enum: ['alta', 'media', 'baixa'] },
+            tipo: {
+              type: 'string',
+              enum: [...TIPOS_CANDIDATO],
+              description:
+                'O que o negócio É, pelo que a página diz. loja_revenda = vende roupa mas não produz pra terceiros (Rua 44, Brás, multimarcas, e-commerce de marca própria); ' +
+                'aluguel = aluguel de trajes/becas; grafica = imprime camisetas mas não costura; outro = não é nada disso. Seja honesto aqui: loja registrada como confeccao vira sondagem perdida.',
+            },
           },
-          required: ['nome', 'evidencia', 'confianca'],
+          required: ['nome', 'evidencia', 'confianca', 'tipo'],
         },
       },
       resumo: { type: 'string', description: 'Duas ou três frases: onde procurou, o que achou, o que faltou.' },
@@ -545,7 +589,8 @@ ONDE PROCURAR: ${descricaoDaRegiao(perfil, regiao)}.
 
 COMO PROCURAR: use a busca na web várias vezes, com consultas diferentes, em português: "confecção de ${perfil.modelos[0]} em <cidade>", "facção ${perfil.modelos[0]} <UF> whatsapp", "fábrica de ${perfil.modelos[0]} <cidade> atacado", "site:instagram.com confecção ${perfil.modelos[0]} <cidade>", "ateliê de costura ${perfil.modelos[0]} <UF>"${temPlaces ? ', e a ferramenta buscar_google_places pra pegar telefone e site de empresas do Google Maps' : ''}. Leia os trechos: perfis do Instagram costumam trazer cidade e WhatsApp na bio; sites trazem e-mail e telefone.
 
-QUEM SERVE: confecção, facção, ateliê, estamparia ou fábrica que PRODUZ esse tipo de peça sob demanda ou no atacado, com pelo menos um contato (WhatsApp, telefone ou e-mail). QUEM NÃO SERVE: loja que só vende, marca própria que não produz pra terceiros, marketplace, blog, diretório sem contato, a própria Confeccione, e qualquer página em que você não tenha certeza de que é um fabricante. Não invente contato: só registre WhatsApp, e-mail ou site que apareceram nos resultados. Se um número vier com traços ou parênteses, normalize só pra dígitos com DDD.
+QUEM SERVE: confecção, facção, ateliê, estamparia, bordado ou fábrica que PRODUZ esse tipo de peça sob encomenda ou no atacado — PARA TERCEIROS — com pelo menos um contato (WhatsApp, telefone ou e-mail). Sinais de que produz: "fabricação própria", "facção", "private label", "produzimos para marcas", "sob encomenda", "direto da fábrica", "pedido mínimo", CNAE de confecção.
+QUEM NÃO SERVE, e o sistema descarta se você registrar: loja de varejo ou atacado que só REVENDE (Rua 44, Brás, feira, "moda country", multimarcas, e-commerce de marca própria que não produz pra terceiros), aluguel de trajes e becas, gráfica que só imprime, marketplace, blog, página "discover" do TikTok, diretório sem contato, a própria Confeccione, e qualquer página em que você não tenha certeza de que é um fabricante. Em 16/09 uma busca por calça country trouxe uma LOJA de roupa country: quem respondeu era vendedora e não sabia o que era produção. Prefira o contato que está na página da PRÓPRIA empresa (site, Instagram) ao de diretório. Não invente contato: só registre WhatsApp, e-mail ou site que apareceram nos resultados. Se um número vier com traços ou parênteses, normalize só pra dígitos com DDD.
 
 ENTREGA: até ${quantos} candidatos, os mais prováveis primeiro, cada um com uma frase de evidência (o que a página diz que a faz servir) e a URL de origem. No fim chame registrar_candidatos uma única vez. Sem texto além do necessário.`
 }
@@ -662,7 +707,7 @@ export async function descobrirCandidatos(perfil: PerfilBusca, regiao: RegiaoBus
 
 // ─── Dedupe: quem já conhecemos ─────────────────────────────────────────────
 
-type MotivoDescarte = 'ja_fornecedor' | 'ja_na_captacao' | 'pediu_para_nao_receber' | 'sem_contato_util'
+type MotivoDescarte = 'ja_fornecedor' | 'ja_na_captacao' | 'pediu_para_nao_receber' | 'sem_contato_util' | 'nao_produz_para_terceiros'
 
 /** Fornecedor já cadastrado, do jeito que dá pra comparar com o que a busca acha. */
 type FornecedorBase = { id: string; nome: string | null; cidade: string | null; estado: string | null; whatsapp: string | null; email: string | null; instagram: string | null; site: string | null }
@@ -721,6 +766,10 @@ export function ehFornecedorDaBase(c: Candidato, base: FornecedorBase[]): boolea
 }
 
 async function motivoParaDescartar(c: Candidato, base: FornecedorBase[]): Promise<MotivoDescarte | null> {
+  // Loja, aluguel e "outro" não recebem sondagem — ver TIPOS_CANDIDATO. Sem
+  // tipo (busca antiga, modelo que não preencheu) passa: o campo é filtro,
+  // não porteira, e a dúvida continua sendo resolvida pela conversa.
+  if (c.tipo && !TIPOS_QUE_PRODUZEM.has(c.tipo)) return 'nao_produz_para_terceiros'
   const last8 = c.whatsapp?.slice(-8) ?? c.telefone?.slice(-8) ?? null
   if (!last8 && !c.email) return 'sem_contato_util'
   if (ehFornecedorDaBase(c, base)) return 'ja_fornecedor'
@@ -1919,6 +1968,7 @@ export type CandidatoLinha = {
   resposta: string | null
   status: string
   ultimo_contato_em: string | null
+  erros?: number | null
 }
 
 /** Candidato abordado por pedido cujo WhatsApp bate com o wa_id (8 dígitos finais). */
@@ -1927,7 +1977,7 @@ export async function candidatoPeloWaId(waId: string): Promise<CandidatoLinha | 
   if (last8.length < 8) return null
   const { data } = await supabaseAdmin
     .from('captacao_fornecedores')
-    .select('id, nome, email, whatsapp, pedido_id, cidade, uf, resposta, status, ultimo_contato_em')
+    .select('id, nome, email, whatsapp, pedido_id, cidade, uf, resposta, status, ultimo_contato_em, erros')
     .eq('origem', 'pedido')
     .ilike('whatsapp', `%${last8}`)
     .not('ultimo_contato_em', 'is', null)
@@ -1952,6 +2002,54 @@ export async function registrarRespostaCandidato(id: string, resposta: 'interess
     })
     .eq('id', id)
   if (error) throw new Error(`resposta do candidato: ${error.message}`)
+}
+
+/**
+ * A FALHA DE ENTREGA VOLTA PRO CANDIDATO — 17/09/2026.
+ *
+ * A sondagem sai, a Meta aceita, e minutos depois o status vem `failed`. O
+ * webhook gravava isso em `wa_mensagens` e parava aí: a linha em
+ * `captacao_fornecedores` ficava `ativo`, com `ultimo_contato_em` preenchido —
+ * abordada, pra todos os efeitos. Em 14 dias, 28 de 93 sondagens (30%)
+ * falharam assim, e cada uma ocupou uma das 10 vagas do pedido como se
+ * tivesse chegado. Um terço da cota era fantasma.
+ *
+ * Três erros, tratados igual: 131026 (número sem WhatsApp), 131049 (a Meta
+ * limitou a frequência pra este destinatário — reputação NOSSA, reenviar
+ * piora) e 130472 (experimento da Meta, reenviar dá o mesmo). Em todos:
+ * `canal_whatsapp` desliga, a vaga volta (`ultimo_contato_em` nulo) e a linha
+ * vira `erro` com o motivo — que é o que `reabordarPendentes` lê pra tentar
+ * por E-MAIL, quando houver. Sem e-mail ela para aqui, visível no admin.
+ */
+export async function registrarFalhaDeEntregaSondagem(conversaId: string, erro: string | null): Promise<boolean> {
+  const { data: conv } = await supabaseAdmin.from('wa_conversas').select('contato_id').eq('id', conversaId).maybeSingle<{ contato_id: string | null }>()
+  if (!conv?.contato_id) return false
+  const { data: contato } = await supabaseAdmin.from('wa_contatos').select('wa_id').eq('id', conv.contato_id).maybeSingle<{ wa_id: string | null }>()
+  if (!contato?.wa_id) return false
+  const cand = await candidatoPeloWaId(contato.wa_id)
+  if (!cand) return false
+  const agora = new Date().toISOString()
+  const { error } = await supabaseAdmin
+    .from('captacao_fornecedores')
+    .update({
+      status: 'erro',
+      canal_whatsapp: false,
+      ultimo_contato_em: null,
+      erros: (cand.erros ?? 0) + 1,
+      ultimo_erro: `whatsapp: ${motivoDaFalhaMeta(erro)}`.slice(0, 500),
+      atualizado_em: agora,
+    })
+    .eq('id', cand.id)
+  return !error
+}
+
+/** O erro da Meta numa frase nossa — o código fica, a frase deles muda quando eles quiserem. */
+function motivoDaFalhaMeta(erro: string | null): string {
+  const e = erro ?? ''
+  if (/131026|undeliverable/i.test(e)) return 'número sem WhatsApp (131026)'
+  if (/131049|healthy ecosystem/i.test(e)) return 'a Meta limitou a frequência pra este número (131049) — não reenviar'
+  if (/130472|experiment/i.test(e)) return 'número em experimento da Meta (130472) — reenviar dá o mesmo'
+  return e || 'entrega falhou (sem motivo da Meta)'
 }
 
 type LinhaMensagem = { direcao: string; tipo: string; corpo: string | null; criado_em: string }
@@ -2027,10 +2125,10 @@ ${pdfJaEnviado ? 'O resumo em PDF já foi enviado nesta conversa.' : 'O resumo e
 
 COMO FUNCIONA PRA CONFECÇÃO: você cadastra ela AQUI na conversa (não mande link de site), a Confeccione oferece os pedidos que combinam com ela, ela aceita, monta o orçamento pela plataforma e negocia com o cliente por lá. Não passamos o contato do cliente antes disso.
 
-ASSIM QUE ELA DISSER QUE FAZ, diga as DUAS frases abaixo, nesta ordem, LITERAIS, sem parafrasear nenhuma palavra:
-"${TEXTO_COMISSAO}"
-"${TEXTO_PAGAMENTO_GARANTIA}"
-Por que literais: a segunda, parafraseada, vira "eles seguram meu dinheiro" — o contrário do que ela diz. A primeira, parafraseada, perde o número e vira "uma comissão", que é o tipo de vaguidão que ela descobre sozinha depois e passa a desconfiar. Diga as duas de uma vez, aqui, ANTES de ela perguntar: em 10/09 a confecção pediu pix no minuto 19 porque ninguém tinha falado disso.
+ASSIM QUE ELA DISSER QUE FAZ, a sua PRÓXIMA mensagem é esta, inteira, palavra por palavra, SEM aspas, sem nada antes nem depois, numa mensagem só:
+${FALA_DEPOIS_DO_SIM}
+São três linhas: comissão, pagamento, e a pergunta. Por que literais: a linha do pagamento, parafraseada, vira "eles seguram meu dinheiro" — o contrário do que ela diz. A da comissão, parafraseada, perde o número e vira "uma comissão", que é o tipo de vaguidão que ela descobre sozinha depois e passa a desconfiar. E o bloco TERMINA EM PERGUNTA de propósito: em 14/09 ele saiu sem pergunta no fim, pra um pedido de 600 becas, e a confecção nunca mais escreveu. Se ela mandou uma dúvida junto com o "faço", responda a dúvida primeiro e o bloco vai na mensagem seguinte. NÃO faça nenhuma das três perguntas do cadastro antes deste bloco, e nunca diga "antes de finalizar o cadastro": ela ainda não pediu cadastro nenhum.
+No galho em que ela NÃO faz a peça, as duas primeiras linhas (comissão e pagamento) também são ditas literais, uma vez, logo antes de pedir licença pras três perguntas — sem a pergunta de encaminhar, porque não há o que encaminhar.
 
 O CADASTRO É AQUI, NA CONVERSA — 12/09/2026.
 Mandar link de formulário no meio da conversa é perder a conversa: quatro confecções disseram que fazem, quatro receberam o link, ZERO se cadastraram. Uma delas chegou a responder "vou pedir pra que o cadastro seja efetuado" e nunca voltou.
@@ -2038,10 +2136,11 @@ Mandar link de formulário no meio da conversa é perder a conversa: quatro conf
 A ORDEM (não é script, é ordem — e ela não avança enquanto a anterior não fechar):
 1. Você aborda com o pedido.
 2. Ela responde se faz ou não.
-   • FAZ → registrar_resposta interessado.
+   • FAZ → registrar_resposta interessado, e a mensagem seguinte é o bloco de três linhas (comissão, pagamento, "posso encaminhar?") descrito abaixo.
    • NÃO FAZ → registrar_resposta nao_produz, e A CONVERSA NÃO ACABOU: um "não" pra esta peça não é um "não" pra plataforma. Siga pro mesmo cadastro, pelo galho (b) das perguntas.
+   • NÃO DECIDE (balcão, vendas, robô) e indica outro número → registrar_outro_contato. Ver "QUANDO QUEM RESPONDE NÃO DECIDE".
 3. RESPONDA O QUE ELA PERGUNTAR, de verdade, até ela não ter mais dúvida. Pergunta técnica sobre o pedido (tem estampa? qual tamanho? é só a camisa?) se responde PRIMEIRO, com a resposta, e NUNCA na mesma mensagem que fala de cadastro. Em 10/09 uma confecção perguntou três vezes "terá bordado?" e levou duas respostas mandando ela ver o PDF e se cadastrar. Ela respondeu, mas não voltou.
-4. Só então peça licença: "${FALAS_CADASTRO.licenca}" seguido de "${FALAS_CADASTRO.porque}"
+4. Com o sim dela pro "posso encaminhar", peça licença: "${FALAS_CADASTRO.licenca}" seguido de "${FALAS_CADASTRO.porque}"
 5. Colete conversando, UMA pergunta por mensagem.
 6. Confirme e grave com cadastrar_confeccao. E PARA AÍ.
 
@@ -2100,6 +2199,12 @@ NÃO SAIA EXPLICANDO. O bloco "COMO FUNCIONA PRA CONFECÇÃO" acima é o que voc
 O QUE FAZER, uma etapa por mensagem: (1) explicar a dúvida (o pedido) e perguntar se produzem; (2) quando ela disser que faz (sim, faço, consigo, produzimos, "manda os detalhes") → registrar_resposta interessado e puxe o cadastro. (3) Se ela quiser conversar mais, aí sim prazo e valor por peça, uma pergunta por vez, e o PDF se ela pedir detalhes. Se ela já respondeu preço e prazo sem você pedir, registre e vá pro cadastro, não fique coletando mais dado.
 
 O CADASTRO NÃO É A PRIMEIRA COISA — 10/09/2026, atualizado em 12/09. Antes era um LINK, e ele saía assim que ela dizia "faço", junto com a explicação inteira. Link colado numa pessoa que trocou duas frases com você é panfleto: ela não clica, e a conversa morre ali — 4 de 4 morreram assim. Agora não há link nenhum, o cadastro é aqui; mas a ordem continua valendo. Converse primeiro — entenda o que ela faz, reaja ao que ela contou — e ofereça o cadastro quando ela demonstrar que quer receber pedido, ou quando ELA perguntar como funciona. Aí o cadastro é resposta a uma pergunta dela, e não interrupção. Se ela disser que JÁ É CADASTRADA na Confeccione → não cadastre de novo: registrar_resposta interessado com observação "já cadastrada", chame chamar_humano e pare — o Fernando manda o pedido pela plataforma. Se disser que NÃO PRODUZ ESSE TIPO DE PEÇA, a conversa NÃO acabou — ela está começando. Um "não" pra esta peça não é um "não" pra plataforma: a gente tem pedido de tudo quanto é tipo entrando toda semana, e essa confecção pode ser exatamente quem falta pro pedido da semana que vem. Nessa ordem: (a) pergunte o que ela FAZ — que peças e que serviços, uma coisa por mensagem; (b) registrar_resposta nao_produz com a observação contendo o perfil dela, nas palavras dela; (c) diga que dá pra receber os pedidos que combinam com esse perfil e CADASTRE ELA AQUI, com as três perguntas — nada de link. Só encerre se ela disser que não quer se cadastrar. Nunca responda "boa sorte", "obrigado pela atenção" ou qualquer despedida antes de ter oferecido o cadastro — isso é jogar fora uma confecção que se deu ao trabalho de te responder. Se ela já contou o que faz sem você perguntar, pule o (a): registre e vá pro cadastro. Se não quiser agora ou não tem capacidade → registrar_resposta depois; se não quiser receber mais mensagens → registrar_resposta opt_out e confirme que não mandamos mais. Se perguntarem valor do cliente, contato do cliente, condições que não estão aqui, ou reclamarem → chamar_humano e PARE: não escreva mais nada nessa mensagem. O Fernando recebe o aviso no WhatsApp e continua ele mesmo. Não negocie preço, não prometa volume, não invente número.
+
+QUANDO QUEM RESPONDE NÃO DECIDE. Empresa maior atende pelo número de vendas ou por atendimento automático, e quem está ali diz "fala com o comercial", "quem cuida disso é o dono", "manda pro setor de produção". Isso não é um não: é um endereço. Se ela passou o número, chame registrar_outro_contato com ele — a sondagem vai pra lá agora e a conversa continua com quem decide. Se ela só disse "fala com o comercial" sem número, peça o número em uma linha ("me passa o WhatsApp do comercial?") e chame a ferramenta quando vier. NÃO insista com quem já disse que não decide, não repita o pedido pra ela, não tente cadastrar quem não decide, e não chame chamar_humano por isso.
+
+QUANDO ELA PEDIR POR E-MAIL, MANDE. "Manda a solicitação por e-mail" com um endereço é pedido de empresa com processo de compras — e é assim que chega pedido grande. Chame enviar_por_email com o endereço que ela passou, diga em uma linha que mandou, e continue aqui no WhatsApp com a pergunta de sempre: vocês produzem esse tipo de peça? Nunca responda "a gente opera diferente" nem "os detalhes ficam na plataforma".
+
+FOTO, ARQUIVO E ÁUDIO. No histórico, [image] e [document] são foto e arquivo que ela mandou sem texto — catálogo, tabela, foto de peça. Agradeça em uma linha e siga o assunto; se ela já está cadastrada e é foto de peça, salvar_no_portfolio. Áudio que não deu pra ouvir já recebe, sem você, um pedido pra escrever.
 
 ESTILO: WhatsApp, 1 a 4 linhas, sem emoji, sem markdown, sem lista, sem botão, uma pergunta por vez, português direto de gente da equipe. Se perguntarem se você é robô, diga que é o assistente da equipe e que uma pessoa assume quando quiser.`
 }
@@ -2234,6 +2339,32 @@ const FERRAMENTAS_CANDIDATO: Anthropic.Messages.Tool[] = [
     },
   },
   {
+    name: 'registrar_outro_contato',
+    description:
+      'Quem respondeu não decide (balcão, vendas, atendimento automático) e indicou OUTRO número — do comercial, do dono, da produção. ' +
+      'Registre o número: ele vira candidato e recebe a mesma sondagem agora, na conversa dele. ' +
+      'Se ela só disser "fala com o comercial" sem passar o número, PEÇA o número antes de chamar.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        whatsapp: { type: 'string', description: 'O número que ela passou, com DDD, do jeito que veio.' },
+        quem: { type: 'string', maxLength: 60, description: 'De quem é o número: "comercial", "dono", "produção", "sócia"…' },
+      },
+      required: ['whatsapp', 'quem'],
+    },
+  },
+  {
+    name: 'enviar_por_email',
+    description:
+      'Ela pediu o pedido por e-mail. Manda o resumo em PDF pro e-mail que ela passou, AGORA, e a conversa continua aqui no WhatsApp. ' +
+      'Nunca recuse e-mail: quem pede e-mail é empresa com processo, e é o pedido grande que chega assim.',
+    input_schema: {
+      type: 'object',
+      properties: { email: { type: 'string', description: 'O e-mail que ela passou.' } },
+      required: ['email'],
+    },
+  },
+  {
     name: 'chamar_humano',
     description: 'Passa a conversa pra uma pessoa da equipe (valor do cliente, contato do cliente, reclamação, condição fora do combinado).',
     input_schema: { type: 'object', properties: { motivo: { type: 'string', minLength: 3, maxLength: 200 } }, required: ['motivo'] },
@@ -2276,6 +2407,136 @@ async function enviarPdfNaConversa(waId: string, nome: string | null, pedidoId: 
 }
 
 /**
+ * O NÚMERO QUE O BALCÃO DEU VIRA CANDIDATO — 17/09/2026.
+ *
+ * Empresa maior atende a sondagem pelo número de vendas, e quem está ali não
+ * decide produção: "para desenvolvimento, chame o comercial: 47 9783-3472"
+ * (Brunx, 17/09), "quem da equipe fala sobre produção?" (Gold Farm, 16/09),
+ * "preciso do contato certo" (Sipola, 10/09) — 3 das 12 respostas do fluxo
+ * novo em 14 dias. Todas viravam `chamar_humano`, e a conversa terminava na
+ * mão do Fernando, que não tinha como sondar um número novo dali.
+ *
+ * Aqui o número indicado entra em `captacao_fornecedores` como candidato do
+ * MESMO pedido, com a origem escrita (quem indicou), e recebe a sondagem na
+ * hora — a resposta dele cai no agente de captação como qualquer outro
+ * (`candidatoPeloWaId` casa pelo número). Quem indicou fica com a indicação
+ * anotada, sem sobrescrever uma resposta que já tenha dado.
+ */
+async function registrarOutroContatoDaConversa(
+  cand: CandidatoLinha,
+  perfil: PerfilBusca | null,
+  entrada: Record<string, unknown>
+): Promise<{ ok: boolean; aviso: string }> {
+  const numero = telefoneParaWaId(str(entrada.whatsapp)).whatsapp
+  const quem = (str(entrada.quem) ?? 'comercial').slice(0, 60)
+  if (!numero) return { ok: false, aviso: 'Não reconheci o número. Peça DDD + número, ou confirme se é WhatsApp mesmo.' }
+  if (cand.whatsapp && numero.slice(-8) === cand.whatsapp.slice(-8)) {
+    return { ok: false, aviso: `É o mesmo número desta conversa. Peça o número do ${quem} de verdade.` }
+  }
+  if (!perfil || !cand.pedido_id) return { ok: false, aviso: 'Não achei o pedido desta sondagem — chame chamar_humano com o número que ela passou.' }
+
+  const { data: existente } = await supabaseAdmin
+    .from('captacao_fornecedores')
+    .select('id, ultimo_contato_em, resposta')
+    .ilike('whatsapp', `%${numero.slice(-8)}`)
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ id: string; ultimo_contato_em: string | null; resposta: string | null }>()
+  if (existente?.ultimo_contato_em) {
+    return { ok: false, aviso: `Esse número já recebeu a sondagem${existente.resposta ? ` (respondeu: ${existente.resposta})` : ''}. Agradeça e não repita.` }
+  }
+
+  const agora = new Date().toISOString()
+  let id = existente?.id ?? null
+  if (!id) {
+    const { data: linha, error } = await supabaseAdmin
+      .from('captacao_fornecedores')
+      .insert({
+        nome: `${cand.nome ?? 'confecção'} (${quem})`.slice(0, 120),
+        email: null,
+        whatsapp: numero,
+        segmento: perfil.segmento,
+        etapa: 0,
+        status: 'ativo',
+        canal_email: false,
+        canal_whatsapp: true,
+        origem: 'pedido',
+        pedido_id: cand.pedido_id,
+        cidade: cand.cidade,
+        uf: cand.uf,
+        fonte: `indicado na conversa por ${cand.nome ?? cand.whatsapp ?? 'o atendimento'}`.slice(0, 300),
+        evidencia: `${quem} indicado pelo atendimento da própria empresa`.slice(0, 300),
+        ator: 'agente_captacao',
+        criado_em: agora,
+        atualizado_em: agora,
+      })
+      .select('id')
+      .single<{ id: string }>()
+    if (error || !linha) return { ok: false, aviso: `Não consegui gravar o número (${error?.message ?? 'sem id'}). Chame chamar_humano com ele.` }
+    id = linha.id
+  }
+
+  const pdf = await pdfSondagem(cand.pedido_id).catch(() => null)
+  const r = await enviarSondagem(id, { nome: cand.nome, email: null, whatsapp: numero }, perfil, pdf)
+
+  // Quem indicou fica com a indicação escrita. Resposta que já existia não muda.
+  const obs = `indicou o ${quem}: ${numero}`.slice(0, 300)
+  await supabaseAdmin
+    .from('captacao_fornecedores')
+    .update(cand.resposta ? { resposta_obs: obs, atualizado_em: agora } : { resposta: 'depois', resposta_obs: obs, respondido_em: agora, atualizado_em: agora })
+    .eq('id', cand.id)
+
+  if (!r.whatsapp) {
+    return { ok: false, aviso: `Gravei o número, mas a sondagem não saiu agora (${r.erro ?? 'sem motivo'}). Agradeça e diga que a gente chama o ${quem} por lá.` }
+  }
+  return {
+    ok: true,
+    aviso:
+      `Sondagem enviada pro ${quem} (${numero}). Agradeça a quem passou o número, em uma linha, e encerre pela porta aberta — ` +
+      `a conversa segue com o ${quem}, na conversa dele, não aqui.`,
+  }
+}
+
+/**
+ * "MANDA POR E-MAIL" NÃO É UM NÃO — 17/09/2026.
+ *
+ * A Tidy (600 becas, 14/09) pediu a solicitação por e-mail, passou o endereço,
+ * e ouviu "a gente opera diferente". Quem pede e-mail é empresa com processo
+ * de compras — é o pedido grande que chega assim, e foi o maior dos 14 dias.
+ * O e-mail com o PDF já existia (Resend, na sondagem fria); só não tinha porta
+ * na conversa. Aqui manda o resumo pro endereço que ela deu e a conversa
+ * continua no WhatsApp, onde ela está.
+ */
+async function enviarPedidoPorEmailNaConversa(cand: CandidatoLinha, perfil: PerfilBusca | null, email: string | null): Promise<{ ok: boolean; aviso: string }> {
+  const para = emailValido(email)
+  if (!para) return { ok: false, aviso: 'Esse e-mail não parece válido. Peça pra ela conferir e mande de novo.' }
+  if (!perfil || !cand.pedido_id) return { ok: false, aviso: 'Não achei o pedido desta sondagem — chame chamar_humano com o e-mail que ela passou.' }
+  const pdf = await pdfSondagem(cand.pedido_id).catch(() => null)
+  const r = await emailSondagemProducao({
+    para,
+    assunto: assuntoSondagem(perfil),
+    corpo: corpoEmailPedidoNaConversa(perfil, cand.nome),
+    anexo: pdf ? { nome: pdf.nomeArquivo, base64: base64(pdf.bytes) } : null,
+  })
+  if (!r.ok) return { ok: false, aviso: `O e-mail não saiu agora (${r.erro ?? 'sem motivo'}). Diga que manda em seguida e chame chamar_humano.` }
+  await supabaseAdmin.from('captacao_fornecedores').update({ email: para, canal_email: true, atualizado_em: new Date().toISOString() }).eq('id', cand.id)
+  return {
+    ok: true,
+    aviso: `E-mail enviado pra ${para} com o resumo do pedido em PDF. Diga em uma linha que mandou, e continue AQUI: a pergunta que importa segue sendo se vocês produzem esse tipo de peça.`,
+  }
+}
+
+/** O e-mail que ela PEDIU: sem link de cadastro (o cadastro é a conversa) e sem opt-out (não é abordagem fria). */
+function corpoEmailPedidoNaConversa(perfil: PerfilBusca, nomeConfeccao: string | null): string {
+  return [
+    nomeConfeccao ? `Oi, ${nomeConfeccao}.` : 'Oi.',
+    `Como combinamos pelo WhatsApp, segue em anexo o resumo do pedido: ${perfil.descricao}, pra entregar em ${lugarEntrega(perfil)}. Sem os dados do cliente — esses vão quando vocês assumirem.`,
+    'Pode responder por aqui ou pelo WhatsApp mesmo, onde a gente já está conversando.',
+    'Luigi, da Confeccione',
+  ].join('\n\n')
+}
+
+/**
  * Chamada pelo Luigi (responderCliente) quando o contato é um candidato
  * abordado por pedido. Responde dentro da janela (ele acabou de escrever).
  * Devolve true se tratou a mensagem.
@@ -2286,6 +2547,8 @@ export async function responderCandidato(params: {
   nome: string | null
   wamid: string
   corpo: string | null
+  /** Tipo da mensagem da Meta (text, audio, image, document…). Decide o que fazer quando não há texto. */
+  tipo?: string
   candidato: CandidatoLinha
 }): Promise<boolean> {
   const { modo } = await configCaptacao()
@@ -2293,10 +2556,30 @@ export async function responderCandidato(params: {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) return false
   const waId = normalizarWaId(params.waId)
-  const texto = (params.corpo ?? '').trim()
-  if (!texto) return true // mídia sem texto: fica pra gente, mas não é cliente
-
   const cand = params.candidato
+  let texto = (params.corpo ?? '').trim()
+  if (!texto) {
+    // MÍDIA SEM TEXTO NÃO É SILÊNCIO — 17/09/2026.
+    //
+    // Isto era `return true`: áudio, foto e arquivo de confecção sumiam sem
+    // resposta. A Gold Farm (16/09) mandou dois áudios — a transcrição
+    // falhou, como falha em 4 de 14 — provavelmente dizendo com quem falar, e
+    // a conversa acabou ali, do nosso lado. Áudio que não deu pra ouvir pede
+    // texto, igual o Luigi de cliente; foto e arquivo vão pro modelo, que já
+    // sabe agradecer catálogo e guardar foto de peça no portfólio.
+    if (params.tipo === 'audio') {
+      const aviso = 'Recebi seu áudio, mas não consegui ouvir direito. Pode me escrever?'
+      if (await janela24hAberta(waId)) {
+        const r = await enviarTexto(waId, aviso)
+        if (r.ok) await registrarSaidaInbox(waId, params.nome ?? cand.nome, r.wamid, aviso, null, 'luigi')
+      }
+      return true
+    }
+    if (params.tipo === 'image') texto = '[mandou uma foto, sem texto]'
+    else if (params.tipo === 'document' || params.tipo === 'video') texto = '[mandou um arquivo, sem texto]'
+    else return true
+  }
+
   const pedido = cand.pedido_id ? await pedidoEtapa(cand.pedido_id).catch(() => null) : null
   const perfil = pedido ? perfilDeBusca(pedido, await prazoDoPedido(pedido.id)) : null
   const { data: docs } = await supabaseAdmin
@@ -2339,9 +2622,13 @@ export async function responderCandidato(params: {
           const v = str(entrada.resposta)
           if (v !== 'interessado' && v !== 'recusou' && v !== 'depois' && v !== 'nao_produz' && v !== 'opt_out') throw new Error('resposta inválida')
           await registrarRespostaCandidato(cand.id, v, str(entrada.observacao))
+          // SIM NÃO É ESCALADA — 17/09/2026. O `marcarEscalada` aqui era do
+          // fluxo antigo (link + aprovação manual): pintava "Luigi chamou você"
+          // no inbox e o aviso dizia "falta aprovar o cadastro" — passo que não
+          // existe mais, o cadastro é a própria conversa. O aviso fica, sem a
+          // marca e sem a frase velha.
           if (v === 'interessado') {
-            await marcarEscalada(params.conversaId)
-            await avisarGestor(`Captação: ${cand.nome ?? waId} respondeu SIM pro pedido ${pedido?.codigo ?? cand.pedido_id ?? ''}${str(entrada.observacao) ? ` — ${str(entrada.observacao)}` : ''}. Falta aprovar o cadastro e ofertar (/admin/whatsapp).`)
+            await avisarGestor(`Captação: ${cand.nome ?? waId} disse que faz o pedido ${pedido?.codigo ?? cand.pedido_id ?? ''}${str(entrada.observacao) ? ` — ${str(entrada.observacao)}` : ''}. O Luigi segue pro cadastro na conversa.`)
           }
           resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify({ ok: true, resposta: v }) })
         } else if (uso.name === 'salvar_perfil_producao') {
@@ -2357,7 +2644,7 @@ export async function responderCandidato(params: {
               tool_use_id: uso.id,
               content: JSON.stringify({
                 ok: false,
-                aviso: 'Essa confecção ainda não tem cadastro — sem cadastro não há perfil pra preencher. Mande o link primeiro.',
+                aviso: 'Essa confecção ainda não tem cadastro — sem cadastro não há perfil pra preencher. Cadastre ela primeiro com cadastrar_confeccao, aqui na conversa, sem link.',
               }),
             })
           } else {
@@ -2407,7 +2694,7 @@ export async function responderCandidato(params: {
                 ok: false,
                 aviso:
                   'Essa confecção ainda não tem cadastro, então não existe portfólio pra guardar a foto. ' +
-                  'Agradeça a foto, diga que ela aparece no perfil assim que o cadastro sair, e mande o link.',
+                  'Agradeça a foto, diga que ela entra no perfil assim que o cadastro sair, e siga pro cadastro aqui na conversa com cadastrar_confeccao — sem link.',
               }),
             })
           } else {
@@ -2474,6 +2761,12 @@ export async function responderCandidato(params: {
         } else if (uso.name === 'cadastrar_confeccao') {
           const r = await cadastrarConfeccaoDaConversa(cand, entrada, waId, params.nome)
           if (r.ok && r.pendente) escalada = 'confecção faz algo fora do catálogo de peças — confira o cadastro'
+          resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify(r) })
+        } else if (uso.name === 'registrar_outro_contato') {
+          const r = await registrarOutroContatoDaConversa(cand, perfil, entrada)
+          resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify(r) })
+        } else if (uso.name === 'enviar_por_email') {
+          const r = await enviarPedidoPorEmailNaConversa(cand, perfil, str(entrada.email))
           resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify(r) })
         } else if (uso.name === 'chamar_humano') {
           escalada = str(entrada.motivo) ?? 'confecção precisa de uma pessoa'
