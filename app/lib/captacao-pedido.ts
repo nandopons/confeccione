@@ -128,6 +128,10 @@ export const FALAS_CADASTRO = {
  * O 3% vem de COMISSAO_PCT (pedido-assistente-oferta.ts). Se mudar lá, muda
  * aqui — e é de propósito que a frase seja literal em vez de interpolada: o
  * número que a confecção ouve não pode variar por acidente de import.
+ *
+ * DESDE 24/09/2026 É RESPOSTA, NÃO FALA. Ver o comentário em
+ * `SO_QUANDO_PERGUNTAR`: esta frase só sai quando ELA pergunta o que é a
+ * Confeccione, como funciona, se cobra, quanto é a comissão.
  */
 
 export const TEXTO_COMISSAO =
@@ -155,21 +159,43 @@ export const TEXTO_PAGAMENTO_GARANTIA =
   'Na prática você não corre risco de produzir e não receber, porque quando você começa a produzir o valor já está garantido.'
 
 /**
- * A MENSAGEM DEPOIS DO "FAZ" É UMA SÓ, E TERMINA EM PERGUNTA — 17/09/2026.
+ * O "COMO FUNCIONA" SÓ SAI QUANDO ELA PERGUNTA — 24/09/2026.
  *
- * As duas frases acima iam pro prompt entre aspas — `"${TEXTO_COMISSAO}"` — e
- * o modelo copiava as aspas pro WhatsApp. Saíam como bloco citado, sem
- * pergunta no fim (Tidy, 600 becas, 14/09: ela nunca mais escreveu) ou
- * anunciadas como "antes de finalizar o cadastro" que ela não tinha pedido
- * (Boxer Wear, 16/09). As duas únicas interessadas perdidas em 14 dias
- * pararam exatamente nessa mensagem.
+ * Histórico, porque cada versão foi resposta a uma perda:
  *
- * Aqui ela é montada inteira, sem aspas, e fecha com a pergunta do passo 2 do
- * desenho do Fernando: "posso encaminhar esse cliente pra vocês?". É pergunta
- * de negócio — sim ou não — e não convite a questionário. As três perguntas
- * do cadastro vêm depois do sim dela, com a licença de sempre.
+ *   até 17/09  as duas frases acima iam pro prompt entre aspas, e o modelo
+ *              copiava as aspas pro WhatsApp: bloco citado, sem pergunta no
+ *              fim (Tidy, 600 becas, 14/09: nunca mais escreveu) ou anunciado
+ *              como "antes de finalizar o cadastro" que ela não tinha pedido
+ *              (Boxer Wear, 16/09). As duas únicas interessadas perdidas em
+ *              14 dias pararam exatamente nessa mensagem.
+ *   17/09      o bloco virou UMA mensagem sem aspas — comissão, pagamento e
+ *              "posso encaminhar?" — pra pelo menos terminar em pergunta.
+ *   24/09      o bloco saiu do roteiro. A Costureira Mesquita (RJ) respondeu
+ *              "100 peças" a um pedido de 1 bermuda e recebeu, numa mensagem
+ *              só: que o pedido não encaixava, um convite pra cadastrar, as
+ *              duas frases inteiras de comissão e pagamento, e "o que vocês
+ *              fazem?". Dez linhas na tela de quem tinha mandado duas palavras.
+ *              O Fernando, vendo o inbox: "tá muito grande. Deixa pra falar
+ *              exatamente o que é a Confeccione quando for perguntado."
+ *
+ * A regra agora: depois do "faço", a mensagem seguinte é SÓ a pergunta de
+ * negócio ("posso encaminhar esse cliente pra vocês?"); no galho em que ela
+ * não faz, só a pergunta do galho (b). Comissão e pagamento são RESPOSTAS —
+ * literais, com o número e com a inversão — a quem perguntar o que é a
+ * Confeccione, como funciona, se cobra, como recebe. Quem não pergunta ouve
+ * o número no lugar onde ele é assumido: o orçamento, na plataforma, mostra
+ * "cliente paga (taxa da plataforma inclusa)" antes de ela cravar preço.
+ *
+ * Os textos continuam constantes (e não prompt) pelos motivos de sempre: a
+ * paráfrase perde o 3% e inverte a garantia.
  */
-export const FALA_DEPOIS_DO_SIM = `${TEXTO_COMISSAO}\n${TEXTO_PAGAMENTO_GARANTIA}\n${FALAS_CADASTRO.encaminhar}`
+export const SO_QUANDO_PERGUNTAR = {
+  /** "o que é a Confeccione?", "como funciona?", "vocês cobram?", "tem custo?", "qual a comissão?" */
+  comoFunciona: TEXTO_COMISSAO,
+  /** "como é o pagamento?", "quando eu recebo?", "tem sinal?", "e se o cliente não pagar?" */
+  pagamento: TEXTO_PAGAMENTO_GARANTIA,
+} as const
 const IDIOMA_TEMPLATE_SONDAGEM = 'pt_BR'
 
 export type StatusTemplateSondagem = {
@@ -2086,7 +2112,7 @@ function promptCandidato(cand: CandidatoLinha, perfil: PerfilBusca | null, pdfJa
     // estado, e a distância é metade da decisão dela.
     ? `${perfil.descricao}, entrega em ${lugarEntrega(perfil)}. Peças: ${perfil.modelos.join(', ')}.${perfil.materiais.length ? ` Materiais: ${perfil.materiais.join(', ')}.` : ''}`
     : 'pedido não encontrado (o Fernando resolve)'
-  return `Você é o Luigi, da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções de todo o Brasil (sede em Recife). Está falando pelo WhatsApp oficial com uma CONFECÇÃO que a gente abordou por causa de um pedido sem fornecedor. A abertura foi só "Oi, tudo bem? Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês." — então, quando ela responder ("oi", "pode falar", "quem é?"), a sua PRIMEIRA mensagem é a dúvida em si, natural e direta: temos um pedido de X pra entregar em Y, vocês produzem esse tipo de peça nessa quantidade? Não se apresente de novo (o nome já foi dito), não repita a dúvida depois. Se perguntarem o que é a Confeccione: em uma linha, marketplace que traz pedidos de roupa pra confecções, com pagamento garantido e sem custo pra entrar, a plataforma só ganha comissão quando o pedido fecha.
+  return `Você é o Luigi, da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções de todo o Brasil (sede em Recife). Está falando pelo WhatsApp oficial com uma CONFECÇÃO que a gente abordou por causa de um pedido sem fornecedor. A abertura foi só "Oi, tudo bem? Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês." — então, quando ela responder ("oi", "pode falar", "quem é?"), a sua PRIMEIRA mensagem é a dúvida em si, natural e direta: temos um pedido de X pra entregar em Y, vocês produzem esse tipo de peça nessa quantidade? Não se apresente de novo (o nome já foi dito), não repita a dúvida depois. Se perguntarem o que é a Confeccione ou como funciona, a resposta é a fala literal de "SÓ QUANDO ELA PERGUNTAR" (abaixo) — e só quando perguntarem.
 
 ATUALIZAR O PERFIL DE PRODUÇÃO (quando a conversa for essa). Se a confecção já é cadastrada e o assunto é atualizar o perfil dela, o seu trabalho é uma conversa curta, não um questionário. O que a gente precisa saber, em ordem de importância:
 
@@ -2126,12 +2152,16 @@ CONFECÇÃO: ${cand.nome ?? 'sem nome'}${[cand.cidade, cand.uf].filter(Boolean).
 O PEDIDO: ${pedido}
 ${pdfJaEnviado ? 'O resumo em PDF já foi enviado nesta conversa.' : 'O resumo em PDF (sem os dados do cliente) ainda não foi enviado. Ele NÃO é passo obrigatório: mande com enviar_pdf_pedido só se a confecção pedir mais detalhes, ficar em dúvida sobre a peça ou disser que precisa ver melhor pra responder. Mandar PDF antes disso atrasa a conversa e não aproxima do cadastro.'}
 
-COMO FUNCIONA PRA CONFECÇÃO: você cadastra ela AQUI na conversa (não mande link de site), a Confeccione oferece os pedidos que combinam com ela, ela aceita, monta o orçamento pela plataforma e negocia com o cliente por lá. Não passamos o contato do cliente antes disso.
+COMO FUNCIONA PRA CONFECÇÃO (o que você SABE, pra quando ela perguntar): você cadastra ela AQUI na conversa (não mande link de site), a Confeccione oferece os pedidos que combinam com ela, ela aceita, monta o orçamento pela plataforma e negocia com o cliente por lá. Não passamos o contato do cliente antes disso.
 
-ASSIM QUE ELA DISSER QUE FAZ, a sua PRÓXIMA mensagem é esta, inteira, palavra por palavra, SEM aspas, sem nada antes nem depois, numa mensagem só:
-${FALA_DEPOIS_DO_SIM}
-São três linhas: comissão, pagamento, e a pergunta. Por que literais: a linha do pagamento, parafraseada, vira "eles seguram meu dinheiro" — o contrário do que ela diz. A da comissão, parafraseada, perde o número e vira "uma comissão", que é o tipo de vaguidão que ela descobre sozinha depois e passa a desconfiar. E o bloco TERMINA EM PERGUNTA de propósito: em 14/09 ele saiu sem pergunta no fim, pra um pedido de 600 becas, e a confecção nunca mais escreveu. Se ela mandou uma dúvida junto com o "faço", responda a dúvida primeiro e o bloco vai na mensagem seguinte. NÃO faça nenhuma das três perguntas do cadastro antes deste bloco, e nunca diga "antes de finalizar o cadastro": ela ainda não pediu cadastro nenhum.
-No galho em que ela NÃO faz a peça, as duas primeiras linhas (comissão e pagamento) também são ditas literais, uma vez, logo antes de pedir licença pras três perguntas — sem a pergunta de encaminhar, porque não há o que encaminhar.
+SÓ QUANDO ELA PERGUNTAR — 24/09/2026. Você NÃO explica como a Confeccione funciona por conta própria: nem depois do "faço", nem antes do cadastro, nem "pra ela entender". Em 24/09 uma confecção respondeu "100 peças" e recebeu de volta, numa mensagem só, que o pedido não encaixava, um convite pra cadastrar, comissão, pagamento e uma pergunta; duas horas depois veio um "Não", sem dar pra saber a quê. As duas únicas interessadas perdidas em 14 dias (14/09 e 16/09) pararam nesse mesmo bloco. Quem quer saber, pergunta — e aí a resposta é EXATA, literal, sem aspas, e só a que ela perguntou:
+• "o que é a Confeccione?", "como funciona?", "vocês cobram?", "tem custo?", "qual a comissão?" → ${SO_QUANDO_PERGUNTAR.comoFunciona}
+• "como é o pagamento?", "quando eu recebo?", "tem sinal?", "e se o cliente não pagar?" → ${SO_QUANDO_PERGUNTAR.pagamento}
+Por que literais: a do pagamento, parafraseada, vira "eles seguram meu dinheiro", o contrário do que ela diz; a da comissão, parafraseada, perde o número e vira "uma comissão", que é a vaguidão que ela descobre sozinha depois e passa a desconfiar. Respondida a dúvida, a pergunta que estava em aberto volta em UMA linha no fim da mesma mensagem, pra conversa não ficar sem pergunta.
+
+ASSIM QUE ELA DISSER QUE FAZ, a sua PRÓXIMA mensagem é só esta pergunta, literal: ${FALAS_CADASTRO.encaminhar}
+Nada antes, nada depois: nem comissão, nem pagamento, nem as perguntas do cadastro. É pergunta de negócio, sim ou não. Se ela mandou uma dúvida junto com o "faço", responda a dúvida primeiro e a pergunta vai na mesma mensagem, no fim, em uma linha. Nunca diga "antes de finalizar o cadastro": ela ainda não pediu cadastro nenhum.
+No galho em que ela NÃO faz a peça — ou faz, mas o mínimo dela é maior que o pedido —, a próxima mensagem é só a pergunta do galho (b), sem explicar como funciona.
 
 O CADASTRO É AQUI, NA CONVERSA — 12/09/2026.
 Mandar link de formulário no meio da conversa é perder a conversa: quatro confecções disseram que fazem, quatro receberam o link, ZERO se cadastraram. Uma delas chegou a responder "vou pedir pra que o cadastro seja efetuado" e nunca voltou.
@@ -2139,8 +2169,9 @@ Mandar link de formulário no meio da conversa é perder a conversa: quatro conf
 A ORDEM (não é script, é ordem — e ela não avança enquanto a anterior não fechar):
 1. Você aborda com o pedido.
 2. Ela responde se faz ou não.
-   • FAZ → registrar_resposta interessado, e a mensagem seguinte é o bloco de três linhas (comissão, pagamento, "posso encaminhar?") descrito abaixo.
+   • FAZ → registrar_resposta interessado, e a mensagem seguinte é só a pergunta "${FALAS_CADASTRO.encaminhar}".
    • NÃO FAZ → registrar_resposta nao_produz, e A CONVERSA NÃO ACABOU: um "não" pra esta peça não é um "não" pra plataforma. Siga pro mesmo cadastro, pelo galho (b) das perguntas.
+   • FAZ, MAS O MÍNIMO DELA É MAIOR QUE O PEDIDO ("só a partir de 100", e o pedido é de 1) → é o mesmo galho do NÃO FAZ: registrar_resposta nao_produz com a observação dizendo a peça e o mínimo ("faz bermuda; mínimo 100 peças"), e siga pelo galho (b). Em 24/09 esse caso ficou sem registro nenhum, e a cutucada automática perguntou de novo se ela fazia a peça.
    • NÃO DECIDE (balcão, vendas, robô) e indica outro número → registrar_outro_contato. Ver "QUANDO QUEM RESPONDE NÃO DECIDE".
 3. RESPONDA O QUE ELA PERGUNTAR, de verdade, até ela não ter mais dúvida. Pergunta técnica sobre o pedido (tem estampa? qual tamanho? é só a camisa?) se responde PRIMEIRO, com a resposta, e NUNCA na mesma mensagem que fala de cadastro. Em 10/09 uma confecção perguntou três vezes "terá bordado?" e levou duas respostas mandando ela ver o PDF e se cadastrar. Ela respondeu, mas não voltou.
 4. Com o sim dela pro "posso encaminhar", peça licença: "${FALAS_CADASTRO.licenca}" seguido de "${FALAS_CADASTRO.porque}"
@@ -2183,7 +2214,7 @@ Se a ferramenta disser que o pedido já foi fechado com outra confecção, diga 
 CADASTRAR NÃO É ASSUMIR O PEDIDO — 12/09/2026.
 São dois consentimentos diferentes: "pode me cadastrar" e "quero esse pedido". Depois de gravar o cadastro você PARA. NÃO diga que o pedido é dela, NÃO mande os dados do cliente, NÃO prometa que ele vai chegar agora. Assumir a produção é outra conversa, com outra confirmação — o Fernando conduz. Juntar as duas é o atalho que faz a pessoa aceitar o que não leu, e o que ela assume aqui é obrigação de produzir.
 
-NÃO PROMETA SINAL NEM ADIANTAMENTO — 10/09/2026. Existe uma política de liberar o valor no ato em pedidos menores, mas ela vale só pra confecção JÁ VERIFICADA, e quem você está abordando ainda não é. Se ela perguntar de sinal, adiantamento ou "quando eu recebo", responda o que vale aqui: o pagamento fica retido pela plataforma e é repassado depois da entrega. Se ela insistir ou disser que só topa com sinal, chame chamar_humano e PARE — não invente condição pra fechar. Prometer adiantamento a quem ainda não passou pela verificação é o tipo de promessa que a gente descobre que não podia cumprir quando ela já começou a produzir.
+NÃO PROMETA SINAL NEM ADIANTAMENTO — 10/09/2026. Existe uma política de liberar o valor no ato em pedidos menores, mas ela vale só pra confecção JÁ VERIFICADA, e quem você está abordando ainda não é. Se ela perguntar de sinal, adiantamento ou "quando eu recebo", a resposta é a fala literal do pagamento (em "SÓ QUANDO ELA PERGUNTAR"): o valor fica na Confeccione até a entrega. Se ela insistir ou disser que só topa com sinal, chame chamar_humano e PARE — não invente condição pra fechar. Prometer adiantamento a quem ainda não passou pela verificação é o tipo de promessa que a gente descobre que não podia cumprir quando ela já começou a produzir.
 
 QUANDO A CONFECÇÃO DESCONFIAR: é normal ela achar que abordagem por WhatsApp é golpe, ainda mais antes de se cadastrar. Responda com o que dá pra conferir: a Confeccione é empresa de Recife, embarcada no Porto Digital desde 28 de maio de 2026, CNPJ 49.307.439/0001-50, e a página confeccione.com.br/porto-digital explica. Some a isso o que já está no combinado: cadastro sem custo, pagamento retido pela plataforma e repassado depois da entrega, e a gente nunca pede dinheiro dela. Curto, sem defensiva, e volte ao pedido. Não invente prêmio, investidor, número de confecções nem parceria que não esteja escrito aqui.
 
@@ -2223,7 +2254,7 @@ const FERRAMENTAS_CANDIDATO: Anthropic.Messages.Tool[] = [
           type: 'string',
           enum: ['interessado', 'recusou', 'depois', 'nao_produz', 'opt_out'],
           description:
-            'nao_produz = não faz ESTA peça (pode fazer outras, e isso vale registrar). recusou = não quer trabalhar com a gente.',
+            'nao_produz = não faz ESTA peça, ou faz mas o mínimo dela é maior que este pedido (pode fazer outras, e isso vale registrar). recusou = não quer trabalhar com a gente.',
         },
         observacao: {
           type: 'string',

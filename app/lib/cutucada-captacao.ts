@@ -21,8 +21,15 @@
 //   • só se ninguém da equipe assumiu (escalada ou humano na conversa)
 //   • em horário de gente ler mensagem de trabalho
 //
-// E a pergunta é a que faltou: pra quem nunca disse se faz, "vocês fazem?";
-// pra quem disse que faz e parou no como-funciona, "ficou dúvida?".
+// E a pergunta é a que faltou. Até 24/09 isso era decidido por
+// `captacao_fornecedores.resposta`: nula → "vocês fazem?", interessado →
+// "ficou dúvida?". Só que resposta nula NÃO quer dizer "nunca disse se faz":
+// quer dizer que o agente não chamou registrar_resposta — e a Costureira
+// Mesquita (24/09) tinha dito "mínimo 100 peças" pra um pedido de 1 bermuda,
+// ouvido que não encaixava e recebido "o que vocês fazem?"; duas horas depois
+// a cutucada perguntou "vocês fazem esse tipo de peça?", e o "Não" que voltou
+// não responde a nada que dê pra registrar. A pergunta que faltou é a ÚLTIMA
+// QUE A GENTE FEZ, e ela está no nosso último balão — é de lá que sai agora.
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
@@ -61,13 +68,52 @@ type Candidata = {
 type UltimasMensagens = {
   ultimaDela: string | null
   ultimaNossa: string | null
+  /** Corpo do nosso último balão: é dele que sai a pergunta da cutucada. */
+  ultimaNossaCorpo: string | null
   escaladaEm: string | null
 }
 
-/** Um texto por situação. Curto, uma pergunta, sem se apresentar de novo. */
-export function textoDaCutucada(resposta: string | null): string {
-  if (resposta === 'interessado') return 'Ficou alguma dúvida sobre como funciona? Posso responder aqui mesmo.'
-  return 'Conseguiu ver? Vocês fazem esse tipo de peça? Um sim ou não já me ajuda.'
+const SEM_PERGUNTA_ABERTA = 'Ficou alguma dúvida? Posso responder aqui mesmo.'
+
+/**
+ * A pergunta que ficou sem resposta no nosso último balão: a última linha com
+ * "?", da primeira frase interrogativa até o fim — "O que vocês fazem
+ * exatamente? Facção, modelagem, só venda de pronto?" volta inteira, "Tudo
+ * bem! Você pode me passar quem fala de produção?" volta sem o "Tudo bem!".
+ * Se a linha termina em afirmação ("O que vocês fazem? Pode ser 3 exemplos."),
+ * volta só a última interrogativa. Frase se separa em pontuação SEGUIDA de
+ * espaço, pra "1.000 peças?" e "confeccione.com.br" não quebrarem no meio.
+ * Cumprimento ("tudo bem?"), curta demais ou longa demais não é pergunta pra
+ * repetir.
+ */
+export function ultimaPergunta(corpo: string | null): string | null {
+  if (!corpo) return null
+  const linha = corpo
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.includes('?'))
+    .pop()
+  if (!linha) return null
+  const frases = linha.split(/(?<=[.!?])\s+/)
+  const primeira = frases.findIndex((f) => f.endsWith('?'))
+  if (primeira < 0) return null
+  const doInicio = frases.slice(primeira).join(' ')
+  const ultimaInterrogativa = [...frases].reverse().find((f) => f.endsWith('?')) ?? ''
+  const p = (doInicio.endsWith('?') ? doInicio : ultimaInterrogativa).trim()
+  if (p.length < 12 || p.length > 160) return null
+  if (/tudo bem\?$/i.test(p)) return null
+  return p
+}
+
+/**
+ * Um texto só, e é a pergunta que a gente já tinha feito: quem leu e não
+ * respondeu não precisa de pergunta nova, precisa da mesma de novo. Sem
+ * pergunta em aberto (a última mensagem foi resposta a uma dúvida dela), abre
+ * espaço pra dúvida.
+ */
+export function textoDaCutucada(ultimoBalaoNosso: string | null): string {
+  const pergunta = ultimaPergunta(ultimoBalaoNosso)
+  return pergunta ? `Conseguiu ver? ${pergunta}` : SEM_PERGUNTA_ABERTA
 }
 
 /**
@@ -98,17 +144,20 @@ async function ultimasMensagens(waId: string): Promise<{ conversaId: string; m: 
   if (!conversa) return null
   const { data, error } = await supabaseAdmin
     .from('wa_mensagens')
-    .select('direcao, criado_em')
+    .select('direcao, criado_em, corpo, tipo')
     .eq('conversa_id', conversa.id)
     .order('criado_em', { ascending: false })
     .limit(30)
   if (error) throw new Error(`mensagens da conversa ${conversa.id}: ${error.message}`)
-  const linhas = (data ?? []) as Array<{ direcao: string; criado_em: string }>
+  const linhas = (data ?? []) as Array<{ direcao: string; criado_em: string; corpo: string | null; tipo: string | null }>
+  const nossa = linhas.find((l) => l.direcao === 'saida')
   return {
     conversaId: conversa.id,
     m: {
       ultimaDela: linhas.find((l) => l.direcao === 'entrada')?.criado_em ?? null,
-      ultimaNossa: linhas.find((l) => l.direcao === 'saida')?.criado_em ?? null,
+      ultimaNossa: nossa?.criado_em ?? null,
+      // A sondagem (template) não é pergunta pra repetir: "tudo bem?" não é a dúvida.
+      ultimaNossaCorpo: nossa && nossa.tipo !== 'template' ? nossa.corpo : null,
       escaladaEm: conversa.luigi_escalado_em,
     },
   }
@@ -166,7 +215,7 @@ export async function rodarCutucadaCaptacao(): Promise<ResultadoCutucadaCaptacao
         puladas++
         continue
       }
-      const texto = textoDaCutucada(c.resposta)
+      const texto = textoDaCutucada(u.m.ultimaNossaCorpo)
       const r = await enviarTexto(waId, texto)
       if (!r.ok) {
         console.error('[cutucada-captacao] envio falhou', { candidato: c.id, erro: r.erro })
