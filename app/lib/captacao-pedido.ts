@@ -1099,6 +1099,9 @@ async function ofertarNaConversa(cand: CandidatoLinha, fornecedorId: string): Pr
   const r = await ofertarPedido(cand.pedido_id, [fornecedorId], {
     notificar: false,
     motivoSemNotificar: 'entregue na conversa (captação)',
+    // Origem própria: é oferta feita por gente (a conversa), com a janela de
+    // um dia — e distinguível da manual do admin na medição.
+    origem: 'captacao',
   })
   if (!r.ok) return { ok: false, aviso: `Não deu pra liberar o pedido pra ela agora (${r.erro ?? 'motivo desconhecido'}).` }
 

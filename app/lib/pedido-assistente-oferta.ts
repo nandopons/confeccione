@@ -24,7 +24,7 @@ import { pedidoTemListaAbertaIncompleta } from '@/app/lib/listas-externas'
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
-import { somarHorasComerciais, horasParaResponder } from './horario-comercial'
+import { somarHorasComerciais, horasParaResponder, HORAS_OFERTA_MANUAL } from './horario-comercial'
 import { APROVACAO_QUE_DESCLASSIFICA } from './classificacao-contato'
 import { registrarVersaoOrcamento } from './orcamento-versoes'
 import { enviarTextoSimples } from './whatsapp-cloud'
@@ -377,7 +377,7 @@ export async function ofertarPedido(
      * só a fila automática se declara. Antes disto a coluna ficava NULL em tudo
      * que não fosse a fila, e "origem = manual" era dedução de quem lia.
      */
-    origem?: 'manual' | 'automatica'
+    origem?: 'manual' | 'automatica' | 'captacao'
   }
 ): Promise<{ ok: boolean; criadas: number; notificadas: number; erro?: string }> {
   const notificar = opts?.notificar !== false
@@ -491,8 +491,13 @@ export async function ofertarPedido(
     //
     // A hora é a do envio, não a do pedido: é o combinado que a confecção viu, e
     // não muda se a janela mudar amanhã.
-    const expiraEm = somarHorasComerciais(horasParaResponder(pedido.prazo_dias)).toISOString()
+    //
+    // JANELA CURTA SÓ NA FILA — 24/09/2026. Ver HORAS_OFERTA_MANUAL: oferta que
+    // uma pessoa fez (admin, produto, conversa de captação) não tem "próxima",
+    // então expirar em 3 h só tira o pedido de quem a gente escolheu.
     const origem = opts?.origem ?? 'manual'
+    const horas = origem === 'automatica' ? horasParaResponder(pedido.prazo_dias) : HORAS_OFERTA_MANUAL
+    const expiraEm = somarHorasComerciais(horas).toISOString()
 
     let ofertaId: string
     if (existente) {

@@ -91,6 +91,26 @@ export function somarHorasComerciais(horas: number, inicio: Date = new Date()): 
 export const HORAS_PARA_RESPONDER = 3
 
 /**
+ * A OFERTA QUE UMA PESSOA FEZ ESPERA UM DIA — 24/09/2026.
+ *
+ * A janela curta (1–3 h comerciais, `horasParaResponder`) é da FILA: ela
+ * existe pra passar o pedido pra próxima confecção quando a primeira cala. Faz
+ * sentido lá, porque a fila tem próxima. A oferta manual não tem: o Fernando
+ * escolheu AQUELA confecção, e a captação acabou de cadastrar uma que disse
+ * que faz. Medido de 16 a 24/09: as 3 ofertas nascidas na conversa de captação
+ * (Bandar, Sublimium, Malharia Salete) foram canceladas pelo relógio de 3 h —
+ * a confecção tinha acabado de entrar e perdeu o pedido antes de olhar. As
+ * manuais do admin não sofrem só porque ele mesmo aceita em um minuto.
+ *
+ * Um dia de janela: o pedido continua dela até a MESMA HORA do dia seguinte,
+ * e a decisão de tirar volta a ser humana (ou da fila, quando ligada). São 12
+ * horas COMERCIAIS, não 24 — a janela é 7h–19h, então um dia inteiro tem 12,
+ * e 24 aqui seria dois dias (medido: quarta 11:13 + 24 comerciais = sábado
+ * 11:13).
+ */
+export const HORAS_OFERTA_MANUAL = 12
+
+/**
  * Pedido com prazo apertado não pode esperar 3 horas por confecção.
  *
  * O cliente diz o prazo na conversa e ele vai gravado em `prazo_dias`: dos 204
