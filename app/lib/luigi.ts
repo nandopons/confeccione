@@ -44,7 +44,7 @@ import { enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
 import { enviarImagemDoPedido, janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 // O tipo local LinhaPedido deste arquivo é um recorte antigo, sem material nem
 // descricao. Pra editar a peça de verdade usamos o tipo canônico do produto.
-import { type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
+import { definirStatusOferta, type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
 import { editarLinhasPedidoCliente, gradeDaFerramenta, linhasComAjuste } from './pedido-linhas-edicao'
 import { anexarFotoDaConversaAoModelo, conferirPedido, salvarDadosDoCliente, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores, pausarLembretesDoPedido, type Divergencia } from './pedido-fechamento'
 import {
@@ -73,6 +73,7 @@ import { visualizadorPedidoUrl } from './url'
 import { FAQ_HOME } from '@/app/components/SegmentosEFaq'
 import { ehModoLuigi, type ModoLuigi, type SugestaoLuigi } from './luigi-catalogo'
 import { candidatoPeloWaId, responderCandidato } from './captacao-pedido'
+import { retranscreverDoStorage } from './transcricao'
 
 export * from './luigi-catalogo'
 
@@ -697,6 +698,32 @@ type Contexto = {
   mockupIndisponivel: boolean
   /** O que a confecção JÁ nos deu. Null quando não é fornecedor. */
   cadastroFornecedor: CadastroFornecedor | null
+  /**
+   * Ofertas ainda 'ofertada' pra ESTA confecção. Vazio quando não é
+   * fornecedor ou não há nada em aberto.
+   *
+   * SEM ISTO O LUIGI NÃO SABIA QUE ELA TINHA PEDIDO NA MÃO — 24/09/2026.
+   * O Gustavo recebeu a oferta do 20260900327 às 13:16, e às 14:14 mandou um
+   * áudio de 45 s dizendo que não ia conseguir pegar ("não tenho o molde da
+   * alça fina"). O áudio foi transcrito, o Luigi leu — e respondeu sobre as
+   * fotos do portfólio, porque no mundo dele não existia oferta nenhuma: o
+   * contexto de fornecedor era só o cadastro. Ele até gravou "não faz alça
+   * fina" no perfil. O pedido continuou 'ofertada' pra ele até vencer.
+   */
+  ofertasAbertas: OfertaAberta[]
+}
+
+type OfertaAberta = {
+  id: string
+  pedidoId: string
+  codigo: string | null
+  /** Peças do pedido em uma linha (resumoDasLinhas). */
+  resumo: string
+  lugar: string | null
+  prazoDias: number | null
+  ofertadaEm: string
+  expiraEm: string | null
+  link: string
 }
 
 /**
@@ -877,6 +904,38 @@ async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | 
     descricaoTemPecas: naoVazio(f.descricao_livre) && pecasCatalogo.length === 0 && servicosComNome.length === 0,
     aprovado: f.aprovacao_status === 'aprovado',
   }
+}
+
+/** As ofertas ainda em aberto pra esta confecção, mais recente primeiro. */
+async function ofertasAbertasDoFornecedor(waId: string): Promise<OfertaAberta[]> {
+  const fornecedorId = await fornecedorDoContato(waId)
+  if (!fornecedorId) return []
+  const { data, error } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id, pedido_id, criado_em, expira_em, pedidos_assistente(codigo, cidade, uf, prazo_dias, linhas)')
+    .eq('fornecedor_id', fornecedorId)
+    .eq('status', 'ofertada')
+    .order('criado_em', { ascending: false })
+    .limit(5)
+  // Consulta que falha não é "nenhuma oferta": seria o Luigi voltando a não
+  // saber do pedido dela em silêncio.
+  if (error) throw new Error(`ofertas abertas do fornecedor: ${error.message}`)
+  type Ped = { codigo: string | null; cidade: string | null; uf: string | null; prazo_dias: number | null; linhas: unknown }
+  type R = { id: string; pedido_id: string; criado_em: string; expira_em: string | null; pedidos_assistente: Ped | Ped[] | null }
+  return ((data ?? []) as unknown as R[]).map((o) => {
+    const p = Array.isArray(o.pedidos_assistente) ? o.pedidos_assistente[0] : o.pedidos_assistente
+    return {
+      id: o.id,
+      pedidoId: o.pedido_id,
+      codigo: p?.codigo ?? null,
+      resumo: resumoDasLinhas(p?.linhas),
+      lugar: [p?.cidade, p?.uf].filter(Boolean).join('/') || null,
+      prazoDias: p?.prazo_dias ?? null,
+      ofertadaEm: o.criado_em,
+      expiraEm: o.expira_em,
+      link: `https://www.confeccione.com.br/fornecedor/oferta/${o.id}`,
+    }
+  })
 }
 
 /**
@@ -1326,12 +1385,13 @@ async function recusasAnterioresDaMesmaDivergencia(conversaId: string, divergenc
 }
 
 async function montarContexto(conversaId: string, waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
-  const [pedidos, conta, cadastroFornecedor] = await Promise.all([
+  const [pedidos, conta, cadastroFornecedor, ofertasAbertas] = await Promise.all([
     pedidosDoContato(waId, clienteId),
     clienteId
       ? supabaseAdmin.from('contas_clientes').select('nome, email').eq('id', clienteId).maybeSingle<{ nome: string | null; email: string | null }>()
       : Promise.resolve({ data: null }),
     ehFornecedor ? cadastroDoFornecedor(waId) : Promise.resolve(null),
+    ehFornecedor ? ofertasAbertasDoFornecedor(waId) : Promise.resolve([] as OfertaAberta[]),
   ])
 
   // Em aberto primeiro (mais recente no topo); fechados só os 2 últimos.
@@ -1410,6 +1470,7 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
     conversaId,
     ehFornecedor,
     cadastroFornecedor,
+    ofertasAbertas,
     contato: { nome, telefone: waId, conta: conta.data ? { nome: conta.data.nome, email: conta.data.email } : null },
     pedidos: lista,
     pedidoEmFoco: abertos[0] ?? null,
@@ -1904,6 +1965,25 @@ const FERRAMENTA_COTAR_FRETE: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_RECUSAR_OFERTA: Anthropic.Messages.Tool = {
+  name: 'recusar_oferta',
+  description:
+    'A confecção disse que NÃO vai pegar um pedido que está ofertado a ela (não tem o molde, agenda cheia, não faz ' +
+    'essa peça, mínimo maior). Fecha a oferta como recusada e avisa o Fernando, que oferta pra outra. ' +
+    'Só chame quando ELA disser que não pega — dúvida, pergunta ou "vou ver" não é recusa.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      pedido_codigo: {
+        type: 'string',
+        description: 'Código do pedido recusado (está em OFERTAS EM ABERTO). Obrigatório se houver mais de uma oferta em aberto.',
+      },
+      motivo: { type: 'string', maxLength: 300, description: 'Por que ela não pega, NAS PALAVRAS DELA.' },
+    },
+    required: ['motivo'],
+  },
+}
+
 const FERRAMENTA_PORTFOLIO: Anthropic.Messages.Tool = {
   name: 'salvar_no_portfolio',
   description:
@@ -1975,7 +2055,7 @@ function ferramentasDoModo(
   // precisa é registrar o próprio perfil e mandar foto.
   if (ehFornecedor) {
     return modo === 'responde'
-      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_CORRIGIR_TIPO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO, FERRAMENTA_COTAR_FRETE]
+      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_CORRIGIR_TIPO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO, FERRAMENTA_COTAR_FRETE, FERRAMENTA_RECUSAR_OFERTA]
       : [FERRAMENTA_CHAMAR_HUMANO]
   }
   const fora = fechamento ? FORA_DA_MESA[fechamento] : null
@@ -2215,6 +2295,47 @@ async function executarFerramenta(
           pecasNovas.length === 0
             ? 'Gravei o que ela contou, mas NENHUMA peça foi pro match — só `pecas` faz o pedido chegar nela. Se ela citou peça, chame de novo com `pecas`. Não diga a ela que o cadastro está atualizado enquanto isso não acontecer.'
             : undefined,
+      }
+    }
+    case 'recusar_oferta': {
+      // A RECUSA DELA FECHA A OFERTA E AVISA QUEM REOFERTA — 24/09/2026.
+      //
+      // Sem esta ferramenta o "não vou conseguir pegar" ficava só na conversa:
+      // a oferta seguia 'ofertada' até vencer (24 h comerciais), o Fernando
+      // não sabia, e o pedido esperava um dia por uma confecção que já tinha
+      // dito não. A oferta é achada pelo cadastro do NÚMERO, nunca por id que
+      // o modelo escolha — mesma trava de aceitar_oferta na captação.
+      const motivo = String(entrada.motivo ?? '').trim()
+      if (!motivo) return { ok: false, aviso: 'mande o motivo, nas palavras dela' }
+      const abertas = ctx.ofertasAbertas
+      if (abertas.length === 0) {
+        return { ok: false, aviso: 'não há oferta em aberto pra ela — não tem o que recusar. Se ela fala de um pedido antigo, só registre com salvar_perfil_producao (nao_faz) e siga.' }
+      }
+      const codigo = String(entrada.pedido_codigo ?? '').trim()
+      const alvo = codigo ? abertas.find((o) => o.codigo === codigo) : abertas.length === 1 ? abertas[0] : null
+      if (!alvo) {
+        return {
+          ok: false,
+          aviso: codigo
+            ? `o pedido ${codigo} não está ofertado a ela. Em aberto: ${abertas.map((o) => o.codigo ?? o.id).join(', ')}.`
+            : `ela tem ${abertas.length} ofertas em aberto (${abertas.map((o) => o.codigo ?? o.id).join(', ')}): mande pedido_codigo dizendo qual ela recusou.`,
+        }
+      }
+      const r = await definirStatusOferta(alvo.id, 'recusada')
+      if (!r.ok) return { ok: false, aviso: `não consegui fechar a oferta: ${r.erro ?? 'erro'}` }
+      // O motivo fica na oferta: é o que o painel mostra e o que explica a
+      // reoferta. Failure-soft — a recusa já está gravada.
+      await supabaseAdmin.from('ofertas_pedido_assistente').update({ observacao: `Recusou pelo WhatsApp: ${motivo}` }).eq('id', alvo.id)
+      ctx.ofertasAbertas = abertas.filter((o) => o.id !== alvo.id)
+      const quem = ctx.contato.nome ?? ctx.contato.telefone
+      await avisarGestor(`${quem} recusou o pedido ${alvo.codigo ?? alvo.id} pelo WhatsApp: "${motivo}". A oferta foi fechada — é ofertar pra outra confecção pelo painel.`)
+      return {
+        ok: true,
+        pedido: alvo.codigo,
+        proximo_passo:
+          'Diga em UMA linha que está certo e que esse fica de fora, e que o próximo que combinar com ela você manda. ' +
+          'Não insista, não pergunte o porquê de novo, não peça desculpa, não ofereça outro pedido (não existe). ' +
+          'Se ela contou o que não faz, grave com salvar_perfil_producao (nao_faz).',
       }
     }
     case 'cotar_frete': {
@@ -3014,7 +3135,39 @@ async function executarFerramenta(
  * aplica. Ela não tem pedido em andamento, não vai pagar nada, não precisa de
  * link de visualizador — e o vocabulário é outro, porque ela é do ramo.
  */
-function promptFornecedor(nome: string | null, jaSeApresentou: boolean, cadastro: CadastroFornecedor | null): string {
+/**
+ * O bloco das ofertas em aberto do prompt do fornecedor. Só existe quando há
+ * oferta: sem ela, falar de pedido é convidar o modelo a inventar um (ver "SE
+ * ELA PERGUNTAR 'QUE PEDIDO?'").
+ */
+function blocoOfertasAbertas(ofertas: OfertaAberta[]): string {
+  if (ofertas.length === 0) return ''
+  const linhas = ofertas.map((o) => {
+    const partes = [
+      `pedido ${o.codigo ?? o.id}: ${o.resumo}`,
+      o.lugar ? `entrega em ${o.lugar}` : null,
+      o.prazoDias ? `cliente pediu ${o.prazoDias} dias` : null,
+      `ofertado ${quandoRecife(o.ofertadaEm) ?? 'há pouco'}`,
+      o.expiraEm ? `vence ${quandoRecife(o.expiraEm)}` : null,
+      `link ${o.link}`,
+    ].filter(Boolean)
+    return `- ${partes.join(' · ')}`
+  })
+  return `
+OFERTAS EM ABERTO PRA ELA — é disto que ela fala quando diz "esse pedido", "o pedido que você mandou", "aquele da regata":
+${linhas.join('\n')}
+
+O que fazer com o que ela disser sobre a oferta:
+• "NÃO VOU CONSEGUIR", "não pego", "não tenho o molde", "tô sem agenda", "não faço esse tipo" → chame recusar_oferta com o motivo NAS PALAVRAS DELA e responda em UMA linha: está certo, esse fica de fora, o próximo que combinar você manda. Sem insistir, sem "tem certeza?", sem desculpa. Se ela disse o que não faz, grave também em salvar_perfil_producao (nao_faz).
+• "EU PEGO", "pode mandar", "aceito" → o aceite é no link da oferta (ela toca em "Ver pedido" e aceita lá, é um toque): diga isso em uma linha e mande o link. Aceitar lá é o que libera o contato do cliente e a ficha técnica pra ela. Não aceite por ela e não diga que "já está com ela".
+• "VOU VER", "chegando lá eu olho", "depois te falo" → não é sim nem não. Responda curto e espere; não cobre, não repita a oferta.
+• Dúvida sobre o pedido (tem arte? é sublimação? qual tecido?) → responda com o que está no resumo acima e no histórico; o que não estiver aí, chamar_humano.
+
+Em 24/09 uma confecção disse por áudio "não vou conseguir assumir esse pedido, não tenho o molde da alça fina" e ouviu de volta "quando tiver as fotos prontas é só subir no painel". Ela tinha respondido ao pedido; a resposta era sobre outra coisa. Responda ao que ela disse.
+`
+}
+
+function promptFornecedor(nome: string | null, jaSeApresentou: boolean, cadastro: CadastroFornecedor | null, ofertas: OfertaAberta[] = []): string {
   // O BLOCO DO QUE JÁ SABEMOS — 10/09/2026.
   //
   // Sem ele o Luigi abria a conversa perguntando o que a confecção já tinha
@@ -3146,14 +3299,14 @@ QUEM PRECISA DA OUTRA É A GENTE. Ela tem produção; a gente tem pedido procura
 
 A FOTO É O VITRINE DELA, NÃO ARQUIVO NOSSO. Nunca diga "pra gente colocar no seu perfil", como se fosse cadastro interno. Diga pra que serve do lado dela: é o que o cliente vê quando escolhe a confecção que vai produzir.
 
-SE ELA PERGUNTAR "QUE PEDIDO?", NÃO EXISTE PEDIDO. Não invente um, e não explique por quê. Uma linha e siga: "Não é um pedido específico — ${pedeUmaCoisa}" Só isso.
+${ofertas.length > 0 ? blocoOfertasAbertas(ofertas) : `SE ELA PERGUNTAR "QUE PEDIDO?", NÃO EXISTE PEDIDO. Não invente um, e não explique por quê. Uma linha e siga: "Não é um pedido específico — ${pedeUmaCoisa}" Só isso.`}
 
 NÃO CONTE A NOSSA COZINHA. Template, Meta, janela de 24 h, "o único formato aprovado", categoria que não filtra, como o match funciona, o que falta no cadastro dela pra pontuar: nada disso interessa a quem está costurando. É problema nosso. Explicar isso não soa transparente, soa confuso — e faz ela achar que vai dar trabalho falar com a gente. Peça o que você precisa e pronto; se ela quiser saber pra quê, uma frase resolve ("é pra te mandar só o que combina com o que vocês fazem").
 
 POUCAS PALAVRAS. Uma mensagem, uma ou duas linhas, uma pergunta. Não abra com "Luigi aqui" num balão e o assunto noutro — junte. Não peça desculpa por confusão que ela não teve. Se der pra cortar metade e a frase continuar de pé, corte.
 
 Ruim (três balões, 10/09/2026): "Luigi aqui, do atendimento da Confeccione." / "Na verdade não existe um pedido específico, o template que a gente usa pra abrir conversa menciona pedido mas é o único formato que a Meta aprova. Me desculpa pela confusão." / "O motivo real: seu cadastro ainda não tem peças com nome, só categorias, e isso limita o match..."
-Bom: "Aqui é o Luigi, da Confeccione. Não é um pedido específico — ${pedeUmaCoisa}"
+Bom: ${ofertas.length > 0 ? '"Aqui é o Luigi, da Confeccione. Conseguiu ver o pedido que mandei?"' : `"Aqui é o Luigi, da Confeccione. Não é um pedido específico — ${pedeUmaCoisa}"`}
 ${jaSabemos}
 
 ${jaSeApresentou ? 'Você já se apresentou nesta conversa: não repita o nome.' : 'Se for a primeira fala sua aqui, diga em uma linha quem é.'}
@@ -3201,7 +3354,7 @@ NUNCA: prometa pedido, volume ou faturamento; combine preço; passe contato de c
 
 function promptSistema(modo: Exclude<ModoLuigi, 'desligado'>, ctx: Contexto, jaSeApresentou: boolean): Anthropic.Messages.TextBlockParam[] {
   const nome = primeiroNome(ctx.contato.nome) || primeiroNome(ctx.contato.conta?.nome) || null
-  if (ctx.ehFornecedor) return [{ type: 'text', text: promptFornecedor(nome, jaSeApresentou, ctx.cadastroFornecedor) }]
+  if (ctx.ehFornecedor) return [{ type: 'text', text: promptFornecedor(nome, jaSeApresentou, ctx.cadastroFornecedor, ctx.ofertasAbertas) }]
   const faq = FAQ_HOME.map((f) => `- ${f.pergunta} ${f.resposta}`).join('\n')
   const etapas = (Object.keys(ETAPA_PARA_CLIENTE) as Etapa[]).map((e) => `- ${e} (${INFO_ETAPA[e].label}): ${ETAPA_PARA_CLIENTE[e]}`).join('\n')
   const pedidos =
@@ -4722,6 +4875,28 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     if (ehNumeroGestao(waId)) return
     if (['reaction', 'sticker', 'contacts', 'location', 'unknown'].includes(params.tipo)) return
 
+    // ÁUDIO QUE CHEGOU SEM TEXTO GANHA UMA SEGUNDA TENTATIVA — 24/09/2026.
+    //
+    // O webhook transcreve com 8 s de teto antes de responder à Meta; o que
+    // não coube ali chegava aqui como "não consegui ouvir, pode me escrever?"
+    // — pra cliente, pra confecção e pra candidata da captação, os três
+    // caminhos abaixo. Aqui, no after(), há tempo: tenta de novo do Storage
+    // com 25 s, grava em `corpo`, e a mensagem segue como se tivesse chegado
+    // transcrita. Só quem falha duas vezes ouve o pedido pra escrever.
+    if (params.tipo === 'audio' && !(params.corpo ?? '').trim()) {
+      const { data: linha } = await supabaseAdmin
+        .from('wa_mensagens')
+        .select('midia_path, midia_mime, corpo')
+        .eq('wamid', params.wamid)
+        .maybeSingle<{ midia_path: string | null; midia_mime: string | null; corpo: string | null }>()
+      const texto = (linha?.corpo ?? '').trim() || (await retranscreverDoStorage({ wamid: params.wamid, midiaPath: linha?.midia_path ?? null, midiaMime: linha?.midia_mime ?? null }))
+      if (texto) {
+        params = { ...params, corpo: texto }
+        // O preview da lista de conversas também passa a mostrar o que ela disse.
+        await supabaseAdmin.from('wa_conversas').update({ preview: `🎤 ${texto.slice(0, 100)}` }).eq('id', params.conversaId)
+      }
+    }
+
     // Confecção que a captação puxada pelo pedido abordou: é o agente de
     // captação quem conversa (modo próprio em agentes_config), não o Luigi
     // de cliente — a pessoa não tem pedido, tem uma sondagem pra responder.
@@ -4821,8 +4996,9 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // Imagem e PDF o Luigi lê (o histórico monta o bloco), mesmo sem legenda:
     // cliente manda foto de referência, print de estampa, arte da logo ou a
     // ficha técnica em PDF, e pedir pra descrever é o oposto do que ele quis.
-    // Áudio já chega transcrito do webhook — se não tem texto aqui, é porque a
-    // transcrição falhou, e aí o pedido pra escrever continua valendo.
+    // Áudio já chega transcrito do webhook, e o que não coube lá teve a
+    // segunda tentativa no começo desta função — se não tem texto aqui, falhou
+    // duas vezes, e aí o pedido pra escrever vale.
     const temTexto = Boolean(params.corpo && params.corpo.trim())
     const anexoQueEuLeio = params.tipo === 'image' || params.tipo === 'document'
     if (!temTexto && !anexoQueEuLeio) {
@@ -4867,7 +5043,20 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       let mensagens = historico.msgs
       const ultima = mensagens[mensagens.length - 1]
       if (!historico.wamids.has(params.wamid) || !ultima || ultima.role !== 'user') {
-        const atual = (params.corpo ?? '').trim()
+        // NUNCA UM TURNO VAZIO — 24/09/2026. Foto sem legenda que chegou
+        // ENQUANTO o Luigi respondia à mensagem anterior já está no histórico,
+        // mas atrás da resposta dele; este galho então acrescentava um turno do
+        // cliente com `corpo` nulo — content: '' — e a API recusava o turno
+        // inteiro ("messages.14: user messages must have non-empty content",
+        // Gustavo, 13:14). O cliente ouvia "deixa eu confirmar uma coisa" e
+        // a foto ficava sem reação. O marcador diz ao modelo o que aconteceu.
+        const atual =
+          (params.corpo ?? '').trim() ||
+          (params.tipo === 'image'
+            ? '[a foto acima chegou enquanto você respondia — olhe pra ela e reaja agora]'
+            : params.tipo === 'document'
+              ? '[o arquivo acima chegou enquanto você respondia — leia e reaja agora]'
+              : `[${params.tipo} sem texto]`)
         if (ultima && ultima.role === 'user' && typeof ultima.content === 'string') {
           mensagens = [...mensagens.slice(0, -1), { role: 'user', content: `${ultima.content}\n\n${atual}` }]
         } else {

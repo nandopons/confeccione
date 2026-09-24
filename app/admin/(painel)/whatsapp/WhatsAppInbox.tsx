@@ -321,10 +321,31 @@ function CorpoMensagem({ m }: { m: Mensagem }) {
     )
   }
   if (m.tipo === 'audio') {
-    return m.midia_url ? (
-      <audio controls preload="none" src={m.midia_url} className="max-w-full" style={{ width: 260 }} />
-    ) : (
-      <p className="italic text-neutral-500">🎤 Áudio indisponível</p>
+    // A TRANSCRIÇÃO APARECE EMBAIXO DO PLAYER — 24/09/2026.
+    //
+    // O áudio já chegava transcrito em `corpo` desde 09/09 (é o que o Luigi
+    // lê), mas o inbox mostrava só o player. O Fernando viu três áudios do
+    // Gustavo e a resposta do Luigi ao lado, e concluiu que o Luigi não tinha
+    // ouvido — quando na verdade os três estavam em texto no banco. O que o
+    // Luigi leu tem que ser o que o inbox mostra; e ler é mais rápido que
+    // apertar play em cada balão. `preload="metadata"` é pra duração aparecer
+    // em vez de 0:00/0:00.
+    return (
+      <div className="space-y-1.5">
+        {m.midia_url ? (
+          <audio controls preload="metadata" src={m.midia_url} className="max-w-full" style={{ width: 260 }} />
+        ) : (
+          <p className="italic text-neutral-500">🎤 Áudio indisponível</p>
+        )}
+        {m.corpo ? (
+          <p className="whitespace-pre-wrap break-words text-[13px]">
+            <span className="text-neutral-400 text-[11px] uppercase tracking-wide mr-1.5">transcrição</span>
+            {m.corpo}
+          </p>
+        ) : (
+          <p className="italic text-neutral-400 text-[12px]">não deu pra transcrever — o Luigi pediu pra escrever</p>
+        )}
+      </div>
     )
   }
   if (m.tipo === 'video') {

@@ -20,6 +20,8 @@
 // gente pagar a transcrição UMA vez — quem reler a conversa lê o texto pronto.
 // ============================================================================
 
+import { supabaseAdmin } from './supabase-server'
+
 /** Mimes de áudio que o WhatsApp entrega e o Gemini aceita. */
 const MIMES_AUDIO = new Set(['audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/amr', 'audio/wav', 'audio/webm'])
 
@@ -27,11 +29,15 @@ const MIMES_AUDIO = new Set(['audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/aac'
 const TAMANHO_MAX = 15 * 1024 * 1024
 
 /**
- * Teto de espera. Isso roda dentro do webhook, ANTES do 200 pra Meta — se o
- * Gemini travar, a Meta reenvia o evento e a mensagem entra duplicada. Melhor
+ * Teto de espera DENTRO DO WEBHOOK, antes do 200 pra Meta — se o Gemini
+ * travar, a Meta reenvia o evento e a mensagem entra duplicada. Melhor
  * desistir da transcrição do que atrasar o webhook.
+ *
+ * A segunda tentativa (`retranscreverDoStorage`) roda depois do 200, no
+ * `after()`, e pode esperar mais: ver TIMEOUT_SEGUNDA_TENTATIVA_MS.
  */
 const TIMEOUT_MS = 8000
+const TIMEOUT_SEGUNDA_TENTATIVA_MS = 25_000
 
 const PROMPT =
   'Transcreva este áudio em português do Brasil, literalmente, só o que foi dito. ' +
@@ -57,7 +63,8 @@ export function ehAudioTranscritivel(mime: string | null | undefined): boolean {
  */
 export async function transcreverAudio(
   audio: ArrayBuffer | Buffer,
-  mime: string | null | undefined
+  mime: string | null | undefined,
+  opts: { timeoutMs?: number } = {}
 ): Promise<string | null> {
   const key = process.env.GEMINI_API_KEY
   if (!key) return null
@@ -70,7 +77,7 @@ export async function transcreverAudio(
 
   const modelo = process.env.GEMINI_AUDIO_MODEL || 'gemini-2.5-flash'
   const controle = new AbortController()
-  const relogio = setTimeout(() => controle.abort(), TIMEOUT_MS)
+  const relogio = setTimeout(() => controle.abort(), opts.timeoutMs ?? TIMEOUT_MS)
 
   try {
     const res = await fetch(
@@ -116,5 +123,43 @@ export async function transcreverAudio(
     return null
   } finally {
     clearTimeout(relogio)
+  }
+}
+
+/**
+ * SEGUNDA TENTATIVA, FORA DO WEBHOOK — 24/09/2026.
+ *
+ * O webhook tem 8 s pra transcrever antes de responder à Meta; um áudio de um
+ * minuto às vezes não cabe, e o Gemini às vezes só falha. Até aqui, uma falha
+ * era definitiva: o áudio ficava no Storage e o Luigi respondia "não consegui
+ * ouvir, pode me escrever?" — a máquina pedindo pra pessoa se adaptar a ela,
+ * que é exatamente o que a transcrição existe pra evitar. Em 30 dias, 4 de 23
+ * áudios ficaram sem texto.
+ *
+ * Isto roda no `after()`, com tempo: baixa o áudio do Storage, tenta de novo
+ * com 25 s, e grava em `corpo` pra que o inbox, o Luigi e a gestão leiam o
+ * mesmo texto. Devolve a transcrição, ou null se nem assim deu — e aí sim o
+ * pedido pra escrever vale.
+ */
+export async function retranscreverDoStorage(params: {
+  wamid: string
+  midiaPath: string | null
+  midiaMime: string | null
+}): Promise<string | null> {
+  if (!params.midiaPath || !ehAudioTranscritivel(params.midiaMime)) return null
+  try {
+    const { data, error } = await supabaseAdmin.storage.from('wa-midia').download(params.midiaPath)
+    if (error || !data) {
+      console.error('[transcricao] segunda tentativa: download falhou', { wamid: params.wamid, erro: error?.message })
+      return null
+    }
+    const texto = await transcreverAudio(Buffer.from(await data.arrayBuffer()), params.midiaMime, { timeoutMs: TIMEOUT_SEGUNDA_TENTATIVA_MS })
+    if (!texto) return null
+    const { error: eUp } = await supabaseAdmin.from('wa_mensagens').update({ corpo: texto }).eq('wamid', params.wamid)
+    if (eUp) console.error('[transcricao] segunda tentativa: não gravou o corpo', { wamid: params.wamid, erro: eUp.message })
+    return texto
+  } catch (e) {
+    console.error('[transcricao] segunda tentativa falhou', { wamid: params.wamid, erro: e instanceof Error ? e.message : String(e) })
+    return null
   }
 }
