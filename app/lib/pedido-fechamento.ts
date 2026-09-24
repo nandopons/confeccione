@@ -299,6 +299,14 @@ export async function anexarFotoDaConversaAoModelo(params: {
   return { ok: true, modelo: nome, totalFotos: fotos.length, jaEstava: false }
 }
 
+/**
+ * Até quando um pedido aberto pelo Luigi ainda é "o que você acabou de abrir"
+ * (ver `criarPedidoParaContato`). Seis horas cobre a sessão de conversa em que
+ * o esquecimento acontece (medido: 1, 2 e 6 minutos); dias depois a pergunta
+ * "é novo ou mudança?" volta a fazer sentido, porque o cliente também esqueceu.
+ */
+const MINUTOS_PEDIDO_RECEM_ABERTO = 6 * 60
+
 /** Teto do silêncio: nem o cliente que diz "ano que vem" some pra sempre. */
 const MAX_DIAS_PAUSA = 120
 /** Quando ele pede tempo sem dizer quanto. Um mês é o "depois" mais comum. */
@@ -390,7 +398,16 @@ export async function criarPedidoParaContato(params: {
    * escreve em campo nenhum faz a pergunta voltar pra sempre.
    */
   separadoDoPedido?: string | null
-}): Promise<{ ok: boolean; erro?: string; pedidoId?: string; codigo?: string; resumo?: string; reaproveitado?: boolean }> {
+}): Promise<{
+  ok: boolean
+  erro?: string
+  pedidoId?: string
+  codigo?: string
+  resumo?: string
+  reaproveitado?: boolean
+  /** O aberto é um que o Luigi mesmo abriu há pouco nesta conversa — siga com ele, não pergunte. */
+  recemAbertoPeloLuigi?: boolean
+}> {
   const tel = params.telefone.replace(/\D/g, '')
   if (tel.length < 10) return { ok: false, erro: 'telefone do contato inválido' }
   if (params.pecas.length === 0) return { ok: false, erro: 'informe ao menos uma peça' }
@@ -435,9 +452,9 @@ export async function criarPedidoParaContato(params: {
   // SEM JANELA DE TEMPO de propósito: "há quanto tempo" nunca foi a pergunta.
   // A pergunta é se ela já tem um pedido em aberto, e isso não caduca.
   const tel8 = tel.slice(-8)
-  const { data: aberto } = await supabaseAdmin
+  const { data: aberto, error: eAberto } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, codigo, linhas, criado_em')
+    .select('id, codigo, linhas, criado_em, origem')
     .like('telefone', `%${tel8}`)
     .is('encerrado_em', null)
     .is('finalizado_em', null)
@@ -449,7 +466,9 @@ export async function criarPedidoParaContato(params: {
     .or('pagamento_status.is.null,pagamento_status.neq.pago')
     .order('criado_em', { ascending: false })
     .limit(1)
-    .maybeSingle<{ id: string; codigo: string | null; linhas: unknown; criado_em: string }>()
+    .maybeSingle<{ id: string; codigo: string | null; linhas: unknown; criado_em: string; origem: string | null }>()
+  // Consulta que falha não é "não tem aberto": seria a trava sumindo em silêncio.
+  if (eAberto) return { ok: false, erro: `não consegui conferir os pedidos abertos (${eAberto.message}); tente de novo` }
   // O cliente respondeu que é pedido NOVO: confere e deixa passar.
   //
   // Confere de verdade — o código tem que ser de um pedido ABERTO DESTE contato.
@@ -478,6 +497,40 @@ export async function criarPedidoParaContato(params: {
     const resumoAtual = linhas
       .map((l, i) => `${i + 1}. ${[l.modelo, l.cor, l.quantidade ? `${l.quantidade} un` : null].filter(Boolean).join(', ')}`)
       .join(' | ')
+    const ref = aberto.codigo ?? aberto.id
+
+    // O ABERTO É O QUE O PRÓPRIO LUIGI ACABOU DE ABRIR — 24/09/2026.
+    //
+    // Das 3 recusas desta trava desde 12/09, as 3 eram um pedido que o Luigi
+    // mesmo tinha aberto minutos antes, na mesma conversa (Miguel 317 aos 6
+    // min; Kaiky 328 a 1 e a 2 min). O resultado da ferramenta não sobrevive
+    // ao turno, então no turno seguinte ele não lembra que criou — e a
+    // pergunta genérica "é pedido novo ou mudança?" cai num cliente que
+    // descreveu UMA peça e nunca ouviu falar de outro pedido. O Kaiky
+    // respondeu "é a primeira vez que peço esse colete", pediu pra "cancelar
+    // e abrir um novo", e daí nasceram 330, 331 e 333.
+    //
+    // Pedido que o Luigi abriu há pouco NESTA conversa não é dúvida: é o
+    // pedido dele. A instrução muda de "pergunte" pra "siga com ele".
+    const minutos = (Date.now() - new Date(aberto.criado_em).getTime()) / 60_000
+    if (aberto.origem === 'whatsapp_luigi' && minutos < MINUTOS_PEDIDO_RECEM_ABERTO) {
+      const ha = minutos < 1 ? 'menos de 1 minuto' : `${Math.round(minutos)} min`
+      return {
+        ok: true,
+        reaproveitado: true,
+        recemAbertoPeloLuigi: true,
+        pedidoId: aberto.id,
+        codigo: aberto.codigo ?? undefined,
+        erro:
+          `o pedido ${ref} foi aberto por VOCÊ nesta conversa há ${ha}, com: ${resumoAtual || '(nenhuma peça ainda)'}. ` +
+          `Ele JÁ É o pedido dele — não é outro, e não é dúvida: NÃO crie outro, NÃO pergunte se é novo ou mudança, ` +
+          `NÃO encerre pra "abrir um novo". Se ele pediu pra cancelar e abrir novo antes disso, já foi feito e este é o novo. ` +
+          `Siga com o ${ref}: ajustar_peca_pedido pra mudar peça, salvar_dados_do_cliente pros dados, anexar_foto_ao_modelo, ` +
+          `enviar_resumo_pedido quando estiver inteiro. Só existe segundo pedido se ELE disser, por conta própria, que quer um ` +
+          `separado — aí criar_pedido com separado_do_pedido: "${ref}".`,
+      }
+    }
+
     return {
       ok: true,
       reaproveitado: true,

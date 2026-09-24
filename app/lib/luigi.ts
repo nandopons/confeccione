@@ -323,6 +323,25 @@ function agoraRecife(): string {
 }
 
 /**
+ * "hoje 15:31", "ontem 09:10" ou "12/09 14:02" — o relógio de um evento, em
+ * Recife, do jeito que o modelo consegue comparar com o histórico da conversa.
+ * `criado_ha_dias: 0` não distingue o pedido aberto às 14:30 do encerrado às
+ * 15:31, e essa diferença é a que decide qual é "o antigo" e qual é "o novo".
+ */
+export function quandoRecife(iso: string | null | undefined, agora = new Date()): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  const dia = (x: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Recife', year: 'numeric', month: '2-digit', day: '2-digit' }).format(x)
+  const hora = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Recife', hour: '2-digit', minute: '2-digit', hour12: false }).format(d)
+  const ontem = new Date(agora.getTime() - 86400_000)
+  if (dia(d) === dia(agora)) return `hoje ${hora}`
+  if (dia(d) === dia(ontem)) return `ontem ${hora}`
+  const data = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Recife', day: '2-digit', month: '2-digit' }).format(d)
+  return `${data} ${hora}`
+}
+
+/**
  * A saudação certa pra hora que é, resolvida AQUI e não pelo modelo.
  *
  * O prompt já trazia "Agora em Recife: ... 21:01" e mesmo assim saiu um "Boa
@@ -573,6 +592,14 @@ type PedidoContexto = {
   o_que_significa: string
   em_aberto: boolean
   criado_ha_dias: number | null
+  /**
+   * "hoje 14:30, aberto por você nesta conversa" — o relógio que diz qual
+   * pedido é o antigo e qual é o novo. Sem hora, dois pedidos de hoje são
+   * iguais aos olhos do modelo, e foi assim que o Kaiky ganhou quatro.
+   */
+  aberto: string | null
+  /** "hoje 15:31" — quando fechou. Só faz sentido lido junto com `aberto` do que está em aberto. */
+  encerrado: string | null
   nesta_etapa_ha_dias: number | null
   pecas: string
   prazo_desejado_dias: number | null
@@ -641,7 +668,8 @@ type Contexto = {
   conversaId: string
   contato: { nome: string | null; telefone: string; conta: { nome: string | null; email: string | null } | null }
   pedidos: PedidoContexto[]
-  pedidoEmFoco: PedidoEtapa | null
+  /** O pedido que uma chamada sem `pedido` alcança. Muda dentro do turno quando criar_pedido abre um novo. */
+  pedidoEmFoco: { id: string; codigo: string | null } | null
   /** true = é confecção cadastrada, não cliente. Muda o prompt inteiro. */
   ehFornecedor: boolean
   /**
@@ -1112,6 +1140,84 @@ async function respostaAoFechamento(conversaId: string, corpoAtual: string): Pro
 }
 
 /**
+ * DESISTÊNCIA DITA PELO CLIENTE, sobre linha normalizada (sem acento).
+ *
+ * Cada forma apareceu numa conversa real que terminou em encerrar_pedido:
+ * "pode cancelar" e "Pode encerrar" (André 09/09), "Não vou querer mais"
+ * (Kaiky 10/09), "1 foi sem querer" (Luiz 13/09), "Não compensa o valor" e
+ * "gostaria de cancelar meu pedido" (Ednelson 16/09), "não quero mais" e
+ * "Quero cancelar e abrir um novo" (Kaiky 24/09). Generoso de propósito: quem
+ * casa aqui só ganha o direito de ser encerrado, que era o de sempre.
+ */
+const PEDIU_PARA_ENCERRAR = new RegExp(
+  '\\b(?:' +
+    'cancel\\w*|desist\\w*|encerr\\w*|' +
+    'nao (?:quero|queremos|vou|vamos|preciso|precisamos) mais|nao vou (?:querer|fazer|seguir|continuar|levar|fechar)|' +
+    'nao (?:quero|queremos) (?:fazer|seguir|continuar|esse pedido|o pedido|mais nada)|' +
+    'nao (?:tenho|temos|ha|tem) mais interesse|sem interesse|perdi o interesse|' +
+    '(?:foi|era) sem querer|sem querer|era (?:so )?um (?:pedido )?(?:so|mesmo)|(?:so|somente|apenas) um (?:pedido|mesmo)|duplic\\w*|repetid\\w*|' +
+    '(?:abrir|abre|fazer|faz|comecar|comeca|criar|cria|montar|monta) (?:um |uma |outro |outra )?(?:novo|nova|outro|outra|do zero)|' +
+    '(?:novo|outro) pedido|pedido novo|do zero|recomec\\w*|refaz\\w*|' +
+    'mudei de ideia|deixa (?:pra la|quieto|isso pra la)|esquece\\w*|' +
+    '(?:apag\\w*|exclu\\w*|remov\\w*|tira|tirar) (?:o |esse |este |meu |aquele |isso |tudo )?(?:pedido|tudo|isso)|' +
+    'pode (?:parar|apagar|fechar o pedido)|parar por aqui|para por aqui|' +
+    'nao (?:da|dava|vai dar|deu) (?:mais|tempo|certo|pra mim|pra gente)|nao compensa|(?:muito|mto|bem) caro|caro demais|achei caro|ta caro|esta caro|' +
+    'outra (?:empresa|confeccao|loja|fabrica|pessoa|fornecedor|costureira)|outro (?:lugar|fornecedor|fabricante)|' +
+    'ja (?:comprei|resolvi|consegui|fechei|encontrei|achei)|nao (?:precisa|preciso|precisamos) mais|' +
+    'nao (?:e|era) (?:esse|isso|este)|(?:ta|esta|pedido) errado' +
+    ')\\b'
+)
+/** A pergunta que o Luigi (ou a equipe) faz antes de encerrar. O "sim" a ela vale como pedido. */
+const PERGUNTA_DE_ENCERRAR = /encerr|cancel|desist|parar por aqui|fech(?:o|a|ar) (?:o |esse |este |aquele )?(?:pedido|\d)/
+
+/**
+ * O cliente pediu pra encerrar ESTE pedido — depois de ele existir?
+ *
+ * ENCERRAR PRECISA DE UM PEDIDO DELE POSTERIOR AO PEDIDO — 24/09/2026.
+ * Kaiky: disse "quero cancelar e abrir um novo" às 14:49, UMA vez. O Luigi
+ * encerrou o 328 e abriu o 330 (15:31); no turno seguinte encerrou o 330 e
+ * abriu o 331; no outro, o 331 e abriu o 333. O resultado da ferramenta não
+ * sobrevive ao turno, então a cada rodada o pedido aberto parecia "o antigo"
+ * e a frase de 14:49 parecia nova. Quatro pedidos em 80 minutos, o cliente
+ * respondendo "Ss" e "Mais alguma coisa?".
+ *
+ * A régua é a linha do tempo: só conta o que ele escreveu DEPOIS de o pedido
+ * nascer — vocabulário de desistência, ou um sim à pergunta "posso encerrar?".
+ * Medido nos 5 encerramentos legítimos desde 20/08: todos passam. Os 2 do
+ * loop: nenhum. `null` = consulta falhou (na dúvida, não encerra).
+ */
+async function clientePediuParaEncerrar(conversaId: string, pedidoId: string): Promise<{ pediu: boolean; abertoEm: string } | null> {
+  const { data: ped, error: e1 } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('criado_em')
+    .eq('id', pedidoId)
+    .maybeSingle<{ criado_em: string }>()
+  if (e1 || !ped) return null
+  // 2 s de folga: o relógio da Meta é em segundos e o nosso em milissegundos.
+  const desde = new Date(new Date(ped.criado_em).getTime() - 2000).toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('direcao, tipo, corpo, autor')
+    .eq('conversa_id', conversaId)
+    .gt('criado_em', desde)
+    .in('tipo', ['text', 'audio', 'button'])
+    .order('criado_em', { ascending: true })
+    .limit(1000)
+  if (error || !data) return null
+  let ultimaSaida = ''
+  for (const m of data as MensagemRecente[]) {
+    const corpo = m.corpo ?? ''
+    if (m.direcao !== 'entrada') {
+      ultimaSaida = normalizarLinha(corpo)
+      continue
+    }
+    if (PEDIU_PARA_ENCERRAR.test(normalizarLinha(corpo))) return { pediu: true, abertoEm: ped.criado_em }
+    if (PERGUNTA_DE_ENCERRAR.test(ultimaSaida) && eleDisseQuePode(corpo.split(/\r?\n/))) return { pediu: true, abertoEm: ped.criado_em }
+  }
+  return { pediu: false, abertoEm: ped.criado_em }
+}
+
+/**
  * O texto de uma liberação recusada, do jeito que o modelo precisa ler: o
  * motivo, cada divergência com o que perguntar, e o [como levar isto ao
  * cliente]. Um texto só, servido pela ferramenta e pela trava por código —
@@ -1252,6 +1358,12 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
       o_que_significa: ETAPA_PARA_CLIENTE[p.etapa],
       em_aberto: emAberto,
       criado_ha_dias: dias(p.criado_em),
+      aberto: (() => {
+        const q = quandoRecife(p.criado_em)
+        if (!q) return null
+        return p.origem === 'whatsapp_luigi' ? `${q}, aberto por você nesta conversa` : `${q}, aberto por ele no site`
+      })(),
+      encerrado: emAberto ? null : quandoRecife(p.encerrado_em),
       nesta_etapa_ha_dias: dias(p.desde),
       pecas: resumoDasLinhas(p.linhas),
       prazo_desejado_dias: prazo,
@@ -1907,13 +2019,31 @@ async function acharNoContexto(ctx: Contexto, ref: string | undefined): Promise<
   // A garantia de escopo continua de pé, e é ela que importa: a busca é
   // ancorada no telefone DESTE contato, então nenhuma ferramenta alcança pedido
   // de outra pessoa por passar um código qualquer.
+  //
+  // A CONSULTA NUNCA FUNCIONOU — 24/09/2026. O filtro era
+  // `.or('codigo.eq.X,id.eq.X')`, e `id` é uuid: com um código na mão o
+  // Postgres respondia 22P02 ("invalid input syntax for type uuid"), o erro
+  // vinha em `error`, `data` vinha null e isto devolvia "não encontrado". Em 11
+  // de 11 turnos desde 09/09 (a Cybelle inclusive, no dia em que isto foi
+  // escrito) o pedido recém-criado ficou invisível pra ajustar_peca,
+  // salvar_dados, anexar_foto, mockup e resumo. Falha que se parece com
+  // ausência, outra vez. Agora a coluna é escolhida pela FORMA da referência,
+  // e erro de consulta LANÇA — "não consegui ler" não é "não existe".
   const tel8 = ctx.contato.telefone.replace(/\D/g, '').slice(-8)
   if (tel8.length !== 8) return null
   let q = supabaseAdmin.from('pedidos_assistente').select('id, codigo').like('telefone', `%${tel8}`)
-  if (r) q = q.or(`codigo.eq.${r},id.eq.${r}`)
-  const { data } = await q.order('criado_em', { ascending: false }).limit(1).maybeSingle<{ id: string; codigo: string | null }>()
+  if (r) q = UUID.test(r) ? q.eq('id', r) : q.eq('codigo', r)
+  const { data, error } = await q.order('criado_em', { ascending: false }).limit(1).maybeSingle<{ id: string; codigo: string | null }>()
+  if (error) {
+    throw new Error(
+      `não consegui consultar o pedido agora (${error.message}). Tente a mesma chamada de novo neste turno; ` +
+        'se falhar outra vez, chame chamar_humano — não diga ao cliente que o pedido não existe.'
+    )
+  }
   return data ? { id: data.id, codigo: data.codigo } : null
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 type Escalada = { motivo: string } | null
 
@@ -2370,6 +2500,28 @@ async function executarFerramenta(
       const motivo = str(entrada.motivo) as MotivoEncerramento | undefined
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
       if (!motivo || !(MOTIVOS_ENCERRAMENTO as readonly string[]).includes(motivo)) throw new Error('motivo inválido')
+
+      // A trava é o relógio (ver clientePediuParaEncerrar): sem fala de
+      // desistência DEPOIS de o pedido nascer, ele não se encerra — porque
+      // então ele é o pedido novo que a fala anterior mandou abrir.
+      const pediu = await clientePediuParaEncerrar(ctx.conversaId, p.id)
+      if (!pediu) {
+        throw new Error(
+          'não consegui conferir a conversa antes de encerrar. Tente a mesma chamada de novo neste turno; ' +
+            'se falhar outra vez, chame chamar_humano — não encerre nem diga ao cliente que encerrou.'
+        )
+      }
+      if (!pediu.pediu) {
+        const ref = p.codigo ?? p.id
+        throw new Error(
+          `o cliente NÃO pediu pra encerrar o ${ref} depois que ele foi aberto (${quandoRecife(pediu.abertoEm) ?? 'há pouco'}). ` +
+            `Se ele pediu pra cancelar e abrir um novo ANTES disso, já foi atendido: o ${ref} É o pedido novo. ` +
+            'Não encerre — siga com ele (ajustar_peca_pedido, salvar_dados_do_cliente, anexar_foto_ao_modelo, enviar_resumo_pedido). ' +
+            'Se ele desistiu AGORA com outras palavras, pergunte em uma linha se pode encerrar por aqui e chame de novo depois do sim dele.' +
+            '\n[como levar isto ao cliente] Não fale em cancelar nem em pedido novo ou antigo: responda ao que ele disse e continue montando o pedido.'
+        )
+      }
+
       const r = await encerrarPedido(p.id, motivo, 'luigi', str(entrada.observacao) ?? null)
       return { ok: true, codigo: r.codigo, etapa: r.etapa, encerrado_motivo: r.encerrado_motivo }
     }
@@ -2507,6 +2659,16 @@ async function executarFerramenta(
       // resto do plano do turno. Erro não disputa. Trava que às vezes funciona é
       // pior que trava que nunca funciona, porque a gente para de desconfiar.
       if (r.reaproveitado) {
+        // Recém-aberto pelo próprio Luigi: não há pergunta a fazer — o pedido
+        // é dele e o [como levar] genérico ("é separado ou é pra mudar?") é
+        // justamente o que confundiu o Kaiky. Ver criarPedidoParaContato.
+        if (r.recemAbertoPeloLuigi) {
+          throw new Error(
+            `${r.erro}` +
+              '\n[como levar isto ao cliente] NÃO pergunte nada sobre pedido novo ou antigo, e não cite código nem ferramenta. ' +
+              'Responda ao que ele disse e siga montando o pedido que já existe, como se nada tivesse acontecido — porque nada aconteceu.'
+          )
+        }
         throw new Error(
           `${r.erro ?? `esta pessoa já tem o pedido ${r.codigo} em aberto — ajuste ele, não crie outro`}` +
             '\n[como levar isto ao cliente] Quem decide se é pedido novo ou mudança é ELE, não você e não a equipe. ' +
@@ -2514,6 +2676,10 @@ async function executarFerramenta(
             '"isso é um pedido separado do outro, ou é pra mudar aquele mesmo?". Uma pergunta, e espere a resposta.'
         )
       }
+      // O pedido que acabou de nascer é o foco do resto do turno: chamada sem
+      // `pedido` cai nele, não no que estava em foco quando a rodada começou
+      // (que pode ser o que ele acabou de encerrar).
+      ctx.pedidoEmFoco = { id: r.pedidoId!, codigo: r.codigo ?? null }
       const pronto = await conferirPedido(r.pedidoId!)
       return {
         ok: true,
@@ -3137,6 +3303,8 @@ FOTO QUE ELE MANDA VOCÊ PRENDE NA PEÇA. Toda foto de referência — a peça q
 VOCÊ ENXERGA AS IMAGENS: quando o cliente manda foto, você a vê de verdade. Use o que está nela — modelo da peça, cor, estampa, referência que ele mandou — pra preencher o pedido e pra confirmar com ele o que entendeu ("essa camisa é gola careca, certo?"). Nunca peça pra ele descrever o que já está na foto. Diga o que vê de forma concreta, e pergunte só o que a imagem não responde (quantidade, tamanhos, público). Se a foto estiver ruim ou não der pra concluir, diga o que não deu pra ver em vez de adivinhar.
 
 VOCÊ TAMBÉM LÊ PDF E ESCUTA ÁUDIO. O PDF chega inteiro pra você, com o layout: ficha técnica, tabela de grade e tamanhos, arte da estampa, orçamento que ele pediu em outro lugar. Leia e USE — se a tabela de grade traz P 10, M 20, G 15, isso é a quantidade do pedido e você não pergunta de novo. O áudio chega já transcrito no texto da mensagem; trate como se ele tivesse escrito. Nos dois casos, confirme o que entendeu em uma frase antes de gravar, porque transcrição erra nome e número: "entendi 40 camisas, 20 P e 20 M, confere?". Nunca peça pra ele digitar o que já mandou no arquivo — foi justamente pra não digitar que ele mandou.
+
+PEDIDO QUE VOCÊ MESMO ABRIU: cada pedido do contexto traz "aberto: hoje 14:30, aberto por você nesta conversa". Esse é o pedido DELE, montado por você nesta mesma conversa — não é "um pedido antigo", não é dúvida, não se pergunta se é novo ou mudança e não se cancela pra abrir outro. Se ele pediu pra cancelar e abrir um novo e o pedido em aberto foi aberto DEPOIS desse pedido dele, o novo é esse: já está feito, siga com ele. Olhe o relógio ("aberto" e "encerrado") antes de decidir qual é o antigo.
 
 PEDIDO REPETIDO DO MESMO CLIENTE: se o contexto mostrar que ele tem mais de um pedido incompleto criado quase junto (mesmo dia, ou poucos minutos de diferença), quase sempre é a mesma intenção duplicada, não dois pedidos de verdade. Não trate como dois: pergunte de forma leve se ele quer seguir com os dois ou se foi sem querer, e siga com o que ele disser. Nunca mande a mesma cutucada duas vezes pelo mesmo motivo, nem fale de um pedido como se o outro não existisse — isso mostra que a gente não olha o que tem na mão. Se ele disser que era um só, registre o motivo no que sobrou e encerre o duplicado com encerrar_pedido, quando ele confirmar.
 
