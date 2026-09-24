@@ -27,7 +27,7 @@
 
 import { supabaseAdmin } from './supabase-server'
 import { enviarTexto, normalizarWaId } from './whatsapp-cloud'
-import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
+import { acharConversaPorNumero, janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 import { humanoConduzindoPorTelefone } from './luigi'
 
 /** Hora local de Recife. */
@@ -92,20 +92,17 @@ export function cabeCutucar(
 }
 
 async function ultimasMensagens(waId: string): Promise<{ conversaId: string; m: UltimasMensagens } | null> {
-  // Conversa por número, tolerando o nono dígito (ver cutucada-pos-resumo).
-  const { data: exata } = await supabaseAdmin.from('wa_conversas').select('id, luigi_escalado_em').eq('wa_id', waId).maybeSingle<{ id: string; luigi_escalado_em: string | null }>()
-  let conversa = exata ?? null
-  if (!conversa) {
-    const { data } = await supabaseAdmin.from('wa_conversas').select('id, luigi_escalado_em').ilike('wa_id', `%${waId.slice(-8)}`).limit(1)
-    conversa = ((data ?? []) as Array<{ id: string; luigi_escalado_em: string | null }>)[0] ?? null
-  }
+  // Conversa por número, tolerando o nono dígito — pela função única de
+  // whatsapp-notify (a cópia local filtrava uma coluna que não existe).
+  const conversa = await acharConversaPorNumero(waId)
   if (!conversa) return null
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('wa_mensagens')
     .select('direcao, criado_em')
     .eq('conversa_id', conversa.id)
     .order('criado_em', { ascending: false })
     .limit(30)
+  if (error) throw new Error(`mensagens da conversa ${conversa.id}: ${error.message}`)
   const linhas = (data ?? []) as Array<{ direcao: string; criado_em: string }>
   return {
     conversaId: conversa.id,

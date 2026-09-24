@@ -125,6 +125,36 @@ export async function acharContatoPorNumero(waId: string): Promise<{ id: string;
   return escolhido ? { id: escolhido.id, nome: escolhido.nome ?? null } : null
 }
 
+/**
+ * A CONVERSA DE UM NÚMERO — UMA REGRA, UM LUGAR — 24/09/2026.
+ *
+ * `wa_conversas` NÃO tem `wa_id`; o número mora em `wa_contatos`, e a conversa
+ * aponta pro contato. Duas cópias de um "acharConversa" filtravam
+ * `wa_conversas.wa_id` direto: o PostgREST devolvia 42703, o supabase-js punha
+ * em `error` com `data: null`, e as duas engoliam o `error` — a cutucada
+ * pós-resumo (TAREFA 8, desde 10/09) concluía "sem conversa" pra TODO pedido e
+ * nunca cutucou ninguém; a de captação nasceu copiando o mesmo defeito. É a
+ * "falha que se parece com ausência" do AGENTS.md, e quem achou foi a revisão
+ * antes do commit.
+ *
+ * Aqui: contato pelo número (exato, depois 8 finais — `acharContatoPorNumero`)
+ * e a conversa desse contato. Consulta que falha LANÇA: o chamador decide o
+ * que fazer com a exceção, mas nunca lê falha como "não tem".
+ */
+export async function acharConversaPorNumero(waId: string): Promise<{ id: string; luigi_escalado_em: string | null } | null> {
+  const contato = await acharContatoPorNumero(waId)
+  if (!contato) return null
+  const { data, error } = await supabaseAdmin
+    .from('wa_conversas')
+    .select('id, luigi_escalado_em')
+    .eq('contato_id', contato.id)
+    .order('ultima_mensagem_em', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle<{ id: string; luigi_escalado_em: string | null }>()
+  if (error) throw new Error(`conversa do contato ${contato.id}: ${error.message}`)
+  return data ?? null
+}
+
 async function garantirConversa(waId: string, nomeBruto: string | null): Promise<string | null> {
   // O nome vem do perfil do WhatsApp, como a pessoa escreveu: "nicole",
   // "JOAQUIM LIMA RABELO". Normaliza na porta de entrada pra não sujar a base

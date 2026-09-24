@@ -28,7 +28,7 @@
 
 import { supabaseAdmin } from './supabase-server'
 import { enviarTexto, normalizarWaId } from './whatsapp-cloud'
-import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
+import { acharConversaPorNumero, janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 import { humanoConduzindoPorTelefone } from './luigi'
 
 /** Hora local de Recife. Inline pra não arrastar o módulo de marketing junto. */
@@ -164,7 +164,7 @@ export async function rodarCutucadaPosResumo(): Promise<ResultadoCutucada> {
       // (`wa_conversas!inner(wa_id)` + `.eq('wa_conversas.wa_id', …)`) falha em
       // SILÊNCIO — devolve linhas sem aplicar o filtro. Aqui isso significaria
       // achar resposta de outra conversa e nunca cutucar ninguém.
-      const conversaId = await acharConversa(waId)
+      const conversaId = (await acharConversaPorNumero(waId))?.id ?? null
       if (conversaId && (await clienteRespondeuDepois(conversaId, p.resumo_enviado_em))) {
         await marcarCutucado(p.id)
         puladas++
@@ -209,28 +209,10 @@ export async function rodarCutucadaPosResumo(): Promise<ResultadoCutucada> {
   return { enviadas, puladas }
 }
 
-/**
- * A conversa do inbox deste número, tolerando o nono dígito.
- *
- * O mesmo telefone chega como 5581998496055 e 558198496055; comparar por
- * igualdade acharia "nenhuma conversa" e a cutucada sairia por cima de quem já
- * tinha respondido. Os últimos 8 dígitos são o que os dois formatos têm igual.
- */
-async function acharConversa(waId: string): Promise<string | null> {
-  const { data: exata } = await supabaseAdmin
-    .from('wa_conversas')
-    .select('id')
-    .eq('wa_id', waId)
-    .maybeSingle<{ id: string }>()
-  if (exata?.id) return exata.id
-
-  const { data } = await supabaseAdmin
-    .from('wa_conversas')
-    .select('id, wa_id')
-    .ilike('wa_id', `%${waId.slice(-8)}`)
-    .limit(2)
-  return ((data ?? []) as Array<{ id: string }>)[0]?.id ?? null
-}
+// `acharConversa` local saiu em 24/09/2026: filtrava `wa_conversas.wa_id`, coluna
+// que não existe, engolia o erro e devolvia null pra todo mundo — esta tarefa
+// rodou 14 dias sem cutucar ninguém. Agora é `acharConversaPorNumero`, única,
+// em whatsapp-notify.ts (contato pelo número → conversa do contato).
 
 async function clienteRespondeuDepois(conversaId: string, desde: string): Promise<boolean> {
   const { data } = await supabaseAdmin
