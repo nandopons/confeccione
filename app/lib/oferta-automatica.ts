@@ -120,17 +120,48 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
   //
   // `confirmado_em` é gravado por liberarParaFornecedores, que é o que o
   // cliente aciona no "Buscar fornecedor" e o Luigi chama com o sim dele.
-  const { data } = await supabaseAdmin
+  // A FILA NUNCA ACHOU NINGUÉM — 25/09/2026.
+  //
+  // Este select pedia `pecas` e `prazo_dias` à VIEW, e a view não tem essas
+  // duas colunas (o select final da migration 20260908020000 lista as colunas
+  // uma a uma; `pecas` e `prazo_dias` ficaram de fora). O PostgREST devolvia
+  // `column pedidos_assistente_etapas.pecas does not exist`, o código lia só
+  // `data`, `?? []` virava "fila vazia" e o cron respondia 200 com
+  // `ofertados: []` — a cada 20 minutos, desde que a env foi ligada em 10/09.
+  // Medido: 0 de 108 ofertas em 30 dias com origem 'automatica', com 12
+  // pedidos elegíveis e 47 confecções aprovadas na base.
+  //
+  // Dois consertos: a view só entrega o que tem, e as duas colunas vêm da
+  // tabela numa segunda consulta; e consulta que falha PARA a rodada (mesma
+  // regra de candidatosDisponiveis) — fila que erra em silêncio é fila que não
+  // existe e ninguém sabe.
+  const { data, error: errEtapas } = await supabaseAdmin
     .from('pedidos_assistente_etapas')
-    .select('id, codigo, cidade, uf, categoria, pecas, linhas, prazo_dias, etapa, desde, confirmado_em')
+    .select('id, codigo, cidade, uf, categoria, linhas, etapa, desde, confirmado_em')
     .in('etapa', ['buscando_fornecedor', 'sem_fornecedor'])
     .not('confirmado_em', 'is', null)
     .gte('desde', limite)
     .order('desde', { ascending: true })
     .limit(60)
+  if (errEtapas) throw new Error(`fila: pedidos por etapa — ${errEtapas.message}`)
 
-  const candidatos = (data ?? []) as Array<PedidoFila & { etapa: string }>
-  if (candidatos.length === 0) return []
+  const daView = (data ?? []) as Array<Omit<PedidoFila, 'pecas' | 'prazo_dias'> & { etapa: string }>
+  if (daView.length === 0) return []
+
+  const { data: extras, error: errExtras } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, pecas, prazo_dias')
+    .in('id', daView.map((p) => p.id))
+  if (errExtras) throw new Error(`fila: pecas/prazo dos pedidos — ${errExtras.message}`)
+  const extraPorId = new Map(
+    ((extras ?? []) as Array<{ id: string; pecas: string[] | null; prazo_dias: number | null }>).map((e) => [e.id, e])
+  )
+
+  const candidatos: Array<PedidoFila & { etapa: string }> = daView.map((p) => ({
+    ...p,
+    pecas: extraPorId.get(p.id)?.pecas ?? null,
+    prazo_dias: extraPorId.get(p.id)?.prazo_dias ?? null,
+  }))
 
   // Quem já tem oferta viva não entra: um pedido, uma confecção por vez.
   const { data: vivas, error: errVivas } = await supabaseAdmin
