@@ -1248,7 +1248,7 @@ type MensagemRecente = { direcao: 'entrada' | 'saida'; tipo: string | null; corp
  * é em segundos) fica de fora: ela não pode ter respondido ao que ainda não
  * tinha chegado.
  */
-async function respostaAoFechamento(conversaId: string, corpoAtual: string, criadoEmAtual?: string | null): Promise<{ fechamento: boolean; linhas: string[] | null } | null> {
+async function respostaAoFechamento(conversaId: string, corpoAtual: string, criadoEmAtual?: string | null, pergunta: RegExp = PERGUNTA_DE_FECHAMENTO): Promise<{ fechamento: boolean; linhas: string[] | null } | null> {
   const { data, error } = await supabaseAdmin
     .from('wa_mensagens')
     .select('direcao, tipo, corpo, autor, criado_em')
@@ -1256,11 +1256,11 @@ async function respostaAoFechamento(conversaId: string, corpoAtual: string, cria
     .order('criado_em', { ascending: false })
     .limit(12)
   if (error || !data) return null
-  return lerRespostaAoFechamento(data as MensagemRecente[], corpoAtual, criadoEmAtual)
+  return lerRespostaAoFechamento(data as MensagemRecente[], corpoAtual, criadoEmAtual, pergunta)
 }
 
-/** A leitura em si, separada da consulta pra ser testável com a sequência real de uma conversa. `recentes` = da mais nova pra mais velha. */
-export function lerRespostaAoFechamento(recentes: MensagemRecente[], corpoAtual: string, criadoEmAtual?: string | null): { fechamento: boolean; linhas: string[] | null } {
+/** A leitura em si, separada da consulta pra ser testável com a sequência real de uma conversa. `recentes` = da mais nova pra mais velha. `pergunta` = a que o "sim" responde (fechamento por padrão; ver PERGUNTA_DO_RESUMO). */
+export function lerRespostaAoFechamento(recentes: MensagemRecente[], corpoAtual: string, criadoEmAtual?: string | null, pergunta: RegExp = PERGUNTA_DE_FECHAMENTO): { fechamento: boolean; linhas: string[] | null } {
   const tetoMs = criadoEmAtual ? new Date(criadoEmAtual).getTime() + 2000 : null
   const entradas: MensagemRecente[] = []
   const saidas: MensagemRecente[] = []
@@ -1274,7 +1274,7 @@ export function lerRespostaAoFechamento(recentes: MensagemRecente[], corpoAtual:
     }
   }
   const deGente = (m: MensagemRecente) => m.autor !== null && m.autor !== 'luigi'
-  const fechamento = saidas.length > 0 && !saidas.some(deGente) && saidas.some((s) => PERGUNTA_DE_FECHAMENTO.test(s.corpo ?? ''))
+  const fechamento = saidas.length > 0 && !saidas.some(deGente) && saidas.some((s) => pergunta.test(s.corpo ?? ''))
   if (!fechamento) return { fechamento: false, linhas: null }
   // Áudio chega transcrito e botão de template vem com o texto do botão; foto,
   // arquivo e figurinha são outra coisa que não um sim.
@@ -1443,6 +1443,61 @@ async function liberarSeEleConfirmou(ctx: Contexto, corpo: string | null, conver
     '(3) a Confeccione acompanha o processo — ele não fica sozinho com o fornecedor. ' +
     'Com as SUAS palavras, sem "liberado" nem "status atualizado", e sem prometer prazo ou valor.'
   return { liberou: true, codigo: alvo.codigo }
+}
+
+/**
+ * A pergunta que oferece o resumo, como ele a escreve: "Posso te mandar o resumo
+ * em PDF pra você conferir?", "Mando o resumo em PDF pra você conferir?", e a
+ * de agora, "Posso enviar o resumo do pedido pra sua aprovação?". Disjunta da
+ * PERGUNTA_DE_FECHAMENTO de propósito: aquela fala em confecções, esta em resumo.
+ */
+const PERGUNTA_DO_RESUMO = /\b(posso|mando|te mando|envio|quer que eu|quer)\b[^?]{0,40}\bresumo\b[^?]{0,90}\?/i
+
+/**
+ * ELE DISSE QUE PODE MANDAR O RESUMO: O CÓDIGO MANDA — 25/09/2026.
+ *
+ * Big Shopp, 20260900338: 18:24 "posso te mandar o resumo em PDF?" — "sim" —
+ * e o modelo, em vez de mandar, perguntou "antes de mandar o PDF, quero
+ * confirmar: com touca ou sem touca?"; com o "com touca", regerou o mockup e
+ * voltou com "ficou perto do que você quer?". Três turnos depois do sim, PDF
+ * nenhum. É o mesmo desenho de `liberarSeEleConfirmou`: um sim à pergunta que
+ * o Luigi acabou de fazer é ordem, e ordem se cumpre no código, antes de o
+ * modelo abrir a boca — e o que reabriria a etapa sai da mesa (FORA_DA_MESA).
+ *
+ * Só quando dá pra mandar: se ainda falta imagem em algum modelo (e a geração
+ * está de pé), o modelo é quem gera e manda, e o `proximo_passo` diz isso com
+ * a ordem de não perguntar de novo.
+ */
+async function enviarResumoSeEleConfirmou(ctx: Contexto, corpo: string | null, conversaId: string, criadoEm?: string | null): Promise<{ enviou: boolean; codigo: string | null }> {
+  const nao = { enviou: false, codigo: null }
+  if (ctx.ehFornecedor) return nao
+  const alvo = ctx.pedidos.find((p) => p.em_aberto && !JA_FOI_PRAS_CONFECCOES.has(p.etapa))
+  if (!alvo) return nao
+
+  const resposta = await respostaAoFechamento(conversaId, (corpo ?? '').trim(), criadoEm, PERGUNTA_DO_RESUMO)
+  if (!resposta || !resposta.fechamento || !eleDisseQuePode(resposta.linhas)) return nao
+
+  const pendentes = await faltamMockups(alvo.id).catch(() => [] as number[])
+  if (pendentes.length > 0 && !ctx.mockupIndisponivel) {
+    alvo.proximo_passo =
+      'ELE ACABOU DE DIZER QUE PODE MANDAR O RESUMO. Gere a imagem que falta no(s) modelo(s) ' +
+      `${pendentes.join(', ')} com gerar_mockup_do_modelo e chame enviar_resumo_pedido NESTE turno. ` +
+      'Não pergunte de novo se pode mandar, não confirme detalhe nenhum antes: ele já respondeu.'
+    return nao
+  }
+
+  const r = await enviarResumoParaCliente(alvo.id)
+  if (!r.ok) {
+    alvo.proximo_passo =
+      `ELE ACABOU DE DIZER QUE PODE MANDAR O RESUMO, e o envio falhou agora (${r.erro ?? 'sem motivo'}). ` +
+      'Chame enviar_resumo_pedido neste turno; se falhar de novo, chame chamar_humano. Não pergunte de novo se pode mandar.'
+    return nao
+  }
+  alvo.proximo_passo =
+    'O RESUMO EM PDF ACABOU DE SER ENVIADO a ele, neste turno, porque ele disse que podia. Não avise que ' +
+    '"o PDF foi enviado" (ele está vendo o arquivo), não gere prévia, não pergunte se pode mandar. Faça só a ' +
+    'pergunta de fechamento, fechada, em uma linha: "posso confirmar seu pedido e mandar pras confecções?".'
+  return { enviou: true, codigo: alvo.codigo }
 }
 
 /**
@@ -2084,7 +2139,7 @@ const FERRAMENTA_PORTFOLIO: Anthropic.Messages.Tool = {
 }
 
 /** O que o código fez com o fechamento ANTES de o modelo falar — ver liberarSeEleConfirmou. */
-type FechamentoPorCodigo = 'liberou' | 'recusou' | null
+type FechamentoPorCodigo = 'liberou' | 'recusou' | 'resumo' | null
 
 /**
  * O QUE SAI DA MESA NO TURNO DE FECHAMENTO — 16/09 e 17/09/2026.
@@ -2115,6 +2170,14 @@ type FechamentoPorCodigo = 'liberou' | 'recusou' | null
 const FORA_DA_MESA: Record<Exclude<FechamentoPorCodigo, null>, ReadonlySet<string>> = {
   liberou: new Set(['criar_pedido', 'definir_pecas_pedido', 'ajustar_peca_pedido', 'gerar_mockup_do_modelo', 'enviar_resumo_pedido', 'liberar_para_fornecedores']),
   recusou: new Set(['criar_pedido', 'definir_pecas_pedido', 'enviar_resumo_pedido']),
+  // `resumo` (o código mandou o PDF neste turno, porque ele disse que podia):
+  // Big Shopp, 25/09 18:24 — "posso te mandar o resumo?" "sim" → o modelo
+  // perguntou "com touca ou sem touca?", ganhou "com touca", REGEROU o mockup
+  // e voltou com "ficou perto do que você quer?". O PDF nunca saiu. Com o
+  // resumo já enviado, o que cabe é a pergunta de fechamento; peça, prévia e
+  // pedido novo saem da mesa — igual ao `liberou`. Liberar fica: se ele
+  // emendar "pode mandar pras confecções" na mesma fala, é o turno certo.
+  resumo: new Set(['criar_pedido', 'definir_pecas_pedido', 'ajustar_peca_pedido', 'gerar_mockup_do_modelo', 'enviar_resumo_pedido']),
 }
 
 /** Etapas em que o pedido já saiu da mão do cliente — o resumo não volta a sair. */
@@ -2814,14 +2877,19 @@ async function executarFerramenta(
           pronto.divergencias.length > 0
             ? 'Resolva as divergências com o cliente antes de seguir: pergunte uma por vez, com as palavras da lista.'
             : pronto.pronto
-              ? 'Mande o resumo com enviar_resumo_pedido e pergunte se está tudo certo antes de liberar.'
+              // O RESUMO VAI COM O SIM DELE — 25/09/2026. Era "mande o resumo"
+              // direto; o Fernando quer a pergunta antes ("posso enviar o resumo
+              // do pedido pra sua aprovação?") e, se ele acabou de tirar uma
+              // dúvida, nem a pergunta agora — ver a regra DÚVIDA DELE É PONTO
+              // FINAL. Com o sim, o código manda (enviarResumoSeEleConfirmou).
+              ? 'Pedido pronto. Se ele NÃO acabou de fazer uma pergunta, pergunte em uma linha: "Posso enviar o resumo ' +
+                'do pedido pra sua aprovação?". Com o sim, o resumo sai. Se ele fez uma pergunta, responda só ela.'
               : pronto.pecasCompletas
                 // As peças estão de pé — o que falta são dados de frete e nota.
-                // O PDF pode ir agora: ele confere as peças enquanto passa o
-                // resto. Segurar o resumo aqui deixaria a conversa parada num
-                // "me manda o CEP" sem o cliente ter visto nada do pedido.
-                ? 'As peças estão completas. Mande o resumo com enviar_resumo_pedido pra ele conferir e, enquanto isso, ' +
-                  'colete o que falta pra liberar — uma coisa por vez, sem virar formulário.'
+                // O PDF fica pro fim, com o sim dele (25/09): antes ia agora,
+                // "pra ele conferir enquanto passa o resto".
+                ? 'As peças estão completas. Colete o que falta pra liberar — uma coisa por vez, sem virar formulário. ' +
+                  'O resumo vai no fim, quando ele disser que pode.'
                 : 'Pergunte ao cliente o que falta, uma coisa por vez.',
       }
     }
@@ -2899,9 +2967,10 @@ async function executarFerramenta(
           pronto.divergencias.length > 0
             ? 'Resolva as divergências com ela antes de seguir: pergunte uma por vez.'
             : pronto.pronto
-              ? 'Mande o resumo com enviar_resumo_pedido e só libere com o sim dela.'
+              ? 'Pedido pronto. Se ela não acabou de fazer uma pergunta, pergunte: "Posso enviar o resumo do pedido pra ' +
+                'sua aprovação?". Com o sim, o resumo sai; só libere com o sim dela ao resumo.'
               : pronto.pecasCompletas
-                ? `As peças estão completas — mande o resumo com enviar_resumo_pedido pra ela conferir. ${pronto.falta}`
+                ? `As peças estão completas. Colete o que falta, uma coisa por vez; o resumo vai no fim, com o sim dela. ${pronto.falta}`
                 : `Falta: ${pronto.falta}. Pergunte uma coisa por vez.`,
       }
     }
@@ -3122,12 +3191,31 @@ async function executarFerramenta(
       // pra falar a mesma coisa mudando as palavras". Então o exemplo gira
       // com o número da prévia daquele modelo, e a partir da segunda a
       // instrução é dizer o que mudou e não repetir a frase anterior.
-      const exemplo = EXEMPLOS_DEPOIS_DA_PREVIA[(vez - 1) % EXEMPLOS_DEPOIS_DA_PREVIA.length]
+      // A rotação é pela CONVERSA, não pelo modelo: pedido de três peças
+      // gerando a primeira prévia de cada uma usaria o mesmo exemplo três
+      // vezes seguidas se o índice fosse `vez`. Conta as imagens que o Luigi
+      // já mandou nesta conversa (a de agora inclusive).
+      const { count: jaMandadas } = await supabaseAdmin
+        .from('wa_mensagens')
+        .select('id', { count: 'exact', head: true })
+        .eq('conversa_id', ctx.conversaId)
+        .eq('direcao', 'saida')
+        .eq('tipo', 'image')
+        .eq('autor', 'luigi')
+      const exemplo = EXEMPLOS_DEPOIS_DA_PREVIA[Math.max(0, (jaMandadas ?? 1) - 1) % EXEMPLOS_DEPOIS_DA_PREVIA.length]
+      // A MUDANÇA DA PRÉVIA É MUDANÇA DA PEÇA — 25/09/2026. Big Shopp pediu
+      // "faça outro com touca"; a prévia ganhou a touca, a peça não. Na hora do
+      // resumo o modelo não sabia se o pedido tinha touca e perguntou de novo.
       const refeita =
         vez > 1
           ? ` Esta é a ${vez}ª prévia deste modelo nesta conversa: abra dizendo em poucas palavras o que mudou ` +
             '("agora com o capuz", "trocada pra manga longa") e NÃO repita a frase que você usou na prévia ' +
-            'anterior — ele lê as duas juntas na tela. Mesma pergunta, palavras diferentes.'
+            'anterior — ele lê as duas juntas na tela. Mesma pergunta, palavras diferentes.' +
+            (instrucoes
+              ? ' E o que você passou em `instrucoes` ainda NÃO está na peça: grave agora, neste turno, com ' +
+                'ajustar_peca_pedido (descricao, ou o campo certo), senão o resumo sai sem a mudança e você vai ' +
+                'perguntar de novo o que ele já disse.'
+              : '')
           : ''
 
       return {
@@ -3625,7 +3713,9 @@ Então não pergunte só "pra quando você precisa?". Pergunte se esse prazo tem
 
 Nunca invente prazo de produção nem diga que "dá pra fazer em X dias": quem define isso é a confecção que aceitar, no orçamento. Você pergunta e anota; quem promete é ela.
 
-PEDIDO COM PEÇAS PRONTAS NÃO FICA PARADO. Cada pedido no contexto traz "falta_para_liberar". Se a lista estiver VAZIA, o pedido pode ir pras confecções: mande o resumo, confirme com ele e libere. Se tiver itens, peça o PRIMEIRO da lista — um por mensagem — e siga até zerar.
+PEDIDO COM PEÇAS PRONTAS NÃO FICA PARADO. Cada pedido no contexto traz "falta_para_liberar". Se a lista estiver VAZIA, o pedido pode ir pras confecções: pergunte se pode mandar o resumo, mande com o sim, confirme com ele e libere. Se tiver itens, peça o PRIMEIRO da lista — um por mensagem — e siga até zerar.
+
+DÚVIDA DELE É PONTO FINAL DO TURNO. Se ele fez uma pergunta, responda e PARE. Não emende na mesma mensagem, nem numa segunda logo em seguida, o "posso te mandar o resumo?" nem outro passo do fluxo: quem acabou de perguntar está pensando, não decidindo, e empurrar o próximo passo em cima da resposta é vendedor apressado. O resumo você oferece quando ele disser que não tem mais dúvida, ou fechar o assunto ("ok", "entendi", "beleza"): aí a pergunta é uma só, "Posso enviar o resumo do pedido pra sua aprovação?", e com o sim o resumo vai. Se ele ficar em silêncio depois da sua resposta, o sistema volta sozinho uns minutos depois com "ficou alguma dúvida?" — isso não é com você. Exceção: se ele mesmo pedir o resumo, o PDF ou o orçamento, mande.
 
 "JA_TEMOS" É PRA VOCÊ LER, NÃO PRA CONFERIR. Cada pedido traz também "ja_temos", com os dados que já estão gravados e o VALOR de cada um. Não pergunte, não confirme, não mencione nenhum deles — nem em versão educada ("seu e-mail ainda é esse?", "confirma o CEP pra mim?"): conferir é perguntar de novo com outra roupa. O Wesley deu e-mail e CEP no site ontem, abriu um pedido pelo WhatsApp hoje e ouviu as duas perguntas outra vez; a Kelly ouviu "pra qual e-mail mando o resumo?" com o e-mail dela na tela. Do lado deles é a mesma coisa: a empresa não olha o que já foi preenchido. Se o dado está em "ja_temos", use-o e siga.
 
@@ -3651,7 +3741,7 @@ PRENDA A FOTO NO MODELO CERTO, sempre, com anexar_foto_ao_modelo — é assim qu
 
 PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos_para_gerar_mockup". Se tiver posição nessa lista, gere o mockup de TODAS elas com gerar_mockup_do_modelo ANTES de mandar o resumo — o PDF leva as imagens junto, e pedido de três cores com um modelo ilustrado e dois vazios é meia organização. Só a primeira imagem vai pro WhatsApp; as outras entram no pedido caladas e aparecem no resumo. O cliente aprova lendo "camiseta oversized preta, algodão fio 30, 120 peças" e imaginando o resto; a confecção produz a partir da mesma frase. Toda diferença entre o que ele imaginou e o que chegou nasce aí, e o mockup é onde ela aparece a tempo de ser corrigida.
 
-A imagem sai por aqui com legenda dizendo que é prévia de IA. Não descreva a imagem que ele está vendo, não repita a legenda e NUNCA diga que é foto de produção nossa ou de peça pronta — é uma prévia do que ele descreveu.
+A imagem sai por aqui com uma legenda curta ("Gerei esse visualizador."). Não descreva a imagem que ele está vendo, não repita a legenda e NUNCA diga que é foto de produção nossa ou de peça pronta — é uma prévia gerada do que ele descreveu; se ele perguntar se é foto real, diga que é uma prévia gerada por IA pra conferir a ideia.
 
 DEPOIS DE MOSTRAR, PERGUNTE SE ASSIM FICA BOM. Uma linha curta: "assim fica bom? se quiser mudar alguma coisa eu faço outro." Pode lembrar que a foto dele serve no lugar, em poucas palavras, sem virar parágrafo. A foto dele vale MAIS que a nossa prévia: é a peça que ele tem na cabeça, e é o que a confecção vai olhar pra produzir. Quando ela chegar, prenda no modelo com anexar_foto_ao_modelo e siga — não precisa gerar prévia nova em cima dela. Se ele pedir mudança, chame gerar_mockup_do_modelo de novo com "instrucoes" no que ele falou. Se ele disser que está certo, siga pro resumo. E se a lista vier vazia, não gere nada: já existe imagem naquele modelo.
 
@@ -4670,6 +4760,118 @@ async function primeiraReplicaAoHumano(conversaId: string, humanoFalouEm: string
   return primeira
 }
 
+// ─── Seguimento: "ficou alguma dúvida?" depois do silêncio ──────────────────
+
+/** Minutos de silêncio do cliente, depois de uma dúvida respondida, até o Luigi voltar sozinho. */
+const MINUTOS_ATE_SEGUIR = 3
+const FRASES_DE_SEGUIMENTO = ['Ficou alguma dúvida?', 'Tem mais alguma dúvida?', 'Posso ajudar em mais alguma coisa?']
+
+/**
+ * MARCA A VOLTA — 25/09/2026. Big Shopp, 18:23: "é necessário passar pra
+ * confecção pra depois vir o orçamento?"; o Luigi respondeu e, na mesma vez,
+ * "posso te mandar o resumo em PDF?". O Fernando: "era bom ele esperar; se a
+ * conversa não avançar em uns 3 minutos, perguntar se tem mais alguma dúvida;
+ * até ele dizer que não tem, e só aí perguntar se pode mandar o resumo".
+ *
+ * Marca quando: o cliente perguntou algo, o Luigi respondeu sem perguntar nada
+ * de volta (a bola ficou com ninguém), há pedido aberto que ainda não foi pras
+ * confecções, e o turno não fechou nada por código. Quem cumpre a marca é o
+ * cron /api/cron/luigi-seguir, a cada minuto (`seguirConversasParadas`).
+ * Qualquer mensagem do cliente desarma no webhook; fala de gente desarma na
+ * conferência do cron.
+ */
+async function armarSeguir(conversaId: string, ctx: Contexto, clientePerguntou: boolean, luigiPerguntou: boolean, fechamento: FechamentoPorCodigo): Promise<void> {
+  if (ctx.ehFornecedor || !clientePerguntou || luigiPerguntou || fechamento) return
+  const aberto = ctx.pedidos.some((p) => p.em_aberto && !JA_FOI_PRAS_CONFECCOES.has(p.etapa))
+  if (!aberto) return
+  const agora = Date.now()
+  await supabaseAdmin
+    .from('wa_conversas')
+    .update({ luigi_seguir_em: new Date(agora + MINUTOS_ATE_SEGUIR * 60_000).toISOString(), luigi_seguir_marcado_em: new Date(agora).toISOString() })
+    .eq('id', conversaId)
+}
+
+/**
+ * Cumpre as marcas vencidas: manda "ficou alguma dúvida?" onde ninguém falou
+ * desde a marca. Confere no banco, na hora, o que pode ter mudado: mensagem do
+ * cliente, fala de gente, escalada, janela de 24 h, modo do Luigi. Uma vez por
+ * marca — a marca some ao cumprir ou ao desarmar.
+ */
+export async function seguirConversasParadas(): Promise<{ enviadas: number; desarmadas: number }> {
+  const modo = await modoLuigi()
+  const agoraIso = new Date().toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('wa_conversas')
+    .select('id, luigi_seguir_marcado_em, ultima_msg_contato_em, humano_falou_em, luigi_escalado_em, wa_contatos!inner(wa_id, nome)')
+    .lte('luigi_seguir_em', agoraIso)
+    .limit(20)
+  if (error || !data) return { enviadas: 0, desarmadas: 0 }
+
+  let enviadas = 0
+  let desarmadas = 0
+  for (const c of data as Array<{ id: string; luigi_seguir_marcado_em: string | null; ultima_msg_contato_em: string | null; humano_falou_em: string | null; luigi_escalado_em: string | null; wa_contatos: { wa_id: string; nome: string | null } | Array<{ wa_id: string; nome: string | null }> }>) {
+    const desarmar = async () => {
+      await supabaseAdmin.from('wa_conversas').update({ luigi_seguir_em: null, luigi_seguir_marcado_em: null }).eq('id', c.id)
+      desarmadas++
+    }
+    const contato = Array.isArray(c.wa_contatos) ? c.wa_contatos[0] : c.wa_contatos
+    const marcadoMs = c.luigi_seguir_marcado_em ? new Date(c.luigi_seguir_marcado_em).getTime() : 0
+    const depoisDaMarca = (iso: string | null) => Boolean(iso) && new Date(iso as string).getTime() > marcadoMs
+    // Só em `responde`: em `sugere` a fala vira rascunho, e rascunho de
+    // "ficou alguma dúvida?" três minutos depois não serve pra nada.
+    if (modo !== 'responde' || !contato || !marcadoMs || c.luigi_escalado_em || depoisDaMarca(c.ultima_msg_contato_em) || depoisDaMarca(c.humano_falou_em)) {
+      await desarmar()
+      continue
+    }
+    // Alguém nosso (outro turno, gestão, inbox) falou depois da marca? Então a
+    // conversa andou sem o cliente e a cutucada chegaria em cima.
+    const { data: saida } = await supabaseAdmin
+      .from('wa_mensagens')
+      .select('id')
+      .eq('conversa_id', c.id)
+      .eq('direcao', 'saida')
+      .gt('criado_em', c.luigi_seguir_marcado_em as string)
+      .limit(1)
+    if (saida && saida.length > 0) {
+      await desarmar()
+      continue
+    }
+    if (!(await janela24hAberta(contato.wa_id))) {
+      await desarmar()
+      continue
+    }
+    const texto = FRASES_DE_SEGUIMENTO[Math.abs(c.id.charCodeAt(0) + c.id.charCodeAt(1)) % FRASES_DE_SEGUIMENTO.length]
+    const inicio = Date.now()
+    const r = await enviarTexto(contato.wa_id, texto)
+    if (r.ok) await registrarSaidaInbox(contato.wa_id, contato.nome, r.wamid, texto, null, 'luigi')
+    await gravarLog({
+      conversa_id: c.id,
+      wa_id: contato.wa_id,
+      wamid_entrada: null,
+      modo,
+      mensagem: null,
+      resposta: texto,
+      pedido_id: null,
+      // O rastro de que foi o seguimento, não um turno: `via: 'codigo'`, como
+      // a liberação e o resumo por código.
+      ferramentas: [{ nome: 'seguimento_silencio', argumentos: { minutos: MINUTOS_ATE_SEGUIR }, ok: r.ok, via: 'codigo', ...(r.ok ? {} : { erro: r.erro }) }],
+      escalado: false,
+      motivo_escalada: null,
+      status: r.ok ? 'enviada' : 'falhou',
+      modelo: MODELO,
+      rodadas: 0,
+      tokens_entrada: 0,
+      tokens_saida: 0,
+      duracao_ms: Date.now() - inicio,
+      erro: r.ok ? null : `seguimento falhou: ${r.erro}`,
+    })
+    if (r.ok) enviadas++
+    await desarmar()
+    desarmadas--
+  }
+  return { enviadas, desarmadas }
+}
+
 /** Só a leitura do número; erro aqui cai no padrão, que não é permissivo. */
 async function janelaAposHumanoMin(): Promise<number> {
   const { data, error } = await supabaseAdmin
@@ -5263,7 +5465,13 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       const semLiberacao: LiberacaoPorCodigo = { liberou: false, codigo: null }
       const auto: LiberacaoPorCodigo =
         modo === 'responde' ? await liberarSeEleConfirmou(ctx, params.corpo, params.conversaId, params.criadoEm).catch(() => semLiberacao) : semLiberacao
-      const fechamento: FechamentoPorCodigo = auto.liberou ? 'liberou' : auto.recusa ? 'recusou' : null
+      // O sim ao "posso mandar o resumo?" é o degrau anterior do mesmo
+      // desenho — só se o sim não foi ao fechamento.
+      const resumoAuto =
+        modo === 'responde' && !auto.liberou && !auto.recusa
+          ? await enviarResumoSeEleConfirmou(ctx, params.corpo, params.conversaId, params.criadoEm).catch(() => ({ enviou: false, codigo: null }))
+          : { enviou: false, codigo: null }
+      const fechamento: FechamentoPorCodigo = auto.liberou ? 'liberou' : auto.recusa ? 'recusou' : resumoAuto.enviou ? 'resumo' : null
 
       const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada), fechamento)
       const pedidoId = ctx.pedidoEmFoco?.id ?? null
@@ -5275,6 +5483,8 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
         r.ferramentas.unshift({ nome: 'liberar_para_fornecedores', argumentos: { pedido: auto.codigo }, ok: true, via: 'codigo' })
       } else if (auto.recusa) {
         r.ferramentas.unshift({ nome: 'liberar_para_fornecedores', argumentos: { pedido: auto.codigo }, ok: false, erro: auto.recusa, via: 'codigo' })
+      } else if (resumoAuto.enviou) {
+        r.ferramentas.unshift({ nome: 'enviar_resumo_pedido', argumentos: { pedido: resumoAuto.codigo }, ok: true, via: 'codigo' })
       }
 
       if (modo === 'sugere') {
@@ -5552,6 +5762,14 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       //
       // Continua 'falhou' quando o texto foi BARRADO por vocabulário interno —
       // ali houve resposta e ela foi impedida, que é problema de verdade.
+      // Dúvida respondida sem pergunta de volta: marca a volta em 3 min
+      // ("ficou alguma dúvida?"). Ver armarSeguir. Failure-soft.
+      if (envio.ok && modo === 'responde' && !r.escalada) {
+        const ultimaDele = mensagens[mensagens.length - 1]
+        const textoDele = ultimaDele && ultimaDele.role === 'user' && typeof ultimaDele.content === 'string' ? ultimaDele.content : (params.corpo ?? '')
+        await armarSeguir(params.conversaId, ctx, textoDele.includes('?'), r.texto.includes('?'), fechamento).catch(() => undefined)
+      }
+
       const semTexto = partes.length === 0 && !vazandoInterno
       const soEscalou = semTexto && Boolean(r.escalada)
       const calouPorEscolha = semTexto && !r.escalada

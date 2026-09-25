@@ -663,7 +663,7 @@ const CONECTOR_BICOLOR =
  * um par de cores diz que as cores são da mesma peça. Ver `coresSoltas`.
  */
 const CONECTOR_NA_DESCRICAO =
-  /(?<!\p{L})(com|costuras?|detalhes?|listrad\w*|listras?|frente|costas|traseira|externa?|interna?|al[çc]as?|bico|gola|punhos?|barra|extremidades?|capa|estampa\w*|sublima\w*|logo\w*|logotipo|artes?|aplica\w*|bordad\w*|silk|dtf|serigrafia|impress\w*|print|fundo|texto|escrit[ao]s?|letras?|desenho|imagem|degrad\w*|halftone|veludo|forro|faixas?|bordas?|vi[eé]s|vivo|frisos?|mangas?|sobre|efeito|refer[êe]ncia)(?!\p{L})/iu
+  /(?<!\p{L})(com|costuras?|detalhes?|listrad\w*|listras?|frente|costas|traseira|externa?|interna?|al[çc]as?|bico|gola|punhos?|barra|extremidades?|capa|estampa\w*|sublima\w*|logo\w*|logotipo|artes?|aplica\w*|bordad\w*|silk|dtf|serigrafia|impress\w*|print|fundo|texto|escrit[ao]s?|letras?|desenho|imagem|degrad\w*|halftone|veludo|forro|faixas?|bordas?|vi[eé]s|vivo|frisos?|mangas?|sobre|efeito|refer[êe]ncia|bicolor|tricolor|mesclad\w*|ringer|corpo)(?!\p{L})/iu
 
 /** As cores que a regra 2 reconhece, com plural — "10 azuis e 5 brancas" tem as duas no plural. */
 const COR = 'azu(?:l|is)|branc[ao]s?|pret[ao]s?|verdes?|vermelh[ao]s?|amarel[ao]s?|cinzas?|rosas?'

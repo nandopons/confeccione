@@ -390,6 +390,10 @@ async function processarMensagem(msg: MetaMensagem, valor: MetaChangeValue): Pro
       ultima_msg_contato_em: criadoEm,
       nao_lidas: (conv?.nao_lidas ?? 0) + 1,
       arquivada: false,
+      // O cliente falou: a volta marcada ("ficou alguma dúvida?") não tem mais
+      // razão de ser. Ver armarSeguir em luigi.ts.
+      luigi_seguir_em: null,
+      luigi_seguir_marcado_em: null,
     })
     .eq('id', conversaId)
 
