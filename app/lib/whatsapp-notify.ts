@@ -507,27 +507,45 @@ export async function enviarResumoPdfPedido(params: {
    * mensagem que ele mesmo tinha mandado.
    */
   autor?: AutorSaida | null
+  /**
+   * Manda ao cliente mesmo que ele já tenha este PDF idêntico. Por padrão
+   * NÃO: ver "O CLIENTE JÁ TEM ESTE PDF" abaixo. Quem quer reenviar de
+   * propósito (ele pediu o arquivo de novo) passa true.
+   */
+  mesmoQueJaTenha?: boolean
 }): Promise<{ enviados: number; total: number }> {
   const total = params.destinos.length
   if (!total) return { enviados: 0, total: 0 }
 
   try {
+    const { data } = await supabaseAdmin
+      .from('pedidos_assistente')
+      .select(`id, codigo, telefone, resumo_enviado_hash, ${CAMPOS_DO_RESUMO}`)
+      .eq('id', params.pedidoId)
+      .maybeSingle<Record<string, unknown>>()
+    if (!data) return { enviados: 0, total }
+
+    // O CLIENTE JÁ TEM ESTE PDF — 25/09/2026. Big Shopp, 20260900338: o Luigi
+    // mandou o resumo às 18:30, o Fernando ofertou, a Conquisst aceitou, e às
+    // 18:32 o aviso de aceite mandou o MESMO arquivo de novo, com outra legenda.
+    // "Tá redundante." O carimbo de 24/09 (mais abaixo) impedia o Luigi de
+    // repetir o que o aceite mandou; faltava o inverso. Quem decide é a
+    // assinatura do conteúdo: hash igual, o cliente já viu — o aviso de aceite
+    // já leva o link no texto. Só o cliente: a confecção nunca recebeu antes.
+    const hashAtual = hashDoResumo(data)
+    const telCliente = String(data.telefone ?? '').replace(/\D/g, '').slice(-8)
+    const clienteJaTem = !params.mesmoQueJaTenha && telCliente.length === 8 && data.resumo_enviado_hash === hashAtual
+
     // Só vale gerar o PDF se ALGUÉM puder receber — a geração lê imagens e
     // monta o documento inteiro, é a parte cara.
     const abertos: { waId: string; destino: DestinoResumo }[] = []
     for (const destino of params.destinos) {
       const waId = normalizarWaId(destino.telefone)
       if (waId.replace(/\D/g, '').length < 10) continue
+      if (clienteJaTem && waId.slice(-8) === telCliente) continue
       if (await janela24hAberta(waId)) abertos.push({ waId, destino })
     }
     if (!abertos.length) return { enviados: 0, total }
-
-    const { data } = await supabaseAdmin
-      .from('pedidos_assistente')
-      .select(`id, codigo, telefone, ${CAMPOS_DO_RESUMO}`)
-      .eq('id', params.pedidoId)
-      .maybeSingle<Record<string, unknown>>()
-    if (!data) return { enviados: 0, total }
 
     const pedido: ResumoPedido = {
       id: String(data.id),
@@ -629,11 +647,10 @@ export async function enviarResumoPdfPedido(params: {
       // Luigi — que leu "nunca enviado" e mandou. O carimbo mora aqui porque
       // aqui é onde o arquivo chega, seja quem for que pediu. Fornecedor não
       // conta: o campo é sobre o que o CLIENTE já viu.
-      const telCliente = String(data.telefone ?? '').replace(/\D/g, '').slice(-8)
       if (telCliente.length === 8 && waId.slice(-8) === telCliente) {
         await supabaseAdmin
           .from('pedidos_assistente')
-          .update({ resumo_enviado_em: agoraEnvio, resumo_enviado_hash: hashDoResumo(data) })
+          .update({ resumo_enviado_em: agoraEnvio, resumo_enviado_hash: hashAtual })
           .eq('id', params.pedidoId)
           .then(({ error }) => {
             if (error) console.error('[wa-notify] carimbo do resumo falhou', { erro: error.message })

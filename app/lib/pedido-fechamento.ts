@@ -1000,6 +1000,8 @@ export async function enviarResumoParaCliente(
     // a trava de "gente na conversa" lê isso como pessoa e ele se cala nos 15
     // minutos seguintes ao próprio resumo — bem quando o cliente responde.
     autor: 'luigi',
+    // `forcar` = ele pediu o arquivo de novo; aí vai mesmo idêntico.
+    mesmoQueJaTenha: Boolean(opts.forcar),
   })
   if (r.enviados === 0) return { ok: false, erro: 'não foi possível enviar o PDF agora' }
   // QUEM CARIMBA É O ENVIO, NÃO O CHAMADOR — 24/09/2026. `resumo_enviado_em` e
