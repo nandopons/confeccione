@@ -117,10 +117,10 @@ const AGENTES_SAIDA = new Set(['luigi', 'mcp', 'gestao'])
  * repetição que o cliente lia na tela.
  */
 const EXEMPLOS_DEPOIS_DA_PREVIA = [
-  'ficou perto do que você quer? se quiser mudo alguma coisa, ou se você tiver uma foto da peça é só mandar que eu uso a sua.',
-  'é por aí? me diz o que ajustar, ou manda uma foto da peça que eu coloco no lugar dessa.',
-  'chegou mais perto? qualquer detalhe que queira mudar é só falar. se tiver a foto da peça, ela vale mais que a prévia.',
-  'bateu com o que você imaginou? posso mexer no que quiser, ou uso uma foto sua se preferir.',
+  'assim fica bom? se quiser mudar alguma coisa eu faço outro.',
+  'ficou como você imaginou? qualquer ajuste é só me dizer que refaço.',
+  'é por aí? se preferir, me manda uma foto da peça que eu uso ela no lugar.',
+  'bateu com a ideia? posso mexer no que você quiser.',
 ]
 
 /**
@@ -3025,9 +3025,10 @@ async function executarFerramenta(
       // entre elas — quando o que a gente queria era ele aprovar uma.
       const { data: atual } = await supabaseAdmin
         .from('pedidos_assistente')
-        .select('mockups')
+        .select('mockups, linhas')
         .eq('id', p.id)
-        .maybeSingle<{ mockups: MapaMockups | null }>()
+        .maybeSingle<{ mockups: MapaMockups | null; linhas: unknown[] | null }>()
+      const nModelos = Array.isArray(atual?.linhas) ? atual.linhas.length : 1
       const mk = (atual?.mockups ?? {})[String(posicao - 1)]
       if (Array.isArray(mk?.ia) && mk.ia.length > 0 && !instrucoes) {
         throw new Error(
@@ -3092,7 +3093,14 @@ async function executarFerramenta(
       ctx.mockupsNestaRodada += 1
 
       const imagem = r.ia[r.ia.length - 1]
-      const legenda = `Modelo ${posicao} — ${r.modelo}. Prévia gerada por IA a partir do que você descreveu, pra conferir a ideia.`
+      // LEGENDA CURTA — 25/09/2026. Era "Modelo 1 — corta-vento. Prévia gerada
+      // por IA a partir do que você descreveu, pra conferir a ideia." O Fernando:
+      // "as legendas podem ser mais simples: gerei esse visualizador". O modelo
+      // só é nomeado quando o pedido tem mais de um; a segunda geração diz que
+      // refez. O "assim fica bom?" vem na fala do Luigi logo depois.
+      const vez = Math.max(1, r.ia.length)
+      const qual = nModelos > 1 ? ` do modelo ${posicao}, ${r.modelo}` : ''
+      const legenda = vez > 1 ? `Refiz o visualizador${qual}.` : `Gerei esse visualizador${qual}.`
       const envio =
         primeiroDaRodada && imagem
           ? await enviarImagemDoPedido({
@@ -3114,7 +3122,6 @@ async function executarFerramenta(
       // pra falar a mesma coisa mudando as palavras". Então o exemplo gira
       // com o número da prévia daquele modelo, e a partir da segunda a
       // instrução é dizer o que mudou e não repetir a frase anterior.
-      const vez = Math.max(1, r.ia.length)
       const exemplo = EXEMPLOS_DEPOIS_DA_PREVIA[(vez - 1) % EXEMPLOS_DEPOIS_DA_PREVIA.length]
       const refeita =
         vez > 1
@@ -3130,11 +3137,11 @@ async function executarFerramenta(
         usou_arte_do_cliente: r.referenciasUsadas > 0,
         enviado_no_whatsapp: envio.ok,
         aviso: envio.ok
-          ? 'A imagem JÁ FOI para o WhatsApp dele com legenda dizendo que é prévia de IA — não descreva a imagem ' +
-            'nem repita a legenda. Agora pergunte, em UMA linha, se ficou parecido com o que ele quer, e ofereça ' +
-            'as duas saídas na mesma frase: ajustar (ele diz o que mudar e você gera de novo com `instrucoes`) ou ' +
-            'mandar a foto dele (que vira a referência oficial daquele modelo — você prende com ' +
-            `anexar_foto_ao_modelo). Com as SUAS palavras — algo como: "${exemplo}"` +
+          ? `A imagem JÁ FOI para o WhatsApp dele com a legenda "${legenda}" — não descreva a imagem nem repita ` +
+            'a legenda. Agora pergunte, em UMA linha curta, se assim fica bom. Se quiser, diga em poucas palavras ' +
+            'que refaz se ele pedir (ele diz o que mudar e você gera de novo com `instrucoes`) ou que a foto dele ' +
+            'serve no lugar (você prende com anexar_foto_ao_modelo) — mas sem virar parágrafo. ' +
+            `Com as SUAS palavras — algo como: "${exemplo}"` +
             refeita +
             ' Nunca diga que é foto de produção.'
           : !primeiroDaRodada
@@ -3646,7 +3653,7 @@ PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos
 
 A imagem sai por aqui com legenda dizendo que é prévia de IA. Não descreva a imagem que ele está vendo, não repita a legenda e NUNCA diga que é foto de produção nossa ou de peça pronta — é uma prévia do que ele descreveu.
 
-DEPOIS DE MOSTRAR, PERGUNTE SE FICOU PARECIDO — E OFEREÇA A FOTO DELE. Uma linha, com as duas saídas juntas: ajustar ou mandar a própria imagem. "Ficou perto do que você quer? Se quiser eu mudo alguma coisa, ou se você tiver uma foto da peça é só mandar que eu uso a sua." A foto dele vale MAIS que a nossa prévia: é a peça que ele tem na cabeça, e é o que a confecção vai olhar pra produzir. Quando ela chegar, prenda no modelo com anexar_foto_ao_modelo e siga — não precisa gerar prévia nova em cima dela. Se ele pedir mudança, chame gerar_mockup_do_modelo de novo com "instrucoes" no que ele falou. Se ele disser que está certo, siga pro resumo. E se a lista vier vazia, não gere nada: já existe imagem naquele modelo.
+DEPOIS DE MOSTRAR, PERGUNTE SE ASSIM FICA BOM. Uma linha curta: "assim fica bom? se quiser mudar alguma coisa eu faço outro." Pode lembrar que a foto dele serve no lugar, em poucas palavras, sem virar parágrafo. A foto dele vale MAIS que a nossa prévia: é a peça que ele tem na cabeça, e é o que a confecção vai olhar pra produzir. Quando ela chegar, prenda no modelo com anexar_foto_ao_modelo e siga — não precisa gerar prévia nova em cima dela. Se ele pedir mudança, chame gerar_mockup_do_modelo de novo com "instrucoes" no que ele falou. Se ele disser que está certo, siga pro resumo. E se a lista vier vazia, não gere nada: já existe imagem naquele modelo.
 
 NUNCA A MESMA FRASE DUAS VEZES NA MESMA CONVERSA. Quando ele pede um ajuste e você manda a prévia refeita, a pergunta é a mesma, as palavras não: diga primeiro o que mudou ("agora com o capuz") e pergunte de outro jeito. "Ficou parecido com o que você quer? Se quiser ajustar algum detalhe é só me falar" duas vezes seguidas, na tela dele, é robô lendo script. Vale pra toda fala sua que se repete por natureza (a pergunta depois da prévia, o "posso liberar?", o fecho): antes de escrever, olhe a sua última mensagem no histórico e não a reescreva igual.
 
