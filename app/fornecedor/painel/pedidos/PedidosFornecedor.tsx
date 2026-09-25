@@ -46,6 +46,11 @@ function Resumo({ texto }: { texto: string }) {
 const VERDE = '#1D9E75'
 const VERDE_ESCURO = '#0F6E56'
 const VERDE_CLARO = '#E1F5EE'
+/** Botões dos cards: cheio e alto no celular (44 px), compacto em linha no desktop. */
+const BTN_PRIMARIO =
+  'col-span-2 sm:order-2 inline-flex items-center justify-center h-11 sm:h-auto text-sm font-semibold px-4 py-2 rounded-xl text-white'
+const BTN_SECUNDARIO =
+  'inline-flex items-center justify-center h-11 sm:h-auto text-sm px-3 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50'
 
 type TabId = 'pendentes' | 'orcar' | 'aguardando_cliente' | 'producao' | 'concluido'
 
@@ -183,8 +188,11 @@ export default function PedidosFornecedor({
 
   return (
     <div>
-      {/* Tabs */}
-      <div className="flex flex-wrap gap-2 mb-6">
+      {/* Tabs — 25/09/2026: no celular é UMA linha que rola pro lado, sangrando
+          até a borda da tela (-mx-5), em vez de quatro pílulas quebrando em duas
+          linhas centralizadas. O contador vira pílula dentro da pílula, que se
+          lê de relance; "(28)" entre parênteses não. */}
+      <div className="-mx-5 px-5 md:mx-0 md:px-0 mb-5 flex gap-2 overflow-x-auto md:flex-wrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {visiveis.map((t) => {
           const ativo = tab === t.id
           return (
@@ -192,12 +200,20 @@ export default function PedidosFornecedor({
               key={t.id}
               onClick={() => setTab(t.id)}
               className={
-                'px-4 py-2 rounded-full text-sm font-medium transition-colors ' +
+                'shrink-0 inline-flex items-center gap-1.5 pl-3.5 pr-2 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ' +
                 (ativo ? 'text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')
               }
               style={ativo ? { backgroundColor: VERDE_ESCURO } : undefined}
             >
-              {t.label} ({counts[t.id]})
+              {t.label}
+              <span
+                className={
+                  'inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full text-[12px] font-semibold ' +
+                  (ativo ? 'bg-white/20 text-white' : 'bg-white text-gray-700')
+                }
+              >
+                {counts[t.id]}
+              </span>
             </button>
           )
         })}
@@ -234,44 +250,73 @@ function CardPendente({
   onResponder: (ofertaId: string, acao: 'aceitar' | 'recusar') => void
 }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <div>
-          <div className="text-xs text-gray-400">{data(o.criadoEm)}</div>
-          <div className="font-semibold text-gray-900">
-            {o.totalPecas} peças
-            {o.clienteNome ? <span className="text-gray-400 font-normal"> · {o.clienteNome}</span> : null}
-          </div>
-        </div>
-        <span className="text-xs px-2.5 py-1 rounded-full bg-amber-100 text-amber-800">Nova oferta</span>
-      </div>
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
+      <CabecalhoCard data={data(o.criadoEm)} pill="Nova oferta" pillClass="bg-amber-100 text-amber-800" totalPecas={o.totalPecas} clienteNome={o.clienteNome} />
 
       <Resumo texto={o.resumo} />
 
       <div className="mt-3 text-xs text-gray-500">Aceite para assumir este pedido e definir o orçamento.</div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Link
-          href={`/fornecedor/oferta/${o.ofertaId}`}
-          className="text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
-        >
-          Ver mockups e detalhes
-        </Link>
+      {/* AÇÕES — 25/09/2026. Eram três botões do mesmo tamanho em linha, e no
+          celular "Ver mockups e detalhes" ocupava a linha inteira sozinho em
+          cima do "Assumir". A ação principal é UMA e vai cheia; olhar e
+          recusar ficam embaixo, do mesmo peso, lado a lado. */}
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
         <button
           onClick={() => onResponder(o.ofertaId, 'aceitar')}
           disabled={agindo}
-          className="text-sm px-4 py-2 rounded-lg text-white disabled:opacity-50"
+          className="col-span-2 sm:order-2 h-11 sm:h-auto text-sm font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-50"
           style={{ backgroundColor: VERDE }}
         >
-          {agindo ? '...' : 'Assumir pedido'}
+          {agindo ? 'Um instante…' : 'Assumir pedido'}
         </button>
+        <Link
+          href={`/fornecedor/oferta/${o.ofertaId}`}
+          className="sm:order-1 inline-flex items-center justify-center h-11 sm:h-auto text-sm px-3 py-2 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50"
+        >
+          Ver detalhes
+        </Link>
         <button
           onClick={() => onResponder(o.ofertaId, 'recusar')}
           disabled={agindo}
-          className="text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+          className="sm:order-3 h-11 sm:h-auto text-sm px-3 py-2 rounded-xl border border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-600 hover:bg-red-50 disabled:opacity-50"
         >
           Recusar
         </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Cabeçalho dos cards — 25/09/2026. Data e situação na primeira linha (as
+ * duas pequenas), o título embaixo com a largura toda. Antes o título e a
+ * pílula disputavam a mesma linha: "Aguardando o cliente pagar" com
+ * `whitespace-nowrap` ao lado de "50 peças · Maria Eduarda" não cabe em
+ * 360 px, e um dos dois cedia.
+ */
+function CabecalhoCard({
+  data: quando,
+  pill,
+  pillClass,
+  totalPecas,
+  clienteNome,
+}: {
+  data: string
+  pill: string
+  pillClass: string
+  totalPecas: number
+  clienteNome: string | null
+}) {
+  return (
+    <div className="mb-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-gray-400">{quando}</span>
+        <span className={'text-xs px-2.5 py-1 rounded-full text-right ' + pillClass}>{pill}</span>
+      </div>
+      <div className="mt-1 text-[17px] font-semibold text-gray-900 leading-snug">
+        {totalPecas} peças
+        {clienteNome ? <span className="text-gray-400 font-normal"> · {clienteNome}</span> : null}
       </div>
     </div>
   )
@@ -343,19 +388,10 @@ function CardAceito({ o, fornecedorNome }: { o: Oferta; fornecedorNome: string |
   const destaque = o.estado === 'producao'
   return (
     <div
-      className="rounded-2xl border bg-white p-5 shadow-sm"
+      className="rounded-2xl border bg-white p-4 sm:p-5 shadow-sm"
       style={destaque ? { borderColor: VERDE } : { borderColor: '#e5e7eb' }}
     >
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <div>
-          <div className="text-xs text-gray-400">{data(o.criadoEm)}</div>
-          <div className="font-semibold text-gray-900">
-            {o.totalPecas} peças
-            {o.clienteNome ? <span className="text-gray-400 font-normal"> · {o.clienteNome}</span> : null}
-          </div>
-        </div>
-        <span className={'text-xs px-2.5 py-1 rounded-full whitespace-nowrap ' + cfg.pillClass}>{cfg.pill}</span>
-      </div>
+      <CabecalhoCard data={data(o.criadoEm)} pill={cfg.pill} pillClass={cfg.pillClass} totalPecas={o.totalPecas} clienteNome={o.clienteNome} />
 
       <Resumo texto={o.resumo} />
 
@@ -403,30 +439,25 @@ function CardAceito({ o, fornecedorNome }: { o: Oferta; fornecedorNome: string |
         </a>
       )}
 
-      {/* Ações contextuais */}
-      <div className="mt-4 flex flex-wrap gap-2">
+      {/* Ações contextuais — a principal cheia no celular, as outras lado a lado. */}
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
         {o.estado === 'orcar' && (
-          <Link
-            href={`/fornecedor/oferta/${o.ofertaId}/orcamento`}
-            className="text-sm px-4 py-2 rounded-lg text-white"
-            style={{ backgroundColor: VERDE }}
-          >
-            Definir orçamento →
-          </Link>
+          <>
+            <Link href={`/fornecedor/oferta/${o.ofertaId}/orcamento`} className={BTN_PRIMARIO} style={{ backgroundColor: VERDE }}>
+              Definir orçamento →
+            </Link>
+            <Link href={`/fornecedor/oferta/${o.ofertaId}`} className={BTN_SECUNDARIO + ' col-span-2 sm:order-1'}>
+              Ver detalhes
+            </Link>
+          </>
         )}
 
         {o.estado === 'aguardando_cliente' && (
           <>
-            <Link
-              href={`/fornecedor/oferta/${o.ofertaId}`}
-              className="text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
-            >
+            <Link href={`/fornecedor/oferta/${o.ofertaId}`} className={BTN_SECUNDARIO}>
               Ver detalhes
             </Link>
-            <Link
-              href={`/fornecedor/oferta/${o.ofertaId}/orcamento`}
-              className="text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
-            >
+            <Link href={`/fornecedor/oferta/${o.ofertaId}/orcamento`} className={BTN_SECUNDARIO}>
               Ajustar orçamento
             </Link>
           </>
@@ -434,27 +465,17 @@ function CardAceito({ o, fornecedorNome }: { o: Oferta; fornecedorNome: string |
 
         {o.estado === 'producao' && (
           <>
-            <Link
-              href={`/fornecedor/oferta/${o.ofertaId}`}
-              className="text-sm px-4 py-2 rounded-lg text-white"
-              style={{ backgroundColor: VERDE }}
-            >
+            <Link href={`/fornecedor/oferta/${o.ofertaId}`} className={BTN_PRIMARIO} style={{ backgroundColor: VERDE }}>
               Ver mockups e detalhes
             </Link>
-            <Link
-              href="/fornecedor/painel/envio"
-              className="text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
-            >
+            <Link href="/fornecedor/painel/envio" className={BTN_SECUNDARIO + ' col-span-2 sm:order-1'}>
               Envio (Melhor Envio)
             </Link>
           </>
         )}
 
         {o.estado === 'concluido' && (
-          <Link
-            href={`/fornecedor/oferta/${o.ofertaId}`}
-            className="text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
-          >
+          <Link href={`/fornecedor/oferta/${o.ofertaId}`} className={BTN_SECUNDARIO + ' col-span-2'}>
             Ver mockups e detalhes
           </Link>
         )}
@@ -462,3 +483,4 @@ function CardAceito({ o, fornecedorNome }: { o: Oferta; fornecedorNome: string |
     </div>
   )
 }
+

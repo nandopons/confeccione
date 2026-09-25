@@ -14,9 +14,9 @@ export default async function PedidosPage() {
   ])
 
   return (
-    <section className="px-5 md:px-8 pt-8 pb-24 max-w-3xl mx-auto">
+    <section className="px-5 md:px-8 pt-5 md:pt-8 pb-24 max-w-3xl mx-auto">
       <h1 className="text-gray-900 text-2xl font-medium mb-1">Pedidos</h1>
-      <p className="text-gray-500 text-sm mb-8">Aceite as ofertas, envie o orçamento e acompanhe cada pedido até o pagamento do cliente e a produção.</p>
+      <p className="text-gray-500 text-sm mb-5 md:mb-8">Aceite as ofertas, envie o orçamento e acompanhe cada pedido até o pagamento do cliente e a produção.</p>
       {/* fornecedorNome vai junto so pra montar a mensagem de abertura do
           WhatsApp ("Aqui e Fulano, da Confeccione") — o cliente nao sabe quem
           esta mandando "oi". */}
