@@ -136,7 +136,13 @@ export async function rodarCutucadaPosResumo(): Promise<ResultadoCutucada> {
     .is('cutucada_resumo_em', null)
     .is('confirmado_em', null)
     .is('encerrado_em', null)
-    .neq('pagamento_status', 'pago')
+    // A ARMADILHA DO NULL, DE NOVO — 25/09/2026. Era `.neq('pagamento_status',
+    // 'pago')`, e `NULL <> 'pago'` é NULL, que não passa no WHERE. Dos 32
+    // pedidos que já receberam resumo, 30 têm pagamento_status NULO: a
+    // cutucada NUNCA achou candidato nenhum — zero envios na base inteira,
+    // com o cron rodando a cada 15 minutos desde 10/09. A mesma armadilha já
+    // tinha sido pisada em criarPedidoParaContato (ver AGENTS.md).
+    .or('pagamento_status.is.null,pagamento_status.neq.pago')
     .or(`lembretes_pausados_ate.is.null,lembretes_pausados_ate.lt.${new Date().toISOString()}`)
     .limit(40)
 

@@ -50,7 +50,9 @@ export async function listarPedidosChat(filtro: 'incompletos' | 'todos'): Promis
     .select('id, codigo, criado_em, nome, telefone, email, status, pagamento_status, valor_centavos, linhas')
     .order('criado_em', { ascending: false })
     .limit(200)
-  if (filtro === 'incompletos') q = q.neq('pagamento_status', 'pago')
+  // NULL não passa em `.neq`: sem o `is.null` a aba "incompletos" escondia
+  // justamente os pedidos que nunca chegaram a pagamento (25/09/2026).
+  if (filtro === 'incompletos') q = q.or('pagamento_status.is.null,pagamento_status.neq.pago')
   const { data } = await q
   const lista = (data ?? []) as any[]
   // status de oferta por pedido (pra rotular 'buscando fornecedor' / 'aceito')
