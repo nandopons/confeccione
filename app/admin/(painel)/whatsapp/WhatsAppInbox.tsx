@@ -1285,7 +1285,8 @@ export function WhatsAppInbox({
                               (saida ? 'bg-[#d9fdd3] text-neutral-900' : 'bg-white text-neutral-900')
                             }
                           >
-                            {saida && m.autor && (
+                            {/* 'equipe' é quem está olhando esta tela: fala sem rótulo, como sempre foi. */}
+                            {saida && m.autor && m.autor !== 'equipe' && (
                               <p className="text-[10px] font-semibold uppercase tracking-wide text-[#0F6E56] mb-0.5">
                                 {m.autor === 'luigi' ? 'Luigi' : m.autor === 'gestao' ? 'Agente de gestão' : m.autor}
                               </p>

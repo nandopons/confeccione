@@ -747,6 +747,63 @@ type CadastroFornecedor = {
   aprovado: boolean
 }
 
+/** O que o botão do passo 4 do site põe na mensagem: "(pedido 6a8ee300)". */
+const PEDIDO_CITADO_PELO_SITE = /\(pedido ([0-9a-f]{8})\)/i
+
+/**
+ * O BOTÃO DO SITE CITA O PEDIDO; O LUIGI PASSA A ENXERGÁ-LO — 25/09/2026.
+ *
+ * O pedido do site é achado por telefone (`pedidosDoContato`, 8 finais). Quando
+ * o número digitado no site é OUTRO — a Larissa (20260900329) digitou 31
+ * 98412-0057 e escreveu do 31 9844-1333 — o pedido fica invisível, e o
+ * "(pedido 6a8ee300)" que o botão põe na mensagem não era lido por ninguém: o
+ * Luigi respondeu "vi que o pedido 6a8ee300 está aberto" ecoando o texto dela,
+ * sem ter o pedido, e seis turnos depois abriu OUTRO com `criar_pedido`. Dois
+ * pedidos, dados repartidos entre eles. Em 30 dias, 21 clientes vieram do site
+ * pro WhatsApp com o botão; 2 com número diferente do digitado.
+ *
+ * Adotar é gravar o wa_id como telefone do pedido — a regra do número canônico
+ * de telefone-cliente.ts, só que aqui o casamento vem do id na mensagem, não
+ * dos 8 finais. O digitado fica em `telefone_digitado`, como lá. Só pedido
+ * vivo (não pago, não encerrado) e só se o número antigo não for de um contato
+ * que já MANDOU mensagem — aí o pedido tem dono no WhatsApp e não é este.
+ * O id tem 8 hex do próprio uuid: não se adivinha, vem do site.
+ */
+async function adotarPedidoCitado(corpo: string | null, waId: string): Promise<void> {
+  const m = PEDIDO_CITADO_PELO_SITE.exec(corpo ?? '')
+  if (!m) return
+  const prefixo = m[1].toLowerCase()
+  const { data, error } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, telefone, telefone_digitado, pagamento_status, encerrado_em')
+    .gte('id', `${prefixo}-0000-0000-0000-000000000000`)
+    .lte('id', `${prefixo}-ffff-ffff-ffff-ffffffffffff`)
+    .limit(2)
+  if (error || !data || data.length !== 1) return
+  const p = data[0] as { id: string; telefone: string | null; telefone_digitado: string | null; pagamento_status: string | null; encerrado_em: string | null }
+  if (p.pagamento_status === 'pago' || p.encerrado_em) return
+  const fim8 = (t: string | null | undefined) => {
+    const d = (t ?? '').replace(/\D/g, '')
+    return d.length >= 8 ? d.slice(-8) : null
+  }
+  const meu = fim8(waId)
+  const dele = fim8(p.telefone)
+  if (!meu || meu === dele) return
+  if (dele) {
+    const { data: dono } = await supabaseAdmin
+      .from('wa_contatos')
+      .select('wa_id, wa_conversas!inner(ultima_msg_contato_em)')
+      .like('wa_id', `%${dele}`)
+      .not('wa_conversas.ultima_msg_contato_em', 'is', null)
+      .limit(1)
+    if (dono && dono.length > 0) return
+  }
+  await supabaseAdmin
+    .from('pedidos_assistente')
+    .update({ telefone: waId, telefone_digitado: p.telefone_digitado ?? p.telefone, atualizado_em: new Date().toISOString() })
+    .eq('id', p.id)
+}
+
 async function pedidosDoContato(waId: string, clienteId: string | null): Promise<PedidoEtapa[]> {
   const tel8 = waId.replace(/\D/g, '').slice(-8)
   const consultas: Promise<{ data: unknown }>[] = []
@@ -1137,7 +1194,7 @@ const PERGUNTA_DE_FECHAMENTO = /posso\s+(confirmar|liberar)[^?]{0,80}confec|libe
  * linha é pergunta, não resposta. `null` = tinha foto ou arquivo no meio, que
  * nunca é um sim puro.
  */
-function eleDisseQuePode(linhas: string[] | null): boolean {
+export function eleDisseQuePode(linhas: string[] | null): boolean {
   if (!linhas) return false
   let sins = 0
   for (const bruta of linhas) {
@@ -1153,7 +1210,7 @@ function eleDisseQuePode(linhas: string[] | null): boolean {
   return sins > 0
 }
 
-type MensagemRecente = { direcao: 'entrada' | 'saida'; tipo: string | null; corpo: string | null; autor: string | null }
+type MensagemRecente = { direcao: 'entrada' | 'saida'; tipo: string | null; corpo: string | null; autor: string | null; criado_em?: string | null }
 
 /**
  * O que o cliente escreveu desde a última fala do Luigi, e se essa fala foi a
@@ -1165,18 +1222,37 @@ type MensagemRecente = { direcao: 'entrada' | 'saida'; tipo: string | null; corp
  * pergunta pode estar em qualquer fala desse turno, mas o turno tem que ser
  * do Luigi: template da régua ou fala de gente no meio muda o que o "sim"
  * está respondendo. `null` = a consulta falhou (na dúvida, não libera).
+ *
+ * O QUE SAIU DEPOIS DA RESPOSTA DELE NÃO É O QUE ELE RESPONDEU — 25/09/2026.
+ * Kely, 20260900337: 11:50:45 "Posso confirmar e mandar pras confecções?";
+ * 11:51:10 ela: "e isso mesmo"; 11:51:30 o turno ANTERIOR (o do CNPJ, que
+ * ainda rodava) manda o PDF de novo. Quando o turno do "e isso mesmo" leu
+ * esta lista, o PDF estava no topo: uma saída antes de qualquer entrada, a
+ * leitura parou ali, e a pergunta de fechamento nunca foi vista. O código
+ * não liberou, o modelo perguntou "posso liberar?" de novo, e o pedido ficou
+ * parado duas horas e meia até ela perguntar outra coisa. Agora o que é mais
+ * novo que a mensagem deste turno (com 2 s de folga pro relógio da Meta, que
+ * é em segundos) fica de fora: ela não pode ter respondido ao que ainda não
+ * tinha chegado.
  */
-async function respostaAoFechamento(conversaId: string, corpoAtual: string): Promise<{ fechamento: boolean; linhas: string[] | null } | null> {
+async function respostaAoFechamento(conversaId: string, corpoAtual: string, criadoEmAtual?: string | null): Promise<{ fechamento: boolean; linhas: string[] | null } | null> {
   const { data, error } = await supabaseAdmin
     .from('wa_mensagens')
-    .select('direcao, tipo, corpo, autor')
+    .select('direcao, tipo, corpo, autor, criado_em')
     .eq('conversa_id', conversaId)
     .order('criado_em', { ascending: false })
     .limit(12)
   if (error || !data) return null
+  return lerRespostaAoFechamento(data as MensagemRecente[], corpoAtual, criadoEmAtual)
+}
+
+/** A leitura em si, separada da consulta pra ser testável com a sequência real de uma conversa. `recentes` = da mais nova pra mais velha. */
+export function lerRespostaAoFechamento(recentes: MensagemRecente[], corpoAtual: string, criadoEmAtual?: string | null): { fechamento: boolean; linhas: string[] | null } {
+  const tetoMs = criadoEmAtual ? new Date(criadoEmAtual).getTime() + 2000 : null
   const entradas: MensagemRecente[] = []
   const saidas: MensagemRecente[] = []
-  for (const m of data as MensagemRecente[]) {
+  for (const m of recentes) {
+    if (tetoMs !== null && m.direcao === 'saida' && entradas.length === 0 && m.criado_em && new Date(m.criado_em).getTime() > tetoMs) continue
     if (m.direcao === 'entrada') {
       if (saidas.length > 0) break
       entradas.push(m)
@@ -1319,14 +1395,14 @@ async function textoDaRecusaDeLiberacao(
 
 type LiberacaoPorCodigo = { liberou: boolean; codigo: string | null; recusa?: string }
 
-async function liberarSeEleConfirmou(ctx: Contexto, corpo: string | null, conversaId: string): Promise<LiberacaoPorCodigo> {
+async function liberarSeEleConfirmou(ctx: Contexto, corpo: string | null, conversaId: string, criadoEm?: string | null): Promise<LiberacaoPorCodigo> {
   const nao: LiberacaoPorCodigo = { liberou: false, codigo: null }
   if (ctx.ehFornecedor) return nao
   const alvo = ctx.pedidos.find((p) => p.etapa === 'pedido_completo')
   if (!alvo) return nao
 
   // Consulta que falha não libera: na dúvida o modelo ainda tem o proximo_passo.
-  const resposta = await respostaAoFechamento(conversaId, (corpo ?? '').trim())
+  const resposta = await respostaAoFechamento(conversaId, (corpo ?? '').trim(), criadoEm)
   if (!resposta || !resposta.fechamento || !eleDisseQuePode(resposta.linhas)) return nao
 
   // Divergência continua barrando de propósito: é ambiguidade que a confecção
@@ -3519,6 +3595,8 @@ QUANDO ELE DIZ QUE NÃO É AGORA, GUARDE O PEDIDO E CALE OS LEMBRETES. "Vou ver 
 
 QUANDO A FALA VEM COM "[respondendo a ...]", É CITAÇÃO — O CLIENTE APONTOU. Ele usou o "responder" do WhatsApp pra dizer sobre O QUE está falando: aquela foto, aquele áudio, aquela frase sua. Trate como se ele tivesse posto o dedo em cima. "Pode ser essa mesma" citando a segunda foto NÃO é sobre a terceira; "esse aqui não" citando o mockup é sobre o mockup, não sobre o pedido inteiro. Se a citação apontar pra uma mensagem que você não tem no histórico, não finja que sabe — pergunte de qual ele está falando, em uma linha.
 
+FALA MARCADA COMO "[do Fernando, da equipe]" É DA CONFECCIONE, E VALE. Gente da equipe escreve nesta mesma conversa, pelo inbox, e a fala aparece no histórico do seu lado, com essa marca. O que o Fernando ofereceu, prometeu, dispensou ou perguntou vale como se você tivesse dito: continue DALI. Não desdiga, não repita a pergunta dele, não volte a pedir o que ele dispensou. Se ele disse "posso liberar seu pedido e você alinha o resto com a confecção" e o cliente respondeu que pode, o pedido vai — não peça o dado que faltava, não mande outro resumo. Se o que ele combinou você não consegue cumprir com as suas ferramentas, chame chamar_humano e não escreva nada ao cliente.
+
 A ETAPA DA IMAGEM É A MAIS IMPORTANTE DO PEDIDO — VÁ DEVAGAR NELA. É na imagem que o cliente e a confecção combinam de verdade o que vai ser produzido; o resto do pedido é quantidade e endereço. Aqui pressa custa caro: peça errada só aparece na entrega, e aí já são centenas de peças. Trate esta parte como a conversa mais cuidadosa que você tem com ele.
 
 QUANDO CHEGAR UMA FOTO, OLHE ANTES DE FALAR. Você ENXERGA a imagem. Não responda mecânica ("recebi", "foto presa na beca") nem pule direto pra próxima pergunta: diga O QUE VOCÊ VIU, com as palavras da peça. "Vi a beca preta com as três barras de veludo vinho na manga e o capelo com borla" mostra que você olhou. "Recebi sua foto" mostra que você não olhou.
@@ -3804,7 +3882,15 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
 
     // Citação na frente da fala: o "essa" do cliente ganha referente.
     const citada = m.responde_a_wamid ? porWamid.get(m.responde_a_wamid) : undefined
-    const texto = m.responde_a_wamid ? `${marcaDeCitacao(citada)} ${base}` : base
+    const comCitacao = m.responde_a_wamid ? `${marcaDeCitacao(citada)} ${base}` : base
+    // FALA DE GENTE LEVA O NOME DE QUEM FALOU — 25/09/2026. O inbox grava
+    // `autor: 'equipe'`, e sem a marca a fala do Fernando entrava no histórico
+    // como se fosse do Luigi: na Larissa (20260900329) o Fernando ofereceu
+    // liberar sem o código da cor, ela disse "pode sim", e o Luigi, lendo a
+    // oferta como fala dele próprio e sem regra pra honrá-la, pediu o código
+    // de novo. A marca dá ao prompt o gancho pra dizer "isto vale, continue
+    // dali". Ver a regra "FALA MARCADA COMO [do Fernando, da equipe]".
+    const texto = m.direcao === 'saida' && m.autor === 'equipe' ? `[do Fernando, da equipe] ${comCitacao}` : comCitacao
 
     // Com anexo o conteúdo é lista de blocos e não concatena como texto.
     if (bloco) {
@@ -4481,13 +4567,26 @@ const MINUTOS_APOS_HUMANO_PADRAO = 15
  * Falha de leitura NÃO libera: sem saber se tem gente falando, o Luigi cala. O
  * custo de calar é uma resposta atrasada; o de escrever por cima foi um cliente
  * achando que era golpe.
+ *
+ * A JANELA CONTA DA RESPOSTA DO CLIENTE, NÃO SÓ DA FALA DE GENTE — 25/09/2026.
+ * Larissa, 20260900329: o Fernando escreveu às 15:19 "posso liberar seu pedido
+ * e você alinha isso com o fornecedor"; ela demorou 28 minutos e respondeu
+ * "Pode sim"; a janela de 15 tinha fechado, o Luigi tratou a resposta A ELE
+ * como resposta a si e escreveu "manda o código então que eu coloco antes de
+ * liberar" — desdizendo o Fernando, que teve que entrar de novo. Os 15 minutos
+ * existem pra gente ter tempo de responder; o que precisa de resposta é a
+ * RÉPLICA do cliente, e ela chega quando ele quer. Então a primeira mensagem
+ * dele depois da fala de gente rearma a janela, se ninguém nosso falou nesse
+ * meio-tempo. Só a primeira: se o Fernando não voltou em 15 minutos, a segunda
+ * mensagem do cliente já encontra o Luigi de volta, com a fala do Fernando
+ * marcada no histórico ("[do Fernando, da equipe]") e a regra de honrá-la.
  */
 export async function humanoConduzindo(conversaId: string): Promise<{ conduzindo: boolean; faltamMin: number }> {
   const { data, error } = await supabaseAdmin
     .from('wa_conversas')
-    .select('humano_falou_em')
+    .select('humano_falou_em, ultima_msg_contato_em')
     .eq('id', conversaId)
-    .maybeSingle<{ humano_falou_em: string | null }>()
+    .maybeSingle<{ humano_falou_em: string | null; ultima_msg_contato_em: string | null }>()
   if (error) {
     console.error('[luigi] não consegui ler humano_falou_em — calando por precaução', { conversaId })
     return { conduzindo: true, faltamMin: MINUTOS_APOS_HUMANO_PADRAO }
@@ -4495,9 +4594,40 @@ export async function humanoConduzindo(conversaId: string): Promise<{ conduzindo
   if (!data?.humano_falou_em) return { conduzindo: false, faltamMin: 0 }
 
   const janelaMs = (await janelaAposHumanoMin()) * 60_000
-  const decorrido = Date.now() - new Date(data.humano_falou_em).getTime()
+  let baseMs = new Date(data.humano_falou_em).getTime()
+  if (data.ultima_msg_contato_em && new Date(data.ultima_msg_contato_em).getTime() > baseMs) {
+    const primeira = await primeiraReplicaAoHumano(conversaId, data.humano_falou_em)
+    if (primeira !== null) baseMs = Math.max(baseMs, primeira)
+  }
+  const decorrido = Date.now() - baseMs
   if (decorrido >= janelaMs) return { conduzindo: false, faltamMin: 0 }
   return { conduzindo: true, faltamMin: Math.ceil((janelaMs - decorrido) / 60_000) }
+}
+
+/**
+ * Instante da PRIMEIRA mensagem do cliente depois da fala de gente — ou null
+ * se nenhum, ou se algum agente nosso (Luigi, gestão, MCP) já falou depois
+ * dessa réplica: aí a conversa já voltou pra máquina e a janela é a de sempre.
+ * Consulta que falha devolve null: cai na regra antiga, que não é permissiva.
+ */
+async function primeiraReplicaAoHumano(conversaId: string, humanoFalouEm: string): Promise<number | null> {
+  const { data, error } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('direcao, autor, criado_em')
+    .eq('conversa_id', conversaId)
+    .gt('criado_em', humanoFalouEm)
+    .order('criado_em', { ascending: true })
+    .limit(20)
+  if (error || !data) return null
+  let primeira: number | null = null
+  for (const m of data as Array<{ direcao: 'entrada' | 'saida'; autor: string | null; criado_em: string }>) {
+    if (m.direcao === 'entrada') {
+      if (primeira === null) primeira = new Date(m.criado_em).getTime()
+      continue
+    }
+    if (primeira !== null && AGENTES_SAIDA.has((m.autor ?? '').trim().toLowerCase())) return null
+  }
+  return primeira
 }
 
 /** Só a leitura do número; erro aqui cai no padrão, que não é permissivo. */
@@ -4918,6 +5048,10 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       return
     }
 
+    // Antes de qualquer contexto: se a mensagem cita o pedido do site, ele
+    // passa a ser deste número. Failure-soft — não segura a resposta.
+    await adotarPedidoCitado(params.corpo, waId).catch((err) => console.error('[luigi] adotar pedido citado falhou', { err }))
+
     const modoAgora = await modoLuigi()
     if (modoAgora === 'desligado') return
     modo = modoAgora
@@ -5088,7 +5222,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       // iria pras confecções e a mensagem talvez nunca saísse.
       const semLiberacao: LiberacaoPorCodigo = { liberou: false, codigo: null }
       const auto: LiberacaoPorCodigo =
-        modo === 'responde' ? await liberarSeEleConfirmou(ctx, params.corpo, params.conversaId).catch(() => semLiberacao) : semLiberacao
+        modo === 'responde' ? await liberarSeEleConfirmou(ctx, params.corpo, params.conversaId, params.criadoEm).catch(() => semLiberacao) : semLiberacao
       const fechamento: FechamentoPorCodigo = auto.liberou ? 'liberou' : auto.recusa ? 'recusou' : null
 
       const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada), fechamento)

@@ -95,6 +95,14 @@ async function registrarSaida(params: {
       conversa_id: conversaId,
       wamid: resultado.ok ? resultado.wamid : null,
       direcao: 'saida',
+      // QUEM FALOU PELO INBOX ASSINA — 25/09/2026. Até aqui a fala de gente ia
+      // com `autor` nulo, indistinguível de template e de régua, e o Luigi a
+      // lia no histórico como fala dele próprio: na Larissa (20260900329) o
+      // Fernando ofereceu liberar sem o código da cor e o Luigi, 28 minutos
+      // depois, pediu o código de novo. Com a assinatura, `historicoConversa`
+      // marca "[do Fernando, da equipe]" e o prompt manda honrar o combinado.
+      // O rótulo do inbox mostra o autor como está; 'equipe' lê-se sozinho.
+      autor: 'equipe',
       tipo,
       corpo,
       midia_path: params.midiaPath ?? null,

@@ -1108,7 +1108,7 @@ async function enviosDeHoje(): Promise<string | null> {
     const contatoId = contatoPorConversa.get(l.conversa_id) ?? l.conversa_id
     const quem = nomePorContato.get(contatoId) ?? 'desconhecido'
     const hora = new Date(l.criado_em).toLocaleTimeString('pt-BR', { timeZone: 'America/Recife', hour: '2-digit', minute: '2-digit' })
-    const quemMandou = l.autor === 'gestao' || l.autor === 'mcp' ? 'você' : l.autor === 'luigi' ? 'Luigi' : 'automação'
+    const quemMandou = l.autor === 'gestao' || l.autor === 'mcp' ? 'você' : l.autor === 'luigi' ? 'Luigi' : l.autor === 'equipe' ? 'o Fernando, pelo inbox' : 'automação'
     const o_que = `${l.template_nome ? `template ${l.template_nome}` : (l.corpo ?? '').slice(0, 60)} (${quemMandou})`
     const antes = porPessoa.get(contatoId)
     porPessoa.set(contatoId, { hora, o_que, quem, n: (antes?.n ?? 0) + 1 })

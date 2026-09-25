@@ -656,6 +656,64 @@ export type Divergencia = { posicao: number; o_que: string; pergunte: string }
 const CONECTOR_BICOLOR =
   /(?<!\p{L})(com|costuras?|detalhes?|listrad\w*|listras?|frente|traseira|externa?|interna?|al[çc]a|bico|gola|punhos?|barra|extremidades?|capa|estampa\w*|vivo|frisos?|manga)(?!\p{L})/iu
 
+/**
+ * O mesmo conector, pra DESCRIÇÃO — 25/09/2026. A descrição fala de arte, e
+ * arte tem vocabulário próprio: "estampa", "sublimação", "logo", "fundo",
+ * "texto em laranja", "degradê", "halftone". Qualquer um deles LOGO ANTES de
+ * um par de cores diz que as cores são da mesma peça. Ver `coresSoltas`.
+ */
+const CONECTOR_NA_DESCRICAO =
+  /(?<!\p{L})(com|costuras?|detalhes?|listrad\w*|listras?|frente|costas|traseira|externa?|interna?|al[çc]as?|bico|gola|punhos?|barra|extremidades?|capa|estampa\w*|sublima\w*|logo\w*|logotipo|artes?|aplica\w*|bordad\w*|silk|dtf|serigrafia|impress\w*|print|fundo|texto|escrit[ao]s?|letras?|desenho|imagem|degrad\w*|halftone|veludo|forro|faixas?|bordas?|vi[eé]s|vivo|frisos?|mangas?|sobre|efeito|refer[êe]ncia)(?!\p{L})/iu
+
+/** As cores que a regra 2 reconhece, com plural — "10 azuis e 5 brancas" tem as duas no plural. */
+const COR = 'azu(?:l|is)|branc[ao]s?|pret[ao]s?|verdes?|vermelh[ao]s?|amarel[ao]s?|cinzas?|rosas?'
+const COR_SOLTA = new RegExp(`(?<!\\p{L})(${COR})(?!\\p{L})`, 'giu')
+/** "azul e branca", "preto/branco", "azul, vermelha" — duas cores coladas. */
+const PAR_DE_CORES = new RegExp(`(?<!\\p{L})(${COR})\\s*(?:e|ou|,|/|\\+)\\s*(${COR})(?!\\p{L})`, 'giu')
+
+/** "azuis" e "azul" são a mesma cor; "verde" e "vermelho" não (e as duas começam com "ver"). */
+function corCanonica(palavra: string): string {
+  const p = palavra.toLowerCase()
+  if (p.startsWith('azu')) return 'azul'
+  if (p.startsWith('branc')) return 'branco'
+  if (p.startsWith('pret')) return 'preto'
+  if (p.startsWith('verd')) return 'verde'
+  if (p.startsWith('vermelh')) return 'vermelho'
+  if (p.startsWith('amarel')) return 'amarelo'
+  if (p.startsWith('cinz')) return 'cinza'
+  return 'rosa'
+}
+
+/**
+ * Número colado numa cor: "10 azuis e 5 brancas", "3 peças pretas". É o
+ * sinal inequívoco de quantidade por cor dentro do texto — acusa mesmo que a
+ * descrição esteja cheia de conector.
+ */
+const QUANTIDADE_POR_COR = new RegExp(
+  `(?<!\\p{L})\\d+\\s+(?:pe[çc]as?\\s+|unidades?\\s+|un\\.?\\s+|camisetas?\\s+|camisas?\\s+|polos?\\s+|blusas?\\s+|cal[çc]as?\\s+|regatas?\\s+|shorts?\\s+|bermudas?\\s+)?(?:${COR})(?!\\p{L})`,
+  'iu'
+)
+
+/**
+ * Par de cores coladas SEM nada que as amarre à peça: "Camisetas azul e
+ * branca para o time". O que amarra é o que vem logo antes — "em preto e
+ * branco", "estampa azul e vermelha", "detalhe preto/branco" — ou a palavra
+ * logo depois que diz que é padrão da mesma peça ("preto/branco listrado").
+ */
+function coresSoltas(desc: string): boolean {
+  for (const m of desc.matchAll(PAR_DE_CORES)) {
+    if (corCanonica(m[1]) === corCanonica(m[2])) continue
+    const inicio = m.index ?? 0
+    const antes = desc.slice(Math.max(0, inicio - 30), inicio)
+    const depois = desc.slice(inicio + m[0].length, inicio + m[0].length + 14)
+    if (CONECTOR_NA_DESCRICAO.test(antes)) continue
+    if (/(?:^|[^\p{L}])(?:em|de|do|da|com)\s*$/iu.test(antes)) continue
+    if (/^\s*(?:listrad|mesclad|bicolor|degrad|xadrez)/iu.test(depois)) continue
+    return true
+  }
+  return false
+}
+
 export function revisarPecas(linhas: LinhaPedido[]): Divergencia[] {
   const achados: Divergencia[] = []
 
@@ -727,12 +785,30 @@ export function revisarPecas(linhas: LinhaPedido[]): Divergencia[] {
 
     // A descrição fala de cor ou tamanho que não está nos campos — sinal de que
     // o cliente detalhou no texto o que deveria estar estruturado.
-    if (!confirmado && desc.length > 40 && /\b(azul|branca|branco|preta|preto|verde|vermelh|amarel|cinza|rosa)\b/i.test(desc) && cor) {
-      const coresNaDesc = (desc.match(/\b(azul|branca|branco|preta|preto|verde|vermelh\w*|amarel\w*|cinza|rosa)\b/gi) ?? []).map((c) =>
-        c.toLowerCase()
-      )
-      const distintas = new Set(coresNaDesc.map((c) => c.slice(0, 4)))
-      if (distintas.size > 1) {
+    //
+    // CORES NUMA DESCRIÇÃO DE ESTAMPA NÃO SÃO DUAS PEÇAS — 25/09/2026.
+    //
+    // Até aqui bastava a descrição ter mais de 40 caracteres e duas cores
+    // diferentes. Medido nos últimos 30 dias: esta regra recusou 8 liberações,
+    // em 3 pedidos, e nos 3 a descrição era UMA peça só: a beca preta com
+    // veludo vinho nas mangas e detalhe branco (10/09); a camiseta branca com
+    // estampa em preto, laranja e amarelo (Madu, 25/09); a regata off white com
+    // "USJ" em verde nas costas (gabi, 24/09). Zero verdadeiros. O custo de cada
+    // falso positivo é o loop que o Fernando vê da cadeira dele: a cliente diz
+    // "sim" à pergunta de fechamento, a liberação bate aqui, o Luigi pergunta
+    // de novo — duas vezes com a Madu — e a gabi nunca respondeu à segunda.
+    //
+    // O que a regra queria pegar é quantidade POR COR escondida no texto: "10
+    // azuis e 5 brancas". Então agora ela só acusa nesses dois casos: há número
+    // colado numa cor, ou um par de cores coladas sem NADA que as amarre à
+    // peça logo antes ("Camisetas azul e branca para o time") — o mesmo
+    // raciocínio do CONECTOR_BICOLOR da regra 1, estendido ao vocabulário de
+    // descrição de arte e olhado LOCALMENTE, ao redor do par. A regra antiga
+    // também não via plural: "10 azuis e 5 brancas", o caso que ela queria,
+    // passava em branco enquanto "rosto em preto e branco" era barrado.
+    if (!confirmado && desc.length > 40 && cor) {
+      const distintas = new Set(Array.from(desc.matchAll(COR_SOLTA), (m) => corCanonica(m[1])))
+      if (distintas.size > 1 && (QUANTIDADE_POR_COR.test(desc) || coresSoltas(desc))) {
         achados.push({
           posicao,
           o_que: `a descrição da peça ${posicao} mistura cores diferentes ("${desc.slice(0, 90)}")`,
