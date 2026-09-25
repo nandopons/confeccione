@@ -11,7 +11,7 @@
 // os mockups.
 // ============================================================================
 
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 export type LinhaEntrada = {
@@ -25,6 +25,14 @@ export type LinhaEntrada = {
 }
 
 export type LinhaDraft = {
+  /**
+   * Identidade da linha DENTRO do editor, estável enquanto a página vive —
+   * 25/09/2026. `lid` pode ser nulo (pedido antigo, linha nova) e o índice
+   * muda quando uma linha some. A tela de orçamento guarda o preço de cada
+   * linha por esta chave, e é o que faz o preço seguir a linha certa quando a
+   * confecção tira a segunda cor e a terceira vira a segunda.
+   */
+  key: string
   lid: string | null
   origIdx: number | null
   modelo: string
@@ -41,6 +49,7 @@ const GRADE_PADRAO = ['PP', 'P', 'M', 'G', 'GG']
 
 function daLinha(l: LinhaEntrada, i: number): LinhaDraft {
   return {
+    key: l.lid ?? `orig-${i}`,
     lid: l.lid ?? null,
     origIdx: i,
     modelo: l.modelo ?? '',
@@ -69,6 +78,8 @@ export function useEditorLinhas(linhasOriginais: LinhaEntrada[]) {
   const originais = useMemo(() => linhasOriginais.map(daLinha), [linhasOriginais])
   const [itens, setItens] = useState<LinhaDraft[]>(originais)
   const [editando, setEditando] = useState<number | null>(null)
+  // Sequência das chaves de linha nova. Ref, não state: não é pra renderizar.
+  const seqNova = useRef(0)
 
   const removidas = originais.filter((o) => !itens.some((l) => l.origIdx === o.origIdx)).length
   const alteradas = itens.filter((l) => l.alterada).length
@@ -88,7 +99,9 @@ export function useEditorLinhas(linhasOriginais: LinhaEntrada[]) {
     setEditando(null)
   }
   function adicionar() {
-    setItens((arr) => [...arr, { lid: null, origIdx: null, modelo: '', cor: '', material: '', total: '', tamanhos: [], descricao: '', alterada: true }])
+    seqNova.current += 1
+    const key = `nova-${seqNova.current}`
+    setItens((arr) => [...arr, { key, lid: null, origIdx: null, modelo: '', cor: '', material: '', total: '', tamanhos: [], descricao: '', alterada: true }])
     setEditando(itens.length)
   }
   function desfazerTudo() {
@@ -190,7 +203,9 @@ export function QuadroLinhaEditavel({ editor, i, children }: { editor: EditorLin
   const l = editor.itens[i]
   const emEdicao = editor.editando === i
   function excluir() {
-    if (!confirm('Remover este produto do pedido? A remoção só vale quando você clicar em "Pronto, ajustado".')) return
+    // Texto genérico de propósito: este quadro vive na página da oferta
+    // ("Pronto, ajustado") e na de orçamento ("Atualizar e reenviar").
+    if (!confirm('Remover este produto do pedido? Nada muda até você confirmar no botão do fim da página.')) return
     editor.excluir(i)
   }
   return (

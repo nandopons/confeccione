@@ -30,8 +30,26 @@ const FreteMeSchema = z.object({
   cepDestino: z.string().regex(/^\d{8}$/),
 })
 
+// OS ITENS PODEM VIR JUNTO — 25/09/2026. A tela de orçamento agora edita os
+// produtos (tirar, acrescentar, mudar grade) e manda cada linha com o seu
+// preço. `unitCentavos` continua valendo pra quem só muda preço (e pro app
+// mobile, que está fora deste repositório). Um dos dois é obrigatório.
+const TamanhoSchema = z.object({ tamanho: z.string().max(20).nullable().optional(), qtd: z.number().int().min(0).nullable().optional() })
+const LinhaSchema = z.object({
+  lid: z.string().max(64).nullable().optional(),
+  origIdx: z.number().int().min(0).nullable().optional(),
+  modelo: z.string().max(120).nullable().optional(),
+  cor: z.string().max(120).nullable().optional(),
+  material: z.string().max(160).nullable().optional(),
+  total: z.number().int().min(0).nullable().optional(),
+  tamanhos: z.array(TamanhoSchema).max(40).nullable().optional(),
+  descricao: z.string().max(1000).nullable().optional(),
+  preco_unit_centavos: z.number().int().positive('Informe um valor por unidade em cada item.'),
+})
+
 const BodySchema = z.object({
-  unitCentavos: z.array(z.number().int().positive()).min(1).max(50),
+  unitCentavos: z.array(z.number().int().positive()).min(1).max(50).optional(),
+  linhas: z.array(LinhaSchema).min(1, 'O pedido precisa ter pelo menos um produto.').max(60).optional(),
   freteCentavos: z.number().int().min(0),
   // ORÇAMENTO SEM PRAZO NÃO É ORÇAMENTO, É PREÇO — 12/09/2026.
   //
@@ -55,14 +73,23 @@ export async function POST(req: Request, ctx: Ctx) {
   let bruto: unknown
   try { bruto = await req.json() } catch { return NextResponse.json({ erro: 'JSON inválido' }, { status: 400 }) }
   const p = BodySchema.safeParse(bruto)
-  if (!p.success) return NextResponse.json({ erro: 'Dados inválidos' }, { status: 400 })
+  if (!p.success) return NextResponse.json({ erro: p.error.issues[0]?.message ?? 'Dados inválidos' }, { status: 400 })
+  if (!p.data.linhas && !p.data.unitCentavos) return NextResponse.json({ erro: 'Faltam os valores dos itens.' }, { status: 400 })
 
-  const r = await salvarOrcamentoFornecedor(id, p.data.unitCentavos, p.data.freteCentavos, p.data.freteMe ?? null, p.data.prazoProducaoDias)
+  const r = await salvarOrcamentoFornecedor(
+    id,
+    p.data.unitCentavos ?? [],
+    p.data.freteCentavos,
+    p.data.freteMe ?? null,
+    p.data.prazoProducaoDias,
+    { linhas: p.data.linhas ?? null }
+  )
   if (!r.ok) return NextResponse.json({ erro: r.erro ?? 'Falha ao salvar' }, { status: 409 })
 
   return NextResponse.json({
     ok: true,
     valorClienteCentavos: r.valorClienteCentavos,
     repasseCentavos: r.repasseCentavos,
+    itensAjustados: r.itensAjustados ?? false,
   })
 }

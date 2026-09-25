@@ -4,11 +4,28 @@
 // Ele digita o LÍQUIDO que quer receber por unidade de cada produto + frete;
 // o sistema mostra ao vivo "você recebe X · cliente paga Y" e, ao enviar,
 // o cliente é avisado por e-mail e WhatsApp pra aprovar e pagar.
+//
+// OS ITENS TAMBÉM SE EDITAM AQUI — 25/09/2026.
+//
+// Até aqui esta tela só sabia mudar PREÇO. Tirar uma cor, mudar a grade ou
+// acrescentar uma peça era na página da oferta, com o próprio botão e o
+// próprio aviso ao cliente — e quem já estava no orçamento (a Dom Santo, com o
+// 20260900301 da Arabela: "tira uma das quatro cores") não tinha como. O
+// caminho era voltar, editar, "Pronto, ajustado" (WhatsApp 1 pra cliente),
+// voltar pro orçamento e reenviar (WhatsApp 2).
+//
+// Agora o mesmo editor da página da oferta (EditorPedidoFornecedor) vive aqui,
+// com o preço embaixo de cada item, e o envio é UM: itens como ficaram, cada
+// um com o seu preço, frete e prazo — o cliente recebe uma mensagem só, com o
+// que mudou e o valor novo. O preço de cada linha é guardado pela `key` da
+// linha, não pela posição: tirar a segunda cor não pode mover o preço da
+// terceira pra cima.
 
 import { useMemo, useState } from 'react'
 import type { FreteMeEscolhido, OrcamentoFornecedorDados } from '@/app/lib/pedido-assistente-oferta'
 import CalculadoraFreteME from './CalculadoraFreteME'
 import PortfolioUploader from './PortfolioUploader'
+import { QuadroLinhaEditavel, VistaLinhaDraft, totalDraft, useEditorLinhas } from '../EditorPedidoFornecedor'
 
 const TAXA = 0.03
 
@@ -29,8 +46,16 @@ function dataBR(iso: string | null): string {
 }
 
 export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornecedorDados }) {
-  const [unit, setUnit] = useState<string[]>(
-    dados.itens.map((it) => paraTexto(it.unitLiquidoAtualCentavos ?? it.unitLiquidoSugeridoCentavos))
+  const linhasOriginais = useMemo(() => dados.itens.map((it) => it.linha), [dados.itens])
+  const editor = useEditorLinhas(linhasOriginais)
+
+  // Preço por linha, pela `key` da linha (ver LinhaDraft.key). No primeiro
+  // render `editor.itens` é a lista original na mesma ordem de `dados.itens`,
+  // então o índice ainda alinha — é o único momento em que alinha.
+  const [precos, setPrecos] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      editor.itens.map((l, i) => [l.key, paraTexto(dados.itens[i]?.unitLiquidoAtualCentavos ?? dados.itens[i]?.unitLiquidoSugeridoCentavos ?? null)])
+    )
   )
   const [frete, setFrete] = useState<string>(paraTexto(dados.freteLiquidoAtualCentavos))
   const [freteMe, setFreteMe] = useState<FreteMeEscolhido | null>(null)
@@ -41,33 +66,49 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
   const [prazo, setPrazo] = useState<string>('')
   const [calculadoraAberta, setCalculadoraAberta] = useState(false)
   const [enviando, setEnviando] = useState(false)
-  const [feito, setFeito] = useState<{ valorCliente: number; repasse: number } | null>(null)
+  const [feito, setFeito] = useState<{ valorCliente: number; repasse: number; itensAjustados: boolean } | null>(null)
   const [erro, setErro] = useState<string | null>(null)
 
   const localDestino = [dados.cidade, dados.uf].filter(Boolean).join('/')
+  const precoDe = (key: string) => paraCentavos(precos[key] ?? '')
+  const sugestaoDe = (origIdx: number | null) => (origIdx != null ? dados.itens[origIdx]?.unitLiquidoSugeridoCentavos ?? null : null)
 
   const calc = useMemo(() => {
     let produtos = 0
-    let valido = dados.itens.length > 0
-    dados.itens.forEach((it, i) => {
-      const u = paraCentavos(unit[i] ?? '')
-      if (u <= 0) valido = false
-      produtos += it.qtd * u
-    })
+    let pecas = 0
+    let valido = editor.itens.length > 0
+    for (const l of editor.itens) {
+      const qtd = totalDraft(l)
+      const u = paraCentavos(precos[l.key] ?? '')
+      if (u <= 0 || qtd <= 0) valido = false
+      produtos += qtd * u
+      pecas += qtd
+    }
     const freteC = paraCentavos(frete || '0')
     const liquido = produtos + freteC
     const cliente = liquido > 0 ? Math.round(liquido / (1 - TAXA)) : 0
-    return { produtos, freteC, liquido, cliente, valido: valido && liquido > 0 }
-  }, [unit, frete, dados.itens])
+    return { produtos, freteC, liquido, cliente, pecas, valido: valido && liquido > 0 }
+  }, [editor.itens, precos, frete])
+
+  const itemAberto = editor.editando !== null
+  const nAjustes = editor.alteradas + editor.removidas
 
   async function enviar() {
-    if (enviando || !calc.valido) return
+    if (enviando || !calc.valido || itemAberto) return
     const dias = Number((prazo || '').replace(/\D/g, ''))
     if (!Number.isFinite(dias) || dias < 1 || dias > 180) {
       setErro('Informe em quantos dias você entrega a produção (1 a 180).')
       return
     }
-    if (!window.confirm(`Enviar o orçamento ao cliente?\n\nVocê recebe: ${brl(calc.liquido)}\nCliente paga: ${brl(calc.cliente)}\nPrazo de produção: ${dias} dias\n\nEle será avisado por e-mail e WhatsApp na hora.`)) return
+    const linhaAjuste = editor.temMudanca
+      ? `\nItens ajustados: ${nAjustes} (o cliente vê o que mudou na mesma mensagem).`
+      : ''
+    if (
+      !window.confirm(
+        `Enviar o orçamento ao cliente?\n\nVocê recebe: ${brl(calc.liquido)}\nCliente paga: ${brl(calc.cliente)}\nPrazo de produção: ${dias} dias${linhaAjuste}\n\nEle será avisado por e-mail e WhatsApp na hora.`
+      )
+    )
+      return
     setEnviando(true)
     setErro(null)
     try {
@@ -75,7 +116,20 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          unitCentavos: dados.itens.map((_, i) => paraCentavos(unit[i] ?? '')),
+          // Sempre por linhas, mesmo sem edição: o preço vai colado no item, e
+          // o servidor não precisa casar índice com uma lista que pode ter
+          // mudado de tamanho.
+          linhas: editor.itens.map((l) => ({
+            lid: l.lid,
+            origIdx: l.origIdx,
+            modelo: l.modelo.trim() || null,
+            cor: l.cor.trim() || null,
+            material: l.material.trim() || null,
+            total: parseInt(l.total, 10) || null,
+            tamanhos: l.tamanhos.filter((t) => t.tamanho.trim()).map((t) => ({ tamanho: t.tamanho.trim().toUpperCase(), qtd: parseInt(t.qtd, 10) || 0 })),
+            descricao: l.descricao.trim() || null,
+            preco_unit_centavos: precoDe(l.key),
+          })),
           freteCentavos: paraCentavos(frete || '0'),
           prazoProducaoDias: dias,
           freteMe,
@@ -83,13 +137,16 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
       })
       const j = await r.json()
       if (!r.ok) throw new Error(j.erro || 'Não foi possível enviar.')
-      setFeito({ valorCliente: j.valorClienteCentavos, repasse: j.repasseCentavos })
+      setFeito({ valorCliente: j.valorClienteCentavos, repasse: j.repasseCentavos, itensAjustados: Boolean(j.itensAjustados) })
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Erro ao enviar.')
     } finally {
       setEnviando(false)
     }
   }
+
+  const inputPreco =
+    'block mt-1 w-32 border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 focus:outline-none focus:border-emerald-600'
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
@@ -116,7 +173,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
         <div className="px-6 py-8 text-center">
           <p className="text-emerald-700 text-lg font-semibold">✓ Orçamento enviado ao cliente!</p>
           <p className="text-sm text-gray-600 mt-2">
-            Ele recebeu por e-mail e WhatsApp. Cliente paga <strong>{brl(feito.valorCliente)}</strong> · você recebe <strong>{brl(feito.repasse)}</strong> após a entrega em conformidade.
+            Ele recebeu por e-mail e WhatsApp{feito.itensAjustados ? ', com os itens ajustados' : ''}. Cliente paga <strong>{brl(feito.valorCliente)}</strong> · você recebe <strong>{brl(feito.repasse)}</strong> após a entrega em conformidade.
           </p>
           <p className="text-xs text-gray-400 mt-3">Precisa ajustar? É só voltar nesta página enquanto o pedido não for pago.</p>
         </div>
@@ -129,29 +186,62 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
           )}
 
           <div className="px-6 py-5 space-y-4">
-            {dados.itens.map((it, i) => (
-              <div key={i} className="rounded-lg bg-gray-50 border border-gray-100 px-4 py-3">
-                <p className="font-medium text-gray-900 capitalize">{it.label}</p>
-                <div className="mt-2 flex items-center gap-3 flex-wrap">
-                  <label className="text-xs text-gray-500">
-                    Você recebe por unidade (R$)
-                    <input
-                      value={unit[i] ?? ''}
-                      onChange={(e) => setUnit((u) => u.map((v, k) => (k === i ? e.target.value : v)))}
-                      inputMode="decimal"
-                      placeholder="0,00"
-                      className="block mt-1 w-32 border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 focus:outline-none focus:border-emerald-600"
-                    />
-                  </label>
-                  <div className="text-xs text-gray-500 mt-4">
-                    × {it.qtd} un. = <strong className="text-gray-800">{brl(it.qtd * paraCentavos(unit[i] ?? ''))}</strong>
-                    {it.unitLiquidoSugeridoCentavos != null && (
-                      <span className="block text-[11px] text-gray-400">sugestão da plataforma: {brl(it.unitLiquidoSugeridoCentavos)}/un</span>
-                    )}
+            <div className="flex items-baseline justify-between gap-2">
+              <h2 className="text-sm font-semibold text-gray-700">Itens do pedido</h2>
+              <span className="text-xs text-gray-400">toque em Editar pra mudar cor, grade ou quantidade; Excluir tira o item</span>
+            </div>
+
+            {editor.itens.map((l, i) => (
+              <div
+                key={l.key}
+                className={'rounded-lg border px-4 py-3 ' + (l.alterada ? 'bg-amber-50/40 border-amber-200' : 'bg-gray-50 border-gray-100')}
+              >
+                <QuadroLinhaEditavel editor={editor} i={i}>
+                  <VistaLinhaDraft l={l} />
+                </QuadroLinhaEditavel>
+                {editor.editando !== i && (
+                  <div className="mt-2 flex items-center gap-3 flex-wrap">
+                    <label className="text-xs text-gray-500">
+                      Você recebe por unidade (R$)
+                      <input
+                        value={precos[l.key] ?? ''}
+                        onChange={(e) => setPrecos((p) => ({ ...p, [l.key]: e.target.value }))}
+                        inputMode="decimal"
+                        placeholder="0,00"
+                        className={inputPreco}
+                      />
+                    </label>
+                    <div className="text-xs text-gray-500 mt-4">
+                      × {totalDraft(l) || '?'} un. = <strong className="text-gray-800">{brl(totalDraft(l) * precoDe(l.key))}</strong>
+                      {sugestaoDe(l.origIdx) != null && (
+                        <span className="block text-[11px] text-gray-400">sugestão da plataforma: {brl(sugestaoDe(l.origIdx) as number)}/un</span>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             ))}
+
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <button
+                type="button"
+                onClick={editor.adicionar}
+                disabled={itemAberto}
+                className="rounded-lg border-2 border-dashed border-gray-300 px-3 py-2 text-sm text-gray-600 hover:border-emerald-500 hover:text-emerald-700 disabled:opacity-50"
+              >
+                + Adicionar produto
+              </button>
+              {editor.temMudanca && (
+                <button type="button" onClick={editor.desfazerTudo} className="text-sm text-gray-500 hover:underline sm:ml-auto">
+                  Desfazer ajustes nos itens
+                </button>
+              )}
+            </div>
+            {editor.temMudanca && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                {nAjustes} {nAjustes === 1 ? 'item ajustado' : 'itens ajustados'} · {calc.pecas} peças no total. Nada foi enviado ainda: o cliente vê os itens como ficaram, junto com o valor, quando você reenviar.
+              </p>
+            )}
 
             <div className="rounded-lg bg-gray-50 border border-gray-100 px-4 py-3">
               {(dados.cep || localDestino) && (
@@ -164,7 +254,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
                   onChange={(e) => { setFrete(e.target.value); setFreteMe(null) }}
                   inputMode="decimal"
                   placeholder="0,00"
-                  className="block mt-1 w-32 border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 focus:outline-none focus:border-emerald-600"
+                  className={inputPreco}
                 />
               </label>
               <label className="text-xs text-gray-500 block mt-3">
@@ -174,7 +264,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
                   onChange={(e) => setPrazo(e.target.value.replace(/\D/g, '').slice(0, 3))}
                   inputMode="numeric"
                   placeholder="dias"
-                  className="block mt-1 w-32 border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 focus:outline-none focus:border-emerald-600"
+                  className={inputPreco}
                 />
                 <span className="block mt-1 text-[11px] text-gray-400">Conta a partir da confirmação do pagamento. Não inclui o transporte.</span>
               </label>
@@ -215,12 +305,16 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
             <button
               type="button"
               onClick={() => void enviar()}
-              disabled={enviando || !calc.valido}
+              disabled={enviando || !calc.valido || itemAberto}
               className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold py-3.5 rounded-xl"
             >
-              {enviando ? 'Enviando…' : dados.jaDefinido ? 'Atualizar e reenviar ao cliente →' : 'Enviar orçamento ao cliente →'}
+              {enviando ? 'Enviando…' : dados.jaDefinido || editor.temMudanca ? 'Atualizar e reenviar ao cliente →' : 'Enviar orçamento ao cliente →'}
             </button>
-            <p className="text-[11px] text-gray-400 text-center">O cliente recebe e-mail + WhatsApp na hora com o valor e o link pra pagar.</p>
+            {itemAberto ? (
+              <p className="text-[11px] text-amber-700 text-center">Salve ou cancele o item aberto antes de enviar.</p>
+            ) : (
+              <p className="text-[11px] text-gray-400 text-center">O cliente recebe e-mail + WhatsApp na hora com o valor e o link pra pagar.</p>
+            )}
           </div>
         </>
       )}

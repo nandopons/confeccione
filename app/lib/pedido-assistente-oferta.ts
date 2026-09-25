@@ -36,6 +36,7 @@ import { emailOfertaPedidoAssistente, emailFornecedorDefinido } from './email'
 import { enviarEmailOrcamentoFinal } from './email-pedido'
 import { atualizarValorCobrancaPix } from './pedido-pagamento'
 import { calcularOrcamento, type PesquisaPreco } from './orcamento'
+import { salvarLinhasEditadas, type LinhaEditada } from './pedido-linhas-edicao'
 
 export const COMISSAO_PCT = 0.03
 
@@ -1071,6 +1072,13 @@ export type ItemOrcamentoFornecedor = {
   qtd: number
   unitLiquidoAtualCentavos: number | null
   unitLiquidoSugeridoCentavos: number | null
+  /**
+   * A linha em si, pro editor de itens da tela de orçamento — 25/09/2026.
+   * Até aqui a tela só recebia `label` + `qtd`: dava pra mudar o preço, não o
+   * produto. A Arabela pediu pra tirar uma cor do 20260900301 (4 camisetas de
+   * amamentar, Dom Santo) e a confecção, na tela de orçamento, não tinha como.
+   */
+  linha: Pick<LinhaPedido, 'lid' | 'modelo' | 'cor' | 'material' | 'total' | 'tamanhos' | 'descricao'>
 }
 
 export type OrcamentoFornecedorDados = {
@@ -1148,6 +1156,15 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
       qtd: qtdDaLinha(l),
       unitLiquidoAtualCentavos: l.preco_unit_centavos ?? null,
       unitLiquidoSugeridoCentavos: unitSugeridoCliente != null ? Math.round(unitSugeridoCliente * (1 - COMISSAO_PCT)) : null,
+      linha: {
+        lid: l.lid ?? null,
+        modelo: l.modelo ?? null,
+        cor: l.cor ?? null,
+        material: l.material ?? null,
+        total: l.total ?? null,
+        tamanhos: l.tamanhos ?? null,
+        descricao: l.descricao ?? null,
+      },
     }
   })
 
@@ -1184,20 +1201,69 @@ export type FreteMeEscolhido = {
   cepDestino: string
 }
 
+/**
+ * Linha como a tela de orçamento manda quando a confecção mexeu nos itens:
+ * a forma do editor (`LinhaEditada`, com `origIdx` pro remapeio dos mockups)
+ * mais o líquido por unidade que ela digitou pra ESSA linha.
+ */
+export type LinhaOrcamentoEditada = LinhaEditada & { preco_unit_centavos: number }
+
 export async function salvarOrcamentoFornecedor(
   ofertaId: string,
+  /**
+   * Líquido por unidade, na ordem das linhas do pedido. Ignorado quando
+   * `opts.linhas` vem: aí o preço mora em cada linha.
+   */
   unitLiquidoCentavos: number[],
   freteLiquidoCentavos: number,
   freteMe?: FreteMeEscolhido | null,
   /** Dias de PRODUÇÃO que ela assume. Ver a migração 20260912060000. */
-  prazoProducaoDias?: number | null
-): Promise<{ ok: boolean; erro?: string; valorClienteCentavos?: number; repasseCentavos?: number }> {
+  prazoProducaoDias?: number | null,
+  opts: {
+    /**
+     * OS ITENS VÊM JUNTO COM O PREÇO — 25/09/2026.
+     *
+     * Editar os produtos (tirar uma cor, mudar a grade, acrescentar uma peça)
+     * já existia, mas só na página da oferta, com o próprio aviso ao cliente;
+     * a tela de orçamento só sabia mudar preço. Quem estava no orçamento e
+     * precisava tirar um item fazia duas viagens e o cliente recebia DOIS
+     * WhatsApps: "ajustou os produtos" e, minutos depois, "orçamento saiu".
+     *
+     * Agora a tela manda os itens do jeito que ficaram, cada um com o seu
+     * preço. A edição passa pelo MESMO caminho da página da oferta
+     * (salvarLinhasEditadas: lid, remapeio de mockups, histórico) e o cliente
+     * recebe uma mensagem só, com o que mudou e o valor novo.
+     */
+    linhas?: LinhaOrcamentoEditada[] | null
+  } = {}
+): Promise<{ ok: boolean; erro?: string; valorClienteCentavos?: number; repasseCentavos?: number; itensAjustados?: boolean }> {
   const { data: oferta } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
-    .select('id, pedido_id, status, leads_fornecedores(nome)')
+    .select('id, pedido_id, status, fornecedor_id, leads_fornecedores(nome)')
     .eq('id', ofertaId)
     .maybeSingle<any>()
   if (!oferta || oferta.status !== 'aceita') return { ok: false, erro: 'Oferta não encontrada ou não aceita.' }
+
+  // Os itens primeiro, ANTES de ler o pedido: o que vale pro orçamento é o
+  // pedido como ficou depois da edição. Pago e cancelado são recusados lá
+  // dentro com a mesma frase da página da oferta.
+  let resumoEdicao: string | null = null
+  if (opts.linhas && opts.linhas.length > 0) {
+    const ed = await salvarLinhasEditadas({
+      pedidoId: oferta.pedido_id,
+      linhas: opts.linhas,
+      autor: 'fornecedor',
+      fornecedorId: oferta.fornecedor_id,
+      ofertaId: oferta.id,
+    })
+    if (!ed.ok) return { ok: false, erro: ed.erro }
+    if (ed.mudou) resumoEdicao = ed.resumo
+    // O preço de cada linha veio dentro dela e sobreviveu à normalização
+    // (normalizarLinha preserva preco_unit_centavos numérico). Linha vazia
+    // que a edição descartou não tem preço a conferir — o alinhamento é por
+    // construção, não por índice do request.
+    unitLiquidoCentavos = ed.linhas.map((l) => l.preco_unit_centavos ?? 0)
+  }
 
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
@@ -1327,9 +1393,16 @@ export async function salvarOrcamentoFornecedor(
   }
   if (pedido.telefone) {
     try {
+      // Itens que mudaram vão na MESMA mensagem do valor: o cliente vê o
+      // total diferente do que combinou e, na mesma tela, o porquê. Antes,
+      // eram dois avisos separados (ver `opts.linhas`).
+      const ajuste = resumoEdicao
+        ? `✏️ ${fornecedorNome ? `*${fornecedorNome}*` : 'O fornecedor'} ajustou os itens do pedido:\n${resumoEdicao}\n\n`
+        : ''
       const msg =
         `🎉 Oi${pedido.nome ? ', ' + pedido.nome.split(' ')[0] : ''}! Seu orçamento na Confeccione saiu!\n\n` +
-        (fornecedorNome ? `O fornecedor *${fornecedorNome}* vai atender seu pedido.\n` : '') +
+        ajuste +
+        (fornecedorNome && !ajuste ? `O fornecedor *${fornecedorNome}* vai atender seu pedido.\n` : '') +
         `💰 Total: *${brl(valorCliente)}*` +
         (freteCliente > 0 ? ` (produtos ${brl(valorCliente - freteCliente)} + frete ${brl(freteCliente)})` : ' (frete incluso)') +
         `\n\nVeja os detalhes e finalize o pagamento (PIX ou cartão):\n${SITE_URL}/visualizador/${pedido.id}`
@@ -1337,7 +1410,9 @@ export async function salvarOrcamentoFornecedor(
         telefone: pedido.telefone,
         nome: pedido.nome ?? null,
         texto: msg,
-        resumo: `Seu orçamento saiu: ${brl(valorCliente)} — veja e pague com segurança`,
+        resumo: resumoEdicao
+          ? `Seu orçamento saiu com os itens ajustados: ${brl(valorCliente)} — veja e pague com segurança`
+          : `Seu orçamento saiu: ${brl(valorCliente)} — veja e pague com segurança`,
         caminhoBotao: `visualizador/${pedido.id}`,
       })
     } catch (e) {
@@ -1345,5 +1420,5 @@ export async function salvarOrcamentoFornecedor(
     }
   }
 
-  return { ok: true, valorClienteCentavos: valorCliente, repasseCentavos: totalLiquido }
+  return { ok: true, valorClienteCentavos: valorCliente, repasseCentavos: totalLiquido, itensAjustados: Boolean(resumoEdicao) }
 }

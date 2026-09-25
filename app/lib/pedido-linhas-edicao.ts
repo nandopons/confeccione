@@ -107,19 +107,33 @@ function gradeStr(l: LinhaPedido): string {
 export function resumirDiffLinhas(antes: LinhaPedido[], depois: LinhaPedido[]): { resumo: string; lidsAlterados: string[]; mudou: boolean } {
   const porLid = new Map<string, LinhaPedido>()
   for (const l of antes) if (l.lid) porLid.set(l.lid, l)
+  // Linha antiga SEM lid (pedido de antes de 02/09) casa pela POSIÇÃO, quando a
+  // nova naquela posição não casou por lid. É o que resta no caminho do
+  // cliente (o PATCH do visualizador não manda origIdx e dá lid novo a quem
+  // não tinha): sem isto, todo pedido antigo editado virava "− tudo / + tudo"
+  // no aviso à confecção. No caminho da confecção o par fecha por lid (ver
+  // salvarLinhasEditadas), e isto não é alcançado.
+  const semLidPorPosicao = new Map<number, LinhaPedido>()
+  antes.forEach((l, i) => { if (!l.lid) semLidPorPosicao.set(i, l) })
   const partes: string[] = []
   const lids: string[] = []
   let mudou = false
 
-  for (const l of depois) {
-    const a = l.lid ? porLid.get(l.lid) : undefined
+  for (const [i, l] of depois.entries()) {
+    let a = l.lid ? porLid.get(l.lid) : undefined
+    let porPosicao = false
+    if (!a && semLidPorPosicao.has(i)) {
+      a = semLidPorPosicao.get(i)
+      porPosicao = true
+    }
     if (!a) {
       partes.push(`+ ${descreverLinha(l)}`)
       if (l.lid) lids.push(l.lid)
       mudou = true
       continue
     }
-    porLid.delete(l.lid!)
+    if (porPosicao) semLidPorPosicao.delete(i)
+    else porLid.delete(l.lid!)
     const difs: string[] = []
     if ((a.modelo ?? '') !== (l.modelo ?? '')) difs.push('modelo')
     if ((a.cor ?? '') !== (l.cor ?? '')) difs.push('cor')
@@ -133,6 +147,10 @@ export function resumirDiffLinhas(antes: LinhaPedido[], depois: LinhaPedido[]): 
     }
   }
   for (const a of porLid.values()) {
+    partes.push(`− ${descreverLinha(a)}`)
+    mudou = true
+  }
+  for (const a of semLidPorPosicao.values()) {
     partes.push(`− ${descreverLinha(a)}`)
     mudou = true
   }
@@ -239,7 +257,16 @@ export async function salvarLinhasEditadas(params: {
   if (ped.pagamento_status === 'pago') return { ok: false, erro: 'Pedido já pago — não dá mais pra alterar os produtos.', status: 409 }
   if (ped.status === 'cancelado') return { ok: false, erro: 'Pedido cancelado.', status: 409 }
 
-  const antes: LinhaPedido[] = Array.isArray(ped.linhas) ? ped.linhas : []
+  // LINHA ANTIGA SEM lid GANHA UM AQUI, ANTES DA NORMALIZAÇÃO — 25/09/2026.
+  //
+  // O `lid` só existe em linha criada depois de 02/09; em 24/09, 65 dos 77
+  // pedidos com oferta aceita e não pagos tinham linha sem ele. Sem isto, a
+  // normalização dava um uuid NOVO à linha editada, o diff (que casa por lid)
+  // não achava par e resumia "− tudo / + tudo" — e o cliente recebia um aviso
+  // de que a confecção tinha trocado o pedido inteiro, quando ela mudou uma
+  // grade. Com o lid dado à linha antiga, a editada herda pelo `origIdx`
+  // (normalizarLinha: `raw.lid ?? anterior.lid`) e o par fecha.
+  const antes: LinhaPedido[] = (Array.isArray(ped.linhas) ? ped.linhas : []).map((l) => (l.lid ? l : { ...l, lid: randomUUID() }))
   const novas = params.linhas
     .map((raw) => normalizarLinha(raw, raw.origIdx != null ? antes[raw.origIdx] ?? null : null))
     .filter((l) => l.modelo || l.cor || (l.total ?? 0) > 0 || (l.tamanhos?.length ?? 0) > 0)
