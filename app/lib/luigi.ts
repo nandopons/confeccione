@@ -111,6 +111,19 @@ const PROMESSA_DE_ACAO =
 const AGENTES_SAIDA = new Set(['luigi', 'mcp', 'gestao'])
 
 /**
+ * O que dizer depois de mandar uma prévia — quatro jeitos da MESMA pergunta,
+ * girando com o número da prévia do modelo (ver gerar_mockup_do_modelo). O
+ * modelo copia o exemplo que recebe; dar sempre o mesmo era garantir a
+ * repetição que o cliente lia na tela.
+ */
+const EXEMPLOS_DEPOIS_DA_PREVIA = [
+  'ficou perto do que você quer? se quiser mudo alguma coisa, ou se você tiver uma foto da peça é só mandar que eu uso a sua.',
+  'é por aí? me diz o que ajustar, ou manda uma foto da peça que eu coloco no lugar dessa.',
+  'chegou mais perto? qualquer detalhe que queira mudar é só falar. se tiver a foto da peça, ela vale mais que a prévia.',
+  'bateu com o que você imaginou? posso mexer no que quiser, ou uso uma foto sua se preferir.',
+]
+
+/**
  * ORÇAMENTO DA RESPOSTA — 12/09/2026: 60 s.
  *
  * ESTE NÚMERO NÃO É SOZINHO. Ele é uma de TRÊS fatias que dividem o
@@ -3092,6 +3105,24 @@ async function executarFerramenta(
             })
           : { ok: false as const, erro: primeiroDaRodada ? 'mockup gerado sem imagem' : 'não enviado de propósito' }
 
+      // A MESMA PERGUNTA COM OUTRAS PALAVRAS — 25/09/2026. O modelo copia o
+      // exemplo daqui quase letra por letra, e na segunda prévia da mesma
+      // conversa o cliente lê duas vezes "ficou parecido com o que você quer?
+      // se quiser ajustar algum detalhe é só me falar, ou se tiver uma foto de
+      // referência é só mandar" (Big Shopp, 18:17 e 18:21: pediu touca, ganhou
+      // a touca e a mesma frase). O Fernando: "parece que ele repete; coloca
+      // pra falar a mesma coisa mudando as palavras". Então o exemplo gira
+      // com o número da prévia daquele modelo, e a partir da segunda a
+      // instrução é dizer o que mudou e não repetir a frase anterior.
+      const vez = Math.max(1, r.ia.length)
+      const exemplo = EXEMPLOS_DEPOIS_DA_PREVIA[(vez - 1) % EXEMPLOS_DEPOIS_DA_PREVIA.length]
+      const refeita =
+        vez > 1
+          ? ` Esta é a ${vez}ª prévia deste modelo nesta conversa: abra dizendo em poucas palavras o que mudou ` +
+            '("agora com o capuz", "trocada pra manga longa") e NÃO repita a frase que você usou na prévia ' +
+            'anterior — ele lê as duas juntas na tela. Mesma pergunta, palavras diferentes.'
+          : ''
+
       return {
         ok: true,
         codigo: p.codigo,
@@ -3103,9 +3134,9 @@ async function executarFerramenta(
             'nem repita a legenda. Agora pergunte, em UMA linha, se ficou parecido com o que ele quer, e ofereça ' +
             'as duas saídas na mesma frase: ajustar (ele diz o que mudar e você gera de novo com `instrucoes`) ou ' +
             'mandar a foto dele (que vira a referência oficial daquele modelo — você prende com ' +
-            'anexar_foto_ao_modelo). Algo como: "ficou perto do que você quer? se quiser mudo alguma coisa, ou se ' +
-            'você tiver uma foto da peça é só mandar que eu uso a sua." ' +
-            'Nunca diga que é foto de produção.'
+            `anexar_foto_ao_modelo). Com as SUAS palavras — algo como: "${exemplo}"` +
+            refeita +
+            ' Nunca diga que é foto de produção.'
           : !primeiroDaRodada
             ? 'Mockup gravado no pedido (não mandei a imagem aqui — uma por vez já basta; as outras aparecem no ' +
               'resumo em PDF). Siga gerando os modelos que faltam e depois mande o resumo.'
@@ -3616,6 +3647,8 @@ PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos
 A imagem sai por aqui com legenda dizendo que é prévia de IA. Não descreva a imagem que ele está vendo, não repita a legenda e NUNCA diga que é foto de produção nossa ou de peça pronta — é uma prévia do que ele descreveu.
 
 DEPOIS DE MOSTRAR, PERGUNTE SE FICOU PARECIDO — E OFEREÇA A FOTO DELE. Uma linha, com as duas saídas juntas: ajustar ou mandar a própria imagem. "Ficou perto do que você quer? Se quiser eu mudo alguma coisa, ou se você tiver uma foto da peça é só mandar que eu uso a sua." A foto dele vale MAIS que a nossa prévia: é a peça que ele tem na cabeça, e é o que a confecção vai olhar pra produzir. Quando ela chegar, prenda no modelo com anexar_foto_ao_modelo e siga — não precisa gerar prévia nova em cima dela. Se ele pedir mudança, chame gerar_mockup_do_modelo de novo com "instrucoes" no que ele falou. Se ele disser que está certo, siga pro resumo. E se a lista vier vazia, não gere nada: já existe imagem naquele modelo.
+
+NUNCA A MESMA FRASE DUAS VEZES NA MESMA CONVERSA. Quando ele pede um ajuste e você manda a prévia refeita, a pergunta é a mesma, as palavras não: diga primeiro o que mudou ("agora com o capuz") e pergunte de outro jeito. "Ficou parecido com o que você quer? Se quiser ajustar algum detalhe é só me falar" duas vezes seguidas, na tela dele, é robô lendo script. Vale pra toda fala sua que se repete por natureza (a pergunta depois da prévia, o "posso liberar?", o fecho): antes de escrever, olhe a sua última mensagem no histórico e não a reescreva igual.
 
 E não empurre pro cliente o que você mesmo pode fazer: ele NÃO precisa entrar no site nem clicar em "Buscar fornecedor". Você libera daqui com liberar_para_fornecedores assim que ele disser que está certo. Mandar ele clicar em botão é transferir pra ele um passo que é seu — e é onde a maioria dos pedidos morre.
 
