@@ -35,6 +35,11 @@ const FreteMeSchema = z.object({
 // preço. `unitCentavos` continua valendo pra quem só muda preço (e pro app
 // mobile, que está fora deste repositório). Um dos dois é obrigatório.
 const TamanhoSchema = z.object({ tamanho: z.string().max(20).nullable().optional(), qtd: z.number().int().min(0).nullable().optional() })
+// Fotos da linha: mesma forma do PATCH /linhas (ver lá).
+const ImagensSchema = z.object({
+  manter: z.array(z.string().regex(/^(f|ia):\d{1,2}$/)).max(20),
+  novas: z.array(z.string().max(200)).max(6),
+})
 const LinhaSchema = z.object({
   lid: z.string().max(64).nullable().optional(),
   origIdx: z.number().int().min(0).nullable().optional(),
@@ -44,6 +49,7 @@ const LinhaSchema = z.object({
   total: z.number().int().min(0).nullable().optional(),
   tamanhos: z.array(TamanhoSchema).max(40).nullable().optional(),
   descricao: z.string().max(1000).nullable().optional(),
+  imagens: ImagensSchema.nullable().optional(),
   preco_unit_centavos: z.number().int().positive('Informe um valor por unidade em cada item.'),
 })
 

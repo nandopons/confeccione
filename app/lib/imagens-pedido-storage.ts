@@ -82,19 +82,45 @@ export async function guardarImagem(valor: string, pedidoId: string): Promise<st
   const p = partesDataUrl(valor)
   if (!p) return valor
 
-  const sha = createHash('sha256').update(p.bytes).digest('hex').slice(0, 32)
-  const ext = EXT_POR_MIME[p.mime.toLowerCase()] ?? 'bin'
+  const ref = await guardarBytes(p.bytes, p.mime, pedidoId)
+  // Falha de upload NÃO derruba o pedido — devolve o data URI original e segue.
+  return ref ?? valor
+}
+
+/**
+ * Sobe bytes crus pro bucket do pedido e devolve a referência curta, ou null
+ * se o upload falhar — 25/09/2026. É o miolo de `guardarImagem`, exposto pra
+ * quem já tem o arquivo em mãos (upload multipart da confecção) e não precisa
+ * passar por data URI. Mesmo nome por hash, mesmo `upsert`: mandar a mesma
+ * foto duas vezes não cria dois arquivos.
+ */
+export async function guardarBytes(bytes: Buffer, mime: string, pedidoId: string): Promise<string | null> {
+  const sha = createHash('sha256').update(bytes).digest('hex').slice(0, 32)
+  const ext = EXT_POR_MIME[mime.toLowerCase()] ?? 'bin'
   const caminho = `pedidos/${pedidoId}/${sha}.${ext}`
 
   const { error } = await supabaseAdmin.storage
     .from(BUCKET_ARTES)
-    .upload(caminho, p.bytes, { contentType: p.mime, upsert: true })
+    .upload(caminho, bytes, { contentType: mime, upsert: true })
 
   if (error) {
-    console.error('[imagens-pedido-storage] upload falhou, mantendo data URI:', error.message)
-    return valor
+    console.error('[imagens-pedido-storage] upload falhou:', error.message)
+    return null
   }
   return `${PREFIXO}${caminho}`
+}
+
+/**
+ * true se a referência aponta pra dentro da pasta DESTE pedido, com nome de
+ * arquivo no formato que a gente gera. É a checagem de quem recebe uma
+ * referência do navegador e vai gravá-la no pedido: sem ela, um cliente
+ * poderia colar a foto de outro pedido — ou qualquer caminho do bucket.
+ */
+export function ehRefDoPedido(valor: unknown, pedidoId: string): valor is string {
+  if (!ehRefStorage(valor)) return false
+  const esperado = `${PREFIXO}pedidos/${pedidoId}/`
+  if (!(valor as string).startsWith(esperado)) return false
+  return NOME_ARQUIVO.test((valor as string).slice(esperado.length))
 }
 
 export async function guardarImagens(lista: string[], pedidoId: string): Promise<string[]> {

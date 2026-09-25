@@ -14,6 +14,13 @@ export const runtime = 'nodejs'
 type Ctx = { params: Promise<{ id: string }> }
 
 const TamanhoSchema = z.object({ tamanho: z.string().max(20).nullable().optional(), qtd: z.number().int().min(0).nullable().optional() })
+// Fotos da linha — 25/09/2026. `manter` = chaves das que já eram dela
+// (f:<j> / ia:<j>), `novas` = referências storage: subidas pela rota /imagem.
+// Curto de propósito: a foto em si nunca passa por aqui.
+const ImagensSchema = z.object({
+  manter: z.array(z.string().regex(/^(f|ia):\d{1,2}$/)).max(20),
+  novas: z.array(z.string().max(200)).max(6),
+})
 const LinhaSchema = z.object({
   lid: z.string().max(64).nullable().optional(),
   origIdx: z.number().int().min(0).nullable().optional(),
@@ -23,6 +30,7 @@ const LinhaSchema = z.object({
   total: z.number().int().min(0).nullable().optional(),
   tamanhos: z.array(TamanhoSchema).max(40).nullable().optional(),
   descricao: z.string().max(1000).nullable().optional(),
+  imagens: ImagensSchema.nullable().optional(),
 })
 const BodySchema = z.object({ linhas: z.array(LinhaSchema).min(1).max(60) })
 

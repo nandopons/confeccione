@@ -25,7 +25,7 @@ import { useMemo, useState } from 'react'
 import type { FreteMeEscolhido, OrcamentoFornecedorDados } from '@/app/lib/pedido-assistente-oferta'
 import CalculadoraFreteME from './CalculadoraFreteME'
 import PortfolioUploader from './PortfolioUploader'
-import { QuadroLinhaEditavel, VistaLinhaDraft, totalDraft, useEditorLinhas } from '../EditorPedidoFornecedor'
+import { QuadroLinhaEditavel, VistaLinhaDraft, imagensParaEnvio, totalDraft, useEditorLinhas } from '../EditorPedidoFornecedor'
 
 const TAXA = 0.03
 
@@ -46,8 +46,13 @@ function dataBR(iso: string | null): string {
 }
 
 export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornecedorDados }) {
+  // `it.linha` já traz `visuais` (as fotos da linha) — o editor mostra, tira e
+  // põe foto aqui igual na página da oferta; o upload vai pela oferta.
   const linhasOriginais = useMemo(() => dados.itens.map((it) => it.linha), [dados.itens])
-  const editor = useEditorLinhas(linhasOriginais)
+  const editor = useEditorLinhas(linhasOriginais, { ofertaId: dados.ofertaId })
+  // Foto ampliada: sem lightbox por índice nesta tela (aqui não há grade
+  // global), então é uma só, por URL.
+  const [fotoAberta, setFotoAberta] = useState<string | null>(null)
 
   // Preço por linha, pela `key` da linha (ver LinhaDraft.key). No primeiro
   // render `editor.itens` é a lista original na mesma ordem de `dados.itens`,
@@ -128,6 +133,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
             total: parseInt(l.total, 10) || null,
             tamanhos: l.tamanhos.filter((t) => t.tamanho.trim()).map((t) => ({ tamanho: t.tamanho.trim().toUpperCase(), qtd: parseInt(t.qtd, 10) || 0 })),
             descricao: l.descricao.trim() || null,
+            imagens: imagensParaEnvio(l),
             preco_unit_centavos: precoDe(l.key),
           })),
           freteCentavos: paraCentavos(frete || '0'),
@@ -188,7 +194,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
           <div className="px-6 py-5 space-y-4">
             <div className="flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold text-gray-700">Itens do pedido</h2>
-              <span className="text-xs text-gray-400">o lápis muda cor, grade ou quantidade; o × tira o item</span>
+              <span className="text-xs text-gray-400">o lápis muda cor, grade, quantidade ou fotos; o × tira o item</span>
             </div>
 
             {editor.itens.map((l, i) => (
@@ -197,7 +203,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
                 className={'rounded-lg border px-4 py-3 ' + (l.alterada ? 'bg-amber-50/40 border-amber-200' : 'bg-gray-50 border-gray-100')}
               >
                 <QuadroLinhaEditavel editor={editor} i={i}>
-                  <VistaLinhaDraft l={l} />
+                  <VistaLinhaDraft l={l} onAbrirImagem={setFotoAberta} />
                 </QuadroLinhaEditavel>
                 {editor.editando !== i && (
                   <div className="mt-2 flex items-center gap-3 flex-wrap">
@@ -317,6 +323,26 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
             )}
           </div>
         </>
+      )}
+
+      {fotoAberta && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+          onClick={() => setFotoAberta(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            onClick={() => setFotoAberta(null)}
+            className="absolute top-4 right-4 h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl leading-none"
+            aria-label="Fechar"
+          >
+            ×
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={fotoAberta} alt="Foto da peça" className="max-h-[90vh] max-w-[92vw] object-contain rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
+        </div>
       )}
     </div>
   )

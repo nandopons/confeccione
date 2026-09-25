@@ -1,13 +1,14 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { linkWhatsApp } from '@/app/lib/phone'
 import { msgFornecedorParaCliente } from '@/app/lib/mensagens-whatsapp'
-import { useEditorLinhas, QuadroLinhaEditavel, VistaLinhaDraft, BarraProntoAjustado } from './EditorPedidoFornecedor'
+import { useEditorLinhas, QuadroLinhaEditavel, VistaLinhaDraft, BarraProntoAjustado, type LinhaEntrada } from './EditorPedidoFornecedor'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 type Estampa = { posicao?: string | null; tamanho?: string | null }
 type Linha = {
+  lid?: string | null
   modelo?: string | null
   cor?: string | null
   material?: string | null
@@ -28,6 +29,8 @@ type Oferta = {
   linhas: Linha[]
   numImagens: number
   fotosPorLinha: number[] | null
+  /** Imagens de cada linha (chave + URL), na ordem do índice global — pro editor. */
+  visuaisPorLinha?: { chave: string; url: string }[][]
   valorRepasseCentavos: number | null
   prazoDias: number | null
   cidade?: string | null
@@ -67,11 +70,27 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
   const [enviando, setEnviando] = useState<null | 'aceitar' | 'recusar'>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [lightbox, setLightbox] = useState<number | null>(null)
+  // Foto que ainda não é do pedido (subida agora no editor) não tem índice
+  // global: o lightbox abre por URL, sem setas.
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
 
   // Edição dos produtos pelo fornecedor que assumiu (direto nos quadrinhos;
   // grava só no "Pronto, ajustado"). Ver EditorPedidoFornecedor.tsx.
-  const editor = useEditorLinhas(oferta.linhas)
+  // As fotos de cada linha entram no rascunho junto com a linha.
+  const linhasEntrada = useMemo<LinhaEntrada[]>(
+    () => oferta.linhas.map((l, i) => ({ ...l, visuais: oferta.visuaisPorLinha?.[i] ?? [] })),
+    [oferta.linhas, oferta.visuaisPorLinha]
+  )
+  const editor = useEditorLinhas(linhasEntrada, { ofertaId: oferta.ofertaId })
   const podeEditar = status === 'aceita' && !oferta.pago
+
+  function abrirImagem(url: string) {
+    // Foto que já é do pedido tem URL de índice global: abre no lightbox com
+    // setas, junto das outras. Foto nova (ainda no rascunho) abre sozinha.
+    const m = /\/imagem\?i=(\d+)$/.exec(url)
+    if (m) setLightbox(Number(m[1]))
+    else setLightboxUrl(url)
+  }
 
   const localPedido = [oferta.cidade, oferta.uf].filter(Boolean).join('/')
   const destinoFrete = [localPedido, oferta.cep ? `CEP ${oferta.cep}` : ''].filter(Boolean).join(' — ')
@@ -149,34 +168,19 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
           )}
           <div className="flex items-baseline justify-between gap-2 mb-3">
             <h2 className="text-sm font-semibold text-gray-700">Itens do pedido</h2>
-            <span className="text-xs text-gray-400">o lápis ajusta o item; o × tira</span>
+            <span className="text-xs text-gray-400">o lápis ajusta o item e as fotos; o × tira</span>
           </div>
           <ul className="space-y-3">
-            {editor.itens.map((l, i) => {
-              const fpl = oferta.fotosPorLinha
-              const count = fpl && l.origIdx != null ? fpl[l.origIdx] ?? 0 : 0
-              const offset = fpl && l.origIdx != null ? fpl.slice(0, l.origIdx).reduce((a, b) => a + b, 0) : 0
-              return (
-                <li key={l.lid ?? `n${i}`} className={'rounded-lg border px-4 py-3 ' + (l.alterada ? 'bg-amber-50/40 border-amber-200' : 'bg-gray-50 border-gray-100')}>
-                  {count > 0 && (
-                    <div className="mb-3 flex gap-2 overflow-x-auto">
-                      {Array.from({ length: count }).map((_, j) => {
-                        const gi = offset + j
-                        return (
-                          <button key={j} type="button" onClick={() => setLightbox(gi)} className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-white" aria-label={`Ampliar foto ${j + 1}`}>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={`/api/pedido/assistente/${oferta.pedidoId}/imagem?i=${gi}`} alt="" className="h-full w-full object-cover" />
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                  <QuadroLinhaEditavel editor={editor} i={i}>
-                    <VistaLinhaDraft l={l} />
-                  </QuadroLinhaEditavel>
-                </li>
-              )
-            })}
+            {/* As fotos da linha vêm do rascunho (VistaLinhaDraft), não mais
+                do fotosPorLinha: assim a vista mostra o que a confecção
+                tirou ou pôs antes de gravar. */}
+            {editor.itens.map((l, i) => (
+              <li key={l.key} className={'rounded-lg border px-4 py-3 ' + (l.alterada ? 'bg-amber-50/40 border-amber-200' : 'bg-gray-50 border-gray-100')}>
+                <QuadroLinhaEditavel editor={editor} i={i}>
+                  <VistaLinhaDraft l={l} onAbrirImagem={abrirImagem} />
+                </QuadroLinhaEditavel>
+              </li>
+            ))}
           </ul>
           <BarraProntoAjustado editor={editor} ofertaId={oferta.ofertaId} orcamentoDefinido={oferta.orcamentoStatus === 'definido'} />
         </div>
@@ -414,7 +418,32 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
         <PerguntasFornecedor ofertaId={oferta.ofertaId} />
       )}
 
-      {lightbox !== null && (
+      {lightboxUrl !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+          onClick={() => setLightboxUrl(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            type="button"
+            onClick={() => setLightboxUrl(null)}
+            className="absolute top-4 right-4 h-10 w-10 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/30 text-white text-2xl leading-none"
+            aria-label="Fechar"
+          >
+            ×
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightboxUrl}
+            alt="Foto da peça"
+            className="max-h-[90vh] max-w-[92vw] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
+      {lightbox !== null && lightboxUrl === null && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
           onClick={() => setLightbox(null)}

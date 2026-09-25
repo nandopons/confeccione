@@ -23,9 +23,21 @@ import { randomUUID } from 'crypto'
 import { supabaseAdmin } from './supabase-server'
 import { avisoOficial } from './whatsapp-notify'
 import { primeiroNome } from './nome'
+import { ehRefDoPedido } from './imagens-pedido-storage'
 import type { LinhaPedido } from './pedido-assistente-oferta'
 
 export type AutorEdicao = 'cliente' | 'fornecedor' | 'admin'
+
+/**
+ * AS FOTOS DA LINHA, COMO O EDITOR AS MANDA — 25/09/2026.
+ *
+ * `manter` são chaves das imagens que a linha JÁ tinha quando a página abriu:
+ * `f:<j>` = mockups[origIdx].fotos[j], `ia:<j>` = mockups[origIdx].ia[j]. O
+ * que não está em `manter` sai. `novas` são referências `storage:` que a
+ * confecção acabou de subir pela rota /imagem — só valem se apontam pra pasta
+ * deste pedido. Sem o campo, a linha fica com o que o remapeio deu a ela.
+ */
+export type ImagensEditadas = { manter: string[]; novas: string[] }
 
 /** Linha como chega do editor do fornecedor: mesma forma + índice de origem. */
 export type LinhaEditada = LinhaPedido & {
@@ -36,13 +48,19 @@ export type LinhaEditada = LinhaPedido & {
   objetivo_material?: string | null
   /** Posição da linha no pedido ANTES da edição (null = linha nova). */
   origIdx?: number | null
+  imagens?: ImagensEditadas | null
 }
+
+/** Chave de uma imagem da linha no editor (ver ImagensEditadas). */
+export const CHAVE_IMAGEM = /^(f|ia):(\d{1,2})$/
+/** Teto de fotos por linha — o mesmo do visualizador do cliente (MAX_FOTOS). */
+export const MAX_FOTOS_POR_LINHA = 6
 
 type MapaMockups = Record<string, unknown>
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null)
 
-function normalizarLinha(raw: LinhaEditada, anterior: LinhaPedido | null): LinhaPedido & { origIdx: number | null } {
+function normalizarLinha(raw: LinhaEditada, anterior: LinhaPedido | null): LinhaPedido & { origIdx: number | null; imagens?: ImagensEditadas | null } {
   const tamanhos = Array.isArray(raw.tamanhos)
     ? raw.tamanhos
         .map((t) => ({ tamanho: str(t?.tamanho), qtd: Number.isFinite(Number(t?.qtd)) && Number(t?.qtd) > 0 ? Math.round(Number(t?.qtd)) : null }))
@@ -53,7 +71,7 @@ function normalizarLinha(raw: LinhaEditada, anterior: LinhaPedido | null): Linha
   // Com grade preenchida, o total é a soma da grade; sem grade, vale o total digitado.
   const total = somaTam > 0 ? somaTam : totalRaw
 
-  const out: LinhaPedido & { origIdx: number | null } = {
+  const out: LinhaPedido & { origIdx: number | null; imagens?: ImagensEditadas | null } = {
     lid: str(raw.lid) ?? anterior?.lid ?? randomUUID(),
     modelo: str(raw.modelo),
     cor: str(raw.cor),
@@ -92,7 +110,90 @@ function normalizarLinha(raw: LinhaEditada, anterior: LinhaPedido | null): Linha
     const v = raw[k] !== undefined ? raw[k] : (anterior as LinhaEditada | null)?.[k]
     if (v !== undefined) (out as Record<string, unknown>)[k] = v
   }
+  // As fotos não são campo da linha (moram em `mockups`), mas viajam junto até
+  // aplicarImagensEditadas — e são tiradas antes de gravar (ver linhasFinais).
+  if (raw.imagens && typeof raw.imagens === 'object') {
+    out.imagens = {
+      manter: Array.isArray(raw.imagens.manter) ? raw.imagens.manter.filter((c) => typeof c === 'string' && CHAVE_IMAGEM.test(c)) : [],
+      novas: Array.isArray(raw.imagens.novas) ? raw.imagens.novas.filter((r) => typeof r === 'string') : [],
+    }
+  }
   return out
+}
+
+type EntradaMockup = { liso?: string; arte?: string; fotos?: string[]; ia?: { url: string; prompt?: string }[] }
+
+/**
+ * Aplica, por linha, o que a confecção fez com as fotos — 25/09/2026.
+ *
+ * Roda DEPOIS do remapeio: `remapeado[n]` já é o que a linha n herdou da sua
+ * posição antiga. Pra cada linha que trouxe `imagens`:
+ *   fotos = as que ela manteve (por chave, olhando o mapa ANTES da edição)
+ *           + as novas (só referências da pasta deste pedido; teto de 6)
+ *   ia    = as que ela manteve
+ * Sem `imagens` na linha, nada muda — é o que o visualizador do cliente e o
+ * Luigi mandam, e eles continuam funcionando como antes.
+ *
+ * Foto nova apaga `liso`/`arte` legados da linha, igual ao visualizador faz
+ * quando o cliente sobe foto: o modelo de fotos por peça substitui o antigo.
+ * Linha legada em que ela não mexeu nas fotos (manter e novas vazios, e sem
+ * fotos antes) fica com o liso/arte que tinha.
+ *
+ * Devolve o mapa final e quais posições tiveram foto mudada, pro resumo.
+ */
+export function aplicarImagensEditadas(
+  remapeado: MapaMockups,
+  antesMapa: MapaMockups | null,
+  novas: Array<{ origIdx: number | null; imagens?: ImagensEditadas | null }>,
+  pedidoId: string
+): { mapa: MapaMockups; posicoesComFotoMudada: number[] } {
+  const mapa: MapaMockups = { ...remapeado }
+  const mudadas: number[] = []
+  novas.forEach((l, n) => {
+    if (!l.imagens) return
+    const base: EntradaMockup = (l.origIdx != null && antesMapa ? (antesMapa[String(l.origIdx)] as EntradaMockup | undefined) : undefined) ?? {}
+    const baseFotos = Array.isArray(base.fotos) ? base.fotos.filter((f): f is string => typeof f === 'string' && f.length > 0) : []
+    // Mesmo filtro de visuaisPorLinha e coletarVisuaisPedido: a chave ia:<j>
+    // que a confecção devolve foi numerada sobre a lista JÁ filtrada.
+    const baseIa = Array.isArray(base.ia) ? base.ia.filter((it) => it && typeof it.url === 'string' && it.url.length > 0) : []
+
+    const manterFotos: string[] = []
+    const manterIa: { url: string; prompt?: string }[] = []
+    for (const chave of l.imagens.manter) {
+      const m = CHAVE_IMAGEM.exec(chave)
+      if (!m) continue
+      const j = Number(m[2])
+      if (m[1] === 'f' && baseFotos[j] && !manterFotos.includes(baseFotos[j])) manterFotos.push(baseFotos[j])
+      if (m[1] === 'ia' && baseIa[j] && !manterIa.includes(baseIa[j])) manterIa.push(baseIa[j])
+    }
+    // Só o que está na pasta DESTE pedido entra; o resto é ignorado em silêncio
+    // no dado e ruidoso no log — colar referência de outro pedido é bug ou má fé.
+    const novasRefs = l.imagens.novas.filter((r) => {
+      const ok = ehRefDoPedido(r, pedidoId)
+      if (!ok) console.error('[pedido-linhas] referência de foto recusada', { pedidoId, linha: n, ref: String(r).slice(0, 80) })
+      return ok
+    })
+    const fotos = [...manterFotos, ...novasRefs.filter((r) => !manterFotos.includes(r))].slice(0, MAX_FOTOS_POR_LINHA)
+
+    const entrada: EntradaMockup = { ...((mapa[String(n)] as EntradaMockup | undefined) ?? {}) }
+    if (fotos.length > 0) {
+      entrada.fotos = fotos
+      delete entrada.liso
+      delete entrada.arte
+    } else {
+      delete entrada.fotos
+    }
+    if (manterIa.length > 0) entrada.ia = manterIa
+    else delete entrada.ia
+
+    const antesStr = JSON.stringify({ f: baseFotos, ia: baseIa.map((i) => i.url) })
+    const depoisStr = JSON.stringify({ f: fotos, ia: manterIa.map((i) => i.url) })
+    if (antesStr !== depoisStr) mudadas.push(n)
+
+    if (Object.keys(entrada).length > 0) mapa[String(n)] = entrada
+    else delete mapa[String(n)]
+  })
+  return { mapa, posicoesComFotoMudada: mudadas }
 }
 
 function descreverLinha(l: LinhaPedido): string {
@@ -272,13 +373,29 @@ export async function salvarLinhasEditadas(params: {
     .filter((l) => l.modelo || l.cor || (l.total ?? 0) > 0 || (l.tamanhos?.length ?? 0) > 0)
   if (novas.length === 0) return { ok: false, erro: 'O pedido precisa ter pelo menos um produto.', status: 400 }
 
-  const linhasFinais: LinhaPedido[] = novas.map((l) => { const { origIdx, ...resto } = l; void origIdx; return resto })
+  const linhasFinais: LinhaPedido[] = novas.map((l) => { const { origIdx, imagens, ...resto } = l; void origIdx; void imagens; return resto })
   const diff = resumirDiffLinhas(antes, linhasFinais)
+  // Foto não muda preço nem grade: mexer só nela não cancela um orçamento já
+  // enviado. O aviso ao cliente ainda sai (é `mudou`, abaixo).
   const orcamentoReaberto = diff.mudou && ped.orcamento_status === 'definido'
+
+  const remapeado = comFotosParqueadas(ped.mockups, remapearMockups(ped.mockups, novas), novas)
+  const imagens = aplicarImagensEditadas(remapeado, ped.mockups, novas, params.pedidoId)
+
+  // "(fotos)" no resumo: na linha que já mudou por outro motivo, junta; nas
+  // outras, uma linha própria. É o que o cliente lê no WhatsApp.
+  let resumo = diff.resumo
+  for (const n of imagens.posicoesComFotoMudada) {
+    const desc = descreverLinha(linhasFinais[n])
+    const linhaAjustada = new RegExp(`^~ ${desc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\((.*)\\)$`, 'm')
+    if (linhaAjustada.test(resumo)) resumo = resumo.replace(linhaAjustada, (_, difs: string) => `~ ${desc} (${difs}, fotos)`)
+    else if (!resumo.includes(`+ ${desc}`)) resumo = [resumo, `~ ${desc} (fotos)`].filter(Boolean).join('\n')
+  }
+  const mudou = diff.mudou || imagens.posicoesComFotoMudada.length > 0
 
   const patch: Record<string, unknown> = {
     linhas: linhasFinais,
-    mockups: comFotosParqueadas(ped.mockups, remapearMockups(ped.mockups, novas), novas),
+    mockups: imagens.mapa,
     atualizado_em: new Date().toISOString(),
   }
   if (orcamentoReaberto) patch.orcamento_status = 'aguardando_fornecedor'
@@ -286,14 +403,14 @@ export async function salvarLinhasEditadas(params: {
   const { error } = await supabaseAdmin.from('pedidos_assistente').update(patch).eq('id', params.pedidoId)
   if (error) return { ok: false, erro: error.message, status: 500 }
 
-  if (diff.mudou) {
+  if (mudou) {
     try {
       await supabaseAdmin.from('pedidos_assistente_edicoes').insert({
         pedido_id: params.pedidoId,
         autor: params.autor,
         fornecedor_id: params.fornecedorId ?? null,
         oferta_id: params.ofertaId ?? null,
-        resumo: diff.resumo.slice(0, 2000),
+        resumo: resumo.slice(0, 2000),
         linhas_antes: antes,
         linhas_depois: linhasFinais,
       })
@@ -301,7 +418,7 @@ export async function salvarLinhasEditadas(params: {
       console.error('[pedido-linhas] histórico falhou', { err })
     }
   }
-  return { ok: true, linhas: linhasFinais, resumo: diff.resumo, mudou: diff.mudou, orcamentoReaberto }
+  return { ok: true, linhas: linhasFinais, resumo, mudou, orcamentoReaberto }
 }
 
 /**

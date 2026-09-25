@@ -926,6 +926,8 @@ export type OfertaDetalheFornecedor = {
   linhas: LinhaPedido[]
   numImagens: number
   fotosPorLinha: number[] | null
+  /** Por linha, as imagens com chave e URL — o que o editor de itens mostra e devolve. */
+  visuaisPorLinha: VisualLinha[][]
   valorRepasseCentavos: number | null
   prazoDias: number | null
   cidade: string | null
@@ -937,6 +939,38 @@ export type OfertaDetalheFornecedor = {
   contatoCliente: ContatoClienteOferta | null
   linkOrcamento: string | null
   temListaAberta: boolean
+}
+
+/** Uma imagem de uma linha, como o editor da confecção a vê: chave pra devolver e URL pra mostrar. */
+export type VisualLinha = { chave: string; url: string }
+
+/**
+ * As imagens de cada linha, na MESMA ordem do índice global que a rota
+ * /imagem?i= serve (coletarVisuaisPedido: fotos e depois ia, linha a linha) —
+ * 25/09/2026. A chave (`f:<j>` / `ia:<j>`) é o que a confecção manda de volta
+ * em `imagens.manter` quando ajusta a linha (ver pedido-linhas-edicao).
+ *
+ * Só no modelo de fotos por peça. No legado (nenhuma linha com fotos/ia, só
+ * `imagens` do confirm antigo ou arte/liso), o índice global não é por linha,
+ * e cada linha volta vazia: a página mostra a grade única e o editor não
+ * oferece tirar o que não é de linha nenhuma. Pôr foto nova continua valendo.
+ */
+export function visuaisPorLinha(mapa: MapaMockups | null | undefined, nLinhas: number, pedidoId: string): VisualLinha[][] {
+  const mk = mapa && typeof mapa === 'object' ? mapa : {}
+  const porLinha: VisualLinha[][] = []
+  let global = 0
+  let algum = false
+  for (let i = 0; i < nLinhas; i++) {
+    const v = (mk[String(i)] ?? {}) as { fotos?: unknown; ia?: unknown }
+    const fotos = Array.isArray(v.fotos) ? v.fotos.filter((x) => typeof x === 'string' && x.length > 0) : []
+    const ia = Array.isArray(v.ia) ? v.ia.filter((it) => it && typeof (it as { url?: unknown }).url === 'string' && ((it as { url: string }).url.length > 0)) : []
+    const lista: VisualLinha[] = []
+    fotos.forEach((_, j) => lista.push({ chave: `f:${j}`, url: `/api/pedido/assistente/${pedidoId}/imagem?i=${global++}` }))
+    ia.forEach((_, j) => lista.push({ chave: `ia:${j}`, url: `/api/pedido/assistente/${pedidoId}/imagem?i=${global++}` }))
+    if (lista.length > 0) algum = true
+    porLinha.push(lista)
+  }
+  return algum ? porLinha : porLinha.map(() => [])
 }
 
 export async function carregarOfertaParaFornecedor(
@@ -1023,6 +1057,7 @@ export async function carregarOfertaParaFornecedor(
     linhas,
     numImagens: coletarVisuaisPedido(pedido.mockups, pedido.imagens).length,
     fotosPorLinha: temFotosPorLinha ? fotosPorLinha : null,
+    visuaisPorLinha: visuaisPorLinha(pedido.mockups, linhas.length, pedido.id),
     valorRepasseCentavos: oferta.valor_repasse_centavos,
     prazoDias: pedido.prazo_dias ?? null,
     cidade: pedido.cidade ?? null,
@@ -1078,7 +1113,7 @@ export type ItemOrcamentoFornecedor = {
    * produto. A Arabela pediu pra tirar uma cor do 20260900301 (4 camisetas de
    * amamentar, Dom Santo) e a confecção, na tela de orçamento, não tinha como.
    */
-  linha: Pick<LinhaPedido, 'lid' | 'modelo' | 'cor' | 'material' | 'total' | 'tamanhos' | 'descricao'>
+  linha: Pick<LinhaPedido, 'lid' | 'modelo' | 'cor' | 'material' | 'total' | 'tamanhos' | 'descricao'> & { visuais: VisualLinha[] }
 }
 
 export type OrcamentoFornecedorDados = {
@@ -1115,12 +1150,13 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
 
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, nome, linhas, prazo_dias, pagamento_status, orcamento_status, orcamento_definido_em, frete_centavos, cidade, uf, cep, bairro')
+    .select('id, nome, linhas, mockups, prazo_dias, pagamento_status, orcamento_status, orcamento_definido_em, frete_centavos, cidade, uf, cep, bairro')
     .eq('id', oferta.pedido_id)
     .maybeSingle<{
       id: string
       nome: string | null
       linhas: LinhaPedido[]
+      mockups: MapaMockups | null
       prazo_dias: number | null
       pagamento_status: string | null
       orcamento_status: string | null
@@ -1134,6 +1170,7 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
   if (!pedido) return null
 
   const linhas = Array.isArray(pedido.linhas) ? pedido.linhas : []
+  const visuais = visuaisPorLinha(pedido.mockups, linhas.length, pedido.id)
 
   // sugeridos: engine de mercado → líquido (97% do unitário sugerido ao cliente)
   const { data: pesq } = await supabaseAdmin.from('pesquisas_preco').select('chave, faixas')
@@ -1164,6 +1201,7 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
         total: l.total ?? null,
         tamanhos: l.tamanhos ?? null,
         descricao: l.descricao ?? null,
+        visuais: visuais[i] ?? [],
       },
     }
   })

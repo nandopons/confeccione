@@ -3,17 +3,30 @@
 // app/fornecedor/oferta/[id]/EditorPedidoFornecedor.tsx
 // ============================================================================
 // Fornecedor que ASSUMIU o pedido ajusta os produtos DIRETO em cada quadrinho
-// da lista (modelo, cor, material, grade, observação), marca item por item
-// (Salvar = aplica no rascunho / Excluir), e só um botão geral no fim —
+// da lista (modelo, cor, material, grade, observação, FOTOS), marca item por
+// item (Salvar = aplica no rascunho / Excluir), e só um botão geral no fim —
 // "Pronto, ajustado — atualizar e avisar o cliente" — grava tudo de uma vez
 // (PATCH /api/fornecedor/oferta/[id]/linhas) depois de um pop-up avisando que
 // o cliente será notificado. Cada linha leva origIdx pro servidor re-mapear
-// os mockups.
+// os mockups. A tela de orçamento usa o mesmo editor, com o preço embaixo.
+//
+// FOTOS DA LINHA — 25/09/2026. Até aqui o editor só carregava a CONTAGEM de
+// fotos de cada linha: dava pra ver, não pra tirar nem pôr, e linha nova nascia
+// sem imagem. O Fernando, testando no celular: "ao editar produto não consegue
+// editar a imagem; ao adicionar produto não consegue anexar imagem".
+//
+// Agora a foto é parte do rascunho da linha (`LinhaDraft.imagens`): a que já
+// era da peça vem com uma chave (f:0, ia:1…) e sai com o ×; a nova sobe na
+// hora pra pasta do pedido (POST /imagem, uma por vez, já redimensionada aqui
+// no navegador) e entra como referência. Nada encosta no pedido até o botão
+// geral: o PATCH leva, por linha, `imagens: { manter: [chaves], novas: [refs] }`
+// — o servidor rebuilda `mockups[i]` (ver aplicarImagensEditadas).
 // ============================================================================
 
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
+export type VisualEntrada = { chave: string; url: string }
 export type LinhaEntrada = {
   lid?: string | null
   modelo?: string | null
@@ -22,6 +35,19 @@ export type LinhaEntrada = {
   total?: number | null
   tamanhos?: Tamanho[] | null
   descricao?: string | null
+  /** Imagens que a linha já tem (chave pra devolver, URL pra mostrar). */
+  visuais?: VisualEntrada[] | null
+}
+
+export type ImagemDraft = {
+  /** Chave da imagem que a linha JÁ tinha (f:<j> / ia:<j>); null = nova. */
+  chave: string | null
+  /** Referência `storage:` da foto nova, depois do upload. */
+  ref: string | null
+  /** O que o <img> mostra. */
+  url: string
+  subindo?: boolean
+  erro?: string | null
 }
 
 export type LinhaDraft = {
@@ -41,11 +67,14 @@ export type LinhaDraft = {
   total: string
   tamanhos: Array<{ tamanho: string; qtd: string }>
   descricao: string
+  imagens: ImagemDraft[]
   /** true quando difere do original (ou é nova). */
   alterada: boolean
 }
 
 const GRADE_PADRAO = ['PP', 'P', 'M', 'G', 'GG']
+/** Mesmo teto do visualizador do cliente e do servidor (MAX_FOTOS_POR_LINHA). */
+export const MAX_FOTOS = 6
 
 function daLinha(l: LinhaEntrada, i: number): LinhaDraft {
   return {
@@ -58,6 +87,7 @@ function daLinha(l: LinhaEntrada, i: number): LinhaDraft {
     total: l.total != null ? String(l.total) : '',
     tamanhos: (l.tamanhos ?? []).filter((t) => t?.tamanho).map((t) => ({ tamanho: String(t.tamanho), qtd: t.qtd != null ? String(t.qtd) : '' })),
     descricao: l.descricao ?? '',
+    imagens: (l.visuais ?? []).map((v) => ({ chave: v.chave, ref: null, url: v.url })),
     alterada: false,
   }
 }
@@ -68,13 +98,34 @@ function somaGrade(l: { tamanhos: Array<{ qtd: string }> }): number {
 export function totalDraft(l: LinhaDraft): number {
   return somaGrade(l) || parseInt(l.total, 10) || 0
 }
+/** Só imagens prontas contam: a que ainda está subindo não é da linha ainda. */
+function imagensProntas(l: { imagens: ImagemDraft[] }): ImagemDraft[] {
+  return l.imagens.filter((i) => !i.subindo && !i.erro && (i.chave || i.ref))
+}
 function assinatura(l: Omit<LinhaDraft, 'alterada'>): string {
-  return JSON.stringify([l.modelo.trim(), l.cor.trim(), l.material.trim(), String(totalDraft({ ...l, alterada: false })), l.tamanhos.filter((t) => t.tamanho.trim()).map((t) => [t.tamanho.trim().toUpperCase(), parseInt(t.qtd, 10) || 0]), l.descricao.trim()])
+  return JSON.stringify([
+    l.modelo.trim(),
+    l.cor.trim(),
+    l.material.trim(),
+    String(totalDraft({ ...l, alterada: false })),
+    l.tamanhos.filter((t) => t.tamanho.trim()).map((t) => [t.tamanho.trim().toUpperCase(), parseInt(t.qtd, 10) || 0]),
+    l.descricao.trim(),
+    imagensProntas(l).map((i) => i.chave ?? i.ref),
+  ])
+}
+
+/** O que o PATCH /linhas e o POST /orcamento recebem por linha. */
+export function imagensParaEnvio(l: LinhaDraft): { manter: string[]; novas: string[] } {
+  const prontas = imagensProntas(l)
+  return {
+    manter: prontas.map((i) => i.chave).filter((c): c is string => Boolean(c)),
+    novas: prontas.filter((i) => !i.chave).map((i) => i.ref).filter((r): r is string => Boolean(r)),
+  }
 }
 
 // ── Estado compartilhado ─────────────────────────────────────────────────────
 
-export function useEditorLinhas(linhasOriginais: LinhaEntrada[]) {
+export function useEditorLinhas(linhasOriginais: LinhaEntrada[], opts: { ofertaId?: string | null } = {}) {
   const originais = useMemo(() => linhasOriginais.map(daLinha), [linhasOriginais])
   const [itens, setItens] = useState<LinhaDraft[]>(originais)
   const [editando, setEditando] = useState<number | null>(null)
@@ -101,7 +152,7 @@ export function useEditorLinhas(linhasOriginais: LinhaEntrada[]) {
   function adicionar() {
     seqNova.current += 1
     const key = `nova-${seqNova.current}`
-    setItens((arr) => [...arr, { key, lid: null, origIdx: null, modelo: '', cor: '', material: '', total: '', tamanhos: [], descricao: '', alterada: true }])
+    setItens((arr) => [...arr, { key, lid: null, origIdx: null, modelo: '', cor: '', material: '', total: '', tamanhos: [], descricao: '', imagens: [], alterada: true }])
     setEditando(itens.length)
   }
   function desfazerTudo() {
@@ -109,17 +160,67 @@ export function useEditorLinhas(linhasOriginais: LinhaEntrada[]) {
     setEditando(null)
   }
 
-  return { itens, editando, setEditando, aplicar, excluir, adicionar, desfazerTudo, temMudanca, alteradas, removidas }
+  return { itens, editando, setEditando, aplicar, excluir, adicionar, desfazerTudo, temMudanca, alteradas, removidas, ofertaId: opts.ofertaId ?? null }
 }
 
 export type EditorLinhas = ReturnType<typeof useEditorLinhas>
+
+// ── Upload da foto (redimensiona no navegador, sobe uma por vez) ─────────────
+
+const LADO_MAX = 1600
+
+function lerComoDataUrl(file: File): Promise<string> {
+  return new Promise((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(String(r.result))
+    r.onerror = () => rej(new Error('não deu pra ler o arquivo'))
+    r.readAsDataURL(file)
+  })
+}
+
+/**
+ * Foto de celular tem 3–8 MB; a função da Vercel aceita 4,5 MB. Reduz pra
+ * ≤1600 px em JPEG antes de subir — mesmo caminho do visualizador do cliente.
+ * Arquivo já pequeno passa como está.
+ */
+async function prepararParaUpload(file: File): Promise<Blob> {
+  if (file.size <= 900_000) return file
+  const dataUrl = await lerComoDataUrl(file)
+  const img = document.createElement('img')
+  await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error('imagem inválida')); img.src = dataUrl })
+  const esc = Math.min(1, LADO_MAX / Math.max(img.naturalWidth || 1, img.naturalHeight || 1))
+  const w = Math.max(1, Math.round((img.naturalWidth || 1) * esc))
+  const h = Math.max(1, Math.round((img.naturalHeight || 1) * esc))
+  const cv = document.createElement('canvas')
+  cv.width = w
+  cv.height = h
+  const cx = cv.getContext('2d')
+  if (!cx) return file
+  cx.fillStyle = '#ffffff'
+  cx.fillRect(0, 0, w, h)
+  cx.drawImage(img, 0, 0, w, h)
+  const blob = await new Promise<Blob | null>((res) => cv.toBlob(res, 'image/jpeg', 0.85))
+  return blob ?? file
+}
+
+async function subirFoto(ofertaId: string, file: File): Promise<{ ref: string; url: string }> {
+  const blob = await prepararParaUpload(file)
+  const fd = new FormData()
+  fd.append('file', blob, blob === file ? file.name : 'foto.jpg')
+  const r = await fetch(`/api/fornecedor/oferta/${ofertaId}/imagem`, { method: 'POST', body: fd })
+  const j = await r.json().catch(() => null)
+  if (!r.ok || !j?.ref) throw new Error(j?.erro || 'Não deu pra subir a foto.')
+  return { ref: j.ref as string, url: j.url as string }
+}
 
 // ── Formulário inline de um quadrinho ────────────────────────────────────────
 
 const inp = 'w-full rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40'
 
-export function FormLinhaInline({ linha, onSalvar, onCancelar, onExcluir }: {
+export function FormLinhaInline({ linha, ofertaId, onSalvar, onCancelar, onExcluir }: {
   linha: LinhaDraft
+  /** Sem oferta não há onde subir foto — o botão some. */
+  ofertaId: string | null
   onSalvar: (l: Omit<LinhaDraft, 'alterada'>) => void
   onCancelar: () => void
   onExcluir: () => void
@@ -131,6 +232,14 @@ export function FormLinhaInline({ linha, onSalvar, onCancelar, onExcluir }: {
   })
   const [erro, setErro] = useState<string | null>(null)
   const soma = somaGrade(f)
+  const inputFoto = useRef<HTMLInputElement>(null)
+  // Upload termina depois de a pessoa ter clicado Cancelar: o setState num
+  // componente desmontado é ruído. A ref diz se ainda estamos aqui.
+  const vivo = useRef(true)
+  useEffect(() => () => { vivo.current = false }, [])
+
+  const subindo = f.imagens.some((i) => i.subindo)
+  const vagas = Math.max(0, MAX_FOTOS - f.imagens.filter((i) => !i.erro).length)
 
   function upd(p: Partial<typeof f>) { setF((x) => ({ ...x, ...p })) }
   function updTam(j: number, p: Partial<{ tamanho: string; qtd: string }>) { setF((x) => ({ ...x, tamanhos: x.tamanhos.map((t, k) => (k === j ? { ...t, ...p } : t)) })) }
@@ -140,10 +249,36 @@ export function FormLinhaInline({ linha, onSalvar, onCancelar, onExcluir }: {
       return { ...x, tamanhos: [...x.tamanhos, { tamanho: GRADE_PADRAO.find((g) => !usados.has(g)) ?? '', qtd: '' }] }
     })
   }
+  function removerImagem(url: string) {
+    setF((x) => ({ ...x, imagens: x.imagens.filter((i) => i.url !== url) }))
+  }
+  async function escolherFotos(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []).filter((x) => x.type.startsWith('image/'))
+    e.target.value = ''
+    if (!ofertaId || files.length === 0) return
+    const aUsar = files.slice(0, vagas)
+    if (aUsar.length === 0) { setErro(`No máximo ${MAX_FOTOS} fotos por item.`); return }
+    setErro(null)
+    for (const file of aUsar) {
+      const urlLocal = URL.createObjectURL(file)
+      setF((x) => ({ ...x, imagens: [...x.imagens, { chave: null, ref: null, url: urlLocal, subindo: true }] }))
+      try {
+        const { ref } = await subirFoto(ofertaId, file)
+        if (!vivo.current) continue
+        setF((x) => ({ ...x, imagens: x.imagens.map((i) => (i.url === urlLocal ? { ...i, ref, subindo: false } : i)) }))
+      } catch (err) {
+        if (!vivo.current) continue
+        const msg = err instanceof Error ? err.message : 'Não deu pra subir a foto.'
+        setF((x) => ({ ...x, imagens: x.imagens.map((i) => (i.url === urlLocal ? { ...i, subindo: false, erro: msg } : i)) }))
+      }
+    }
+  }
   function salvar() {
     if (!f.modelo.trim()) { setErro('Informe o modelo.'); return }
     if (!(somaGrade(f) || parseInt(f.total, 10) || 0)) { setErro('Informe a quantidade (grade ou total).'); return }
-    onSalvar(f)
+    if (subindo) { setErro('Espera a foto terminar de subir.'); return }
+    // Foto que falhou não vai: sai do rascunho na hora de salvar.
+    onSalvar({ ...f, imagens: f.imagens.filter((i) => !i.erro) })
   }
 
   return (
@@ -175,10 +310,53 @@ export function FormLinhaInline({ linha, onSalvar, onCancelar, onExcluir }: {
           <label className="mt-1.5 block text-xs text-gray-500">Quantidade total<input className={inp + ' max-w-[9rem]'} inputMode="numeric" value={f.total} onChange={(e) => upd({ total: e.target.value.replace(/\D/g, '') })} placeholder="ex.: 50" /></label>
         )}
       </div>
+
+      {/* FOTOS DA PEÇA — miniaturas com × e, no fim da fila, o quadrinho
+          tracejado "+ foto" (64 px: cabe o dedo; abre câmera ou galeria). */}
+      <div className="mt-2">
+        <span className="text-xs text-gray-500">Fotos da peça{f.imagens.length > 0 && <span className="text-gray-700"> · {f.imagens.filter((i) => !i.erro).length}/{MAX_FOTOS}</span>}</span>
+        <input ref={inputFoto} type="file" accept="image/*" multiple className="hidden" onChange={(e) => void escolherFotos(e)} />
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {f.imagens.map((im) => (
+            <div key={im.url} className={'relative h-16 w-16 overflow-hidden rounded-lg border bg-white ' + (im.erro ? 'border-red-300' : 'border-gray-200')} title={im.erro ?? undefined}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={im.url} alt="" className={'h-full w-full object-cover ' + (im.subindo ? 'opacity-40' : '')} />
+              {im.subindo && <span className="absolute inset-0 flex items-center justify-center text-[10px] font-medium text-gray-700">subindo…</span>}
+              {im.erro && <span className="absolute inset-x-0 bottom-0 bg-red-600/90 text-[9px] leading-tight text-white text-center px-0.5">falhou</span>}
+              <button
+                type="button"
+                onClick={() => removerImagem(im.url)}
+                aria-label="Tirar foto"
+                title="Tirar foto"
+                className="absolute top-0.5 right-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white text-[12px] leading-none hover:bg-red-600"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {ofertaId && vagas > 0 && (
+            <button
+              type="button"
+              onClick={() => inputFoto.current?.click()}
+              className="flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-lg border-2 border-dashed border-gray-300 bg-white text-gray-500 hover:border-emerald-500 hover:text-emerald-700"
+              aria-label="Adicionar foto"
+            >
+              <span className="text-xl leading-none">+</span>
+              <span className="text-[10px] font-medium">foto</span>
+            </button>
+          )}
+        </div>
+        {f.imagens.length === 0 && (
+          <p className="mt-1 text-[11px] text-gray-400">
+            {ofertaId ? 'Anexe a referência da peça — câmera ou galeria.' : 'Sem foto.'}
+          </p>
+        )}
+      </div>
+
       <label className="mt-2 block text-xs text-gray-500">Observação<textarea className={inp} rows={2} value={f.descricao} onChange={(e) => upd({ descricao: e.target.value })} placeholder="acabamento, gola, etiqueta…" /></label>
       {erro && <p className="mt-2 text-xs text-red-600">{erro}</p>}
       <div className="mt-3 flex items-center gap-2">
-        <button type="button" onClick={salvar} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700">Salvar</button>
+        <button type="button" onClick={salvar} disabled={subindo} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">{subindo ? 'Subindo foto…' : 'Salvar'}</button>
         <button type="button" onClick={onCancelar} className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Cancelar</button>
         <button type="button" onClick={onExcluir} className="ml-auto text-sm text-gray-400 hover:text-red-600">Excluir</button>
       </div>
@@ -254,7 +432,7 @@ export function QuadroLinhaEditavel({ editor, i, children }: { editor: EditorLin
   }
   if (emEdicao) {
     return (
-      <FormLinhaInline linha={l} onSalvar={(n) => editor.aplicar(i, n)} onCancelar={() => { if (l.origIdx == null && !l.modelo) editor.excluir(i); else editor.setEditando(null) }} onExcluir={excluir} />
+      <FormLinhaInline linha={l} ofertaId={editor.ofertaId} onSalvar={(n) => editor.aplicar(i, n)} onCancelar={() => { if (l.origIdx == null && !l.modelo) editor.excluir(i); else editor.setEditando(null) }} onExcluir={excluir} />
     )
   }
   return (
@@ -270,11 +448,33 @@ export function QuadroLinhaEditavel({ editor, i, children }: { editor: EditorLin
   )
 }
 
-/** Vista resumida de uma linha do rascunho (mesmo visual da lista original). */
-export function VistaLinhaDraft({ l }: { l: LinhaDraft }) {
+/**
+ * Vista resumida de uma linha do rascunho (mesmo visual da lista original),
+ * com as fotos da peça em cima. Clique na foto abre por `onAbrirImagem`
+ * (lightbox da página) ou, sem ele, numa aba nova.
+ */
+export function VistaLinhaDraft({ l, onAbrirImagem }: { l: LinhaDraft; onAbrirImagem?: (url: string) => void }) {
   const tam = l.tamanhos.filter((t) => t.tamanho.trim()).map((t) => `${t.tamanho.toUpperCase()}: ${t.qtd || '?'}`).join('  ·  ')
+  const fotos = imagensProntas(l)
   return (
     <div className="text-sm">
+      {fotos.length > 0 && (
+        <div className="mb-3 flex gap-2 overflow-x-auto">
+          {fotos.map((im, j) =>
+            onAbrirImagem ? (
+              <button key={im.url} type="button" onClick={() => onAbrirImagem(im.url)} className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-white" aria-label={`Ampliar foto ${j + 1}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={im.url} alt="" className="h-full w-full object-cover" />
+              </button>
+            ) : (
+              <a key={im.url} href={im.url} target="_blank" rel="noopener noreferrer" className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-white" aria-label={`Abrir foto ${j + 1}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={im.url} alt="" className="h-full w-full object-cover" />
+              </a>
+            )
+          )}
+        </div>
+      )}
       <div className="font-medium text-gray-900">{totalDraft(l) || '?'}× {l.modelo || 'peça'}{l.cor ? ` · ${l.cor}` : ''}</div>
       {l.material && <div className="text-gray-600 mt-1">Tecido: {l.material}</div>}
       {tam && <div className="text-gray-600 mt-1">{tam}</div>}
@@ -303,6 +503,7 @@ export function BarraProntoAjustado({ editor, ofertaId, orcamentoDefinido }: { e
           total: parseInt(l.total, 10) || null,
           tamanhos: l.tamanhos.filter((t) => t.tamanho.trim()).map((t) => ({ tamanho: t.tamanho.trim().toUpperCase(), qtd: parseInt(t.qtd, 10) || 0 })),
           descricao: l.descricao.trim() || null,
+          imagens: imagensParaEnvio(l),
         })),
       }
       const r = await fetch(`/api/fornecedor/oferta/${ofertaId}/linhas`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
