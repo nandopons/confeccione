@@ -149,7 +149,7 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
           )}
           <div className="flex items-baseline justify-between gap-2 mb-3">
             <h2 className="text-sm font-semibold text-gray-700">Itens do pedido</h2>
-            <span className="text-xs text-gray-400">toque em Editar pra ajustar direto no item</span>
+            <span className="text-xs text-gray-400">o lápis ajusta o item; o × tira</span>
           </div>
           <ul className="space-y-3">
             {editor.itens.map((l, i) => {

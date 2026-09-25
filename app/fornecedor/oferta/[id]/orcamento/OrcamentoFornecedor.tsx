@@ -188,7 +188,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
           <div className="px-6 py-5 space-y-4">
             <div className="flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold text-gray-700">Itens do pedido</h2>
-              <span className="text-xs text-gray-400">toque em Editar pra mudar cor, grade ou quantidade; Excluir tira o item</span>
+              <span className="text-xs text-gray-400">o lápis muda cor, grade ou quantidade; o × tira o item</span>
             </div>
 
             {editor.itens.map((l, i) => (

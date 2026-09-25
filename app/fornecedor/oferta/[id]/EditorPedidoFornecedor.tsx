@@ -186,19 +186,63 @@ export function FormLinhaInline({ linha, onSalvar, onCancelar, onExcluir }: {
   )
 }
 
-/** Cabeçalho de um quadrinho em modo edição: selo + botões Editar/Excluir. */
-export function AcoesLinha({ linha, editando, onEditar, onExcluir }: { linha: LinhaDraft; editando: boolean; onEditar: () => void; onExcluir: () => void }) {
-  if (editando) return null
+// ── Ícones (SVG inline, como o resto do site — não há lib de ícone) ──────────
+
+function IconeLapis() {
   return (
-    <div className="mt-2 flex items-center gap-3 text-xs">
-      {linha.alterada && <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">{linha.origIdx == null ? 'novo' : 'ajustado'}</span>}
-      <button type="button" onClick={onEditar} className="text-emerald-700 hover:underline">Editar</button>
-      <button type="button" onClick={onExcluir} className="text-gray-400 hover:text-red-600">Excluir</button>
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  )
+}
+function IconeX() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" aria-hidden>
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </svg>
+  )
+}
+
+/**
+ * Ações de um quadrinho: lápis e × no CANTO SUPERIOR DIREITO do card, como
+ * botões redondos — 25/09/2026. Eram dois links de texto ("Editar Excluir")
+ * embaixo do conteúdo, e o Fernando, vendo a tela de orçamento: "ficou meio
+ * estranho; coloca um lápis e um X em cada card, bem proeminente e elegante".
+ * 36 px cada, que é o mínimo pra dedo; o × só fica vermelho ao passar.
+ */
+function AcoesLinha({ onEditar, onExcluir }: { onEditar: () => void; onExcluir: () => void }) {
+  return (
+    <div className="absolute -top-0.5 right-0 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={onEditar}
+        title="Editar item"
+        aria-label="Editar item"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-emerald-200 bg-white text-emerald-700 shadow-sm transition-colors hover:border-emerald-400 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+      >
+        <IconeLapis />
+      </button>
+      <button
+        type="button"
+        onClick={onExcluir}
+        title="Remover item"
+        aria-label="Remover item"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-400/40"
+      >
+        <IconeX />
+      </button>
     </div>
   )
 }
 
-/** Quadrinho completo (vista + form) — conteúdo da vista vem por children. */
+/**
+ * Quadrinho completo (vista + form) — conteúdo da vista vem por children.
+ * A vista fica num bloco `relative` com espaço à direita (pr-24) pros dois
+ * botões, que são posicionados em cima dele — assim funcionam igual na página
+ * da oferta (onde há fotos acima) e na de orçamento (onde o preço vem abaixo).
+ */
 export function QuadroLinhaEditavel({ editor, i, children }: { editor: EditorLinhas; i: number; children: ReactNode }) {
   const l = editor.itens[i]
   const emEdicao = editor.editando === i
@@ -208,17 +252,21 @@ export function QuadroLinhaEditavel({ editor, i, children }: { editor: EditorLin
     if (!confirm('Remover este produto do pedido? Nada muda até você confirmar no botão do fim da página.')) return
     editor.excluir(i)
   }
+  if (emEdicao) {
+    return (
+      <FormLinhaInline linha={l} onSalvar={(n) => editor.aplicar(i, n)} onCancelar={() => { if (l.origIdx == null && !l.modelo) editor.excluir(i); else editor.setEditando(null) }} onExcluir={excluir} />
+    )
+  }
   return (
-    <>
-      {emEdicao ? (
-        <FormLinhaInline linha={l} onSalvar={(n) => editor.aplicar(i, n)} onCancelar={() => { if (l.origIdx == null && !l.modelo) editor.excluir(i); else editor.setEditando(null) }} onExcluir={excluir} />
-      ) : (
-        <>
-          {children}
-          <AcoesLinha linha={l} editando={false} onEditar={() => editor.setEditando(i)} onExcluir={excluir} />
-        </>
+    <div className="relative pr-24">
+      {children}
+      {l.alterada && (
+        <span className="mt-1.5 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+          {l.origIdx == null ? 'novo' : 'ajustado'}
+        </span>
       )}
-    </>
+      <AcoesLinha onEditar={() => editor.setEditando(i)} onExcluir={excluir} />
+    </div>
   )
 }
 
