@@ -25,6 +25,15 @@ export const HORA_ABRE = 7
 export const HORA_FECHA = 19
 
 /**
+ * Quantos dias um pedido liberado fica na fila de oferta antes de a gente
+ * perguntar ao cliente se ele quer continuar a busca (25/09/2026, decisão do
+ * Fernando). Mora aqui, e não em oferta-automatica.ts, porque quem grava o
+ * prazo é `liberarParaFornecedores` (pedido-fechamento.ts) e quem o consome é
+ * a fila e a régua — três arquivos, nenhum pode importar dos outros sem ciclo.
+ */
+export const DIAS_DE_BUSCA = 7
+
+/**
  * Deslocamento de Recife em relação ao UTC, em minutos, naquele instante.
  * Recife não tem horário de verão hoje, mas derivar do dado é mais seguro do
  * que fixar -180 e descobrir o contrário num feriado de calendário.

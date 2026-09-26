@@ -45,27 +45,16 @@ export const MAX_OFERTAS_ABERTAS = 2
 const MAX_POR_RODADA = 2
 
 /**
- * Pedido parado além disto não entra na fila automática.
+ * A IDADE DO PEDIDO VIROU PRAZO DA BUSCA — 25/09/2026.
  *
- * POR QUE ISTO EXISTE — 10/09/2026
- * A fila ordena do mais antigo pro mais novo, o que é justo enquanto ela roda.
- * Só que ela nunca rodou: no dia em que ligarmos, há 32 pedidos represados e os
- * dez primeiros seriam de JUNHO, parados há 85 dias. A primeira coisa que a
- * automação faria seria oferecer a uma confecção um pedido que o cliente fez há
- * três meses — e empurrar os de hoje (a Ias, de 200 peças) pro fim da fila.
- *
- * Isso queima os dois lados: a confecção gasta atenção com algo que o cliente
- * provavelmente já resolveu em outro lugar, e a gente aparece desorganizado
- * logo na mensagem que devia abrir relação.
- *
- * Pedido antigo não fica órfão: ele continua no painel e o botão "Ofertar"
- * manual segue funcionando. O que a automação não faz é ressuscitar sozinha um
- * acervo parado — quem decide que vale a pena reabrir é o Fernando, olhando.
- *
- * Se um dia a fila estiver rodando em dia, este número pode subir sem medo:
- * ele existe pro represamento inicial, não pro regime normal.
+ * Até aqui havia um corte fixo de 30 dias (`MAX_DIAS_PARADO`), pra fila não
+ * ressuscitar sozinha um acervo de junho. O Fernando trocou por uma regra que
+ * fala com o cliente: cada pedido liberado vale `DIAS_DE_BUSCA` (7) dias na
+ * fila; vencido, a régua em busca-fornecedor-validade.ts pergunta se ele quer
+ * continuar — qualquer resposta renova por mais 7, silêncio encerra. Aqui a
+ * fila só olha `busca_valida_ate`: dentro do prazo, oferta; fora, é a régua
+ * que decide, não a fila.
  */
-const MAX_DIAS_PARADO = 30
 
 export type ResultadoFila = {
   expiradas: number
@@ -104,11 +93,6 @@ type PedidoFila = {
 
 /** Pedidos confirmados que ainda não têm confecção nem oferta em aberto. */
 async function pedidosNaFila(): Promise<PedidoFila[]> {
-  // O corte por idade vai no banco pra não gastar a janela de 60 lendo pedido
-  // de junho que seria descartado depois — sem ele, os represados ocupariam a
-  // consulta inteira e os de hoje nem apareceriam.
-  const limite = new Date(Date.now() - MAX_DIAS_PARADO * 24 * 60 * 60 * 1000).toISOString()
-
   // A ETAPA NÃO BASTA: EXIGIMOS O ACEITE DO CLIENTE — 10/09/2026.
   //
   // A view de etapas classifica como `buscando_fornecedor` quem tem
@@ -148,7 +132,6 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
     .select('id, codigo, cidade, uf, categoria, linhas, etapa, desde, confirmado_em')
     .in('etapa', ['buscando_fornecedor', 'sem_fornecedor'])
     .not('confirmado_em', 'is', null)
-    .gte('desde', limite)
     .order('desde', { ascending: true })
     .limit(60)
   if (errEtapas) throw new Error(`fila: pedidos por etapa — ${errEtapas.message}`)
@@ -156,20 +139,26 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
   const daView = (data ?? []) as Array<Omit<PedidoFila, 'pecas' | 'prazo_dias'> & { etapa: string }>
   if (daView.length === 0) return []
 
+  // Só quem está DENTRO do prazo de busca. Pedido com `busca_valida_ate` nulo é
+  // anterior à migration 20260926000000 e não recebeu backfill por não ter
+  // confirmado_em — não passou no filtro da view, então não chega aqui.
   const { data: extras, error: errExtras } = await supabaseAdmin
     .from('pedidos_assistente')
     .select('id, pecas, prazo_dias')
     .in('id', daView.map((p) => p.id))
+    .gte('busca_valida_ate', new Date().toISOString())
   if (errExtras) throw new Error(`fila: pecas/prazo dos pedidos — ${errExtras.message}`)
   const extraPorId = new Map(
     ((extras ?? []) as Array<{ id: string; pecas: string[] | null; prazo_dias: number | null }>).map((e) => [e.id, e])
   )
 
-  const candidatos: Array<PedidoFila & { etapa: string }> = daView.map((p) => ({
-    ...p,
-    pecas: extraPorId.get(p.id)?.pecas ?? null,
-    prazo_dias: extraPorId.get(p.id)?.prazo_dias ?? null,
-  }))
+  const candidatos: Array<PedidoFila & { etapa: string }> = daView
+    .filter((p) => extraPorId.has(p.id))
+    .map((p) => ({
+      ...p,
+      pecas: extraPorId.get(p.id)?.pecas ?? null,
+      prazo_dias: extraPorId.get(p.id)?.prazo_dias ?? null,
+    }))
 
   // Quem já tem oferta viva não entra: um pedido, uma confecção por vez.
   const { data: vivas, error: errVivas } = await supabaseAdmin

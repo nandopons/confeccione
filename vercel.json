@@ -43,6 +43,10 @@
     {
       "path": "/api/cron/luigi-seguir",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/busca-vencida",
+      "schedule": "5 * * * *"
     }
   ]
 }

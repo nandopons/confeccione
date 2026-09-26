@@ -948,13 +948,21 @@ async function fornecedoresAceitos(pedidoIds: string[]): Promise<Map<string, str
   return mapa
 }
 
-/** prazo_dias não está na view; vem da tabela, só pros pedidos do contexto. */
-async function prazosDesejados(pedidoIds: string[]): Promise<Map<string, number>> {
-  const mapa = new Map<string, number>()
+type DaTabela = { prazo_dias: number | null; busca_perguntada_em: string | null; busca_perguntada_vezes: number }
+
+/**
+ * prazo_dias e os campos da régua da busca não estão na view; vêm da tabela,
+ * só pros pedidos do contexto.
+ */
+async function prazosDesejados(pedidoIds: string[]): Promise<Map<string, DaTabela>> {
+  const mapa = new Map<string, DaTabela>()
   if (pedidoIds.length === 0) return mapa
-  const { data } = await supabaseAdmin.from('pedidos_assistente').select('id, prazo_dias').in('id', pedidoIds)
-  for (const r of (data ?? []) as Array<{ id: string; prazo_dias: number | null }>) {
-    if (typeof r.prazo_dias === 'number') mapa.set(r.id, r.prazo_dias)
+  const { data } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, prazo_dias, busca_perguntada_em, busca_perguntada_vezes')
+    .in('id', pedidoIds)
+  for (const r of (data ?? []) as Array<{ id: string } & DaTabela>) {
+    mapa.set(r.id, { prazo_dias: r.prazo_dias, busca_perguntada_em: r.busca_perguntada_em, busca_perguntada_vezes: r.busca_perguntada_vezes ?? 0 })
   }
   return mapa
 }
@@ -1626,7 +1634,9 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
   const lista = escolhidos.map<PedidoContexto>((p) => {
     const emAberto = (ETAPAS_ABERTAS as string[]).includes(p.etapa)
     const entrega = [p.cidade, p.uf].filter(Boolean).join('/') || null
-    const prazo = prazos.get(p.id) ?? null
+    const daTabela = prazos.get(p.id)
+    const prazo = daTabela?.prazo_dias ?? null
+    const perguntamosSeContinua = daTabela?.busca_perguntada_em ?? null
     return {
       codigo: p.codigo,
       id: p.id,
@@ -1672,7 +1682,18 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
           ? 'PRONTO E NÃO LIBERADO. Se ele já viu o resumo e disser que pode ("pode", "sim", "manda"), ' +
             'chame liberar_para_fornecedores AGORA, neste mesmo turno. Não pergunte de novo: ' +
             'ele já respondeu, e repetir a pergunta é o que faz o pedido parar aqui.'
-          : undefined,
+          : perguntamosSeContinua && (p.etapa === 'buscando_fornecedor' || p.etapa === 'sem_fornecedor')
+            ? // A RÉGUA DA BUSCA PERGUNTOU E ELE VOLTOU — 25/09/2026. Quase sempre
+              // o que saiu foi o template "posso tirar uma dúvida?" (janela
+              // fechada), então a pergunta de verdade ainda não foi feita: é
+              // aqui. Qualquer resposta dele já renovou a busca por 7 dias no
+              // cron; o que o Luigi faz é dar o rumo — ou encerrar, se ele
+              // disser que não quer mais.
+              `A BUSCA DE CONFECÇÃO PASSOU DOS 7 DIAS SEM NINGUÉM PEGAR, e a gente perguntou ${quandoRecife(perguntamosSeContinua) ?? 'há pouco'} se ele quer que a gente continue procurando. ` +
+              'Se a mensagem dele agora é a resposta a isso: quem quer seguir → diga em uma linha que a busca continua por mais 7 dias e pergunte se mudou alguma coisa no pedido (prazo, quantidade) que ajude a fechar; ' +
+              'quem não quer mais → pergunte se pode encerrar e, com o sim, encerrar_pedido. ' +
+              'Se ele só respondeu "pode" ao "posso tirar uma dúvida?", a dúvida é ESTA: pergunte se ele quer que a gente continue procurando confecção pro pedido. Não repita o resumo, não peça dado que já tem.'
+            : undefined,
       // Só faz sentido perseguir imagem em pedido que ainda vai pro cliente.
       // Pedido pago/produzindo já foi aprovado como está; mexer nele agora só
       // criaria diferença entre o que a confecção recebeu e o que está na tela.

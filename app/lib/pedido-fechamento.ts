@@ -30,6 +30,7 @@ import { enviarResumoPdfPedido } from './whatsapp-notify'
 import { CAMPOS_DO_RESUMO, hashDoResumo } from './resumo-hash'
 import type { LinhaPedido } from './pedido-assistente-oferta'
 import { ehPublicoValido } from './pecas'
+import { DIAS_DE_BUSCA } from './horario-comercial'
 
 export type PecaEntrada = {
   modelo?: string | null
@@ -1043,9 +1044,19 @@ export async function liberarParaFornecedores(
     .maybeSingle<{ confirmado_em: string | null }>()
 
   const agora = new Date().toISOString()
+  // A BUSCA NASCE COM PRAZO — 25/09/2026. Sete dias na fila; depois a régua
+  // pergunta ao cliente se continua (busca-fornecedor-validade.ts). Liberar de
+  // novo um pedido já liberado renova o prazo: é o cliente dizendo "segue".
   const { error } = await supabaseAdmin
     .from('pedidos_assistente')
-    .update({ status: 'confirmado', confirmado_em: p?.confirmado_em ?? agora, atualizado_em: agora })
+    .update({
+      status: 'confirmado',
+      confirmado_em: p?.confirmado_em ?? agora,
+      busca_valida_ate: new Date(Date.now() + DIAS_DE_BUSCA * 24 * 60 * 60 * 1000).toISOString(),
+      busca_perguntada_em: null,
+      busca_perguntada_vezes: 0,
+      atualizado_em: agora,
+    })
     .eq('id', pedidoId)
 
   if (error) return { ok: false, erro: 'não foi possível liberar agora' }
