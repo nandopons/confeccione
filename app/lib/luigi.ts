@@ -723,6 +723,21 @@ type Contexto = {
    * fina" no perfil. O pedido continuou 'ofertada' pra ele até vencer.
    */
   ofertasAbertas: OfertaAberta[]
+  /**
+   * Ofertas que ELA recebeu e que fecharam com OUTRA confecção nos últimos
+   * dias. Ver `ofertasFechadasComOutra` — 25/09/2026, o Cristian.
+   */
+  ofertasFechadasComOutra: OfertaFechadaComOutra[]
+}
+
+type OfertaFechadaComOutra = {
+  codigo: string | null
+  resumo: string
+  ofertadaEm: string
+  /** Quando a outra confecção aceitou (= quando esta foi cancelada). */
+  fechouEm: string
+  /** Minutos entre a oferta chegar pra ela e o pedido fechar com outra. */
+  minutosAteFechar: number
 }
 
 type OfertaAberta = {
@@ -736,6 +751,64 @@ type OfertaAberta = {
   ofertadaEm: string
   expiraEm: string | null
   link: string
+}
+
+/**
+ * Ofertas desta confecção que fecharam com outra nos últimos 3 dias.
+ *
+ * O CRISTIAN — 25/09/2026. O Fernando ofertou o 20260900338 (500 corta-vento)
+ * pra 10 confecções às 18:28; a Conquisst aceitou às 18:32 e as outras nove
+ * foram canceladas na hora. O Cristian abriu o link às 20:59, leu "já foi
+ * atendido" e escreveu isso. Pro Luigi não existia oferta nenhuma (o contexto
+ * só carrega `ofertada`), então ele respondeu com o discurso de boas-vindas e
+ * pediu foto — como se ela tivesse dito "oi".
+ *
+ * Isto dá ao prompt o fato: qual pedido, quando chegou pra ela, quanto tempo
+ * depois fechou. É com isso que ele explica em vez de ignorar.
+ *
+ * "Fechou com outra" = esta linha está `cancelada` E o mesmo pedido tem uma
+ * oferta `aceita`. Cancelada por vencimento sem ninguém aceitar não entra:
+ * é outra conversa (o pedido ainda está procurando quem produza).
+ */
+async function ofertasFechadasComOutra(waId: string): Promise<OfertaFechadaComOutra[]> {
+  const fornecedorId = await fornecedorDoContato(waId)
+  if (!fornecedorId) return []
+  const desde = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('pedido_id, criado_em, respondido_em, pedidos_assistente(codigo, linhas)')
+    .eq('fornecedor_id', fornecedorId)
+    .eq('status', 'cancelada')
+    .gte('respondido_em', desde)
+    .order('respondido_em', { ascending: false })
+    .limit(3)
+  if (error) throw new Error(`ofertas fechadas com outra: ${error.message}`)
+  type Ped = { codigo: string | null; linhas: unknown }
+  type R = { pedido_id: string; criado_em: string; respondido_em: string | null; pedidos_assistente: Ped | Ped[] | null }
+  const canceladas = (data ?? []) as unknown as R[]
+  if (canceladas.length === 0) return []
+
+  const { data: aceitas, error: errAceitas } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('pedido_id, respondido_em')
+    .in('pedido_id', canceladas.map((c) => c.pedido_id))
+    .eq('status', 'aceita')
+  if (errAceitas) throw new Error(`aceites dos pedidos cancelados: ${errAceitas.message}`)
+  const aceitaEm = new Map(((aceitas ?? []) as Array<{ pedido_id: string; respondido_em: string | null }>).map((a) => [a.pedido_id, a.respondido_em]))
+
+  return canceladas
+    .filter((c) => aceitaEm.has(c.pedido_id))
+    .map((c) => {
+      const p = Array.isArray(c.pedidos_assistente) ? c.pedidos_assistente[0] : c.pedidos_assistente
+      const fechouEm = aceitaEm.get(c.pedido_id) ?? c.respondido_em ?? c.criado_em
+      return {
+        codigo: p?.codigo ?? null,
+        resumo: resumoDasLinhas(p?.linhas),
+        ofertadaEm: c.criado_em,
+        fechouEm,
+        minutosAteFechar: Math.max(0, Math.round((new Date(fechouEm).getTime() - new Date(c.criado_em).getTime()) / 60000)),
+      }
+    })
 }
 
 /**
@@ -1528,13 +1601,14 @@ async function recusasAnterioresDaMesmaDivergencia(conversaId: string, divergenc
 }
 
 async function montarContexto(conversaId: string, waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
-  const [pedidos, conta, cadastroFornecedor, ofertasAbertas] = await Promise.all([
+  const [pedidos, conta, cadastroFornecedor, ofertasAbertas, ofertasFechadas] = await Promise.all([
     pedidosDoContato(waId, clienteId),
     clienteId
       ? supabaseAdmin.from('contas_clientes').select('nome, email').eq('id', clienteId).maybeSingle<{ nome: string | null; email: string | null }>()
       : Promise.resolve({ data: null }),
     ehFornecedor ? cadastroDoFornecedor(waId) : Promise.resolve(null),
     ehFornecedor ? ofertasAbertasDoFornecedor(waId) : Promise.resolve([] as OfertaAberta[]),
+    ehFornecedor ? ofertasFechadasComOutra(waId) : Promise.resolve([] as OfertaFechadaComOutra[]),
   ])
 
   // Em aberto primeiro (mais recente no topo); fechados só os 2 últimos.
@@ -1614,6 +1688,7 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
     ehFornecedor,
     cadastroFornecedor,
     ofertasAbertas,
+    ofertasFechadasComOutra: ofertasFechadas,
     contato: { nome, telefone: waId, conta: conta.data ? { nome: conta.data.nome, email: conta.data.email } : null },
     pedidos: lista,
     pedidoEmFoco: abertos[0] ?? null,
@@ -3368,7 +3443,73 @@ Em 24/09 uma confecção disse por áudio "não vou conseguir assumir esse pedid
 `
 }
 
-function promptFornecedor(nome: string | null, jaSeApresentou: boolean, cadastro: CadastroFornecedor | null, ofertas: OfertaAberta[] = []): string {
+/**
+ * O pedido que ela recebeu e que já fechou com outra confecção.
+ *
+ * O que o Fernando quer que o Luigi diga (25/09/2026, sobre o Cristian): que
+ * foi pela urgência — o pedido saiu pra várias ao mesmo tempo e a primeira a
+ * aceitar levou —, que não é nada contra ela, e que dá pra ALINHAR O PERFIL
+ * dela pra os próximos chegarem certeiros. Não é pedido de desculpa nem
+ * discurso de boas-vindas: é explicação + próximo passo.
+ */
+function blocoOfertasFechadasComOutra(ofertas: OfertaFechadaComOutra[]): string {
+  if (ofertas.length === 0) return ''
+  const linhas = ofertas.map((o) => {
+    const tempo = o.minutosAteFechar < 60 ? `${o.minutosAteFechar} min` : `${Math.round(o.minutosAteFechar / 60)} h`
+    return `- pedido ${o.codigo ?? '?'}: ${o.resumo} · chegou pra ela ${quandoRecife(o.ofertadaEm) ?? 'há pouco'} · fechou com outra confecção ${tempo} depois`
+  })
+  return `
+PEDIDO QUE ELA RECEBEU E JÁ FECHOU COM OUTRA CONFECÇÃO:
+${linhas.join('\n')}
+
+Se ela disser "já foi atendido", "outra pessoa pegou", "quando abri já tinha fechado", "cheguei atrasado", É DISTO que ela fala. Responda A ISSO, não com boas-vindas nem com pedido de foto. Em uma ou duas linhas:
+• o porquê: esse pedido tinha pressa, foi pra mais de uma confecção ao mesmo tempo e a primeira que aceitou levou — quem abre depois vê "já atendido". Não foi nada contra ela, e o pedido não saiu da mão dela por recusa.
+• o próximo passo, que é o que interessa: pra os próximos chegarem na frente e certeiros, alinhar o perfil de vocês — o que produzem melhor e uma foto de produção. E aí faça a pergunta certa (peça com nome ou foto, conforme o que falta acima).
+
+Errado (25/09/2026, o Cristian escreveu "Este pedido ja foi atendido por outra pessoa" e ouviu): "A gente recebe pedido de quem quer produzir roupa e manda pras confecções da rede; quando cai um que combina com vocês, você decide se pega e monta o orçamento." — isso é a apresentação padrão, ignora o que ele disse.
+Certo: "Esse era urgente, foi pra várias confecções ao mesmo tempo e a primeira que aceitou levou — quando você abriu já tinha fechado. Pra os próximos chegarem na sua frente, me diz o que vocês mais produzem e me manda uma foto de produção."
+`
+}
+
+/**
+ * COMO A CONFECCIONE FUNCIONA, PRA QUEM PERGUNTAR — vale pra TODA confecção,
+ * aprovada ou não.
+ *
+ * Até 25/09/2026 isto morava dentro do bloco de sinal/adiantamento, que só
+ * entra no prompt de confecção APROVADA. Cadastro pendente ficava sem
+ * resposta pra "qual a porcentagem de vocês?", "como o cliente sabe o preço?",
+ * "tem limite de peças?" — e o Luigi, sem ter o que dizer, respondia "tem mais
+ * foto?". A Fernanda (Felix Leather) fez CINCO perguntas assim em 25/09 e
+ * ouviu "Tem mais fotos?" pra todas; o Fernando entrou e respondeu à mão. O
+ * que ele respondeu é o que está aqui, nas palavras dele.
+ */
+const COMO_FUNCIONA_PRA_CONFECCAO = `
+SE ELA PERGUNTAR COMO FUNCIONA — comissão, preço, como chega pedido, frete, quantos pedidos — RESPONDA. Estas são as respostas, e você responde só à pergunta que ela fez, uma coisa por mensagem:
+
+COMISSÃO / "QUAL A PORCENTAGEM DE VOCÊS?": a Confeccione NÃO tira nada do valor que ela recebe. O que ela põe no orçamento é o que ela recebe, integral. Em cima do orçamento dela a gente adiciona 3%, cobrados do CLIENTE — aparece pro cliente como "Seguro Confeccione". Diga assim, porque a suposição natural dela é que a plataforma desconta da produção, e é essa suposição que faz confecção inflar preço ou preferir fechar por fora.
+
+PREÇO DAS PEÇAS / "COMO O CLIENTE VAI SABER O VALOR?" / "NÃO PRECISA DOS VALORES?": não tem tabela de preço no cadastro, e o cliente não faz o pedido pelo preço — ele descreve a peça e a quantidade. O pedido chega pra ela com um resumo (por WhatsApp e e-mail); ela aceita ou recusa; se aceitar, ela conversa com o cliente e passa o preço dela no orçamento, de acordo com o que viu e alinhou com ele. Se ela sugerir "média de valores por fornecedor": é uma ideia que a gente está avaliando, hoje funciona assim.
+
+ACEITAR OU RECUSAR: o pedido chega, ela decide. Recusar não tem custo e o cliente NÃO fica sabendo quem recusou. Ao aceitar, o sistema libera os dados do cliente pra ela (nome, WhatsApp, e-mail, endereço) e manda os dados dela pro cliente. Muitas vezes vale conversar antes pelo WhatsApp — se apresentar, entender os detalhes — e, acertado isso, enviar o orçamento pelo botão do painel. É por esse link que o cliente paga.
+
+"TEM LIMITE DE PEÇAS / DE PEDIDOS POR FORNECEDOR?": não. Ela pega o que couber na agenda dela e recusa o resto.
+
+FRETE: ela põe o CEP de origem no orçamento e o frete é calculado ali, do endereço dela até o do cliente — a Confeccione é integrada ao Melhor Envio. Quem envia é ELA.
+
+"QUANTOS PEDIDOS POR MÊS?" / "TEM PEDIDO DO MEU NICHO?": hoje gira em torno de 200 pedidos por mês, de todo tipo de peça. Não prometa quantos serão do nicho dela — você não sabe. O que você pode dizer: a gente está liberando fornecedor e pedido aos poucos, lapidando os detalhes pra experiência ficar boa dos dois lados; o mais importante agora é o pedido chegar organizado e alinhado ao perfil dela — por isso o perfil importa.
+
+QUEM SOMOS, se ela perguntar: projeto de tecnologia pra confecção, de Recife, embarcado no Porto Digital (parceria público-privada). Uma linha, sem propaganda.
+
+PERGUNTA DELA VEM ANTES DA SUA. Se ela perguntou algo e você tem a resposta acima, responda ISSO nesta mensagem; a foto ou a peça você pede depois, na mensagem seguinte ou quando ela terminar de perguntar. Pedir foto em cima de uma pergunta não respondida é o mesmo que não ter lido.
+`
+
+function promptFornecedor(
+  nome: string | null,
+  jaSeApresentou: boolean,
+  cadastro: CadastroFornecedor | null,
+  ofertas: OfertaAberta[] = [],
+  fechadasComOutra: OfertaFechadaComOutra[] = []
+): string {
   // O BLOCO DO QUE JÁ SABEMOS — 10/09/2026.
   //
   // Sem ele o Luigi abria a conversa perguntando o que a confecção já tinha
@@ -3463,8 +3604,6 @@ SE ELA QUISER ACEITAR UM PEDIDO MAS FALTAR ARTE OU MOCKUP: pode aceitar. Ao acei
 
 QUANDO ELA DISSER QUE É A PRIMEIRA VEZ NA PLATAFORMA: reconheça e siga; não trate como risco nem como novata. As condições são as mesmas — a verificação é o que vale, não o histórico.
 
-COMISSÃO — E ESTA RESPOSTA VALE OURO PRA ELA: a Confeccione NÃO tira nada do valor dela. O que ela põe no orçamento é o que ela recebe, integral. A nossa comissão é de 3% cobrada do CLIENTE, por cima do pedido. Diga assim, porque a suposição natural dela é que a plataforma desconta da produção — e é essa suposição que faz confecção inflar preço ou preferir fechar por fora.
-
 NOTA FISCAL: cada confecção é responsável pela emissão própria — a gente está liberando o módulo, mas quem emite é ela. Pelo Melhor Envio dá pra gerar DECLARAÇÃO DE CONTEÚDO, que os Correios ainda aceitam; a LatamCargo exige NF.
 
 E AVISE DO RISCO, sem dramatizar: declaração de conteúdo NÃO tem valor fiscal, e em envio interestadual a mercadoria pode ficar retida na Sefaz. Quem consegue emitir nota, emite — é o caminho seguro. Isso não é burocracia nossa, é o que evita a carga dela parar na estrada.
@@ -3500,7 +3639,8 @@ QUEM PRECISA DA OUTRA É A GENTE. Ela tem produção; a gente tem pedido procura
 
 A FOTO É O VITRINE DELA, NÃO ARQUIVO NOSSO. Nunca diga "pra gente colocar no seu perfil", como se fosse cadastro interno. Diga pra que serve do lado dela: é o que o cliente vê quando escolhe a confecção que vai produzir.
 
-${ofertas.length > 0 ? blocoOfertasAbertas(ofertas) : `SE ELA PERGUNTAR "QUE PEDIDO?", NÃO EXISTE PEDIDO. Não invente um, e não explique por quê. Uma linha e siga: "Não é um pedido específico — ${pedeUmaCoisa}" Só isso.`}
+${blocoOfertasFechadasComOutra(fechadasComOutra)}
+${ofertas.length > 0 ? blocoOfertasAbertas(ofertas) : fechadasComOutra.length > 0 ? '' : `SE ELA PERGUNTAR "QUE PEDIDO?", NÃO EXISTE PEDIDO. Não invente um, e não explique por quê. Uma linha e siga: "Não é um pedido específico — ${pedeUmaCoisa}" Só isso.`}
 
 NÃO CONTE A NOSSA COZINHA. Template, Meta, janela de 24 h, "o único formato aprovado", categoria que não filtra, como o match funciona, o que falta no cadastro dela pra pontuar: nada disso interessa a quem está costurando. É problema nosso. Explicar isso não soa transparente, soa confuso — e faz ela achar que vai dar trabalho falar com a gente. Peça o que você precisa e pronto; se ela quiser saber pra quê, uma frase resolve ("é pra te mandar só o que combina com o que vocês fazem").
 
@@ -3512,9 +3652,10 @@ ${jaSabemos}
 
 ${jaSeApresentou ? 'Você já se apresentou nesta conversa: não repita o nome.' : 'Se for a primeira fala sua aqui, diga em uma linha quem é.'}
 
-SE ELA ACABOU DE SE CADASTRAR, DIGA EM UMA LINHA O QUE A GENTE FAZ — e só. "A gente recebe pedido de quem quer produzir roupa e manda pras confecções da rede; quando cai um que combina com vocês, você decide se pega e monta o orçamento." Pronto, já dá pra perguntar.
+SE ELA ACABOU DE SE CADASTRAR E ESTA É A PRIMEIRA TROCA, DIGA EM UMA LINHA O QUE A GENTE FAZ — e só. "A gente recebe pedido de quem quer produzir roupa e manda pras confecções da rede; quando cai um que combina com vocês, você decide se pega e monta o orçamento." Pronto, já dá pra perguntar. Essa frase é de ABERTURA: se ela já recebeu pedido, já conversou com você ou acabou de dizer alguma coisa concreta (que o pedido fechou, uma pergunta, uma recusa), NÃO a use — responda ao que ela disse.
 
-O resto (como o pagamento é retido, quem aprova o cadastro, comissão) você SÓ fala se ela perguntar, e aí responde só o que ela perguntou. Discurso de boas-vindas não convence ninguém a costurar pra gente — trabalho, sim. E nunca prometa volume, frequência nem faturamento: você não sabe.
+O resto (como o pagamento é retido, quem aprova o cadastro, comissão) você SÓ fala se ela perguntar, e aí responde só o que ela perguntou. Discurso de boas-vindas não convence ninguém a costurar pra gente — trabalho, sim. E nunca prometa volume, frequência nem faturamento pro nicho dela: você não sabe.
+${COMO_FUNCIONA_PRA_CONFECCAO}
 ${regraSinal}
 
 ${perguntaPecas ? 'VOCÊ QUER DUAS COISAS DELA, NESTA ORDEM.' : 'VOCÊ QUER UMA COISA DELA: FOTO.'} Diga o porquê uma vez — é pra mandar só pedido que combina com ela em vez de mandar tudo — e vá.
@@ -3555,7 +3696,7 @@ NUNCA: prometa pedido, volume ou faturamento; combine preço; passe contato de c
 
 function promptSistema(modo: Exclude<ModoLuigi, 'desligado'>, ctx: Contexto, jaSeApresentou: boolean): Anthropic.Messages.TextBlockParam[] {
   const nome = primeiroNome(ctx.contato.nome) || primeiroNome(ctx.contato.conta?.nome) || null
-  if (ctx.ehFornecedor) return [{ type: 'text', text: promptFornecedor(nome, jaSeApresentou, ctx.cadastroFornecedor, ctx.ofertasAbertas) }]
+  if (ctx.ehFornecedor) return [{ type: 'text', text: promptFornecedor(nome, jaSeApresentou, ctx.cadastroFornecedor, ctx.ofertasAbertas, ctx.ofertasFechadasComOutra) }]
   const etapas = (Object.keys(ETAPA_PARA_CLIENTE) as Etapa[]).map((e) => `- ${e} (${INFO_ETAPA[e].label}): ${ETAPA_PARA_CLIENTE[e]}`).join('\n')
   const pedidos =
     ctx.pedidos.length === 0

@@ -33,8 +33,16 @@ import { ofertarPedido, ordenarFornecedoresPara, resumirLinhas, type FornecedorO
 /** Ofertas em aberto que uma confecção pode segurar ao mesmo tempo. */
 export const MAX_OFERTAS_ABERTAS = 2
 
-/** Teto de pedidos tratados por rodada — cron roda a cada 10 min. */
-const MAX_POR_RODADA = 10
+/**
+ * Teto de pedidos tratados por rodada — cron roda a cada 20 min.
+ *
+ * Era 10. Baixou pra 2 em 25/09/2026, decisão do Fernando: a fila nunca tinha
+ * rodado de verdade (ver pedidosNaFila) e no dia do conserto havia 12 pedidos
+ * elegíveis represados — soltar 10 ofertas de uma vez na primeira rodada, sem
+ * ninguém olhando, é o oposto do "uma confecção por vez". Com 2 por rodada, o
+ * represamento escoa em ~2 h de horário comercial e dá pra acompanhar.
+ */
+const MAX_POR_RODADA = 2
 
 /**
  * Pedido parado além disto não entra na fila automática.
