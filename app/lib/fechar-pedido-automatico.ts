@@ -88,6 +88,9 @@ const MOTIVO_PREVIA = 'prévia não saiu'
  *   • 21h–23h59 só se o cliente escreveu nas últimas 2 h. Aí ele está acordado,
  *     na conversa, esperando — o PDF é resposta, não interrupção.
  */
+/** Cliente que escreveu há menos disto está em conversa; o fechador espera. */
+const MINUTOS_CONVERSA_VIVA = 15
+
 function podeFecharAgora(ultimaEntradaDoCliente: Date | null): { pode: boolean; motivo: string } {
   const hora = horaEmRecife()
   if (hora < 8) return { pode: false, motivo: 'madrugada (fecha a partir das 8h)' }
@@ -315,9 +318,26 @@ async function varrer(saida: ResultadoFechamento): Promise<ResultadoFechamento> 
       continue
     }
 
-    const quando = podeFecharAgora(await ultimaFalaDoCliente(p.telefone))
+    const ultimaFala = await ultimaFalaDoCliente(p.telefone)
+    const quando = podeFecharAgora(ultimaFala)
     if (!quando.pode) {
       saida.pulados.push({ pedido: rotulo, motivo: quando.motivo })
+      continue
+    }
+    // CONVERSA VIVA É DO LUIGI, NÃO DO FECHADOR — 27/09/2026.
+    //
+    // O Guilherme disse "sim, por favor" ao "posso mandar o resumo?" às
+    // 14:14:21; o Luigi abriu o turno e mandou o PDF às 14:15:32. Esta rodada
+    // começou às 14:15:06, leu `resumo_enviado_em` nulo (o Luigi ainda estava
+    // gerando), gerou uma prévia por conta e mandou o MESMO PDF às 14:15:32,
+    // 109 ms depois do dele. Dois arquivos iguais na tela do cliente.
+    //
+    // O fechador existe pro pedido PARADO — pronto e sem ninguém falando. Quem
+    // escreveu há minutos está sendo atendido; entrar aqui é falar por cima.
+    // A trava atômica em enviarResumoParaCliente é a rede pro caso extremo;
+    // esta é a regra de bom senso que evita chegar lá.
+    if (ultimaFala && Date.now() - ultimaFala.getTime() < MINUTOS_CONVERSA_VIVA * 60_000) {
+      saida.pulados.push({ pedido: rotulo, motivo: `cliente falou há menos de ${MINUTOS_CONVERSA_VIVA} min — a conversa é do Luigi` })
       continue
     }
     if (await humanoFalouAgora(p.telefone)) {

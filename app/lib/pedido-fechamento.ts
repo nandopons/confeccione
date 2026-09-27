@@ -988,6 +988,37 @@ export async function enviarResumoParaCliente(
     }
   }
 
+  // QUEM CARIMBA PRIMEIRO MANDA; O OUTRO DESISTE — 27/09/2026.
+  //
+  // O Luigi (na conversa) e o fechador automático (cron) chamaram esta função
+  // pro mesmo pedido com 45 s de diferença; os dois leram `resumo_enviado_em`
+  // nulo acima, os dois geraram o PDF, e o Guilherme recebeu dois arquivos
+  // iguais com 109 ms de intervalo. A leitura lá em cima não é trava: entre
+  // ler e gravar cabe um PDF inteiro.
+  //
+  // Trava de verdade é um UPDATE condicional no banco: grava o hash SÓ SE ele
+  // ainda não é este. Quem chegar segundo não afeta linha nenhuma e sai sem
+  // mandar. Se o envio falhar, devolve o hash anterior pra não deixar o pedido
+  // "resumado" sem resumo. Com `forcar` (ele pediu o arquivo de novo) a trava
+  // não se aplica — reenviar é a intenção.
+  const hashAnterior = p.resumo_enviado_hash
+  if (!opts.forcar) {
+    const { data: reivindicado, error: errReiv } = await supabaseAdmin
+      .from('pedidos_assistente')
+      .update({ resumo_enviado_hash: hash })
+      .eq('id', pedidoId)
+      .or(`resumo_enviado_hash.is.null,resumo_enviado_hash.neq.${hash}`)
+      .select('id')
+    if (errReiv) return { ok: false, erro: `não consegui reservar o envio: ${errReiv.message}` }
+    if (!reivindicado || reivindicado.length === 0) {
+      return {
+        ok: true,
+        jaEnviado: true,
+        erro: 'outro processo acabou de mandar este mesmo resumo — não mande de novo, fale com o cliente sobre o que ele já tem em mãos',
+      }
+    }
+  }
+
   const r = await enviarResumoPdfPedido({
     pedidoId,
     destinos: [
@@ -1001,10 +1032,16 @@ export async function enviarResumoParaCliente(
     // a trava de "gente na conversa" lê isso como pessoa e ele se cala nos 15
     // minutos seguintes ao próprio resumo — bem quando o cliente responde.
     autor: 'luigi',
-    // `forcar` = ele pediu o arquivo de novo; aí vai mesmo idêntico.
-    mesmoQueJaTenha: Boolean(opts.forcar),
+    // A deduplicação já foi feita aqui (hash + reserva). Sem isto, a reserva
+    // acima faria o envio achar que "o cliente já tem" e pular o cliente.
+    mesmoQueJaTenha: true,
   })
-  if (r.enviados === 0) return { ok: false, erro: 'não foi possível enviar o PDF agora' }
+  if (r.enviados === 0) {
+    if (!opts.forcar) {
+      await supabaseAdmin.from('pedidos_assistente').update({ resumo_enviado_hash: hashAnterior }).eq('id', pedidoId).eq('resumo_enviado_hash', hash)
+    }
+    return { ok: false, erro: 'não foi possível enviar o PDF agora' }
+  }
   // QUEM CARIMBA É O ENVIO, NÃO O CHAMADOR — 24/09/2026. `resumo_enviado_em` e
   // a assinatura são gravados dentro de enviarResumoPdfPedido, no momento em
   // que o PDF chega ao CLIENTE — por qualquer caminho. Ver a nota lá.
