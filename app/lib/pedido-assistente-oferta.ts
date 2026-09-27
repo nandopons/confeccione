@@ -877,8 +877,58 @@ export async function recusarOrcamentoCliente(pedidoId: string): Promise<{ ok: b
   return { ok: true }
 }
 
+/**
+ * O cliente desistiu: avisa cada confecção que estava com o pedido (oferta em
+ * aberto ou aceita) e cancela as ofertas.
+ *
+ * O MATHEUS — 26/09/2026. Ele pediu pra cancelar o 20260900339 já com
+ * orçamento da Dom Santo definido e aguardando pagamento. O Luigi escalou
+ * ("não posso encerrar por aqui") e a Dom Santo, que tinha orçado, ficaria
+ * esperando um pagamento que não vem. Regra do Fernando: cliente que pediu e
+ * confirmou o cancelamento tem o pedido cancelado, em qualquer etapa antes do
+ * pagamento — e a confecção recebe uma linha dizendo isso. Simples, sem
+ * justificativa: "o cliente pediu pra cancelar".
+ *
+ * Failure-soft no aviso (uma confecção sem WhatsApp não trava o cancelamento)
+ * e idempotente (só oferta viva recebe; a segunda chamada não acha nenhuma).
+ */
+export async function avisarConfeccoesDoCancelamento(pedidoId: string): Promise<{ avisadas: number }> {
+  const { data: pedido } = await supabaseAdmin.from('pedidos_assistente').select('codigo').eq('id', pedidoId).maybeSingle<{ codigo: string | null }>()
+  const { data: vivas } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id, status, leads_fornecedores(nome, whatsapp)')
+    .eq('pedido_id', pedidoId)
+    .in('status', ['ofertada', 'aceita'])
+  type R = { id: string; status: string; leads_fornecedores: { nome: string | null; whatsapp: string | null } | { nome: string | null; whatsapp: string | null }[] | null }
+  const ofertas = ((vivas ?? []) as unknown as R[]).map((o) => ({ ...o, f: Array.isArray(o.leads_fornecedores) ? o.leads_fornecedores[0] : o.leads_fornecedores }))
+  if (ofertas.length === 0) return { avisadas: 0 }
+
+  const ref = pedido?.codigo ? `pedido ${pedido.codigo}` : 'pedido'
+  let avisadas = 0
+  for (const o of ofertas) {
+    if (!o.f?.whatsapp) continue
+    const primeiro = (o.f.nome ?? '').trim().split(/\s+/)[0]
+    const ola = primeiro ? `Oi, ${primeiro}! ` : 'Oi! '
+    const ok = await avisoOficial({
+      telefone: o.f.whatsapp,
+      nome: o.f.nome,
+      texto: `${ola}O cliente pediu pra cancelar o ${ref}. Ele sai da sua lista${o.status === 'aceita' ? ' — obrigado por ter orçado' : ''}. Qualquer próximo que combinar com vocês eu mando.`,
+      resumo: `o cliente pediu pra cancelar o ${ref}, ele sai da sua lista`,
+      caminhoBotao: `fornecedor/oferta/${o.id}`,
+    }).catch(() => false)
+    if (ok) avisadas++
+  }
+
+  await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .update({ status: 'cancelada', respondido_em: new Date().toISOString(), observacao: 'o cliente pediu pra cancelar o pedido' })
+    .eq('pedido_id', pedidoId)
+    .in('status', ['ofertada', 'aceita'])
+  return { avisadas }
+}
+
 // Cliente CANCELA o pedido (antes do pagamento). Marca o pedido como cancelado
-// e cancela as ofertas em aberto/aceitas.
+// e cancela as ofertas em aberto/aceitas — avisando quem estava com ele.
 export async function cancelarPedidoCliente(pedidoId: string): Promise<{ ok: boolean; erro?: string }> {
   const { data: ped } = await supabaseAdmin
     .from('pedidos_assistente')
@@ -889,11 +939,7 @@ export async function cancelarPedidoCliente(pedidoId: string): Promise<{ ok: boo
   if (ped.pagamento_status === 'pago') return { ok: false, erro: 'Pedido já pago — não pode ser cancelado por aqui. Fale com a gente.' }
   if (ped.status === 'cancelado') return { ok: true }
 
-  await supabaseAdmin
-    .from('ofertas_pedido_assistente')
-    .update({ status: 'cancelada', respondido_em: new Date().toISOString() })
-    .eq('pedido_id', pedidoId)
-    .in('status', ['ofertada', 'aceita'])
+  await avisarConfeccoesDoCancelamento(pedidoId)
 
   const { error } = await supabaseAdmin
     .from('pedidos_assistente')

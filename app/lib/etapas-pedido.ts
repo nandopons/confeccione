@@ -11,6 +11,7 @@
 
 import { supabaseAdmin } from './supabase-server'
 import { ETAPAS, type Etapa, type GrupoEtapa, type MotivoEncerramento } from './etapas-pedido-catalogo'
+import { avisarConfeccoesDoCancelamento } from './pedido-assistente-oferta'
 
 export * from './etapas-pedido-catalogo'
 
@@ -170,6 +171,11 @@ export async function encerrarPedido(
     })
     .eq('id', id)
   if (e2) throw new Error(`encerrar pedido: ${e2.message}`)
+  // QUEM ESTAVA COM O PEDIDO FICA SABENDO — 27/09/2026. Encerrar um pedido
+  // que tem oferta viva (ofertada ou aceita, inclusive já orçada) deixava a
+  // confecção esperando um pagamento que nunca vem. Ver o caso do Matheus em
+  // avisarConfeccoesDoCancelamento. Falha no aviso não desfaz o encerramento.
+  await avisarConfeccoesDoCancelamento(id).catch((err) => console.error('[encerrar-pedido] aviso às confecções falhou', { id, err }))
   return await pedidoEtapaOuErro(id)
 }
 

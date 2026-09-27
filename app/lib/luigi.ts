@@ -1800,7 +1800,7 @@ const FERRAMENTA_ENCERRAR: Anthropic.Messages.Tool = {
   name: 'encerrar_pedido',
   description:
     'Encerra o pedido como perdido, com motivo (achou_caro, data, atendimento, sumiu, outro). SÓ depois de o cliente dizer de forma ' +
-    'clara que não quer seguir E confirmar quando você perguntar. Pedido pago não se encerra.',
+    'clara que não quer seguir E confirmar quando você perguntar. Vale em qualquer etapa antes do pagamento (com confecção escolhida, orçamento definido, aguardando pagamento); a confecção é avisada pelo sistema. Só pedido PAGO não se encerra.',
   input_schema: {
     type: 'object',
     properties: {
@@ -3731,7 +3731,9 @@ function promptSistema(modo: Exclude<ModoLuigi, 'desligado'>, ctx: Contexto, jaS
 
   const encerrar =
     modo === 'responde'
-      ? 'Quando o cliente disser de forma clara que não quer mais seguir com o pedido, pergunte em uma linha se pode encerrar por aqui; só depois do sim dele chame encerrar_pedido com o motivo que ele deu. Pedido pago não se encerra.'
+      ? 'Quando o cliente disser de forma clara que não quer mais seguir com o pedido, pergunte em uma linha se pode encerrar por aqui; só depois do sim dele chame encerrar_pedido com o motivo que ele deu. ' +
+        'ISSO VALE EM QUALQUER ETAPA ANTES DO PAGAMENTO — inclusive com confecção já escolhida, orçamento definido ou "aguardando pagamento": aguardando pagamento NÃO é pago. A confecção que estava com o pedido é avisada pelo sistema, não por você. ' +
+        'Só pedido PAGO (etapa pago/em produção/pronto/entregue) não se encerra por aqui — aí chame chamar_humano. Em 26/09 o Matheus confirmou o cancelamento de um pedido aguardando pagamento e ouviu "esse pedido já tem pagamento registrado e não posso encerrar" — errado: ele não tinha pago nada.'
       : 'Se o cliente disser que não quer mais seguir, registre o motivo com registrar_motivo_parada e chame chamar_humano — quem encerra é o Fernando. Não diga isso ao cliente: o que a gente faz com o pedido por dentro não é problema dele.'
 
   const estatico = `Você é o Luigi, do atendimento da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções verificadas de todo o Brasil (sede em Recife, PE). Está respondendo pelo WhatsApp oficial da empresa a um cliente ou possível cliente.
