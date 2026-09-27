@@ -95,11 +95,16 @@ export function textoDaPergunta(p: Pick<PedidoBuscaVencida, 'nome' | 'codigo'>, 
   return `${ola}Continuo procurando confecção pro seu pedido${p.codigo ? ` ${p.codigo}` : ''}? Se não tiver retorno, encerro a busca por aqui.`
 }
 
+/** Primeiro nome pro {{1}} do template; a Meta recusa parâmetro vazio. */
+function primeiroNome(nome: string | null): string {
+  return (nome ?? '').trim().split(/\s+/)[0] || 'cliente'
+}
+
 /** Corpo do template, pro histórico do inbox — o que a Meta entrega. */
-function corpoDoTemplate(): string {
+function corpoDoTemplate(nome: string | null): string {
   const s = saudacaoPorHora()
   const saud = s === 'manha' ? 'Bom dia' : s === 'tarde' ? 'Boa tarde' : 'Boa noite'
-  return `${saud}! Sobre seu pedido na Confeccione, posso tirar uma dúvida?`
+  return `${saud}, ${primeiroNome(nome)}! Sobre seu pedido na Confeccione, posso tirar uma dúvida?`
 }
 
 export async function rodarBuscaVencida(): Promise<ResultadoBuscaVencida> {
@@ -203,9 +208,12 @@ export async function rodarBuscaVencida(): Promise<ResultadoBuscaVencida> {
         corpo = textoDaPergunta(p, vez)
         ok = await enviarTexto(waId, corpo)
       } else {
+        // O TEMPLATE TEM {{1}} = PRIMEIRO NOME — 27/09/2026. A primeira rodada
+        // real (14:05) mandou sem parâmetro e a Meta recusou os 12 com 132000
+        // "Number of parameters does not match". Mesma chamada da sondagem.
         template = templateDuvidaPedidoAgora()
-        corpo = corpoDoTemplate()
-        ok = await enviarTemplate(waId, template)
+        corpo = corpoDoTemplate(p.nome)
+        ok = await enviarTemplate(waId, template, 'pt_BR', [{ type: 'body', parameters: [{ type: 'text', text: primeiroNome(p.nome) }] }])
       }
       if (!ok.ok) {
         console.error('[busca-vencida] envio falhou', { pedido: rotulo, erro: ok.erro })
