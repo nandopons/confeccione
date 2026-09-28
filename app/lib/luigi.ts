@@ -73,6 +73,7 @@ import { visualizadorPedidoUrl } from './url'
 import { ehModoLuigi, type ModoLuigi, type SugestaoLuigi } from './luigi-catalogo'
 import { candidatoPeloWaId, responderCandidato } from './captacao-pedido'
 import { retranscreverDoStorage } from './transcricao'
+import { criarPerguntaFornecedor, listarThreadOferta, perguntasPendentesDosPedidos, responderPerguntaCliente, type MensagemPergunta, type PerguntaPendente } from './perguntas'
 
 export * from './luigi-catalogo'
 
@@ -674,6 +675,15 @@ type PedidoContexto = {
   link_do_pedido: string
   motivo_parada: string | null
   encerrado_motivo: string | null
+  /**
+   * Perguntas de confecção que o cliente ainda não respondeu — uma por oferta.
+   *
+   * 28/09/2026: a pergunta chega a ele pelo WhatsApp como uma pergunta de
+   * gente ("a confecção perguntou: essas peças vêm cortadas?"), e a resposta é
+   * o que ele digitar de volta. Sem isto no contexto o Luigi lia "vem sim,
+   * cortadas" como frase solta e respondia sobre outra coisa.
+   */
+  perguntas_da_confeccao: Array<{ oferta_id: string; pergunta: string; quando: string | null }>
 }
 
 type Contexto = {
@@ -751,6 +761,8 @@ type OfertaAberta = {
   ofertadaEm: string
   expiraEm: string | null
   link: string
+  /** O que ela já perguntou ao cliente por esta oferta, e o que ele respondeu. */
+  perguntas: MensagemPergunta[]
 }
 
 /**
@@ -1072,7 +1084,9 @@ async function ofertasAbertasDoFornecedor(waId: string): Promise<OfertaAberta[]>
   if (error) throw new Error(`ofertas abertas do fornecedor: ${error.message}`)
   type Ped = { codigo: string | null; cidade: string | null; uf: string | null; prazo_dias: number | null; linhas: unknown }
   type R = { id: string; pedido_id: string; criado_em: string; expira_em: string | null; pedidos_assistente: Ped | Ped[] | null }
-  return ((data ?? []) as unknown as R[]).map((o) => {
+  const linhas = (data ?? []) as unknown as R[]
+  const threads = await Promise.all(linhas.map((o) => listarThreadOferta(o.id)))
+  return linhas.map((o, i) => {
     const p = Array.isArray(o.pedidos_assistente) ? o.pedidos_assistente[0] : o.pedidos_assistente
     return {
       id: o.id,
@@ -1084,6 +1098,7 @@ async function ofertasAbertasDoFornecedor(waId: string): Promise<OfertaAberta[]>
       ofertadaEm: o.criado_em,
       expiraEm: o.expira_em,
       link: `https://www.confeccione.com.br/fornecedor/oferta/${o.id}`,
+      perguntas: threads[i] ?? [],
     }
   })
 }
@@ -1624,11 +1639,12 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
   const fechados = pedidos.filter((p) => !(ETAPAS_ABERTAS as string[]).includes(p.etapa)).slice(0, 2)
   const escolhidos = [...abertos, ...fechados]
   const ids = escolhidos.map((p) => p.id)
-  const [fornecedores, prazos, dadosCliente, mockups] = await Promise.all([
+  const [fornecedores, prazos, dadosCliente, mockups, perguntasPendentes] = await Promise.all([
     fornecedoresAceitos(ids),
     prazosDesejados(ids),
     dadosDeEntrega(ids),
     mockupsDosPedidos(ids),
+    ehFornecedor ? Promise.resolve(new Map<string, PerguntaPendente[]>()) : perguntasPendentesDosPedidos(ids),
   ])
 
   const lista = escolhidos.map<PedidoContexto>((p) => {
@@ -1636,6 +1652,7 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
     const entrega = [p.cidade, p.uf].filter(Boolean).join('/') || null
     const daTabela = prazos.get(p.id)
     const prazo = daTabela?.prazo_dias ?? null
+    const pendentes = (perguntasPendentes.get(p.id) ?? []).map((q) => ({ oferta_id: q.ofertaId, pergunta: q.texto, quando: quandoRecife(q.criadoEm) }))
     // Só vale como contexto se foi há pouco: marca de 3 dias atrás é de outra
     // rodada (a régua mantém a marca depois de renovar — ver perguntaDestaRodada).
     const perguntamosSeContinua =
@@ -1683,7 +1700,16 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
       // novo: quando liberar_para_fornecedores grava status='confirmado', a
       // etapa vira buscando_fornecedor sozinha e este campo some.
       proximo_passo:
-        p.etapa === 'pedido_completo'
+        pendentes.length > 0
+          ? // UMA CONFECÇÃO PERGUNTOU E ELE VOLTOU — 28/09/2026. A pergunta
+            // foi pra ele no WhatsApp sem link ("me responde por aqui que eu
+            // repasso"); a resposta é a mensagem dele agora.
+            `UMA CONFECÇÃO FEZ PERGUNTA SOBRE ESTE PEDIDO E ELE AINDA NÃO RESPONDEU (veja perguntas_da_confeccao). ` +
+            'Se a mensagem dele agora responde a pergunta: chame responder_pergunta_da_confeccao com a resposta NAS PALAVRAS DELE e confirme em uma linha que repassou. ' +
+            'Se a resposta muda ou detalha uma peça (tecido, corte, cor, arte, acabamento), chame também ajustar_peca_pedido com confirmado_pelo_cliente pra isso constar na ficha que toda confecção lê. ' +
+            'Se ele só cumprimentou ou falou de outra coisa, responda o que ele disse e repita a pergunta da confecção em uma linha, sem link. ' +
+            'Não invente resposta por ele e não diga que a confecção já aceitou — ela só perguntou.'
+          : p.etapa === 'pedido_completo'
           ? 'PRONTO E NÃO LIBERADO. Se ele já viu o resumo e disser que pode ("pode", "sim", "manda"), ' +
             'chame liberar_para_fornecedores AGORA, neste mesmo turno. Não pergunte de novo: ' +
             'ele já respondeu, e repetir a pergunta é o que faz o pedido parar aqui.'
@@ -1710,6 +1736,7 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
       link_do_pedido: visualizadorPedidoUrl(p.id),
       motivo_parada: p.motivo_parada,
       encerrado_motivo: p.encerrado_motivo,
+      perguntas_da_confeccao: pendentes,
     }
   })
 
@@ -2232,6 +2259,42 @@ const FERRAMENTA_RECUSAR_OFERTA: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_PERGUNTAR_CLIENTE: Anthropic.Messages.Tool = {
+  name: 'perguntar_ao_cliente',
+  description:
+    'A confecção tem uma dúvida sobre um pedido OFERTADO a ela que o resumo não responde (vem cortado? tem a arte? qual gramatura?). ' +
+    'Manda a pergunta ao cliente pelo WhatsApp, nas palavras dela, e a resposta volta pra ela por aqui. ' +
+    'Só vale enquanto a oferta está em aberto; depois de aceitar ela fala direto com o cliente. ' +
+    'Não use pra pergunta que o contexto já responde, nem pra recusar (recusar_oferta) ou aceitar (é no link).',
+  input_schema: {
+    type: 'object',
+    properties: {
+      pedido_codigo: {
+        type: 'string',
+        description: 'Código do pedido (está em OFERTAS EM ABERTO). Obrigatório se houver mais de uma oferta em aberto.',
+      },
+      pergunta: { type: 'string', maxLength: 500, description: 'A dúvida dela, como pergunta direta ao cliente, sem nome de confecção.' },
+    },
+    required: ['pergunta'],
+  },
+}
+
+const FERRAMENTA_RESPONDER_PERGUNTA: Anthropic.Messages.Tool = {
+  name: 'responder_pergunta_da_confeccao',
+  description:
+    'O cliente respondeu a uma pergunta que uma confecção fez sobre o pedido dele (está em perguntas_da_confeccao). ' +
+    'Grava a resposta e repassa à confecção pelo WhatsApp. Só chame quando a mensagem dele responder a pergunta de fato.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      pedido: { type: 'string', description: 'Código ou id do pedido (do contexto). Sem isto, usa o pedido em foco.' },
+      oferta_id: { type: 'string', description: 'oferta_id da pergunta (em perguntas_da_confeccao). Obrigatório se houver mais de uma pendente.' },
+      resposta: { type: 'string', maxLength: 1000, description: 'A resposta NAS PALAVRAS DELE, limpa de cumprimento.' },
+    },
+    required: ['resposta'],
+  },
+}
+
 const FERRAMENTA_PORTFOLIO: Anthropic.Messages.Tool = {
   name: 'salvar_no_portfolio',
   description:
@@ -2342,7 +2405,7 @@ function ferramentasDoModo(
   // precisa é registrar o próprio perfil e mandar foto.
   if (ehFornecedor) {
     return modo === 'responde'
-      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_CORRIGIR_TIPO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO, FERRAMENTA_COTAR_FRETE, FERRAMENTA_RECUSAR_OFERTA]
+      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_CORRIGIR_TIPO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO, FERRAMENTA_COTAR_FRETE, FERRAMENTA_RECUSAR_OFERTA, FERRAMENTA_PERGUNTAR_CLIENTE]
       : [FERRAMENTA_CHAMAR_HUMANO]
   }
   const fora = fechamento ? FORA_DA_MESA[fechamento] : null
@@ -2361,6 +2424,7 @@ function ferramentasDoModo(
         FERRAMENTA_DADOS_CLIENTE,
         FERRAMENTA_RESUMO_PDF,
         FERRAMENTA_LIBERAR,
+        FERRAMENTA_RESPONDER_PERGUNTA,
       ].filter((f) => !fora?.has(f.name) && !(semPedidoPraLiberar && MESA_SEM_PEDIDO_PRA_LIBERAR.has(f.name)))
     : [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_MOTIVO_PARADA]
 }
@@ -2582,6 +2646,71 @@ async function executarFerramenta(
           pecasNovas.length === 0
             ? 'Gravei o que ela contou, mas NENHUMA peça foi pro match — só `pecas` faz o pedido chegar nela. Se ela citou peça, chame de novo com `pecas`. Não diga a ela que o cadastro está atualizado enquanto isso não acontecer.'
             : undefined,
+      }
+    }
+    case 'perguntar_ao_cliente': {
+      // A DÚVIDA DELA VAI PRO CLIENTE COMO PERGUNTA — 28/09/2026. Antes a
+      // regra era "o que não estiver no resumo, chamar_humano": o Fernando
+      // virava o correio entre os dois. Agora o Luigi é o correio.
+      const pergunta = String(entrada.pergunta ?? '').trim()
+      if (!pergunta) return { ok: false, aviso: 'mande a pergunta, nas palavras dela' }
+      const abertas = ctx.ofertasAbertas
+      if (abertas.length === 0) {
+        return { ok: false, aviso: 'não há oferta em aberto pra ela — não tem cliente pra perguntar. Se é dúvida geral, responda você; se for sobre pedido já aceito, ela fala direto com o cliente.' }
+      }
+      const codigo = String(entrada.pedido_codigo ?? '').trim()
+      const alvo = codigo ? abertas.find((o) => o.codigo === codigo) : abertas.length === 1 ? abertas[0] : null
+      if (!alvo) {
+        return {
+          ok: false,
+          aviso: codigo
+            ? `o pedido ${codigo} não está ofertado a ela. Em aberto: ${abertas.map((o) => o.codigo ?? o.id).join(', ')}.`
+            : `ela tem ${abertas.length} ofertas em aberto (${abertas.map((o) => o.codigo ?? o.id).join(', ')}): mande pedido_codigo dizendo de qual é a dúvida.`,
+        }
+      }
+      const r = await criarPerguntaFornecedor(alvo.id, pergunta)
+      if (!r.ok) return { ok: false, aviso: `não consegui mandar a pergunta: ${r.erro ?? 'erro'}` }
+      alvo.perguntas = [...alvo.perguntas, { id: 'agora', autor: 'fornecedor', texto: pergunta, criadoEm: new Date().toISOString() }]
+      return {
+        ok: true,
+        pedido: alvo.codigo,
+        proximo_passo:
+          'Diga em UMA linha que perguntou ao cliente e que traz a resposta assim que ele responder. ' +
+          'Não prometa prazo, não repita a pergunta, não peça pra ela aceitar antes da resposta.',
+      }
+    }
+    case 'responder_pergunta_da_confeccao': {
+      const resposta = String(entrada.resposta ?? '').trim()
+      if (!resposta) return { ok: false, aviso: 'mande a resposta, nas palavras dele' }
+      const alvo = await acharNoContexto(ctx, str(entrada.pedido))
+      if (!alvo) return { ok: false, aviso: 'pedido não encontrado no contexto' }
+      const pendentes = ctx.pedidos.find((p) => p.id === alvo.id)?.perguntas_da_confeccao ?? []
+      if (pendentes.length === 0) return { ok: false, aviso: 'não há pergunta de confecção pendente neste pedido — não tem o que responder. Se ele quer mudar a peça, use ajustar_peca_pedido.' }
+      const ofertaId = String(entrada.oferta_id ?? '').trim()
+      const pergunta = ofertaId ? pendentes.find((q) => q.oferta_id === ofertaId) : pendentes.length === 1 ? pendentes[0] : null
+      if (!pergunta) {
+        return {
+          ok: false,
+          aviso: ofertaId
+            ? `não há pergunta pendente com oferta_id ${ofertaId}. Pendentes: ${pendentes.map((q) => `${q.oferta_id} ("${q.pergunta.slice(0, 60)}")`).join('; ')}.`
+            : `há ${pendentes.length} perguntas pendentes: mande oferta_id dizendo qual ele respondeu.`,
+        }
+      }
+      const r = await responderPerguntaCliente(alvo.id, pergunta.oferta_id, resposta)
+      if (!r.ok) return { ok: false, aviso: `não consegui gravar a resposta: ${r.erro ?? 'erro'}` }
+      const ped = ctx.pedidos.find((p) => p.id === alvo.id)
+      if (ped) {
+        ped.perguntas_da_confeccao = ped.perguntas_da_confeccao.filter((q) => q.oferta_id !== pergunta.oferta_id)
+        if (ped.perguntas_da_confeccao.length === 0) ped.proximo_passo = undefined
+      }
+      return {
+        ok: true,
+        pedido: alvo.codigo,
+        pergunta: pergunta.pergunta,
+        proximo_passo:
+          'Diga em UMA linha que repassou pra confecção. ' +
+          'Se a resposta detalha a peça (tecido, corte, cor, arte, acabamento), chame ajustar_peca_pedido com confirmado_pelo_cliente pra constar na ficha. ' +
+          'Não diga que a confecção aceitou — ela só perguntou.',
       }
     }
     case 'recusar_oferta': {
@@ -3488,7 +3617,8 @@ function blocoOfertasAbertas(ofertas: OfertaAberta[]): string {
       o.expiraEm ? `vence ${quandoRecife(o.expiraEm)}` : null,
       `link ${o.link}`,
     ].filter(Boolean)
-    return `- ${partes.join(' · ')}`
+    const thread = o.perguntas.map((m) => `    ${m.autor === 'fornecedor' ? 'ela perguntou' : 'o cliente respondeu'}: "${m.texto}"`)
+    return [`- ${partes.join(' · ')}`, ...thread].join('\n')
   })
   return `
 OFERTAS EM ABERTO PRA ELA — é disto que ela fala quando diz "esse pedido", "o pedido que você mandou", "aquele da regata":
@@ -3498,7 +3628,7 @@ O que fazer com o que ela disser sobre a oferta:
 • "NÃO VOU CONSEGUIR", "não pego", "não tenho o molde", "tô sem agenda", "não faço esse tipo" → chame recusar_oferta com o motivo NAS PALAVRAS DELA e responda em UMA linha: está certo, esse fica de fora, o próximo que combinar você manda. Sem insistir, sem "tem certeza?", sem desculpa. Se ela disse o que não faz, grave também em salvar_perfil_producao (nao_faz).
 • "EU PEGO", "pode mandar", "aceito" → o aceite é no link da oferta (ela toca em "Ver pedido" e aceita lá, é um toque): diga isso em uma linha e mande o link. Aceitar lá é o que libera o contato do cliente e a ficha técnica pra ela. Não aceite por ela e não diga que "já está com ela".
 • "VOU VER", "chegando lá eu olho", "depois te falo" → não é sim nem não. Responda curto e espere; não cobre, não repita a oferta.
-• Dúvida sobre o pedido (tem arte? é sublimação? qual tecido?) → responda com o que está no resumo acima e no histórico; o que não estiver aí, chamar_humano.
+• Dúvida sobre o pedido (tem arte? é sublimação? qual tecido? vem cortado?) → responda com o que está no resumo acima e no histórico; o que não estiver aí, chame perguntar_ao_cliente com a dúvida NAS PALAVRAS DELA — a pergunta vai pro cliente no WhatsApp e a resposta volta por aqui. Diga que perguntou; não chame o Fernando pra isso. Se a pergunta já está no thread acima sem resposta, diga que ainda está esperando o cliente; se já tem resposta, ela está ali — responda com ela.
 
 Em 24/09 uma confecção disse por áudio "não vou conseguir assumir esse pedido, não tenho o molde da alça fina" e ouviu de volta "quando tiver as fotos prontas é só subir no painel". Ela tinha respondido ao pedido; a resposta era sobre outra coisa. Responda ao que ela disse.
 `

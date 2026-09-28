@@ -1,9 +1,18 @@
 // app/lib/perguntas.ts
 // ============================================================================
 // Perguntas MEDIADAS entre fornecedor e cliente sobre um pedido — sem troca de
-// contato. O fornecedor pergunta na página da oferta; o cliente é notificado
-// (WhatsApp + e-mail da Confeccione) e responde no visualizador do pedido; a
-// resposta volta pro fornecedor (que vê via polling). Tudo anonimizado.
+// contato. O fornecedor pergunta na página da oferta OU pelo WhatsApp (o Luigi
+// chama perguntarAoCliente); o cliente recebe a pergunta no WhatsApp como uma
+// mensagem de gente ("a confecção perguntou: …, me responde por aqui que eu
+// repasso") e responde ali mesmo — o Luigi grava a resposta — ou no
+// visualizador do pedido; a resposta volta pro fornecedor no WhatsApp e na
+// página da oferta. Tudo anonimizado.
+//
+// POR QUE A PERGUNTA VAI SEM LINK — 28/09/2026 (decisão do Fernando). De
+// junho a setembro foram 12 mensagens no thread e só 2 respostas de cliente:
+// a pergunta chegava como "responda por aqui: https://…#perguntas" e o
+// cliente, que estava no WhatsApp, não ia pro site. Agora a pergunta é uma
+// pergunta, e a resposta é o que ele digitar de volta.
 //
 // Tabela: public.perguntas_oferta (id, pedido_id, oferta_id, autor, texto,
 // criado_em). Acesso via service role (supabaseAdmin).
@@ -58,6 +67,55 @@ export async function listarThreadOferta(ofertaId: string): Promise<MensagemPerg
   return (data ?? []).map(mapMensagem)
 }
 
+/** A pergunta, do jeito que uma pessoa mandaria. Exportado pra teste. */
+export function textoDaPerguntaAoCliente(primeiroNome: string | null, pergunta: string): string {
+  const ola = primeiroNome ? `Oi, ${primeiroNome}! ` : 'Oi! '
+  const p = pergunta.trim().replace(/\s+/g, ' ')
+  return `${ola}A confecção que está avaliando o seu pedido perguntou: "${p}"\n\nMe responde por aqui que eu repasso pra ela.`
+}
+
+/** A resposta do cliente, do jeito que chega à confecção. Exportado pra teste. */
+export function textoDaRespostaAoFornecedor(primeiroNome: string | null, codigo: string | null, pergunta: string | null, resposta: string, link: string): string {
+  const ola = primeiroNome ? `Oi, ${primeiroNome}! ` : 'Oi! '
+  const ref = codigo ? `do pedido ${codigo}` : 'do pedido'
+  const sobre = pergunta ? ` sobre "${pergunta.trim().replace(/\s+/g, ' ').slice(0, 160)}"` : ''
+  return `${ola}O cliente ${ref} respondeu à sua pergunta${sobre}:\n\n"${resposta.trim()}"\n\nSe fechar pra vocês, o aceite é aqui: ${link}`
+}
+
+export type PerguntaPendente = {
+  ofertaId: string
+  pedidoId: string
+  texto: string
+  criadoEm: string
+}
+
+/**
+ * Perguntas de confecção AINDA SEM resposta do cliente, por pedido — a última
+ * pergunta de cada oferta que não tem mensagem do cliente depois dela. É o que
+ * o Luigi vê quando o cliente escreve.
+ */
+export async function perguntasPendentesDosPedidos(pedidoIds: string[]): Promise<Map<string, PerguntaPendente[]>> {
+  const mapa = new Map<string, PerguntaPendente[]>()
+  if (pedidoIds.length === 0) return mapa
+  const { data, error } = await supabaseAdmin
+    .from('perguntas_oferta')
+    .select('id, pedido_id, oferta_id, autor, texto, criado_em')
+    .in('pedido_id', pedidoIds)
+    .order('criado_em', { ascending: true })
+    .returns<(LinhaPerguntaDB & { pedido_id: string; oferta_id: string })[]>()
+  if (error) throw new Error(`perguntas pendentes: ${error.message}`)
+  // Por oferta, a última mensagem decide: fornecedor = pendente.
+  const ultima = new Map<string, LinhaPerguntaDB & { pedido_id: string; oferta_id: string }>()
+  for (const r of data ?? []) ultima.set(r.oferta_id, r)
+  for (const r of ultima.values()) {
+    if (r.autor !== 'fornecedor') continue
+    const lista = mapa.get(r.pedido_id) ?? []
+    lista.push({ ofertaId: r.oferta_id, pedidoId: r.pedido_id, texto: r.texto, criadoEm: r.criado_em })
+    mapa.set(r.pedido_id, lista)
+  }
+  return mapa
+}
+
 /**
  * O FORNECEDOR faz uma pergunta na página da oferta. Insere a mensagem e
  * notifica o cliente (WhatsApp + e-mail) em best-effort — notificação nunca
@@ -103,18 +161,15 @@ export async function criarPerguntaFornecedor(
       const primeiroNome = pedido.nome ? pedido.nome.split(' ')[0] : null
 
       if (pedido.telefone) {
-        const msg =
-          `💬 *Confeccione*\n\n` +
-          `${primeiroNome ? `Oi, ${primeiroNome}! ` : 'Oi! '}` +
-          `Um fornecedor tem uma *pergunta* sobre o seu pedido.\n\n` +
-          `"${v.valor}"\n\n` +
-          `Responda por aqui (sem precisar trocar contato):\n${link}`
+        // Uma pessoa perguntando, não um sistema mandando link. A resposta
+        // dele cai no Luigi, que grava com responder_pergunta_da_confeccao.
+        const msg = textoDaPerguntaAoCliente(primeiroNome, v.valor)
         try {
           await avisoOficial({
             telefone: pedido.telefone,
             nome: pedido.nome ?? null,
             texto: msg,
-            resumo: 'O fornecedor fez uma pergunta sobre o seu pedido — responda pela plataforma',
+            resumo: `uma confecção perguntou sobre o seu pedido: "${v.valor.slice(0, 160)}" — me responde por aqui que eu repasso`,
             caminhoBotao: `visualizador/${oferta.pedido_id}`,
           })
         } catch (e) {
@@ -222,5 +277,46 @@ export async function responderPerguntaCliente(
     return { ok: false, erro: 'Não foi possível registrar a resposta.' }
   }
 
+  // A resposta vai pra confecção no WhatsApp (best-effort). Antes ela só
+  // aparecia na página da oferta, por polling — quem perguntou pelo celular
+  // nunca voltava lá pra ver.
+  try {
+    await avisarFornecedorDaResposta(ofertaId, v.valor)
+  } catch (e) {
+    console.error('[perguntas] aviso ao fornecedor falhou', ofertaId, e)
+  }
+
   return { ok: true }
+}
+
+async function avisarFornecedorDaResposta(ofertaId: string, resposta: string): Promise<void> {
+  const { data: oferta } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id, status, pedidos_assistente(codigo), leads_fornecedores(nome, whatsapp)')
+    .eq('id', ofertaId)
+    .maybeSingle()
+  type F = { nome: string | null; whatsapp: string | null }
+  type P = { codigo: string | null }
+  type R = { id: string; status: string; pedidos_assistente: P | P[] | null; leads_fornecedores: F | F[] | null }
+  const o = oferta as unknown as R | null
+  if (!o) return
+  const f = Array.isArray(o.leads_fornecedores) ? o.leads_fornecedores[0] : o.leads_fornecedores
+  const p = Array.isArray(o.pedidos_assistente) ? o.pedidos_assistente[0] : o.pedidos_assistente
+  if (!f?.whatsapp) return
+  const { data: ultimaPergunta } = await supabaseAdmin
+    .from('perguntas_oferta')
+    .select('texto')
+    .eq('oferta_id', ofertaId)
+    .eq('autor', 'fornecedor')
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ texto: string }>()
+  const primeiro = (f.nome ?? '').trim().split(/\s+/)[0] || null
+  await avisoOficial({
+    telefone: f.whatsapp,
+    nome: f.nome,
+    texto: textoDaRespostaAoFornecedor(primeiro, p?.codigo ?? null, ultimaPergunta?.texto ?? null, resposta, `${SITE_URL}/fornecedor/oferta/${ofertaId}`),
+    resumo: `o cliente ${p?.codigo ? `do pedido ${p.codigo} ` : ''}respondeu à sua pergunta: "${resposta.slice(0, 160)}"`,
+    caminhoBotao: `fornecedor/oferta/${ofertaId}`,
+  })
 }
