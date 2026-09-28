@@ -120,9 +120,41 @@ export async function acharContatoPorNumero(waId: string): Promise<{ id: string;
     .like('wa_id', `%${tel8}`)
     .order('criado_em', { ascending: true })
     .limit(5)
+  const lista = (parecidos ?? []) as Array<{ id: string; nome: string | null }>
+  if (lista.length === 0) return null
+  if (lista.length === 1) return { id: lista[0].id, nome: lista[0].nome ?? null }
 
-  const escolhido = (parecidos ?? [])[0] as { id: string; nome: string | null } | undefined
-  return escolhido ? { id: escolhido.id, nome: escolhido.nome ?? null } : null
+  // DOIS CONTATOS PRO MESMO NÚMERO: FICA COM O QUE A META CONFIRMOU — 27/09/2026.
+  //
+  // A Meta entrega o wa_id sem o nono dígito (558199677937); o cliente digita
+  // com ele (5581999677937). Template mandado pelo número digitado antes de a
+  // pessoa escrever cria um contato órfão, e daí em diante "o mais antigo"
+  // ganha — no Cassiano e na Bordados & Cia o órfão ERA o mais antigo, e as
+  // saídas caíam numa conversa sem nenhuma mensagem recebida. Medido: 6 pares
+  // na base. O contato que tem ENTRADA é o número real; os outros são chute.
+  //
+  // Duas consultas de propósito: filtro em embed aninhado do PostgREST falha
+  // em silêncio (ver o comentário em cutucada-pos-resumo.ts).
+  const { data: conversas } = await supabaseAdmin
+    .from('wa_conversas')
+    .select('id, contato_id')
+    .in('contato_id', lista.map((c) => c.id))
+  const conversaDoContato = new Map(((conversas ?? []) as Array<{ id: string; contato_id: string }>).map((c) => [c.id, c.contato_id]))
+  const confirmados = new Set<string>()
+  if (conversaDoContato.size > 0) {
+    const { data: entradas } = await supabaseAdmin
+      .from('wa_mensagens')
+      .select('conversa_id')
+      .eq('direcao', 'entrada')
+      .in('conversa_id', [...conversaDoContato.keys()])
+      .limit(50)
+    for (const m of (entradas ?? []) as Array<{ conversa_id: string }>) {
+      const contato = conversaDoContato.get(m.conversa_id)
+      if (contato) confirmados.add(contato)
+    }
+  }
+  const escolhido = lista.find((c) => confirmados.has(c.id)) ?? lista[0]
+  return { id: escolhido.id, nome: escolhido.nome ?? null }
 }
 
 /**
