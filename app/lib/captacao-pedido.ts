@@ -341,6 +341,12 @@ export type PerfilBusca = {
   uf: string | null
   prazoDias: number | null
   segmento: string
+  /**
+   * O que mais as linhas dizem — cor, descrição, estampas por posição —, uma
+   * entrada por linha. É com isto que o Luigi responde "tem arte definida?"
+   * em vez de chutar. Ver O PEDIDO em promptCandidato (28/09/2026).
+   */
+  detalhes: string[]
 }
 
 function limpo(s: string | null | undefined): string {
@@ -384,6 +390,19 @@ export function perfilDeBusca(p: PedidoEtapa, prazoDias: number | null): PerfilB
   const material = materiais.length ? ` em ${materiais.join('/')}` : ''
   const tecnica = tecnicas.includes('estampa') ? ' com estampa' : ''
   const descricao = `${quantidade || '?'} ${pecas}${material}${tecnica}`
+  const detalhes = linhas.map((l, i) => {
+    const qtd = typeof l.total === 'number' ? l.total : (l.tamanhos ?? []).reduce((a, t) => a + (t.qtd ?? 0), 0)
+    const estampas = (l.estampas ?? []).map((e) => [e.posicao, e.tamanho].filter(Boolean).join(' ')).filter(Boolean)
+    const partes = [
+      `${qtd || '?'}× ${limpo(l.modelo) || 'peça'}`,
+      limpo(l.cor) ? `cor ${limpo(l.cor)}` : null,
+      limpo(l.material) ? limpo(l.material) : null,
+      estampas.length ? `estampa/arte em: ${estampas.join(', ')}` : (l.estampas?.length ?? 0) > 0 ? 'com estampa' : null,
+      (l.acabamentos ?? []).length ? `acabamentos: ${(l.acabamentos ?? []).map((x) => limpo(x)).join(', ')}` : null,
+      limpo(l.descricao) ? `"${limpo(l.descricao).slice(0, 300)}"` : null,
+    ].filter(Boolean)
+    return `${i + 1}) ${partes.join(' · ')}`
+  })
   return {
     pedidoId: p.id,
     codigo: p.codigo,
@@ -396,6 +415,7 @@ export function perfilDeBusca(p: PedidoEtapa, prazoDias: number | null): PerfilB
     uf: p.uf,
     prazoDias,
     segmento: segmentoDasPecas(modelos.length ? modelos : [p.categoria ?? '']),
+    detalhes,
   }
 }
 
@@ -2110,7 +2130,12 @@ function promptCandidato(cand: CandidatoLinha, perfil: PerfilBusca | null, pdfJa
     // ORÇAMENTO, onde ela assume um número (prazo_producao_dias). A UF fica:
     // sem ela "Jaboatão dos Guararapes" não diz nada pra quem é de outro
     // estado, e a distância é metade da decisão dela.
-    ? `${perfil.descricao}, entrega em ${lugarEntrega(perfil)}. Peças: ${perfil.modelos.join(', ')}.${perfil.materiais.length ? ` Materiais: ${perfil.materiais.join(', ')}.` : ''}`
+    ? `${perfil.descricao}, entrega em ${lugarEntrega(perfil)}. Peças: ${perfil.modelos.join(', ')}.${perfil.materiais.length ? ` Materiais: ${perfil.materiais.join(', ')}.` : ''}` +
+      (perfil.detalhes.length
+        ? `\nDETALHES POR LINHA (é daqui que você responde quando ela perguntar de arte, cor, tecido ou acabamento — NÃO recite isto sem ela perguntar):\n${perfil.detalhes.join('\n')}` +
+          `\nO que não estiver aí (arte em arquivo, medidas, referência de foto) o cliente ainda não mandou ou está no PDF: diga isso e ofereça enviar_pdf_pedido.` +
+          (perfil.prazoDias ? `\nPrazo que o cliente pediu: ${perfil.prazoDias} dias — só se ela perguntar; na abordagem não entra.` : '')
+        : '')
     : 'pedido não encontrado (o Fernando resolve)'
   return `Você é o Luigi, da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções de todo o Brasil (sede em Recife). Está falando pelo WhatsApp oficial com uma CONFECÇÃO que a gente abordou por causa de um pedido sem fornecedor. A abertura foi só "Oi, tudo bem? Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês." — então, quando ela responder ("oi", "pode falar", "quem é?"), a sua PRIMEIRA mensagem é a dúvida em si, natural e direta: temos um pedido de X pra entregar em Y, vocês produzem esse tipo de peça nessa quantidade? Não se apresente de novo (o nome já foi dito), não repita a dúvida depois. Se perguntarem o que é a Confeccione ou como funciona, a resposta é a fala literal de "SÓ QUANDO ELA PERGUNTAR" (abaixo) — e só quando perguntarem.
 
@@ -2631,6 +2656,27 @@ export async function responderCandidato(params: {
   const client = new Anthropic({ apiKey })
   const historico = await historicoConversa(params.conversaId)
   if (!historico.length || historico[historico.length - 1].role !== 'user') historico.push({ role: 'user', content: texto })
+
+  // ELA PERGUNTOU: A RESPOSTA É OBRIGATÓRIA — 28/09/2026, estrutural.
+  //
+  // A Artculania perguntou "vocês já têm definido a arte da estampa?" às
+  // 09:48, 09:56 e, com o "Claro" lido como sim, ouviu às 10:57 "quais os
+  // principais produtos que vocês fazem?". Três perguntas nossas em cima de
+  // uma dela. A regra de prompt entrou de manhã e não segurou à tarde: o
+  // roteiro ("depois do faço, a pergunta literal do encaminhamento") ganha da
+  // instrução. Aqui a pergunta dela vira a última coisa que o modelo lê antes
+  // de falar, com a ordem explícita — o mesmo mecanismo da nota de retomada
+  // do Luigi. Só quando a mensagem dela tem "?".
+  const perguntaDela = (texto.match(/[^.!?\n]*\?/g) ?? []).map((q) => q.trim()).filter((q) => q.length > 3)
+  if (perguntaDela.length > 0) {
+    historico.push({
+      role: 'user',
+      content:
+        `[nota do sistema, a confecção NÃO vê isto] Ela acabou de perguntar: ${perguntaDela.map((q) => `"${q}"`).join(' e ')}. ` +
+        'A sua mensagem COMEÇA respondendo isso, com o que está em O PEDIDO / DETALHES POR LINHA; o que não estiver lá, diga que o cliente ainda não mandou e ofereça o PDF. ' +
+        'Só depois, na mesma mensagem, em uma linha, vem a pergunta que estava em aberto. Não avance o roteiro sem responder.',
+    })
+  }
 
   let resposta = ''
   let escalada: string | null = null
