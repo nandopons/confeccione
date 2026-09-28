@@ -334,7 +334,18 @@ export async function notificarPedidoRecebido(params: {
  *
  * Enquanto a v4 não estiver aprovada, o envio cai sozinho na v2 (ver abaixo).
  */
-export const TEMPLATE_OFERTA = 'oferta_pedido_v4'
+export const TEMPLATE_OFERTA = 'oferta_pedido_v5'
+
+/**
+ * v5 (28/09/2026, decisão do Fernando): a linha "Detalhes:" saiu. Na prática
+ * ela virava um parágrafo (cor · tecido · estampa · descrição por linha) que
+ * poluía a ficha e escondia o que decide o aceite — tipo, quantidade, estado e
+ * prazo. Quem quiser o resto abre o pedido no botão.
+ *
+ * Enquanto a v5 não estiver aprovada, o envio cai na v4 (ficha com Detalhes)
+ * e, se ela também falhar, na v2 (parágrafo).
+ */
+const TEMPLATE_OFERTA_V4 = 'oferta_pedido_v4'
 
 export async function notificarOfertaFornecedor(params: {
   telefone: string
@@ -347,7 +358,7 @@ export async function notificarOfertaFornecedor(params: {
   estado: string
   /** ex.: "15 dias" ou "a combinar" */
   prazo: string
-  /** Uma linha com o que caracteriza a peça. ex.: "Bonés azuis, bordado" */
+  /** Uma linha com o que caracteriza a peça. Só entra no fallback v4 — a v5 não mostra. */
   detalhes: string
   ofertaId: string
 }): Promise<boolean> {
@@ -372,27 +383,34 @@ export async function notificarOfertaFornecedor(params: {
       parameters: [{ type: 'text', text: params.ofertaId }],
     }
 
-    let resultado = await enviarTemplate(waId, TEMPLATE_OFERTA, 'pt_BR', [
-      {
-        type: 'body',
-        parameters: [
-          { type: 'text', text: produto },
-          { type: 'text', text: quantidade },
-          { type: 'text', text: estado },
-          { type: 'text', text: prazo },
-          { type: 'text', text: detalhes },
-        ],
-      },
-      botao,
-    ])
+    const ficha = [
+      { type: 'text', text: produto },
+      { type: 'text', text: quantidade },
+      { type: 'text', text: estado },
+      { type: 'text', text: prazo },
+    ]
 
-    // A v3 só existe depois que a Meta aprovar. Enquanto isso o envio cairia no
+    let resultado = await enviarTemplate(waId, TEMPLATE_OFERTA, 'pt_BR', [{ type: 'body', parameters: ficha }, botao])
+    let templateUsado: string = TEMPLATE_OFERTA
+
+    // A v5 só existe depois que a Meta aprovar. Enquanto isso o envio cairia no
     // vazio e o fornecedor simplesmente não receberia a oferta — pior do que uma
-    // mensagem feia. Então: falhou a v3, manda a v2 (que já está aprovada).
+    // mensagem feia. Então: falhou a v5, manda a v4 (ficha com Detalhes).
+    if (!resultado.ok) {
+      console.warn('[wa-notify] v5 recusada, caindo pra v4', { erro: resultado.erro })
+      templateUsado = TEMPLATE_OFERTA_V4
+      resultado = await enviarTemplate(waId, TEMPLATE_OFERTA_V4, 'pt_BR', [
+        { type: 'body', parameters: [...ficha, { type: 'text', text: detalhes }] },
+        botao,
+      ])
+    }
+
+    // Último recurso: a v2 (parágrafo), aprovada desde o início.
     let usouFallback = false
     if (!resultado.ok) {
-      console.warn('[wa-notify] v3 recusada, caindo pra v2', { erro: resultado.erro })
+      console.warn('[wa-notify] v4 recusada, caindo pra v2', { erro: resultado.erro })
       usouFallback = true
+      templateUsado = 'oferta_pedido_v2'
       const primeiro = (params.nome ?? '').trim().split(/\s+/)[0] || 'parceiro(a)'
       resultado = await enviarTemplate(waId, 'oferta_pedido_v2', 'pt_BR', [
         {
@@ -432,8 +450,8 @@ export async function notificarOfertaFornecedor(params: {
             `Quantidade: ${quantidade}\n` +
             `Estado: ${estado}\n` +
             `Prazo: ${prazo}\n` +
-            `Detalhes: ${detalhes}\n\n` +
-            `Quer atender este cliente? Toque em Ver pedido.\n▸ ${link}`
+            (templateUsado === TEMPLATE_OFERTA_V4 ? `Detalhes: ${detalhes}\n` : '') +
+            `\nQuer atender este cliente? Toque em Ver pedido.\n▸ ${link}`
         await supabaseAdmin.from('wa_mensagens').insert({
           conversa_id: conversaId,
           wamid: resultado.wamid,
@@ -441,7 +459,7 @@ export async function notificarOfertaFornecedor(params: {
           tipo: 'template',
           corpo,
           status: 'enviando',
-          template_nome: usouFallback ? 'oferta_pedido_v2' : TEMPLATE_OFERTA,
+          template_nome: templateUsado,
           criado_em: agora,
         })
         await supabaseAdmin

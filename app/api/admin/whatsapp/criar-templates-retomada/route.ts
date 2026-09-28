@@ -205,6 +205,37 @@ const TEMPLATES = [
       },
     ],
   },
+  // Oferta ao fornecedor v5 (28/09/2026) — a v4 SEM a linha "Detalhes:".
+  // O Fernando viu a ficha no celular: os detalhes viravam um parágrafo (cor ·
+  // tecido · estampa · descrição por linha) e escondiam o que decide o aceite.
+  // Fica só tipo, quantidade, estado e prazo; o resto está no botão.
+  {
+    name: 'oferta_pedido_v5',
+    language: 'pt_BR',
+    category: 'UTILITY',
+    components: [
+      {
+        type: 'BODY',
+        text:
+          'Novo pedido:\n\nTipo: {{1}}\nQuantidade: {{2}}\nEstado: {{3}}\nPrazo: {{4}}\n\nQuer atender este cliente? Toque em Ver pedido.',
+        example: {
+          body_text: [['Bonés', '10 peças', 'PE', '15 dias']],
+        },
+      },
+      { type: 'FOOTER', text: 'Confeccione · confeccione.com.br' },
+      {
+        type: 'BUTTONS',
+        buttons: [
+          {
+            type: 'URL',
+            text: 'Ver pedido',
+            url: 'https://www.confeccione.com.br/fornecedor/oferta/{{1}}',
+            example: ['https://www.confeccione.com.br/fornecedor/oferta/12a6aef5-5042-4927-9a68-2276777563d1'],
+          },
+        ],
+      },
+    ],
+  },
   // Confirmação de pedido (utility) — botão dinâmico pro painel do cliente
   // com o e-mail pré-preenchido (login?email={{1}}).
   {

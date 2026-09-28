@@ -164,7 +164,7 @@ export async function prepararMensagem(params: {
     // Bruno, Ramon e Yasmin — clientes com pedido parado, que leram a empresa
     // deles perguntando se eles fabricam. O prompt já avisava; a lista de 60
     // apagou o aviso. Aqui não apaga.
-    const SO_PARA_CONFECCAO = new Set(['sondagem_producao', 'luigi_apresentacao', 'oferta_pedido', 'oferta_pedido_v2', 'oferta_pedido_v3', 'oferta_pedido_v4'])
+    const SO_PARA_CONFECCAO = new Set(['sondagem_producao', 'luigi_apresentacao', 'oferta_pedido', 'oferta_pedido_v2', 'oferta_pedido_v3', 'oferta_pedido_v4', 'oferta_pedido_v5'])
     if (SO_PARA_CONFECCAO.has(params.templateNome) && params.pedidoId) {
       return {
         ok: false,

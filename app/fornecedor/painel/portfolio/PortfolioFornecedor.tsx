@@ -15,6 +15,7 @@ import { useRef, useState } from "react";
 import type { PortfolioItem } from "@/app/lib/portfolio-fornecedor";
 import FichaProdutoModal from "./FichaProdutoModal";
 import AjusteFotoModal from "@/app/components/AjusteFotoModal";
+import { reduzirParaUpload, nomeParaUpload } from "@/app/lib/imagem-no-navegador";
 
 const MAX_FOTOS = 24;
 
@@ -69,14 +70,23 @@ export default function PortfolioFornecedor({
     setEnviando(arquivos.length);
     for (const file of arquivos) {
       try {
+        // Reduz no navegador antes de subir: foto de celular passa dos 4,5 MB
+        // que a Vercel aceita, e o 413 vinha em HTML — virava "falha de
+        // conexão" sem explicação (Gustavo Barros, 28/09/2026).
+        const blob = await reduzirParaUpload(file);
         const fd = new FormData();
-        fd.append("file", file);
+        fd.append("file", blob, nomeParaUpload(file, blob));
         const r = await fetch("/api/fornecedor/painel/portfolio", { method: "POST", body: fd });
-        const json = await r.json();
+        const json = await r.json().catch(() => null);
         if (!r.ok) {
-          setErro(json?.error ?? "não consegui enviar essa foto");
-        } else {
+          setErro(
+            json?.error ??
+              (r.status === 413 ? "essa foto é grande demais — tenta uma menor ou tira um print dela" : `não consegui enviar essa foto (erro ${r.status})`)
+          );
+        } else if (json) {
           setFotos((atual) => [...atual, json as PortfolioItem]);
+        } else {
+          setErro("não consegui enviar essa foto");
         }
       } catch {
         setErro("falha de conexão ao enviar a foto");

@@ -24,6 +24,7 @@
 // ============================================================================
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { reduzirParaUpload, nomeParaUpload } from '@/app/lib/imagem-no-navegador'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 export type VisualEntrada = { chave: string; url: string }
@@ -167,46 +168,12 @@ export type EditorLinhas = ReturnType<typeof useEditorLinhas>
 
 // ── Upload da foto (redimensiona no navegador, sobe uma por vez) ─────────────
 
-const LADO_MAX = 1600
-
-function lerComoDataUrl(file: File): Promise<string> {
-  return new Promise((res, rej) => {
-    const r = new FileReader()
-    r.onload = () => res(String(r.result))
-    r.onerror = () => rej(new Error('não deu pra ler o arquivo'))
-    r.readAsDataURL(file)
-  })
-}
-
-/**
- * Foto de celular tem 3–8 MB; a função da Vercel aceita 4,5 MB. Reduz pra
- * ≤1600 px em JPEG antes de subir — mesmo caminho do visualizador do cliente.
- * Arquivo já pequeno passa como está.
- */
-async function prepararParaUpload(file: File): Promise<Blob> {
-  if (file.size <= 900_000) return file
-  const dataUrl = await lerComoDataUrl(file)
-  const img = document.createElement('img')
-  await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error('imagem inválida')); img.src = dataUrl })
-  const esc = Math.min(1, LADO_MAX / Math.max(img.naturalWidth || 1, img.naturalHeight || 1))
-  const w = Math.max(1, Math.round((img.naturalWidth || 1) * esc))
-  const h = Math.max(1, Math.round((img.naturalHeight || 1) * esc))
-  const cv = document.createElement('canvas')
-  cv.width = w
-  cv.height = h
-  const cx = cv.getContext('2d')
-  if (!cx) return file
-  cx.fillStyle = '#ffffff'
-  cx.fillRect(0, 0, w, h)
-  cx.drawImage(img, 0, 0, w, h)
-  const blob = await new Promise<Blob | null>((res) => cv.toBlob(res, 'image/jpeg', 0.85))
-  return blob ?? file
-}
+// Redimensionamento em app/lib/imagem-no-navegador.ts (compartilhado com o portfólio).
 
 async function subirFoto(ofertaId: string, file: File): Promise<{ ref: string; url: string }> {
-  const blob = await prepararParaUpload(file)
+  const blob = await reduzirParaUpload(file)
   const fd = new FormData()
-  fd.append('file', blob, blob === file ? file.name : 'foto.jpg')
+  fd.append('file', blob, nomeParaUpload(file, blob))
   const r = await fetch(`/api/fornecedor/oferta/${ofertaId}/imagem`, { method: 'POST', body: fd })
   const j = await r.json().catch(() => null)
   if (!r.ok || !j?.ref) throw new Error(j?.erro || 'Não deu pra subir a foto.')

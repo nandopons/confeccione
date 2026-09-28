@@ -182,7 +182,7 @@ export async function GET(req: Request) {
       // ninguém, só mantém o estado coerente pra quem lê o histórico.
       //
       // O QUE ASSUMIU: `oferta-automatica.ts` (cron próprio, 20 min), que
-      // roda sobre `pedidos_assistente` e manda pelo template `oferta_pedido_v4`
+      // roda sobre `pedidos_assistente` e manda pelo template `oferta_pedido_v5`
       // antes de tentar texto livre. Liga com OFERTA_AUTOMATICA_ATIVA=1.
       //
       // As rotas manuais da era antiga (/api/admin/ofertar, fila.ts) seguem
