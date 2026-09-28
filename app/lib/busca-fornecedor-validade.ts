@@ -41,7 +41,6 @@ import { enviarTemplate, enviarTexto, normalizarWaId } from './whatsapp-cloud'
 import { acharConversaPorNumero, janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 import { humanoConduzindoPorTelefone } from './luigi'
 import { encerrarPedido } from './etapas-pedido'
-import { templateDuvidaPedidoAgora, saudacaoPorHora } from './whatsapp-templates'
 import { DIAS_DE_BUSCA } from './horario-comercial'
 import { partesEmRecife } from './horario'
 
@@ -57,6 +56,8 @@ export type ResultadoBuscaVencida = {
   repetidos: string[]
   renovados: string[]
   encerrados: string[]
+  /** Vencidos cuja conversa está com o Fernando — a régua não entra; ele decide. */
+  escaladas: string[]
   pulados: number
   observacao?: string
 }
@@ -77,12 +78,29 @@ export type DecisaoBusca = 'perguntar' | 'repetir' | 'renovar' | 'encerrar' | 'e
  * O que fazer com um pedido vencido, dado se o cliente respondeu depois da
  * última pergunta. Pura, pra testar sem banco.
  */
-export function decidirBusca(p: Pick<PedidoBuscaVencida, 'busca_perguntada_em' | 'busca_perguntada_vezes'>, clienteRespondeu: boolean, agora = Date.now()): DecisaoBusca {
-  if (!p.busca_perguntada_em) return 'perguntar'
+export function decidirBusca(p: Pick<PedidoBuscaVencida, 'busca_perguntada_em' | 'busca_perguntada_vezes' | 'busca_valida_ate'>, clienteRespondeu: boolean, agora = Date.now()): DecisaoBusca {
+  if (!perguntaDestaRodada(p)) return 'perguntar'
   if (clienteRespondeu) return 'renovar'
-  const silencioMs = agora - new Date(p.busca_perguntada_em).getTime()
+  const silencioMs = agora - new Date(p.busca_perguntada_em as string).getTime()
   if (silencioMs < DIAS_ENTRE_TOQUES * 24 * 60 * 60 * 1000) return 'esperar'
   return p.busca_perguntada_vezes >= 2 ? 'encerrar' : 'repetir'
+}
+
+/**
+ * A pergunta gravada é desta rodada de vencimento?
+ *
+ * A KAREN — 27/09/2026. A renovação apagava `busca_perguntada_em`; ela
+ * respondeu ao template às 17:18, o cron renovou às 18:05 e apagou a marca,
+ * e quando o Luigi voltou à conversa às 20:09 não sabia mais que a gente
+ * tinha perguntado — respondeu "boa tarde" falando de fotos. A marca agora
+ * FICA (é o contexto do Luigi); o que muda é que ela só conta pra esta
+ * rodada se for posterior ao início da validade atual. Renovou → a validade
+ * começou de novo → a pergunta velha não vale como "já perguntei".
+ */
+export function perguntaDestaRodada(p: Pick<PedidoBuscaVencida, 'busca_perguntada_em' | 'busca_valida_ate'>): boolean {
+  if (!p.busca_perguntada_em) return false
+  const inicioDaRodada = new Date(p.busca_valida_ate).getTime() - DIAS_DE_BUSCA * 24 * 60 * 60 * 1000
+  return new Date(p.busca_perguntada_em).getTime() >= inicioDaRodada
 }
 
 /** Texto da pergunta quando dá pra falar em texto livre (janela aberta). */
@@ -100,15 +118,33 @@ function primeiroNome(nome: string | null): string {
   return (nome ?? '').trim().split(/\s+/)[0] || 'cliente'
 }
 
-/** Corpo do template, pro histórico do inbox — o que a Meta entrega. */
-function corpoDoTemplate(nome: string | null): string {
-  const s = saudacaoPorHora()
-  const saud = s === 'manha' ? 'Bom dia' : s === 'tarde' ? 'Boa tarde' : 'Boa noite'
-  return `${saud}, ${primeiroNome(nome)}! Sobre seu pedido na Confeccione, posso tirar uma dúvida?`
+/**
+ * O resumo que vai no {{2}} do template `pedido_atualizacao` — a pergunta em
+ * si, sem quebra de linha (a Meta recusa), até 300 caracteres.
+ *
+ * NÃO É MAIS O `duvida_pedido_*` — 27/09/2026. Aquele template vem com o
+ * botão "Falar com atendente": a Karen tocou nele às 17:18, a conversa
+ * escalou pro Fernando (que não estava), o Luigi calou e ela ficou três horas
+ * sem resposta — pra uma pergunta que era da máquina. O `pedido_atualizacao`
+ * leva a pergunta no corpo e o botão abre o pedido; quem responde cai no
+ * Luigi, que tem o contexto pra continuar.
+ */
+export function resumoDoTemplate(vez: 1 | 2): string {
+  return vez === 1
+    ? 'ainda não encontrei confecção pro seu pedido. Quer que eu continue procurando? Me responde por aqui'
+    : 'continuo procurando confecção pro seu pedido? Se não tiver retorno, encerro a busca por aqui'
+}
+
+/** Corpo renderizado do template, pro histórico do inbox. */
+function corpoDoTemplate(nome: string | null, vez: 1 | 2, pedidoId: string): string {
+  return (
+    `Oi, ${primeiroNome(nome)}! Atualização do seu pedido na Confeccione: ${resumoDoTemplate(vez)}. Toque no botão pra ver os detalhes e continuar por lá.\n` +
+    `▸ Ver detalhes → https://www.confeccione.com.br/visualizador/${pedidoId}`
+  )
 }
 
 export async function rodarBuscaVencida(): Promise<ResultadoBuscaVencida> {
-  const vazio: ResultadoBuscaVencida = { perguntados: [], repetidos: [], renovados: [], encerrados: [], pulados: 0 }
+  const vazio: ResultadoBuscaVencida = { perguntados: [], repetidos: [], renovados: [], encerrados: [], escaladas: [], pulados: 0 }
   const { hora } = partesEmRecife(new Date())
   if (hora < HORA_MIN || hora >= HORA_MAX) {
     return { ...vazio, observacao: `fora do horário (${HORA_MIN}h–${HORA_MAX}h)` }
@@ -151,7 +187,8 @@ export async function rodarBuscaVencida(): Promise<ResultadoBuscaVencida> {
   const pedidos = (data ?? []) as PedidoBuscaVencida[]
   if (pedidos.length === 0) return vazio
 
-  const r = { ...vazio }
+  const r: ResultadoBuscaVencida = { ...vazio, perguntados: [], repetidos: [], renovados: [], encerrados: [], escaladas: [] }
+  const rotuloDe = (p: PedidoBuscaVencida) => p.codigo ?? p.id
   let toques = 0
 
   for (const p of pedidos) {
@@ -162,8 +199,20 @@ export async function rodarBuscaVencida(): Promise<ResultadoBuscaVencida> {
         continue
       }
       const waId = normalizarWaId(p.telefone)
-      const conversaId = (await acharConversaPorNumero(waId))?.id ?? null
-      const respondeu = p.busca_perguntada_em && conversaId ? await clienteEscreveuDepois(conversaId, p.busca_perguntada_em) : false
+      const conversa = await acharConversaPorNumero(waId)
+      const conversaId = conversa?.id ?? null
+      // CONVERSA ESCALADA NÃO RECEBE PERGUNTA DA MÁQUINA — 27/09/2026. O Dan
+      // (TOY) estava "com o Fernando" desde uma escalada antiga; a régua mandou
+      // o template, ele respondeu "Pode sim" às 16:06, o Luigi descartou a
+      // resposta (conversa escalada) e ninguém respondeu. Quem está escalado
+      // é assunto do Fernando: fica na lista de pulados com o motivo, e ele
+      // decide à mão.
+      if (conversa?.luigi_escalado_em) {
+        r.escaladas.push(rotuloDe(p))
+        r.pulados++
+        continue
+      }
+      const respondeu = perguntaDestaRodada(p) && conversaId ? await clienteEscreveuDepois(conversaId, p.busca_perguntada_em as string) : false
 
       const decisao = decidirBusca(p, respondeu)
       const rotulo = p.codigo ?? p.id
@@ -175,7 +224,8 @@ export async function rodarBuscaVencida(): Promise<ResultadoBuscaVencida> {
           .from('pedidos_assistente')
           .update({
             busca_valida_ate: new Date(Date.now() + DIAS_DE_BUSCA * 24 * 60 * 60 * 1000).toISOString(),
-            busca_perguntada_em: null,
+            // A marca fica: é por ela que o Luigi sabe que perguntamos (ver
+            // perguntaDestaRodada e o proximo_passo em luigi.ts).
             busca_perguntada_vezes: 0,
           })
           .eq('id', p.id)
@@ -208,12 +258,15 @@ export async function rodarBuscaVencida(): Promise<ResultadoBuscaVencida> {
         corpo = textoDaPergunta(p, vez)
         ok = await enviarTexto(waId, corpo)
       } else {
-        // O TEMPLATE TEM {{1}} = PRIMEIRO NOME — 27/09/2026. A primeira rodada
-        // real (14:05) mandou sem parâmetro e a Meta recusou os 12 com 132000
-        // "Number of parameters does not match". Mesma chamada da sondagem.
-        template = templateDuvidaPedidoAgora()
-        corpo = corpoDoTemplate(p.nome)
-        ok = await enviarTemplate(waId, template, 'pt_BR', [{ type: 'body', parameters: [{ type: 'text', text: primeiroNome(p.nome) }] }])
+        // Mesma chamada de avisoOficial (whatsapp-notify.ts): {{1}} nome, {{2}}
+        // resumo, botão de URL com o caminho do pedido. Parâmetro vazio a Meta
+        // recusa com 132000 — foi a primeira rodada real, 14:05 de 27/09.
+        template = 'pedido_atualizacao'
+        corpo = corpoDoTemplate(p.nome, vez, p.id)
+        ok = await enviarTemplate(waId, template, 'pt_BR', [
+          { type: 'body', parameters: [{ type: 'text', text: primeiroNome(p.nome) }, { type: 'text', text: resumoDoTemplate(vez) }] },
+          { type: 'button', sub_type: 'url', index: 0, parameters: [{ type: 'text', text: `visualizador/${p.id}` }] },
+        ])
       }
       if (!ok.ok) {
         console.error('[busca-vencida] envio falhou', { pedido: rotulo, erro: ok.erro })

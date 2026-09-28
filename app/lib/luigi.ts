@@ -1636,7 +1636,12 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
     const entrega = [p.cidade, p.uf].filter(Boolean).join('/') || null
     const daTabela = prazos.get(p.id)
     const prazo = daTabela?.prazo_dias ?? null
-    const perguntamosSeContinua = daTabela?.busca_perguntada_em ?? null
+    // Só vale como contexto se foi há pouco: marca de 3 dias atrás é de outra
+    // rodada (a régua mantém a marca depois de renovar — ver perguntaDestaRodada).
+    const perguntamosSeContinua =
+      daTabela?.busca_perguntada_em && Date.now() - new Date(daTabela.busca_perguntada_em).getTime() < 3 * 24 * 60 * 60 * 1000
+        ? daTabela.busca_perguntada_em
+        : null
     return {
       codigo: p.codigo,
       id: p.id,
@@ -1683,16 +1688,18 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
             'chame liberar_para_fornecedores AGORA, neste mesmo turno. Não pergunte de novo: ' +
             'ele já respondeu, e repetir a pergunta é o que faz o pedido parar aqui.'
           : perguntamosSeContinua && (p.etapa === 'buscando_fornecedor' || p.etapa === 'sem_fornecedor')
-            ? // A RÉGUA DA BUSCA PERGUNTOU E ELE VOLTOU — 25/09/2026. Quase sempre
-              // o que saiu foi o template "posso tirar uma dúvida?" (janela
-              // fechada), então a pergunta de verdade ainda não foi feita: é
-              // aqui. Qualquer resposta dele já renovou a busca por 7 dias no
-              // cron; o que o Luigi faz é dar o rumo — ou encerrar, se ele
-              // disser que não quer mais.
+            ? // A RÉGUA DA BUSCA PERGUNTOU E ELE VOLTOU — 25/09/2026. Fora da
+              // janela sai o template `pedido_atualizacao` com a pergunta no
+              // corpo ("ainda não encontrei confecção… quer que eu continue?").
+              // Qualquer resposta dele já renovou a busca por 7 dias no cron;
+              // o que o Luigi faz é dar o rumo — ou encerrar, se ele disser
+              // que não quer mais. A Karen (27/09) respondeu "boa tarde" e
+              // ouviu de volta uma fala sobre fotos: o Luigi não sabia da
+              // pergunta. Agora sabe.
               `A BUSCA DE CONFECÇÃO PASSOU DOS 7 DIAS SEM NINGUÉM PEGAR, e a gente perguntou ${quandoRecife(perguntamosSeContinua) ?? 'há pouco'} se ele quer que a gente continue procurando. ` +
               'Se a mensagem dele agora é a resposta a isso: quem quer seguir → diga em uma linha que a busca continua por mais 7 dias e pergunte se mudou alguma coisa no pedido (prazo, quantidade) que ajude a fechar; ' +
               'quem não quer mais → pergunte se pode encerrar e, com o sim, encerrar_pedido. ' +
-              'Se ele só respondeu "pode" ao "posso tirar uma dúvida?", a dúvida é ESTA: pergunte se ele quer que a gente continue procurando confecção pro pedido. Não repita o resumo, não peça dado que já tem.'
+              'Se ele só respondeu um cumprimento ("boa tarde", "oi", "pode"), a pergunta ainda está de pé: pergunte de novo, em uma linha, se ele quer que a gente continue procurando confecção pro pedido. Não repita o resumo, não fale de fotos nem de dado que já tem.'
             : undefined,
       // Só faz sentido perseguir imagem em pedido que ainda vai pro cliente.
       // Pedido pago/produzindo já foi aprovado como está; mexer nele agora só
