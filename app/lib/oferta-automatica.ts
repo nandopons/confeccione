@@ -27,7 +27,7 @@ import { supabaseAdmin } from './supabase-server'
 // arquivo importa `ofertarPedido` de lá). Não deixei reexport: ninguém mais
 // consome esses nomes, e casca de compatibilidade sem consumidor é dívida que
 // alguém acha daqui a um mês sem saber se pode remover.
-import { dentroDoHorarioComercial } from './horario-comercial'
+import { estaEmHorarioComercial, FORA_DA_JANELA } from './horario'
 import { ofertarPedido, ordenarFornecedoresPara, resumirLinhas, type FornecedorOpcao, type LinhaPedido } from './pedido-assistente-oferta'
 
 /** Ofertas em aberto que uma confecção pode segurar ao mesmo tempo. */
@@ -242,8 +242,10 @@ async function candidatosDisponiveis(pedidoId: string): Promise<FornecedorOpcao[
 export async function rodarFilaDeOfertas(): Promise<ResultadoFila> {
   const expiradas = await expirarVencidas()
 
-  if (!dentroDoHorarioComercial()) {
-    return { expiradas, ofertados: [], semCandidato: [], observacao: 'fora do horário de envio (7h–19h)' }
+  // Oferta sai só na janela de disparo (seg–sex, 9h–11h — ver horario.ts).
+  // A conta das horas de resposta continua em horario-comercial (7h–19h).
+  if (!estaEmHorarioComercial()) {
+    return { expiradas, ofertados: [], semCandidato: [], observacao: FORA_DA_JANELA }
   }
 
   const pedidos = await pedidosNaFila()

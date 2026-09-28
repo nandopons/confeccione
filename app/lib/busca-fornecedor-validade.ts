@@ -42,13 +42,11 @@ import { acharConversaPorNumero, janela24hAberta, registrarSaidaInbox } from './
 import { humanoConduzindoPorTelefone } from './luigi'
 import { encerrarPedido } from './etapas-pedido'
 import { DIAS_DE_BUSCA } from './horario-comercial'
-import { partesEmRecife } from './horario'
+import { estaEmHorarioComercial, FORA_DA_JANELA } from './horario'
 
 /** Dias de silêncio entre a pergunta e a repetição, e entre a repetição e o encerramento. */
 export const DIAS_ENTRE_TOQUES = 2
 
-const HORA_MIN = 8
-const HORA_MAX = 20
 const MAX_POR_RODADA = 10
 
 export type ResultadoBuscaVencida = {
@@ -145,10 +143,7 @@ function corpoDoTemplate(nome: string | null, vez: 1 | 2, pedidoId: string): str
 
 export async function rodarBuscaVencida(): Promise<ResultadoBuscaVencida> {
   const vazio: ResultadoBuscaVencida = { perguntados: [], repetidos: [], renovados: [], encerrados: [], escaladas: [], pulados: 0 }
-  const { hora } = partesEmRecife(new Date())
-  if (hora < HORA_MIN || hora >= HORA_MAX) {
-    return { ...vazio, observacao: `fora do horário (${HORA_MIN}h–${HORA_MAX}h)` }
-  }
+  if (!estaEmHorarioComercial()) return { ...vazio, observacao: FORA_DA_JANELA }
 
   const agoraIso = new Date().toISOString()
 

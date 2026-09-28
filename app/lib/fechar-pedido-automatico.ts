@@ -40,7 +40,7 @@ import { conferirPedido, enviarResumoParaCliente } from './pedido-fechamento'
 import { faltaParaMockup, gerarMockupDoModelo, type LinhaMockup, type MapaMockups } from './mockup-pedido'
 import { janela24hAberta } from './whatsapp-notify'
 import { avisarGestor } from './luigi'
-import { horaEmRecife } from './horario'
+import { estaEmHorarioComercial, FORA_DA_JANELA } from './horario'
 
 /** Quantos pedidos uma rodada fecha. Cada mockup é uma imagem de IA: vai devagar. */
 const PEDIDOS_POR_RODADA = 3
@@ -91,15 +91,11 @@ const MOTIVO_PREVIA = 'prévia não saiu'
 /** Cliente que escreveu há menos disto está em conversa; o fechador espera. */
 const MINUTOS_CONVERSA_VIVA = 15
 
-function podeFecharAgora(ultimaEntradaDoCliente: Date | null): { pode: boolean; motivo: string } {
-  const hora = horaEmRecife()
-  if (hora < 8) return { pode: false, motivo: 'madrugada (fecha a partir das 8h)' }
-  if (hora < 21) return { pode: true, motivo: '' }
-  const ativo =
-    ultimaEntradaDoCliente && Date.now() - ultimaEntradaDoCliente.getTime() < 2 * 60 * 60_000
-  return ativo
-    ? { pode: true, motivo: '' }
-    : { pode: false, motivo: 'depois das 21h e cliente sem falar há mais de 2h' }
+function podeFecharAgora(_ultimaEntradaDoCliente: Date | null): { pode: boolean; motivo: string } {
+  // JANELA ÚNICA DE DISPARO — 27/09/2026. Era 8h–21h todo dia (e depois das
+  // 21h só com cliente ativo). O fechador é pedido PARADO ganhando resumo sem
+  // ninguém pedir: é disparo, e disparo sai seg–sex, 9h–11h (horario.ts).
+  return estaEmHorarioComercial() ? { pode: true, motivo: '' } : { pode: false, motivo: FORA_DA_JANELA }
 }
 
 export type ResultadoFechamento = {

@@ -36,18 +36,12 @@ import { supabaseAdmin } from './supabase-server'
 import { enviarTexto, normalizarWaId } from './whatsapp-cloud'
 import { acharConversaPorNumero, janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 import { humanoConduzindoPorTelefone } from './luigi'
-
-/** Hora local de Recife. */
-function horaEmRecife(agora = new Date()): number {
-  return Number(new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Recife', hour: '2-digit', hour12: false }).format(agora))
-}
+import { estaEmHorarioComercial, FORA_DA_JANELA } from './horario'
 
 /** Silêncio mínimo depois do nosso último balão. */
 const HORAS_ATE_CUTUCAR = 2
 /** Depois disto a conversa esfriou; sondagem de dois dias atrás é caso de nova onda, não de cutucada. */
 const HORAS_LIMITE = 48
-const HORA_MIN = 8
-const HORA_MAX = 19
 /** O cron roda a cada 15 min; isto não é disparo em massa. */
 const MAX_POR_RODADA = 8
 
@@ -169,10 +163,8 @@ async function marcarCutucada(id: string): Promise<void> {
 
 /** Roda a cutucada. Failure-soft: um envio que falha não derruba os outros. */
 export async function rodarCutucadaCaptacao(): Promise<ResultadoCutucadaCaptacao> {
-  const hora = horaEmRecife()
-  if (hora < HORA_MIN || hora >= HORA_MAX) {
-    return { enviadas: 0, puladas: 0, observacao: `fora do horário (${HORA_MIN}h–${HORA_MAX}h)` }
-  }
+  // Janela única de disparo (seg–sex, 9h–11h) — ver horario.ts.
+  if (!estaEmHorarioComercial()) return { enviadas: 0, puladas: 0, observacao: FORA_DA_JANELA }
 
   const desde = new Date(Date.now() - HORAS_LIMITE * 3_600_000).toISOString()
   const { data, error } = await supabaseAdmin

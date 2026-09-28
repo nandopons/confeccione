@@ -34,6 +34,7 @@ import {
 import { encerrarPedido } from './etapas-pedido'
 import { conteudoDoTemplate, obterTemplate, type TemplateMarketing } from './templates-marketing'
 import { listarLeadsCompleto, registrarToque, type FiltroLeads, type Lead } from './leads-marketing'
+import { estaEmHorarioComercial, FORA_DA_JANELA } from './horario'
 
 export type Gatilho =
   | 'lead_novo'
@@ -722,7 +723,7 @@ export async function detalheAutomacao(id: string): Promise<DetalheAutomacao | n
     receberiamAgora: vencidos.slice(0, 40),
     totalReceberiamAgora: vencidos.length,
     aguardando,
-    janelaAbertaAgora: hora >= a.horaInicio && hora < a.horaFim,
+    janelaAbertaAgora: estaEmHorarioComercial() && hora >= a.horaInicio && hora < a.horaFim,
   }
 }
 
@@ -799,11 +800,15 @@ export async function rodarAutomacao(id: string, opts?: { forcar?: boolean }): P
   // Então: passo com espera 0 sai a qualquer hora; passo com espera em dias
   // espera a janela. Quem não pôde sair fica com `proximo_em` no passado e sai
   // na primeira rodada dentro do horário — nada se perde.
+  // A JANELA GLOBAL MANDA — 27/09/2026. Além da janela da própria automação
+  // (configurável no painel), todo disparo obedece à janela única de
+  // horario.ts (seg–sex, 9h–11h). A da automação só pode APERTAR, nunca
+  // alargar. O passo imediato continua livre, pela decisão de 10/09 acima.
   const hora = horaEmRecife()
-  const dentroDaJanela = hora >= a.horaInicio && hora < a.horaFim
+  const dentroDaJanela = estaEmHorarioComercial() && hora >= a.horaInicio && hora < a.horaFim
   const temPassoImediato = passosAtivos.some((p) => p.esperaDias === 0)
   if (!dentroDaJanela && !temPassoImediato) {
-    return { ...base, observacao: `fora da janela de envio (${a.horaInicio}h–${a.horaFim}h)` }
+    return { ...base, observacao: `${FORA_DA_JANELA}; a desta automação é ${a.horaInicio}h–${a.horaFim}h` }
   }
 
   // `conversasQuentes` joga se a leitura falhar: sem saber quem está falando

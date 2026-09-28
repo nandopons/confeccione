@@ -65,10 +65,30 @@ export function horaEmRecife(d: Date = new Date()): number {
   return partesEmRecife(d).hora
 }
 
-export function estaEmHorarioComercial(): boolean {
-  const { diaSemana, hora } = partesEmRecife()
-  return diaSemana >= 1 && diaSemana <= 5 && hora >= 8 && hora < 20
+// ============================================================================
+// A JANELA DE DISPARO — 27/09/2026, decisão do Fernando.
+//
+// Tudo que a gente manda SEM a pessoa ter escrito antes — oferta a confecção,
+// régua da busca vencida, cutucada pós-resumo, fechador automático, captação,
+// réguas e campanhas de marketing — sai só de SEGUNDA A SEXTA, DAS 9h ÀS 11h
+// (Recife). Fora disso a automação espera; o Luigi continua respondendo quem
+// escreve a qualquer hora, porque aí a conversa é da pessoa.
+//
+// Antes cada arquivo tinha a sua janela (7–19 todo dia, 8–20, 8–21, 8–19…) e
+// nenhuma coincidia com a outra. Esta é a ÚNICA. Quem precisar de outra janela
+// tem que argumentar aqui, não abrir uma constante local.
+// ============================================================================
+export const JANELA_DISPARO_INICIO = 9
+export const JANELA_DISPARO_FIM = 11
+
+/** Dentro da janela de disparo (seg–sex, 9h–11h de Recife)? */
+export function estaEmHorarioComercial(d: Date = new Date()): boolean {
+  const { diaSemana, hora } = partesEmRecife(d)
+  return diaSemana >= 1 && diaSemana <= 5 && hora >= JANELA_DISPARO_INICIO && hora < JANELA_DISPARO_FIM
 }
+
+/** Texto pra quem lê o resultado de um cron pulado. */
+export const FORA_DA_JANELA = `fora da janela de disparo (seg–sex, ${JANELA_DISPARO_INICIO}h–${JANELA_DISPARO_FIM}h)`
 
 /**
  * Retorna true se a hora atual está dentro de uma das janelas de retry
@@ -82,7 +102,8 @@ export function estaEmJanelaRetryPassivo(): boolean {
   const { diaSemana, hora, minuto } = partesEmRecife()
   if (diaSemana < 1 || diaSemana > 5) return false
   if (minuto >= 15) return false
-  return hora === 8 || hora === 15
+  // Uma vez por hora da janela de disparo (9h e 10h). Era 8h e 15h.
+  return hora >= JANELA_DISPARO_INICIO && hora < JANELA_DISPARO_FIM
 }
 
 export function proximoHorarioValido(): Date {
@@ -93,10 +114,10 @@ export function proximoHorarioValido(): Date {
     add = 1 // domingo -> segunda
   } else if (diaSemana === 6) {
     add = 2 // sábado -> segunda
-  } else if (hora >= 20) {
-    add = diaSemana === 5 ? 3 : 1 // sexta pós-20h -> segunda; outros -> dia seguinte
+  } else if (hora >= JANELA_DISPARO_FIM) {
+    add = diaSemana === 5 ? 3 : 1 // sexta depois da janela -> segunda; outros -> dia seguinte
   } else {
-    add = 0 // dia útil antes das 8h -> mesmo dia
+    add = 0 // dia útil antes da janela -> hoje
   }
 
   // `mes` aqui é 1-based; o Date.UTC espera 0-based, daí o -1.
@@ -104,5 +125,5 @@ export function proximoHorarioValido(): Date {
   const y = next.getUTCFullYear()
   const m = String(next.getUTCMonth() + 1).padStart(2, '0')
   const d = String(next.getUTCDate()).padStart(2, '0')
-  return new Date(`${y}-${m}-${d}T08:00:00-03:00`)
+  return new Date(`${y}-${m}-${d}T${String(JANELA_DISPARO_INICIO).padStart(2, '0')}:00:00-03:00`)
 }

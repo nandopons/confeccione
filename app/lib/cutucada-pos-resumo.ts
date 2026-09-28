@@ -30,17 +30,7 @@ import { supabaseAdmin } from './supabase-server'
 import { enviarTexto, normalizarWaId } from './whatsapp-cloud'
 import { acharConversaPorNumero, janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 import { humanoConduzindoPorTelefone } from './luigi'
-
-/** Hora local de Recife. Inline pra não arrastar o módulo de marketing junto. */
-function horaEmRecife(agora = new Date()): number {
-  return Number(
-    new Intl.DateTimeFormat('pt-BR', {
-      timeZone: 'America/Recife',
-      hour: '2-digit',
-      hour12: false,
-    }).format(agora)
-  )
-}
+import { estaEmHorarioComercial, FORA_DA_JANELA } from './horario'
 
 /** Quanto tempo de silêncio antes de perguntar de novo. */
 const HORAS_ATE_CUTUCAR = 1
@@ -50,11 +40,11 @@ const HORAS_ATE_CUTUCAR = 1
  * confirmar?" três dias depois soa como quem não estava prestando atenção.
  * Pedido parado além disso é problema de régua, não de conversa.
  */
-const HORAS_LIMITE = 48
+// 48 → 80 em 27/09/2026: com a janela de disparo seg–sex 9h–11h, um resumo
+// enviado sexta 12h só encontra a próxima janela segunda 9h (69 h). Com 48 ele
+// nunca seria cutucado. 80 cobre a sexta inteira; além disso é régua.
+const HORAS_LIMITE = 80
 
-/** Horário em que é razoável puxar assunto sobre pedido. */
-const HORA_MIN = 8
-const HORA_MAX = 20
 
 /** Teto por rodada: o cron roda a cada 15 min e isto não é disparo em massa. */
 const MAX_POR_RODADA = 10
@@ -118,10 +108,8 @@ function textoDaCutucada(p: PedidoCutucada): string {
  * Roda a cutucada. Failure-soft: um envio que falha não derruba os outros.
  */
 export async function rodarCutucadaPosResumo(): Promise<ResultadoCutucada> {
-  const hora = horaEmRecife()
-  if (hora < HORA_MIN || hora >= HORA_MAX) {
-    return { enviadas: 0, puladas: 0, observacao: `fora do horário (${HORA_MIN}h–${HORA_MAX}h)` }
-  }
+  // Janela única de disparo (seg–sex, 9h–11h) — ver horario.ts.
+  if (!estaEmHorarioComercial()) return { enviadas: 0, puladas: 0, observacao: FORA_DA_JANELA }
 
   const agora = Date.now()
   const desde = new Date(agora - HORAS_LIMITE * 60 * 60 * 1000).toISOString()
