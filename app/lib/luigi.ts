@@ -559,6 +559,15 @@ type LinhaPedido = {
   estampas?: unknown[] | null
 }
 
+/** Alguma linha com quantidade > 0 — o mínimo pra uma confecção avaliar. */
+function temQuantidade(linhas: unknown): boolean {
+  if (!Array.isArray(linhas)) return false
+  return (linhas as LinhaPedido[]).some((l) => {
+    const qtd = typeof l.total === 'number' ? l.total : (l.tamanhos ?? []).reduce((s, t) => s + (t.qtd ?? 0), 0)
+    return qtd > 0
+  })
+}
+
 function resumoDasLinhas(linhas: unknown): string {
   if (!Array.isArray(linhas) || linhas.length === 0) return 'sem peça descrita'
   return (linhas as LinhaPedido[])
@@ -1723,8 +1732,12 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
               // ouviu de volta uma fala sobre fotos: o Luigi não sabia da
               // pergunta. Agora sabe.
               `A BUSCA DE CONFECÇÃO PASSOU DOS 7 DIAS SEM NINGUÉM PEGAR, e a gente perguntou ${quandoRecife(perguntamosSeContinua) ?? 'há pouco'} se ele quer que a gente continue procurando. ` +
-              'Se a mensagem dele agora é a resposta a isso: quem quer seguir → diga em uma linha que a busca continua e pergunte se mudou alguma coisa no pedido (prazo, quantidade) que ajude a fechar; ' +
-              'quem não quer mais → pergunte se pode encerrar e, com o sim, encerrar_pedido. ' +
+              'Se a mensagem dele agora é a resposta a isso: quem quer seguir → diga em UMA linha que a busca continua, e PARE. Não pergunte a peça, não pergunte quantidade, não abra montagem de pedido: o pedido já existe e já foi pras confecções — ' +
+              'o Guilherme (28/09) disse "sim" e ouviu "qual é a peça que você quer produzir?", como se o pedido de 20 dias não existisse. ' +
+              (temQuantidade(p.linhas)
+                ? ''
+                : 'EXCEÇÃO, e só esta: este pedido está sem quantidade — nenhuma confecção consegue avaliar. Depois do "a busca continua", diga em uma frase que pra uma confecção pegar precisa saber quantas peças de cada tipo, e grave o que ele responder com ajustar_peca_pedido. Se ele responder sem número (só tipos de peça, "de tudo"), registre os tipos, diga que fica esperando a quantidade e PARE — não chame chamar_humano por isso. ') +
+              'Quem não quer mais → pergunte se pode encerrar e, com o sim, encerrar_pedido. ' +
               'Se ele só respondeu um cumprimento ("boa tarde", "oi", "pode"), a pergunta ainda está de pé: pergunte de novo, em uma linha, se ele quer que a gente continue procurando confecção pro pedido. Não repita o resumo, não fale de fotos nem de dado que já tem. ' +
               'Se ele disser que já resolveu por fora ("já consegui", "já fechei com outro"): agradeça, registre o motivo e encerre com encerrar_pedido — a busca não tem mais o que fazer por ele. ' +
               'Ao falar do tempo, use nesta_etapa_ha_dias ("há 19 dias"), não invente "mais de 24 h"; e não cite regra interna ("por mais 7 dias" é conta nossa) — diga só que continua procurando.'
