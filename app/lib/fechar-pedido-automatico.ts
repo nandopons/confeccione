@@ -40,7 +40,7 @@ import { conferirPedido, enviarResumoParaCliente } from './pedido-fechamento'
 import { faltaParaMockup, gerarMockupDoModelo, type LinhaMockup, type MapaMockups } from './mockup-pedido'
 import { janela24hAberta } from './whatsapp-notify'
 import { avisarGestor } from './luigi'
-import { estaEmHorarioComercial, FORA_DA_JANELA } from './horario'
+import { estaNaJanelaDoFechador, JANELA_FECHADOR_INICIO, JANELA_FECHADOR_FIM } from './horario'
 
 /** Quantos pedidos uma rodada fecha. Cada mockup é uma imagem de IA: vai devagar. */
 const PEDIDOS_POR_RODADA = 3
@@ -92,10 +92,12 @@ const MOTIVO_PREVIA = 'prévia não saiu'
 const MINUTOS_CONVERSA_VIVA = 15
 
 function podeFecharAgora(_ultimaEntradaDoCliente: Date | null): { pode: boolean; motivo: string } {
-  // JANELA ÚNICA DE DISPARO — 27/09/2026. Era 8h–21h todo dia (e depois das
-  // 21h só com cliente ativo). O fechador é pedido PARADO ganhando resumo sem
-  // ninguém pedir: é disparo, e disparo sai seg–sex, 9h–11h (horario.ts).
-  return estaEmHorarioComercial() ? { pode: true, motivo: '' } : { pode: false, motivo: FORA_DA_JANELA }
+  // Janela própria, 8h–21h todo dia — o argumento está em horario.ts, junto
+  // da constante. Em 27/09 ficou por um dia na janela geral (seg–sex 9h–11h)
+  // e o Claude Code apontou a regressão do caso Wesley; o Fernando devolveu.
+  return estaNaJanelaDoFechador()
+    ? { pode: true, motivo: '' }
+    : { pode: false, motivo: `fora da janela do fechador (${JANELA_FECHADOR_INICIO}h–${JANELA_FECHADOR_FIM}h)` }
 }
 
 export type ResultadoFechamento = {

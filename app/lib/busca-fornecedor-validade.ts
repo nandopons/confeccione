@@ -47,7 +47,10 @@ import { estaEmHorarioComercial, FORA_DA_JANELA } from './horario'
 /** Dias de silêncio entre a pergunta e a repetição, e entre a repetição e o encerramento. */
 export const DIAS_ENTRE_TOQUES = 2
 
-const MAX_POR_RODADA = 10
+// 10 → 20 em 28/09/2026: com a janela seg–sex 9h–11h o cron só roda duas
+// vezes por dia (9:05 e 10:05). Com 10, os 37 vencidos do backfill levariam
+// dois dias; com 20, um. Continua sendo uma pergunta por pessoa.
+const MAX_POR_RODADA = 20
 
 export type ResultadoBuscaVencida = {
   perguntados: string[]

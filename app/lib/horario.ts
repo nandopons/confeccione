@@ -90,6 +90,29 @@ export function estaEmHorarioComercial(d: Date = new Date()): boolean {
 /** Texto pra quem lê o resultado de um cron pulado. */
 export const FORA_DA_JANELA = `fora da janela de disparo (seg–sex, ${JANELA_DISPARO_INICIO}h–${JANELA_DISPARO_FIM}h)`
 
+// ============================================================================
+// A EXCEÇÃO ARGUMENTADA: O FECHADOR — 28/09/2026.
+//
+// O fechador manda o resumo em PDF de um pedido que o cliente ACABOU de montar
+// e o Luigi não fechou. Não é puxar assunto: é o fim da sessão dele, como o
+// passo imediato da régua de marketing (decisão de 10/09 — "quem abriu o
+// pedido de madrugada está ali de madrugada"). O Wesley montou às 21:26,
+// respondeu tudo até 22:20, e o PDF não saiu porque o cron dormia. Com a
+// janela de 9h–11h, um pedido completo na sexta à noite esperaria até segunda
+// — 60 horas em vez de 15 minutos.
+//
+// Por isso o fechador tem janela própria: 8h–21h, TODO dia. Protege a
+// madrugada e nada mais. As outras travas dele (pula quem falou há menos de
+// 15 min, reserva atômica do PDF) continuam valendo.
+// ============================================================================
+export const JANELA_FECHADOR_INICIO = 8
+export const JANELA_FECHADOR_FIM = 21
+
+export function estaNaJanelaDoFechador(d: Date = new Date()): boolean {
+  const { hora } = partesEmRecife(d)
+  return hora >= JANELA_FECHADOR_INICIO && hora < JANELA_FECHADOR_FIM
+}
+
 /**
  * Retorna true se a hora atual está dentro de uma das janelas de retry
  * passivo: 08:00-08:14 ou 15:00-15:14, em dia útil.
