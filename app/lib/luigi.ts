@@ -2300,11 +2300,42 @@ const JA_FOI_PRAS_CONFECCOES: ReadonlySet<Etapa> = new Set<Etapa>([
   'entregue',
 ])
 
+/**
+ * Sem pedido pra montar, a mesa de montagem não existe.
+ *
+ * O JULIO — 27/09/2026. Pedido 20260700114 na busca desde 12/09 (com uma
+ * oferta já feita). Ele respondeu à régua; o modelo viu as quatro fotos
+ * soltas no histórico, entrou no fluxo de montagem ("vou confirmar uma por
+ * uma"), reanexou tudo e fechou com "Posso liberar pras confecções?" — de um
+ * pedido liberado há 16 dias. A regra de prompt existia e não segurou. Aqui é
+ * estrutural: se nenhum pedido em aberto está antes da liberação, as
+ * ferramentas de liberar, mandar resumo e definir peças SAEM da mesa. Ajustar
+ * peça fica (ajuste depois de liberado é legítimo; a confecção lê), foto fica
+ * pelo mesmo motivo, e criar_pedido fica (ele pode querer outro).
+ */
+const MESA_SEM_PEDIDO_PRA_LIBERAR: ReadonlySet<string> = new Set(['liberar_para_fornecedores', 'enviar_resumo_pedido', 'definir_pecas_pedido'])
+
+/**
+ * true quando NÃO há o que liberar: existe pedido em aberto, todos já estão
+ * com as confecções, e nenhum nasceu neste turno (`ctx.pedidos` é a foto do
+ * início do turno; o que criar_pedido abre só aparece em `pedidoEmFoco`).
+ * Cliente sem pedido nenhum mantém a mesa inteira — ele vai criar um.
+ */
+function soTemPedidoJaLiberado(ctx: Contexto): boolean {
+  const abertos = ctx.pedidos.filter((p) => p.em_aberto)
+  if (abertos.length === 0) return false
+  const nasceuNoTurno = Boolean(ctx.pedidoEmFoco) && !ctx.pedidos.some((p) => p.id === ctx.pedidoEmFoco?.id)
+  if (nasceuNoTurno) return false
+  return abertos.every((p) => JA_FOI_PRAS_CONFECCOES.has(p.etapa))
+}
+
 function ferramentasDoModo(
   modo: Exclude<ModoLuigi, 'desligado'>,
   ehFornecedor = false,
   /** Ver FORA_DA_MESA: no turno em que o código fechou (ou tentou), parte da lista some. */
-  fechamento: FechamentoPorCodigo = null
+  fechamento: FechamentoPorCodigo = null,
+  /** Ver MESA_SEM_PEDIDO_PRA_LIBERAR. */
+  semPedidoPraLiberar = false
 ): Anthropic.Messages.Tool[] {
   // Confecção não tem pedido pra montar: dar a ela as ferramentas de peça seria
   // oferecer ao modelo a chance de editar o pedido de OUTRA pessoa. O que ela
@@ -2330,7 +2361,7 @@ function ferramentasDoModo(
         FERRAMENTA_DADOS_CLIENTE,
         FERRAMENTA_RESUMO_PDF,
         FERRAMENTA_LIBERAR,
-      ].filter((f) => !fora?.has(f.name))
+      ].filter((f) => !fora?.has(f.name) && !(semPedidoPraLiberar && MESA_SEM_PEDIDO_PRA_LIBERAR.has(f.name)))
     : [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_MOTIVO_PARADA]
 }
 
@@ -4388,7 +4419,7 @@ async function rodarLuigi(
           // reordenação de um prompt de 33 mil caracteres e fica pra uma decisão
           // própria, com medição.
           system: promptSistema(modo, ctx, jaSeApresentou),
-          tools: comCacheNasFerramentas(ferramentasDoModo(modo, ctx.ehFornecedor, fechamentoPorCodigo)),
+          tools: comCacheNasFerramentas(ferramentasDoModo(modo, ctx.ehFornecedor, fechamentoPorCodigo, soTemPedidoJaLiberado(ctx))),
           messages: historico,
         },
         { signal: controlador.signal }
