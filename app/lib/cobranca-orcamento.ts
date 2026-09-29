@@ -110,6 +110,14 @@ export async function rodarCobrancaOrcamento(): Promise<ResultadoCobrancaOrcamen
     const p = (Array.isArray(o.pedidos_assistente) ? o.pedidos_assistente[0] : o.pedidos_assistente) as Exclude<Linha['pedidos_assistente'], null | unknown[]> | null
     const f = Array.isArray(o.leads_fornecedores) ? o.leads_fornecedores[0] : o.leads_fornecedores
     if (!p || !p.telefone) continue
+    // A ELIONE (313, 29/09): confecção que abriu pedido pra si mesma e aceitou
+    // a própria oferta. Cliente e confecção no mesmo número → não é negociação
+    // nenhuma; recebeu as duas mensagens de uma vez. Pula.
+    const tel8 = (t: string | null) => (t ?? '').replace(/\D/g, '').slice(-8)
+    if (f?.whatsapp && tel8(f.whatsapp) && tel8(f.whatsapp) === tel8(p.telefone)) {
+      puladas++
+      continue
+    }
     if (p.orcamento_definido_em || p.orcamento_cobrado_em || p.encerrado_em || p.finalizado_em || p.pagamento_status === 'pago') continue
     if (p.lembretes_pausados_ate && new Date(p.lembretes_pausados_ate).getTime() > agora) {
       puladas++

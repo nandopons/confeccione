@@ -442,6 +442,26 @@ export function pareceRecadoInterno(texto: string): boolean {
   return VOCABULARIO_INTERNO.test(texto) || TOM_DE_RELATORIO.test(texto)
 }
 
+/**
+ * PERGUNTA QUE NÃO SAI PRA CONFECÇÃO — 29/09/2026 (decisão do Fernando).
+ *
+ * "Muitos questionamentos de um tema que já deveria ter sido superado, e
+ * generalizado. Aprofundar esses detalhes só gera desgaste." A LJ Fardamentos
+ * respondeu "20 dias úteis" e "quantidades grandes" e ouviu de volta "qual o
+ * tempo médio de produção?", "quanto menor, em média, pra polo?", depois de
+ * "que tipos de pedido preferem?", "alguma restrição?", "quais modelos
+ * recusam?". O prompt proíbe cada uma dessas desde 10/09; o modelo reincide.
+ * Regra sem trava é sugestão — então a trava: balão de pergunta sobre prazo,
+ * mínimo, capacidade, restrição, preferência ou recusa não sai. O resto do
+ * turno sai normal; se sobrar nada, não manda nada.
+ */
+const PERGUNTA_PROIBIDA_FORNECEDOR =
+  /(prazo|tempo)\s+(m[eé]dio|de\s+produ[cç][aã]o|de\s+entrega)|quanto\s+(tempo|menor|maior)|quantos\s+dias|em\s+m[eé]dia|(tamanho|lote|pedido)\s+m[ií]nimo|m[ií]nimo\s+de\s+(lote|pe[cç]as)|capacidade|restri[cç][aã]o|preferem\s+receber|costumam\s+(recusar|pegar)|que\s+tipos?\s+de\s+pedido/i
+
+export function perguntaProibidaAoFornecedor(balao: string): boolean {
+  return balao.includes('?') && PERGUNTA_PROIBIDA_FORNECEDOR.test(balao)
+}
+
 /** Tira o que o WhatsApp não mostra bem (D-6: sem markdown, sem emoji, sem lista). */
 function paraWhatsApp(texto: string): string {
   return (
@@ -4073,6 +4093,8 @@ AO ENCERRAR, DIGA ONDE AS FOTOS VÃO PARAR. Uma linha, no fim: as fotos entram n
 
 Grave cada resposta na hora com salvar_perfil_producao. A conversa pode parar depois da primeira, e o que ela já disse vale.
 
+DEPOIS QUE VOCÊ ENCERROU, NÃO REABRA. Se você já disse o fecho ("quando aparecer algo alinhado a oferta chega pelo WhatsApp", "qualquer coisa é só chamar") e ela ainda manda detalhe ("20 dias úteis", "quantidades grandes", "polo tem prazo menor"): grave o que der pra gravar (perfil, nao_faz) e responda com UMA palavra ("anotado") ou nada. NÃO faça pergunta de acompanhamento ("quanto menor?", "em média quanto?"): cada pergunta sua depois do fecho é desgaste pra ela e não muda nenhum pedido. Detalhe de prazo e volume a gente descobre ofertando, não perguntando.
+
 PEÇAS, E SÓ PEÇAS. A única coisa que a gente quer arrancar da conversa é O QUE ELA PRODUZ, com nome de peça. NÃO pergunte "que tipos de pedido vocês preferem receber?", "tem alguma restrição?", "quais modelos vocês costumam recusar?", "tamanho mínimo de lote?" — a LJ Fardamentos (29/09) recusou uma oferta e ouviu essas três perguntas em seguida, uma mais vaga que a outra. Recusa não abre entrevista: se ela disse o que não faz, grave (nao_faz) e pronto. Se ela contar peça nova de passagem ("conjuntos em brim", "calça pijama"), grave em pecas e pergunte UMA vez "tem mais alguma peça que vocês fazem?"; com a resposta, encerre. O que ela recusa e o que ela pega a gente aprende ofertando e vendo o aceite — não perguntando.
 
 DEPOIS DISSO ACABOU. Agradeça e encerre — UMA VEZ. Se ela ainda mandar mensagem depois do seu fecho ("obrigada", "tá bom", figurinha), não repita a despedida e não invente assunto: responda com uma ou duas palavras, ou não responda. Despedir-se três vezes é pior que não se despedir. Tecido, mínimo, capacidade, encaixe, se fornece material: registre se ela falar, mas não pergunte. E se ela disser o que NÃO pega, guarde — é o que mais evita pedido errado.
@@ -6288,7 +6310,13 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
         console.error(`[luigi] resposta com vocabulário interno BARRADA em ${params.conversaId}: "${r.texto.slice(0, 160)}"`)
         void avisarGestor(`Barrei uma resposta do Luigi pra ${nomeOuNumero(params.nome, waId)} porque ela tinha vocabulário interno. Veja a conversa no inbox: "${r.texto.slice(0, 120)}"`)
       }
-      const partes = r.escalada || vazandoInterno ? [] : mensagensSeparadas(r.texto)
+      const todasAsPartes = r.escalada || vazandoInterno ? [] : mensagensSeparadas(r.texto)
+      // Ver perguntaProibidaAoFornecedor: pergunta de entrevista que o prompt
+      // proíbe e o modelo insiste em fazer não chega na confecção.
+      const partes = ehFornecedor ? todasAsPartes.filter((p) => !perguntaProibidaAoFornecedor(p)) : todasAsPartes
+      if (partes.length < todasAsPartes.length) {
+        console.error(`[luigi] pergunta proibida à confecção BARRADA em ${params.conversaId}: "${todasAsPartes.filter((p) => perguntaProibidaAoFornecedor(p)).join(' | ').slice(0, 200)}"`)
+      }
       if (r.escalada && r.texto.trim()) {
         console.log(`[luigi] escalou e tentou falar; texto descartado em ${params.conversaId}: "${r.texto.slice(0, 80)}"`)
       }

@@ -394,7 +394,7 @@ export function QuadroLinhaEditavel({ editor, i, children }: { editor: EditorLin
   function excluir() {
     // Texto genérico de propósito: este quadro vive na página da oferta
     // ("Pronto, ajustado") e na de orçamento ("Atualizar e reenviar").
-    if (!confirm('Remover este produto do pedido? Nada muda até você confirmar no botão do fim da página.')) return
+    // Sem confirm(): no navegador embutido do WhatsApp ele é engolido (29/09). Nada muda até o envio, então remover é reversível.
     editor.excluir(i)
   }
   if (emEdicao) {

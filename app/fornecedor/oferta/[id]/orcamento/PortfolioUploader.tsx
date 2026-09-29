@@ -35,7 +35,7 @@ export default function PortfolioUploader({
   }
 
   async function remover(path: string) {
-    if (!window.confirm('Remover este arquivo?')) return
+    // Sem confirm(): no navegador embutido do WhatsApp ele é engolido (29/09).
     setOcupado(true)
     setErro(null)
     try {

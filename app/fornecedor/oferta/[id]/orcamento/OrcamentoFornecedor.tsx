@@ -71,6 +71,14 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
   const [prazo, setPrazo] = useState<string>('')
   const [calculadoraAberta, setCalculadoraAberta] = useState(false)
   const [enviando, setEnviando] = useState(false)
+  // CONFIRMAÇÃO NA PÁGINA, NÃO EM window.confirm — 29/09/2026. A Rafaelle
+  // (327 e 275): "está parando na parte de enviar o orçamento, ao clicar no
+  // botão de enviar, ele trava". Servidor sem nenhum POST dela, sem 4xx, sem
+  // 5xx: o clique nunca saiu do navegador. O link chega pelo WhatsApp e abre
+  // no navegador embutido dele, e WebView de Android costuma engolir o
+  // confirm() (volta false sem mostrar nada). Pra quem está lá, o botão
+  // "trava". O resumo do envio agora é um bloco na página com dois botões.
+  const [confirmando, setConfirmando] = useState(false)
   const [feito, setFeito] = useState<{ valorCliente: number; repasse: number; itensAjustados: boolean } | null>(null)
   const [erro, setErro] = useState<string | null>(null)
 
@@ -98,22 +106,34 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
   const itemAberto = editor.editando !== null
   const nAjustes = editor.alteradas + editor.removidas
 
-  async function enviar() {
+  /** Por que o botão está travado, em português — em vez de um botão cinza mudo. */
+  const motivoBloqueio = useMemo(() => {
+    if (itemAberto) return 'Salve ou cancele o item aberto antes de enviar.'
+    if (editor.itens.length === 0) return 'O pedido precisa ter pelo menos um produto.'
+    for (const l of editor.itens) {
+      const nome = l.modelo.trim() || 'um dos itens'
+      if (totalDraft(l) <= 0) return `Falta a quantidade em ${nome} (edite o item e informe o total ou a grade).`
+      if (paraCentavos(precos[l.key] ?? '') <= 0) return `Falta o valor por unidade em ${nome}.`
+    }
+    return null
+  }, [itemAberto, editor.itens, precos])
+
+  const diasDoPrazo = Number((prazo || '').replace(/\D/g, ''))
+  const prazoValido = Number.isFinite(diasDoPrazo) && diasDoPrazo >= 1 && diasDoPrazo <= 180
+
+  function pedirConfirmacao() {
     if (enviando || !calc.valido || itemAberto) return
-    const dias = Number((prazo || '').replace(/\D/g, ''))
-    if (!Number.isFinite(dias) || dias < 1 || dias > 180) {
+    if (!prazoValido) {
       setErro('Informe em quantos dias você entrega a produção (1 a 180).')
       return
     }
-    const linhaAjuste = editor.temMudanca
-      ? `\nItens ajustados: ${nAjustes} (o cliente vê o que mudou na mesma mensagem).`
-      : ''
-    if (
-      !window.confirm(
-        `Enviar o orçamento ao cliente?\n\nVocê recebe: ${brl(calc.liquido)}\nCliente paga: ${brl(calc.cliente)}\nPrazo de produção: ${dias} dias${linhaAjuste}\n\nEle será avisado por e-mail e WhatsApp na hora.`
-      )
-    )
-      return
+    setErro(null)
+    setConfirmando(true)
+  }
+
+  async function enviar() {
+    if (enviando || !calc.valido || itemAberto || !prazoValido) return
+    const dias = diasDoPrazo
     setEnviando(true)
     setErro(null)
     try {
@@ -148,6 +168,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
       setErro(e instanceof Error ? e.message : 'Erro ao enviar.')
     } finally {
       setEnviando(false)
+      setConfirmando(false)
     }
   }
 
@@ -308,16 +329,49 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
 
             {erro && <p className="text-sm text-red-600">{erro}</p>}
 
-            <button
-              type="button"
-              onClick={() => void enviar()}
-              disabled={enviando || !calc.valido || itemAberto}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold py-3.5 rounded-xl"
-            >
-              {enviando ? 'Enviando…' : dados.jaDefinido || editor.temMudanca ? 'Atualizar e reenviar ao cliente →' : 'Enviar orçamento ao cliente →'}
-            </button>
-            {itemAberto ? (
-              <p className="text-[11px] text-amber-700 text-center">Salve ou cancele o item aberto antes de enviar.</p>
+            {confirmando ? (
+              <div className="rounded-xl border border-emerald-600 bg-white px-4 py-4 space-y-3">
+                <p className="text-sm font-semibold text-gray-900">Enviar o orçamento ao cliente?</p>
+                <div className="text-sm text-gray-700 space-y-1">
+                  <div className="flex justify-between"><span>Você recebe</span><strong>{brl(calc.liquido)}</strong></div>
+                  <div className="flex justify-between"><span>Cliente paga</span><strong>{brl(calc.cliente)}</strong></div>
+                  <div className="flex justify-between"><span>Prazo de produção</span><strong>{diasDoPrazo} dias</strong></div>
+                  {editor.temMudanca && (
+                    <div className="flex justify-between"><span>Itens ajustados</span><strong>{nAjustes}</strong></div>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-500">Ele será avisado por e-mail e WhatsApp na hora.</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmando(false)}
+                    disabled={enviando}
+                    className="flex-1 border border-gray-300 text-gray-700 font-semibold py-3 rounded-xl disabled:opacity-50"
+                  >
+                    Voltar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void enviar()}
+                    disabled={enviando}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold py-3 rounded-xl"
+                  >
+                    {enviando ? 'Enviando…' : 'Confirmar e enviar'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={pedirConfirmacao}
+                disabled={enviando || !calc.valido || itemAberto}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold py-3.5 rounded-xl"
+              >
+                {dados.jaDefinido || editor.temMudanca ? 'Atualizar e reenviar ao cliente →' : 'Enviar orçamento ao cliente →'}
+              </button>
+            )}
+            {motivoBloqueio ? (
+              <p className="text-[11px] text-amber-700 text-center">{motivoBloqueio}</p>
             ) : (
               <p className="text-[11px] text-gray-400 text-center">O cliente recebe e-mail + WhatsApp na hora com o valor e o link pra pagar.</p>
             )}
