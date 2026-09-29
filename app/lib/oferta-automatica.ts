@@ -96,8 +96,9 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
   // A ETAPA NÃO BASTA: EXIGIMOS O ACEITE DO CLIENTE — 10/09/2026.
   //
   // A view de etapas classifica como `buscando_fornecedor` quem tem
-  // `status = 'confirmado'` OU `ofertas_total > 0` (migration 20260908010000,
-  // linha 160). Esse OR é uma porta dos fundos: basta UMA oferta manual pra o
+  // `status = 'confirmado'` com quantidade OU `ofertas_total > 0` (migration
+  // 20260928000000: confirmado sem quantidade é `captado`, o caso do
+  // Guilherme). Esse OR é uma porta dos fundos: basta UMA oferta manual pra o
   // pedido passar a parecer liberado, e a fila automática assumir o volante de
   // um pedido que o cliente nunca autorizou.
   //

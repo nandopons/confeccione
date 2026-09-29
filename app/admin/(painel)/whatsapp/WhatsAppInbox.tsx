@@ -402,26 +402,157 @@ function CorpoMensagem({ m }: { m: Mensagem }) {
   return legenda ?? <p className="italic text-neutral-500">[{m.tipo}]</p>
 }
 
+/**
+ * O card abre o resumo do pedido num popup, sem sair da conversa — 29/09/2026.
+ * Antes era link pra /admin/pedidos-pagos em outra aba: pra conferir "o que
+ * ele pediu mesmo?" no meio do atendimento o Fernando saía do inbox.
+ */
 function CardPedido({ p, esmaecido }: { p: PedidoResumo; esmaecido?: boolean }) {
   const st = STATUS_PEDIDO_LABEL[p.etapa ?? ''] ?? { rotulo: p.etapa ?? '—', cor: 'bg-neutral-100 text-neutral-500' }
+  const [aberto, setAberto] = useState(false)
   return (
-    <a
-      href="/admin/pedidos-pagos"
-      target="_blank"
-      rel="noopener noreferrer"
-      className={
-        'block rounded-xl border border-neutral-200 px-3 py-2.5 hover:border-[#1D9E75] hover:shadow-sm transition ' +
-        (esmaecido ? 'opacity-60' : 'bg-white')
-      }
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[13px] font-medium text-neutral-900 truncate">
-          {p.codigo ? `Nº ${p.codigo}` : 'Pedido'}{p.pecas ? ` · ${p.pecas} pç` : ''}
-        </span>
-        <span className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded ${st.cor}`}>{st.rotulo}</span>
+    <>
+      <button
+        type="button"
+        onClick={() => setAberto(true)}
+        className={
+          'block w-full text-left rounded-xl border border-neutral-200 px-3 py-2.5 hover:border-[#1D9E75] hover:shadow-sm transition ' +
+          (esmaecido ? 'opacity-60' : 'bg-white')
+        }
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[13px] font-medium text-neutral-900 truncate">
+            {p.codigo ? `Nº ${p.codigo}` : 'Pedido'}{p.pecas ? ` · ${p.pecas} pç` : ''}
+          </span>
+          <span className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded ${st.cor}`}>{st.rotulo}</span>
+        </div>
+        <p className="text-[11.5px] text-neutral-500 mt-0.5">{idadeCurta(p.criado_em)}</p>
+      </button>
+      {aberto && <ModalResumoPedido p={p} rotulo={st} onClose={() => setAberto(false)} />}
+    </>
+  )
+}
+
+type LinhaDetalhe = {
+  modelo?: string | null
+  cor?: string | null
+  material?: string | null
+  total?: number | null
+  publico?: string | null
+  estampado?: boolean | null
+  descricao?: string | null
+  tamanhos?: Array<{ tamanho?: string | null; qtd?: number | null }> | null
+  estampas?: Array<{ posicao?: string | null; tamanho?: string | null }> | null
+  acabamentos?: string[] | null
+  confirmado_pelo_cliente?: string | null
+}
+type DetalhePedido = {
+  codigo: string | null
+  contato: {
+    nome: string | null; telefone: string | null; email: string | null
+    cep: string | null; numero: string | null; complemento: string | null; logradouro: string | null
+    bairro: string | null; cidade: string | null; uf: string | null; prazoDias: number | null
+  }
+  linhas: LinhaDetalhe[]
+  mockups: Array<{ index: number; temLiso: boolean; temArte: boolean }>
+}
+
+function ModalResumoPedido({ p, rotulo, onClose }: { p: PedidoResumo; rotulo: { rotulo: string; cor: string }; onClose: () => void }) {
+  const [det, setDet] = useState<DetalhePedido | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+  useEffect(() => {
+    let vivo = true
+    fetch(`/api/admin/pedidos-assistente/${p.id}`, { cache: 'no-store' })
+      .then(async (r) => {
+        const j = await r.json().catch(() => null)
+        if (!r.ok) throw new Error(j?.erro || 'Não consegui carregar o pedido.')
+        if (vivo) setDet(j as DetalhePedido)
+      })
+      .catch((e) => vivo && setErro(e instanceof Error ? e.message : 'Não consegui carregar o pedido.'))
+    return () => { vivo = false }
+  }, [p.id])
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', esc)
+    return () => window.removeEventListener('keydown', esc)
+  }, [onClose])
+
+  const c = det?.contato
+  const entrega = c
+    ? [c.logradouro, c.numero, c.complemento, c.bairro, [c.cidade, c.uf].filter(Boolean).join('/'), c.cep].filter((x) => x && String(x).trim()).join(', ')
+    : ''
+  const grade = (l: LinhaDetalhe) => (l.tamanhos ?? []).filter((t) => t.tamanho).map((t) => `${t.tamanho} ${t.qtd ?? '?'}`).join(' · ')
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-lg max-h-[85dvh] flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="p-4 border-b border-neutral-100 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-semibold truncate">{p.codigo ? `Pedido nº ${p.codigo}` : 'Pedido'}</h2>
+            <p className="text-[11.5px] text-neutral-500">{idadeCurta(p.criado_em)}{p.pecas ? ` · ${p.pecas} pç` : ''}</p>
+          </div>
+          <span className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded ${rotulo.cor}`}>{rotulo.rotulo}</span>
+          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-700" aria-label="Fechar">✕</button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {!det && !erro && <p className="text-[13px] text-neutral-400">Carregando…</p>}
+          {erro && <p className="text-[13px] text-red-600">{erro}</p>}
+          {det && (
+            <>
+              <div>
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400 mb-2">Peças</h3>
+                {det.linhas.length === 0 ? (
+                  <p className="text-[13px] text-neutral-400">Sem peça descrita.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {det.linhas.map((l, i) => {
+                      const mk = det.mockups.find((m) => m.index === i)
+                      const g = grade(l)
+                      return (
+                        <div key={i} className="rounded-xl border border-neutral-200 p-3">
+                          <div className="text-[13px] font-medium text-neutral-900">
+                            {l.total ?? '?'}× {l.modelo || 'peça a definir'}{l.publico && l.publico !== 'unissex' ? ` ${l.publico}` : ''}{l.cor ? ` · ${l.cor}` : ''}{l.material ? ` · ${l.material}` : ''}{l.estampado ? ' (estampada)' : ''}
+                          </div>
+                          {g && <p className="text-[11.5px] text-neutral-500 mt-0.5">Grade: {g}</p>}
+                          {(l.estampas?.length ?? 0) > 0 && (
+                            <p className="text-[11.5px] text-neutral-500 mt-0.5">Estampa: {l.estampas!.map((e) => [e.posicao, e.tamanho].filter(Boolean).join(' ')).join(' · ')}</p>
+                          )}
+                          {(l.acabamentos?.length ?? 0) > 0 && <p className="text-[11.5px] text-neutral-500 mt-0.5">Acabamentos: {l.acabamentos!.join(', ')}</p>}
+                          {l.descricao && <p className="text-[12px] text-neutral-600 mt-1 whitespace-pre-wrap">{l.descricao}</p>}
+                          {l.confirmado_pelo_cliente && <p className="text-[11.5px] text-[#0F6E56] mt-1">Confirmado pelo cliente: {l.confirmado_pelo_cliente}</p>}
+                          {(mk?.temLiso || mk?.temArte) && (
+                            <div className="flex gap-2 mt-2">
+                              {mk.temLiso && (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={`/api/admin/pedidos-assistente/${p.id}/img?linha=${i}&tipo=liso`} alt="liso" className="h-24 rounded border border-neutral-200" />
+                              )}
+                              {mk.temArte && (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={`/api/admin/pedidos-assistente/${p.id}/img?linha=${i}&tipo=arte`} alt="com arte" className="h-24 rounded border border-[#1D9E75]/40" />
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400 mb-2">Entrega e prazo</h3>
+                <LinhaDado rotulo="Prazo" valor={c?.prazoDias ? `${c.prazoDias} dias` : 'a combinar'} />
+                <LinhaDado rotulo="Entrega" valor={entrega || null} />
+                <LinhaDado rotulo="Nome" valor={c?.nome ?? null} />
+              </div>
+            </>
+          )}
+        </div>
+        <div className="p-3 border-t border-neutral-100 flex flex-wrap gap-2 justify-end">
+          <a href={`/visualizador/${p.id}`} target="_blank" rel="noopener noreferrer" className="text-[12.5px] px-3 py-1.5 rounded-lg border border-neutral-200 text-neutral-700 hover:bg-neutral-50">Visualizador do cliente ↗</a>
+          <a href={`/admin/pedidos-pagos#${p.id}`} target="_blank" rel="noopener noreferrer" className="text-[12.5px] px-3 py-1.5 rounded-lg bg-[#1D9E75] text-white hover:bg-[#178a65]">Abrir na página de pedidos ↗</a>
+        </div>
       </div>
-      <p className="text-[11.5px] text-neutral-500 mt-0.5">{idadeCurta(p.criado_em)}</p>
-    </a>
+    </div>
   )
 }
 
