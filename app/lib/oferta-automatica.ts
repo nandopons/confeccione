@@ -27,7 +27,7 @@ import { supabaseAdmin } from './supabase-server'
 // arquivo importa `ofertarPedido` de lá). Não deixei reexport: ninguém mais
 // consome esses nomes, e casca de compatibilidade sem consumidor é dívida que
 // alguém acha daqui a um mês sem saber se pode remover.
-import { estaEmHorarioComercial, FORA_DA_JANELA } from './horario'
+import { estaEmHorarioDeOferta, FORA_DA_JANELA_OFERTA } from './horario'
 import { ofertarPedido, ordenarFornecedoresPara, resumirLinhas, type FornecedorOpcao, type LinhaPedido } from './pedido-assistente-oferta'
 import { comEngajamento } from './engajamento-fornecedor'
 
@@ -43,7 +43,7 @@ export const MAX_OFERTAS_ABERTAS = 2
  * ninguém olhando, é o oposto do "uma confecção por vez". Com 2 por rodada, o
  * represamento escoa em ~2 h de horário comercial e dá pra acompanhar.
  */
-const MAX_POR_RODADA = 2
+const MAX_POR_RODADA = 15
 
 /**
  * A IDADE DO PEDIDO VIROU PRAZO DA BUSCA — 25/09/2026.
@@ -65,20 +65,23 @@ export type ResultadoFila = {
 }
 
 /**
- * Fecha as ofertas que passaram do prazo.
+ * OFERTA NÃO VENCE MAIS — 29/09/2026 (decisão do Fernando).
  *
- * Roda SEMPRE, inclusive fora do horário comercial: expirar não incomoda
- * ninguém, e deixar pra expirar de manhã atrasaria a próxima oferta em horas.
+ * Até aqui, `expira_em` era guilhotina: passou a hora, a oferta virava
+ * `cancelada` e a confecção que abrisse o link à tarde encontrava "pedido
+ * fechado". Em 60 dias, 28 ofertas morreram assim e os pedidos de nicho
+ * levavam uma semana pra passar por cinco confecções.
+ *
+ * O Fernando: "não cancela, só manda pra outro fornecedor, e vai acumulando
+ * ofertas em aberto; quem aceitar primeiro pega". Agora `expira_em` é só o
+ * relógio da fila: passou, a próxima confecção recebe — a anterior continua
+ * podendo aceitar. O que fecha as outras é o ACEITE (definirStatusOferta
+ * cancela as demais) ou o encerramento do pedido
+ * (avisarConfeccoesDoCancelamento). Esta função fica como marco no
+ * resultado do cron (sempre 0) pra quem lê o histórico.
  */
 async function expirarVencidas(): Promise<number> {
-  const { data } = await supabaseAdmin
-    .from('ofertas_pedido_assistente')
-    .update({ status: 'cancelada', respondido_em: new Date().toISOString() })
-    .eq('status', 'ofertada')
-    .not('expira_em', 'is', null)
-    .lt('expira_em', new Date().toISOString())
-    .select('id')
-  return (data ?? []).length
+  return 0
 }
 
 type PedidoFila = {
@@ -162,12 +165,14 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
       prazo_dias: extraPorId.get(p.id)?.prazo_dias ?? null,
     }))
 
-  // Quem já tem oferta viva não entra: um pedido, uma confecção por vez.
+  // Quem já tem aceite, ou oferta cuja janela de resposta ainda corre, não
+  // entra. Oferta com `expira_em` no passado NÃO ocupa o pedido: é a deixa pra
+  // mandar pra próxima confecção (29/09 — ver expirarVencidas).
   const { data: vivas, error: errVivas } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
     .select('pedido_id')
-    .in('status', ['ofertada', 'aceita'])
     .in('pedido_id', candidatos.map((p) => p.id))
+    .or(`status.eq.aceita,and(status.eq.ofertada,expira_em.gt.${new Date().toISOString()})`)
   // TRAVA CEGA NÃO LIBERA — 11/09/2026. Ver o comentário em candidatosDisponiveis.
   if (errVivas) throw new Error(`fila: ofertas vivas — ${errVivas.message}`)
   const ocupados = new Set(((vivas ?? []) as Array<{ pedido_id: string }>).map((o) => o.pedido_id))
@@ -247,8 +252,8 @@ export async function rodarFilaDeOfertas(): Promise<ResultadoFila> {
 
   // Oferta sai só na janela de disparo (seg–sex, 9h–11h — ver horario.ts).
   // A conta das horas de resposta continua em horario-comercial (7h–19h).
-  if (!estaEmHorarioComercial()) {
-    return { expiradas, ofertados: [], semCandidato: [], observacao: FORA_DA_JANELA }
+  if (!estaEmHorarioDeOferta()) {
+    return { expiradas, ofertados: [], semCandidato: [], observacao: FORA_DA_JANELA_OFERTA }
   }
 
   const pedidos = await pedidosNaFila()

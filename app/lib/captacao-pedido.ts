@@ -39,7 +39,7 @@ import { acharContatoPorNumero, janela24hAberta, registrarSaidaInbox, vincularCo
 import { emailSondagemProducao } from './email'
 import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
 import { URL_CADASTRO_FORNECEDOR } from './captacao-templates'
-import { estaEmHorarioComercial } from './horario'
+import { estaEmHorarioDeOferta } from './horario'
 import { avisarGestor, marcarEscalada, semPontoFinal } from './luigi'
 import { definirStatusOferta, ofertarPedido } from './pedido-assistente-oferta'
 import { MAX_OFERTAS_ABERTAS } from './oferta-automatica'
@@ -1945,17 +1945,25 @@ export async function rodarCaptacaoPedidos(origem: 'cron' | 'admin' | 'mcp' = 'c
     resultado.pulado = 'agente de captação desligado'
     return resultado
   }
-  if (origem === 'cron' && !estaEmHorarioComercial()) {
-    resultado.pulado = 'fora do horário comercial'
+  if (origem === 'cron' && !estaEmHorarioDeOferta()) {
+    resultado.pulado = 'fora do expediente de oferta (seg–sex, 8h–18h)'
     return resultado
   }
 
   // Ordem da vez: ver `ordenarParaAVez`. O filtro de idade continua valendo —
   // pedido além de `idade_max_dias` não entra nem na faixa 1, só pelo "Buscar
   // agora" do admin.
+  //
+  // A CAPTAÇÃO CORRE EM PARALELO COM A FILA — 29/09/2026. Com as ofertas
+  // acumulando em vez de vencer, o pedido quase nunca fica "sem fornecedor"
+  // (a etapa exige 24 h sem oferta nova). O gatilho passa a ser o tempo: 24 h
+  // de busca sem aceite, em qualquer das duas etapas, e a gente sai atrás de
+  // confecção nova pra base — "como a gente vinha fazendo".
   const limiteIdade = Date.now() - config.idade_max_dias * 86400_000
-  const todos = (await pedidosPorEtapa(['sem_fornecedor'], 100))
+  const umDia = Date.now() - 24 * 3600_000
+  const todos = (await pedidosPorEtapa(['sem_fornecedor', 'buscando_fornecedor'], 100))
     .filter((p) => new Date(p.confirmado_em ?? p.desde).getTime() >= limiteIdade)
+    .filter((p) => p.etapa === 'sem_fornecedor' || new Date(p.confirmado_em ?? p.desde).getTime() <= umDia)
 
   // PEDIDO SEM QUANTIDADE NÃO É ISCA — 12/09/2026.
   //

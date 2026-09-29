@@ -91,6 +91,27 @@ export function estaEmHorarioComercial(d: Date = new Date()): boolean {
 export const FORA_DA_JANELA = `fora da janela de disparo (seg–sex, ${JANELA_DISPARO_INICIO}h–${JANELA_DISPARO_FIM}h)`
 
 // ============================================================================
+// A EXCEÇÃO ARGUMENTADA: A BUSCA DE CONFECÇÃO — 29/09/2026.
+//
+// Oferta pra confecção e captação de confecção nova não são marketing pro
+// cliente: são trabalho chegando pra quem produz, em horário de fábrica. O
+// Fernando: "quero intensificar esse match, respeitando apenas um horário
+// comercial legal e dia laboral seg a sexta". Com 9h–11h, um pedido de nicho
+// levava uma semana pra passar por cinco confecções. Agora é o expediente
+// inteiro, e a fila avança a cada janela de resposta vencida.
+// ============================================================================
+export const JANELA_OFERTA_INICIO = 8
+export const JANELA_OFERTA_FIM = 18
+
+/** Dentro do expediente de oferta às confecções (seg–sex, 8h–18h de Recife)? */
+export function estaEmHorarioDeOferta(d: Date = new Date()): boolean {
+  const { diaSemana, hora } = partesEmRecife(d)
+  return diaSemana >= 1 && diaSemana <= 5 && hora >= JANELA_OFERTA_INICIO && hora < JANELA_OFERTA_FIM
+}
+
+export const FORA_DA_JANELA_OFERTA = `fora do expediente de oferta (seg–sex, ${JANELA_OFERTA_INICIO}h–${JANELA_OFERTA_FIM}h)`
+
+// ============================================================================
 // A EXCEÇÃO ARGUMENTADA: O FECHADOR — 28/09/2026.
 //
 // O fechador manda o resumo em PDF de um pedido que o cliente ACABOU de montar

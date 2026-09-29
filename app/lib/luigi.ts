@@ -1153,13 +1153,14 @@ async function ofertasAbertasDoFornecedor(waId: string): Promise<OfertaAberta[]>
   if (!fornecedorId) return []
   const { data, error } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
-    .select('id, pedido_id, criado_em, expira_em, pedidos_assistente(codigo, cidade, uf, prazo_dias, linhas)')
+    .select('id, pedido_id, criado_em, expira_em, pedidos_assistente!inner(codigo, cidade, uf, prazo_dias, linhas, busca_valida_ate)')
     .eq('fornecedor_id', fornecedorId)
     .eq('status', 'ofertada')
-    // Vencida não é "aberta": a LJ Fardamentos (29/09) disse "quero atender"
-    // e recebeu dois links, um deles do scrub cargo de 16 dias atrás, com a
-    // busca daquele pedido já encerrada.
-    .or(`expira_em.is.null,expira_em.gt.${new Date().toISOString()}`)
+    // OFERTA NÃO VENCE MAIS (29/09): ela pode aceitar enquanto o pedido
+    // estiver em busca. O que tira a oferta do contexto é a BUSCA do pedido
+    // ter vencido — a LJ Fardamentos (29/09) disse "quero atender" e recebeu
+    // o link do scrub cargo de 16 dias atrás, com a busca encerrada em 19/09.
+    .gt('pedidos_assistente.busca_valida_ate', new Date().toISOString())
     .order('criado_em', { ascending: false })
     .limit(5)
   // Consulta que falha não é "nenhuma oferta": seria o Luigi voltando a não
