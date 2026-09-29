@@ -24,6 +24,7 @@ import { pedidoTemListaAbertaIncompleta } from '@/app/lib/listas-externas'
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
+import { pecasDoPedido, pecaValida, legadoDasPecas } from './pecas'
 import { somarHorasComerciais, horasParaResponder, HORAS_OFERTA_MANUAL } from './horario-comercial'
 import { APROVACAO_QUE_DESCLASSIFICA } from './classificacao-contato'
 import { registrarVersaoOrcamento } from './orcamento-versoes'
@@ -815,9 +816,26 @@ export async function definirStatusOferta(
     }
 
     await notificarAceiteEContatos(ofertaId, oferta.pedido_id, oferta.fornecedor_id)
+    // O ACEITE ENSINA O PORTFÓLIO — 29/09/2026 (decisão do Fernando): "quando
+    // for algo parecido e tiver pedido a gente tenta oferecer e vai
+    // monitorando pra adicionar ao portfólio". Aceitou jaqueta → passa a ser
+    // confecção de jaqueta no match. Failure-soft: não trava o aceite.
+    await aprenderPecasDoAceite(oferta.pedido_id, oferta.fornecedor_id).catch((err) => console.error('[aceite] portfólio', err))
   }
 
   return { ok: true }
+}
+
+async function aprenderPecasDoAceite(pedidoId: string, fornecedorId: string): Promise<void> {
+  const { data: p } = await supabaseAdmin.from('pedidos_assistente').select('linhas, peca, pecas').eq('id', pedidoId).maybeSingle<{ linhas: { modelo?: string | null }[] | null; peca: string | null; pecas: string[] | null }>()
+  if (!p) return
+  const novas = pecasDoPedido(p).filter(pecaValida)
+  if (novas.length === 0) return
+  const { data: f } = await supabaseAdmin.from('leads_fornecedores').select('pecas').eq('id', fornecedorId).maybeSingle<{ pecas: string[] | null }>()
+  const atuais = f?.pecas ?? []
+  const uniao = [...new Set([...atuais, ...novas])]
+  if (uniao.length === atuais.length) return
+  await supabaseAdmin.from('leads_fornecedores').update({ pecas: uniao, tipos_produto: legadoDasPecas(uniao) }).eq('id', fornecedorId)
 }
 
 // ---------------------------------------------------------------------------

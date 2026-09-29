@@ -6,6 +6,7 @@ import { rodarCutucadaCaptacao } from '@/app/lib/cutucada-captacao'
 import { fecharPedidosProntos } from '@/app/lib/fechar-pedido-automatico'
 import { rodarCutucadaJanela } from '@/app/lib/cutucada-janela'
 import { rodarCobrancaOrcamento } from '@/app/lib/cobranca-orcamento'
+import { rodarRevisaoPerfil } from '@/app/lib/revisao-perfil'
 // criarEDispararOferta, avisarGestor, enviarTextoSimples e
 // emailAdminFornecedorExpirou saíram em 10/09/2026 junto com o reenvio da era
 // antiga (ver TAREFA 1). Quem oferta hoje é app/lib/oferta-automatica.ts.
@@ -111,6 +112,15 @@ export async function GET(req: Request) {
     cobrancaOrcamento = { erro: e instanceof Error ? e.message : String(e) }
   }
 
+  // TAREFA 15: revisão semestral do portfólio da confecção (29/09/2026).
+  // Horário comercial dentro (9h–11h, seg–sex). Ver revisao-perfil.ts.
+  let revisaoPerfil: Awaited<ReturnType<typeof rodarRevisaoPerfil>> | { erro: string }
+  try {
+    revisaoPerfil = await rodarRevisaoPerfil()
+  } catch (e) {
+    revisaoPerfil = { erro: e instanceof Error ? e.message : String(e) }
+  }
+
   // TAREFA 11 ANTES DA 10, DE PROPÓSITO — 15/09/2026.
   //
   // O aviso é barato (duas somas em `uso_ia`) e o reprocesso é caro (até 3
@@ -147,6 +157,7 @@ export async function GET(req: Request) {
       fechamento_automatico: fechamento,
       cutucada_janela: cutucadaJanela,
       cobranca_orcamento: cobrancaOrcamento,
+      revisao_perfil: revisaoPerfil,
       reprocesso_ia: reprocesso,
       consumo_ia: consumoIa,
       duracao_ms: Date.now() - inicio,
@@ -450,6 +461,7 @@ export async function GET(req: Request) {
     cutucada_pos_resumo: cutucada,
     cutucada_janela: cutucadaJanela,
     cobranca_orcamento: cobrancaOrcamento,
+    revisao_perfil: revisaoPerfil,
     cutucada_captacao: cutucadaCaptacao,
     fechamento_automatico: fechamento,
     reprocesso_ia: reprocesso,

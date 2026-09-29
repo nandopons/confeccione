@@ -893,6 +893,8 @@ type CadastroFornecedor = {
   /** Peças escritas em prosa no `descricao_livre`, ainda não estruturadas. */
   descricaoTemPecas: boolean
   aprovado: boolean
+  /** Lista de peças enviada na revisão semestral, quando foi há menos de 3 dias. Ver revisao-perfil.ts. */
+  revisaoPerguntadaHaPouco: string[] | null
 }
 
 /** O que o botão do passo 4 do site põe na mensagem: "(pedido 6a8ee300)". */
@@ -1042,7 +1044,7 @@ async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | 
   const [{ data: f }, perfil] = await Promise.all([
     supabaseAdmin
       .from('leads_fornecedores')
-      .select('nome, cidade, estado, raio_atendimento, pedido_minimo, pecas, pecas_outro, descricao_livre, tipos_produto, email, aprovacao_status')
+      .select('nome, cidade, estado, raio_atendimento, pedido_minimo, pecas, pecas_outro, descricao_livre, tipos_produto, email, aprovacao_status, perfil_revisado_em')
       .eq('id', fornecedorId)
       .maybeSingle<{
         nome: string | null
@@ -1056,6 +1058,7 @@ async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | 
         tipos_produto: string[] | null
         email: string | null
         aprovacao_status: string | null
+        perfil_revisado_em: string | null
       }>(),
     lerPerfil(fornecedorId).catch(() => null),
   ])
@@ -1115,6 +1118,12 @@ async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | 
     // própria: leia, extraia e GRAVE, em vez de interrogar.
     descricaoTemPecas: naoVazio(f.descricao_livre) && pecasCatalogo.length === 0 && servicosComNome.length === 0,
     aprovado: f.aprovacao_status === 'aprovado',
+    // A REVISÃO SEMESTRAL PERGUNTOU E ELA VOLTOU — 29/09/2026. A marca fica
+    // pra sempre; só vale como "perguntamos há pouco" por 3 dias.
+    revisaoPerguntadaHaPouco:
+      Boolean(f.perfil_revisado_em) && Date.now() - new Date(f.perfil_revisado_em as string).getTime() < 3 * 24 * 3600_000 && pecasCatalogo.length > 0
+        ? pecasCatalogo
+        : null,
   }
 }
 
@@ -2309,6 +2318,11 @@ const FERRAMENTA_PERFIL_PRODUCAO: Anthropic.Messages.Tool = {
           'Mande a lista COMPLETA do que ela faz a cada chamada, não só o que é novo. ' +
           'Na dúvida entre dois ids, mande os dois; peça que não tem id próximo fica só em `servicos`.',
       },
+      pecas_remover: {
+        type: 'array',
+        items: { type: 'string', enum: PECAS.map((p) => p.id) },
+        description: 'Peças que ela disse que NÃO faz mais / quer tirar da lista (ids do catálogo). Só quando ela pedir pra tirar — nunca por dedução.',
+      },
       servicos: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'As palavras DELA, como ela falou — "regata com vivo", "calça de brim", facção, corte, estamparia. Isto é memória da conversa; quem faz o match é `pecas`.' },
       tecidos: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'malha, plana, suplex, moletom, jeans…' },
       maquinas: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'reta, overloque, galoneira, travete…' },
@@ -2762,18 +2776,25 @@ async function executarFerramenta(
         ? [...new Set((entrada.pecas as unknown[]).map((x) => String(x).trim()).filter(pecaValida))]
         : []
 
-      if (pecasNovas.length > 0) {
+      const pecasRemover = Array.isArray(entrada.pecas_remover)
+        ? new Set((entrada.pecas_remover as unknown[]).map((x) => String(x).trim()).filter(pecaValida))
+        : new Set<string>()
+
+      if (pecasNovas.length > 0 || pecasRemover.size > 0) {
         // Une com o que já existe: se ela contar mais peças numa segunda
         // conversa, somar é certo — sobrescrever apagaria o que ela já disse.
+        // Tirar só o que ela pediu pra tirar (revisão semestral, 29/09).
         const { data: atual } = await supabaseAdmin
           .from('leads_fornecedores')
           .select('pecas')
           .eq('id', forn)
           .maybeSingle<{ pecas: string[] | null }>()
-        const uniao = [...new Set([...(atual?.pecas ?? []), ...pecasNovas])]
+        const uniao = [...new Set([...(atual?.pecas ?? []), ...pecasNovas])].filter((p) => !pecasRemover.has(p))
         patchLead.pecas = uniao
         patchLead.tipos_produto = legadoDasPecas(uniao)
       }
+      // Toda conversa sobre o que ela faz conta como revisão do portfólio.
+      patchLead.perfil_revisado_em = new Date().toISOString()
 
       if (Object.keys(patchLead).length > 0) {
         await supabaseAdmin.from('leads_fornecedores').update(patchLead).eq('id', forn)
@@ -3891,6 +3912,13 @@ function promptFornecedor(
   // fazem moda íntima, certo?" custa o mesmo tempo dela que a pergunta aberta e
   // ainda soa a formulário — use o que já sabemos pra PULAR a pergunta, não pra
   // fazer uma versão educada dela.
+  // A REVISÃO SEMESTRAL PERGUNTOU — 29/09/2026. Ver revisao-perfil.ts.
+  const revisao = cadastro?.revisaoPerguntadaHaPouco
+    ? `
+A GENTE MANDOU HÁ POUCO A LISTA DE PEÇAS QUE TEMOS DELA (${cadastro.revisaoPerguntadaHaPouco.join(', ')}) e perguntou se entrou peça nova ou se tem alguma pra tirar. Se a mensagem dela agora responde a isso: peça nova → salvar_perfil_producao com a lista COMPLETA em pecas (as de antes + as novas); "tira X" → pecas_remover com X; "tá certo", "é isso mesmo", "continua igual" → responda "anotado, obrigado" e PARE. Nada de entrevista, nada de mínimo/prazo/restrição — é só a lista. Se ela só cumprimentou, repita a pergunta em uma linha.
+`
+    : ''
+
   const jaSabemos =
     cadastro && cadastro.sabemos.length > 0
       ? `
@@ -4023,7 +4051,7 @@ POUCAS PALAVRAS. Uma mensagem, uma ou duas linhas, uma pergunta. Não abra com "
 
 Ruim (três balões, 10/09/2026): "Luigi aqui, do atendimento da Confeccione." / "Na verdade não existe um pedido específico, o template que a gente usa pra abrir conversa menciona pedido mas é o único formato que a Meta aprova. Me desculpa pela confusão." / "O motivo real: seu cadastro ainda não tem peças com nome, só categorias, e isso limita o match..."
 Bom: ${ofertas.length > 0 ? '"Aqui é o Luigi, da Confeccione. Conseguiu ver o pedido que mandei?"' : `"Aqui é o Luigi, da Confeccione. Não é um pedido específico — ${pedeUmaCoisa}"`}
-${jaSabemos}
+${revisao}${jaSabemos}
 
 ${jaSeApresentou ? 'Você já se apresentou nesta conversa: não repita o nome.' : 'Se for a primeira fala sua aqui, diga em uma linha quem é.'}
 
@@ -4044,6 +4072,8 @@ Elogio genérico não vale e é pior que nenhum: "que legal", "muito bom", "ador
 AO ENCERRAR, DIGA ONDE AS FOTOS VÃO PARAR. Uma linha, no fim: as fotos entram no perfil da confecção e é o que o cliente vê na hora de escolher quem vai produzir; se ela quiser subir mais, é pelo painel dela. Isso não é agrado — é o motivo pelo qual vale a pena ela mandar foto, e a maioria não sabe que existe. Diga uma vez, sem transformar em propaganda do painel.
 
 Grave cada resposta na hora com salvar_perfil_producao. A conversa pode parar depois da primeira, e o que ela já disse vale.
+
+PEÇAS, E SÓ PEÇAS. A única coisa que a gente quer arrancar da conversa é O QUE ELA PRODUZ, com nome de peça. NÃO pergunte "que tipos de pedido vocês preferem receber?", "tem alguma restrição?", "quais modelos vocês costumam recusar?", "tamanho mínimo de lote?" — a LJ Fardamentos (29/09) recusou uma oferta e ouviu essas três perguntas em seguida, uma mais vaga que a outra. Recusa não abre entrevista: se ela disse o que não faz, grave (nao_faz) e pronto. Se ela contar peça nova de passagem ("conjuntos em brim", "calça pijama"), grave em pecas e pergunte UMA vez "tem mais alguma peça que vocês fazem?"; com a resposta, encerre. O que ela recusa e o que ela pega a gente aprende ofertando e vendo o aceite — não perguntando.
 
 DEPOIS DISSO ACABOU. Agradeça e encerre — UMA VEZ. Se ela ainda mandar mensagem depois do seu fecho ("obrigada", "tá bom", figurinha), não repita a despedida e não invente assunto: responda com uma ou duas palavras, ou não responda. Despedir-se três vezes é pior que não se despedir. Tecido, mínimo, capacidade, encaixe, se fornece material: registre se ela falar, mas não pergunte. E se ela disser o que NÃO pega, guarde — é o que mais evita pedido errado.
 
