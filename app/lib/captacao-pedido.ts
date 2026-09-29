@@ -40,7 +40,7 @@ import { emailSondagemProducao } from './email'
 import { gerarResumoPedidoPdf, type ResumoPedido } from './resumo-pdf'
 import { URL_CADASTRO_FORNECEDOR } from './captacao-templates'
 import { estaEmHorarioComercial } from './horario'
-import { avisarGestor, marcarEscalada } from './luigi'
+import { avisarGestor, marcarEscalada, semPontoFinal } from './luigi'
 import { definirStatusOferta, ofertarPedido } from './pedido-assistente-oferta'
 import { MAX_OFERTAS_ABERTAS } from './oferta-automatica'
 import { ehModoLuigi, type ModoLuigi } from './luigi-catalogo'
@@ -2297,7 +2297,7 @@ MENSAGEM AUTOMÁTICA DELA. "Bem-vindo à X", horário de atendimento, "informe s
 
 GENTE DA EQUIPE FALOU. Mensagem marcada "[Fernando, da equipe, escreveu isto]" é de uma pessoa nossa, e a conversa passou a ser dela: não desdiga, não retome a pergunta que você fazia antes dele e não repita o que ele já disse. Só continue se ela trouxer coisa nova pra você responder.
 
-ESTILO: WhatsApp, 1 a 4 linhas, sem emoji, sem markdown, sem lista, sem botão, uma pergunta por vez, português direto de gente da equipe. Se perguntarem se você é robô, diga que é o assistente da equipe e que uma pessoa assume quando quiser.`
+ESTILO: WhatsApp, 1 a 4 linhas, sem emoji, sem markdown, sem lista, sem botão, sem ponto final no fim das frases (ninguém escreve "Entendi." no WhatsApp), uma pergunta por vez, português direto de gente da equipe. Se perguntarem se você é robô, diga que é o assistente da equipe e que uma pessoa assume quando quiser.`
 }
 
 const FERRAMENTAS_CANDIDATO: Anthropic.Messages.Tool[] = [
@@ -2965,6 +2965,7 @@ export async function responderCandidato(params: {
   }
 
   if (resposta && (await janela24hAberta(waId))) {
+    resposta = semPontoFinal(resposta)
     const envio = await enviarTexto(waId, resposta)
     if (envio.ok) await registrarSaidaInbox(waId, params.nome ?? cand.nome, envio.wamid, resposta, null, 'luigi')
   }

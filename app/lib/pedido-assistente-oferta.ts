@@ -952,6 +952,79 @@ export async function desistirDoPedidoAceito(
 }
 
 /**
+ * O CLIENTE PREFERIU REABRIR A OFERTA — 29/09/2026 (decisão do Fernando).
+ *
+ * A confecção aceitou, 20 h se passaram sem orçamento, a gente perguntou ao
+ * cliente (cobranca-orcamento.ts) e ele escolheu procurar outra. O Luigi só
+ * chama isto depois do "quer que eu libere a busca?" + sim.
+ *
+ * Igual a desistirDoPedidoAceito no banco (aceita → recusada, busca com 7
+ * dias novos), com duas diferenças: quem é avisado é a CONFECÇÃO (uma linha
+ * neutra: o cliente preferiu reabrir, o pedido saiu da lista dela), e o
+ * pedido conta uma reabertura — na segunda o Luigi pede pra olhar o pedido
+ * antes de reabrir de novo (a trava sutil contra "cotação infinita").
+ */
+export async function reabrirBuscaPeloCliente(pedidoId: string): Promise<{ ok: boolean; erro?: string; codigo?: string | null; confeccao?: string | null; confeccaoAvisada?: boolean; vezes?: number }> {
+  const { data: pedido } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id, codigo, pagamento_status, reaberto_vezes')
+    .eq('id', pedidoId)
+    .maybeSingle<{ id: string; codigo: string | null; pagamento_status: string | null; reaberto_vezes: number | null }>()
+  if (!pedido) return { ok: false, erro: 'Pedido não encontrado.' }
+  if (pedido.pagamento_status === 'pago') return { ok: false, erro: 'Pedido já pago — trocar de confecção agora é assunto do Fernando.' }
+  const { data: aceita } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id, leads_fornecedores(nome, whatsapp)')
+    .eq('pedido_id', pedidoId)
+    .eq('status', 'aceita')
+    .limit(1)
+    .maybeSingle()
+  type F = { nome: string | null; whatsapp: string | null }
+  const a = aceita as unknown as { id: string; leads_fornecedores: F | F[] | null } | null
+  if (!a) return { ok: false, erro: 'Nenhuma confecção está com este pedido — não há o que reabrir.' }
+  const f = Array.isArray(a.leads_fornecedores) ? a.leads_fornecedores[0] : a.leads_fornecedores
+
+  const agora = new Date().toISOString()
+  const { error: e1 } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .update({ status: 'recusada', respondido_em: agora, observacao: 'O cliente preferiu reabrir a oferta (20 h sem orçamento na plataforma).' })
+    .eq('id', a.id)
+    .eq('status', 'aceita')
+  if (e1) return { ok: false, erro: e1.message }
+  const vezes = (pedido.reaberto_vezes ?? 0) + 1
+  const { error: e2 } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .update({
+      orcamento_status: null,
+      orcamento_definido_em: null,
+      frete_centavos: null,
+      valor_centavos: null,
+      busca_valida_ate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      busca_perguntada_em: null,
+      busca_perguntada_vezes: 0,
+      orcamento_cobrado_em: null,
+      reaberto_vezes: vezes,
+      atualizado_em: agora,
+    })
+    .eq('id', pedidoId)
+  if (e2) return { ok: false, erro: e2.message }
+
+  let confeccaoAvisada = false
+  if (f?.whatsapp) {
+    const primeiro = (f.nome ?? '').trim().split(/\s+/)[0]
+    const ref = pedido.codigo ? `pedido ${pedido.codigo}` : 'pedido'
+    confeccaoAvisada = await avisoOficial({
+      telefone: f.whatsapp,
+      nome: f.nome ?? null,
+      texto: `${primeiro ? `Oi, ${primeiro}! ` : 'Oi! '}O cliente do ${ref} preferiu reabrir a oferta, e o pedido saiu da sua lista. Quando o próximo combinar com o que você faz, eu te mando.`,
+      resumo: `o cliente do ${ref} preferiu reabrir a oferta e o pedido saiu da sua lista`,
+      caminhoBotao: `fornecedor/oferta/${a.id}`,
+    }).catch(() => false)
+  }
+  return { ok: true, codigo: pedido.codigo, confeccao: f?.nome ?? null, confeccaoAvisada, vezes }
+}
+
+/**
  * O cliente desistiu: avisa cada confecção que estava com o pedido (oferta em
  * aberto ou aceita) e cancela as ofertas.
  *

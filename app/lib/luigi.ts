@@ -44,7 +44,7 @@ import { enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
 import { enviarImagemDoPedido, janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 // O tipo local LinhaPedido deste arquivo é um recorte antigo, sem material nem
 // descricao. Pra editar a peça de verdade usamos o tipo canônico do produto.
-import { definirStatusOferta, desistirDoPedidoAceito, type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
+import { definirStatusOferta, desistirDoPedidoAceito, reabrirBuscaPeloCliente, type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
 import { editarLinhasPedidoCliente, gradeDaFerramenta, linhasComAjuste } from './pedido-linhas-edicao'
 import { anexarFotoDaConversaAoModelo, conferirPedido, salvarDadosDoCliente, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores, pausarLembretesDoPedido, type Divergencia } from './pedido-fechamento'
 import {
@@ -468,6 +468,20 @@ function paraWhatsApp(texto: string): string {
  * um parágrafo perde a prévia e some no texto. Duas mensagens curtas com pausa
  * entre elas leem como alguém digitando; um bloco só lê como aviso de sistema.
  */
+/**
+ * SEM PONTO FINAL — 29/09/2026 (decisão do Fernando: "nenhuma pessoa escreve
+ * dessa forma"). No WhatsApp ninguém fecha a frase com ponto; o ponto no fim
+ * da bolha é a marca mais visível de texto de máquina. O prompt pede, e o
+ * código garante: cada linha perde o "." final. Reticências ficam, ponto no
+ * meio da linha fica, link fica intacto.
+ */
+export function semPontoFinal(texto: string): string {
+  return texto
+    .split('\n')
+    .map((l) => (/https?:\/\//.test(l) || /\.\.\.$/.test(l.trimEnd()) ? l : l.replace(/\.\s*$/, '')))
+    .join('\n')
+}
+
 function mensagensSeparadas(texto: string): string[] {
   const partes: string[] = []
   for (const paragrafo of texto.split(/\n{2,}/)) {
@@ -487,7 +501,7 @@ function mensagensSeparadas(texto: string): string[] {
     }
     if (buffer.join('').trim()) partes.push(buffer.join('\n').trim())
   }
-  return partes.filter(Boolean).slice(0, 4)
+  return partes.filter(Boolean).map(semPontoFinal).slice(0, 4)
 }
 
 /**
@@ -996,7 +1010,7 @@ async function fornecedoresAceitos(pedidoIds: string[]): Promise<Map<string, str
   return mapa
 }
 
-type DaTabela = { prazo_dias: number | null; busca_perguntada_em: string | null; busca_perguntada_vezes: number }
+type DaTabela = { prazo_dias: number | null; busca_perguntada_em: string | null; busca_perguntada_vezes: number; orcamento_cobrado_em: string | null; reaberto_vezes: number }
 
 /**
  * prazo_dias e os campos da régua da busca não estão na view; vêm da tabela,
@@ -1007,10 +1021,10 @@ async function prazosDesejados(pedidoIds: string[]): Promise<Map<string, DaTabel
   if (pedidoIds.length === 0) return mapa
   const { data } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, prazo_dias, busca_perguntada_em, busca_perguntada_vezes')
+    .select('id, prazo_dias, busca_perguntada_em, busca_perguntada_vezes, orcamento_cobrado_em, reaberto_vezes')
     .in('id', pedidoIds)
   for (const r of (data ?? []) as Array<{ id: string } & DaTabela>) {
-    mapa.set(r.id, { prazo_dias: r.prazo_dias, busca_perguntada_em: r.busca_perguntada_em, busca_perguntada_vezes: r.busca_perguntada_vezes ?? 0 })
+    mapa.set(r.id, { prazo_dias: r.prazo_dias, busca_perguntada_em: r.busca_perguntada_em, busca_perguntada_vezes: r.busca_perguntada_vezes ?? 0, orcamento_cobrado_em: r.orcamento_cobrado_em, reaberto_vezes: r.reaberto_vezes ?? 0 })
   }
   return mapa
 }
@@ -1113,6 +1127,10 @@ async function ofertasAbertasDoFornecedor(waId: string): Promise<OfertaAberta[]>
     .select('id, pedido_id, criado_em, expira_em, pedidos_assistente(codigo, cidade, uf, prazo_dias, linhas)')
     .eq('fornecedor_id', fornecedorId)
     .eq('status', 'ofertada')
+    // Vencida não é "aberta": a LJ Fardamentos (29/09) disse "quero atender"
+    // e recebeu dois links, um deles do scrub cargo de 16 dias atrás, com a
+    // busca daquele pedido já encerrada.
+    .or(`expira_em.is.null,expira_em.gt.${new Date().toISOString()}`)
     .order('criado_em', { ascending: false })
     .limit(5)
   // Consulta que falha não é "nenhuma oferta": seria o Luigi voltando a não
@@ -1719,6 +1737,12 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
       daTabela?.busca_perguntada_em && Date.now() - new Date(daTabela.busca_perguntada_em).getTime() < 3 * 24 * 60 * 60 * 1000
         ? daTabela.busca_perguntada_em
         : null
+    // ACEITOU E NÃO ORÇOU: PERGUNTAMOS AO CLIENTE — 29/09/2026. Ver cobranca-orcamento.ts.
+    const cobramosOrcamento =
+      daTabela?.orcamento_cobrado_em && Date.now() - new Date(daTabela.orcamento_cobrado_em).getTime() < 3 * 24 * 60 * 60 * 1000
+        ? daTabela.orcamento_cobrado_em
+        : null
+    const reaberturas = daTabela?.reaberto_vezes ?? 0
     return {
       codigo: p.codigo,
       id: p.id,
@@ -1769,6 +1793,23 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
             'Se a resposta muda ou detalha uma peça (tecido, corte, cor, arte, acabamento), chame também ajustar_peca_pedido com confirmado_pelo_cliente pra isso constar na ficha que toda confecção lê. ' +
             'Se ele só cumprimentou ou falou de outra coisa, responda o que ele disse e repita a pergunta da confecção em uma linha, sem link. ' +
             'Não invente resposta por ele e não diga que a confecção já aceitou — ela só perguntou.'
+          : cobramosOrcamento && (p.etapa === 'em_negociacao' || p.etapa === 'orcamento_atrasado')
+          ? // A CONFECÇÃO ACEITOU, 20 H SEM ORÇAMENTO, E A GENTE PERGUNTOU AO
+            // CLIENTE — 29/09/2026 (decisão do Fernando). O roteiro é sutil de
+            // propósito: reabrir tem que custar uma confirmação (senão vira
+            // "me arruma outro pra cotar" toda hora), mas sem parecer que o
+            // cliente vai ficar mal com a confecção.
+            `A CONFECÇÃO QUE ASSUMIU ESTE PEDIDO (${fornecedores.get(p.id) ?? 'ver fornecedor'}) NÃO DEFINIU O ORÇAMENTO NA PLATAFORMA, e a gente perguntou ${quandoRecife(cobramosOrcamento) ?? 'há pouco'} se ela já entrou em contato e se ele segue com ela ou prefere outra. ` +
+            'Se a mensagem dele agora responde a isso: ' +
+            '(a) estão conversando / vai seguir com ela → UMA linha: ótimo, assim que o orçamento entrar na plataforma eu te aviso pra aprovar. PARE. ' +
+            '(b) ela não falou com ele, sumiu, ou ele prefere outra → NÃO reabra ainda. Responda neste tom, sem acrescentar aviso nem justificativa: ' +
+            '"Claro, posso procurar outra confecção agora mesmo. A confecção atual vai ser avisada de que você preferiu reabrir a oferta do seu pedido. Quer que eu libere a busca?" ' +
+            (reaberturas >= 1
+              ? `Este pedido JÁ FOI REABERTO ${reaberturas === 1 ? 'uma vez' : `${reaberturas} vezes`}: antes da pergunta acima, diga em UMA frase, sem tom de bronca, que como é a ${reaberturas + 1}ª reabertura vale conferir se algo no pedido está afastando as confecções (prazo, quantidade, tecido) — se ele quiser ajustar, ajustar_peca_pedido antes; se disser que está tudo certo, segue pra pergunta. `
+              : '') +
+            '(c) ele confirma a liberação ("sim", "pode", "libera", "quero") → chame reabrir_busca com o pedido. Depois, UMA linha: reaberto, te aviso assim que uma confecção aceitar. Não diga o que a confecção vai ler nem por quê. ' +
+            '(d) só cumprimento → repita a pergunta em uma linha: a confecção já falou com você? ' +
+            'Nunca fale mal da confecção, nunca diga "ela não orçou" como acusação — diga que o orçamento ainda não entrou na plataforma.'
           : p.etapa === 'pedido_completo'
           ? 'PRONTO E NÃO LIBERADO. Se ele já viu o resumo e disser que pode ("pode", "sim", "manda"), ' +
             'chame liberar_para_fornecedores AGORA, neste mesmo turno. Não pergunte de novo: ' +
@@ -2346,6 +2387,18 @@ const FERRAMENTA_DESISTIR_PEDIDO: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_REABRIR_BUSCA: Anthropic.Messages.Tool = {
+  name: 'reabrir_busca',
+  description:
+    'Tira o pedido da confecção que aceitou e não definiu orçamento, e devolve o pedido pra busca (fila automática). A confecção é avisada pelo sistema, em uma linha neutra. ' +
+    'SÓ depois de você ter perguntado "Quer que eu libere a busca?" e ele ter confirmado neste turno — nunca por conta própria, nunca porque ele reclamou uma vez. Não vale em pedido pago.',
+  input_schema: {
+    type: 'object',
+    properties: { pedido: { type: 'string', description: 'Código ou id do pedido (do contexto).' } },
+    required: ['pedido'],
+  },
+}
+
 const FERRAMENTA_PERGUNTAR_CLIENTE: Anthropic.Messages.Tool = {
   name: 'perguntar_ao_cliente',
   description:
@@ -2512,6 +2565,7 @@ function ferramentasDoModo(
         FERRAMENTA_RESUMO_PDF,
         FERRAMENTA_LIBERAR,
         FERRAMENTA_RESPONDER_PERGUNTA,
+        FERRAMENTA_REABRIR_BUSCA,
       ].filter((f) => !fora?.has(f.name) && !(semPedidoPraLiberar && MESA_SEM_PEDIDO_PRA_LIBERAR.has(f.name)))
     : [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_MOTIVO_PARADA]
 }
@@ -2762,6 +2816,21 @@ async function executarFerramenta(
         proximo_passo:
           'Diga em UMA linha que está certo, que tirou o pedido da lista dela e que a gente já está procurando outra confecção pro cliente. ' +
           'Sem insistir, sem "tem certeza?", sem desculpa. Se ela contou o que não faz (corte, estampa), grave com salvar_perfil_producao (nao_faz) — e se ficou claro que ela SÓ COSTURA, faccao: true.',
+      }
+    }
+    case 'reabrir_busca': {
+      const alvo = await acharNoContexto(ctx, entrada.pedido ? String(entrada.pedido) : undefined)
+      if (!alvo) return { ok: false, aviso: 'diga qual pedido (código ou id do contexto)' }
+      const r = await reabrirBuscaPeloCliente(alvo.id)
+      if (!r.ok) return { ok: false, aviso: `não consegui reabrir: ${r.erro ?? 'erro'}` }
+      const quem = ctx.contato.nome ?? ctx.contato.telefone
+      await avisarGestor(
+        `${quem} preferiu reabrir a busca do pedido ${r.codigo ?? alvo.id} (${r.vezes}ª vez): a ${r.confeccao ?? 'confecção'} aceitou e não orçou em 20 h. O pedido voltou pra fila${r.confeccaoAvisada ? ' e a confecção foi avisada' : ' — aviso à confecção falhou, vale mandar à mão'}.`
+      )
+      return {
+        ok: true,
+        pedido: r.codigo,
+        proximo_passo: 'Diga em UMA linha que reabriu a busca e que avisa assim que uma confecção aceitar. Nada sobre a confecção anterior.',
       }
     }
     case 'perguntar_ao_cliente': {
@@ -3724,9 +3793,10 @@ ${linhas.join('\n')}
 
 O que fazer com o que ela disser sobre a oferta:
 • "NÃO VOU CONSEGUIR", "não pego", "não tenho o molde", "tô sem agenda", "não faço esse tipo" → chame recusar_oferta com o motivo NAS PALAVRAS DELA e responda em UMA linha: está certo, esse fica de fora, o próximo que combinar você manda. Sem insistir, sem "tem certeza?", sem desculpa. Se ela disse o que não faz, grave também em salvar_perfil_producao (nao_faz).
-• "EU PEGO", "pode mandar", "aceito" → o aceite é no link da oferta (ela toca em "Ver pedido" e aceita lá, é um toque): diga isso em uma linha e mande o link. Aceitar lá é o que libera o contato do cliente e a ficha técnica pra ela. Não aceite por ela e não diga que "já está com ela".
+• "EU PEGO", "pode mandar", "aceito", "quero atender esse pedido", "Ver pedido" (é o texto do botão da oferta, chega como mensagem) → o aceite é no link da oferta (ela toca e aceita lá, é um toque): UMA linha + o link, e só. Se ela tem uma oferta aberta, é essa — não liste, não pergunte qual, não se apresente antes, não pergunte "posso ajudar com mais alguma coisa?". Exemplo do que NÃO fazer (LJ Fardamentos, 29/09): "quero atender esse pedido" recebeu apresentação, explicação do que são os links, "posso ajudar com mais alguma coisa?" e depois DOIS links, em seis balões. O certo era: "É só aceitar por aqui, é um toque:" + link. Aceitar lá é o que libera o contato do cliente e a ficha técnica pra ela. Não aceite por ela e não diga que "já está com ela".
+• "OK", "beleza", "certo", joinha depois de você mandar o link → ela recebeu; não responda nada (resposta vazia). "Qualquer coisa é só chamar aqui" duas vezes seguidas é ruído.
 • "VOU VER", "chegando lá eu olho", "depois te falo" → não é sim nem não. Responda curto e espere; não cobre, não repita a oferta.
-• Dúvida sobre o pedido (tem arte? é sublimação? qual tecido? vem cortado?) → responda com o que está no resumo acima e no histórico; o que não estiver aí, chame perguntar_ao_cliente com a dúvida NAS PALAVRAS DELA — a pergunta vai pro cliente no WhatsApp e a resposta volta por aqui. Diga que perguntou; não chame o Fernando pra isso. Se a pergunta já está no thread acima sem resposta, diga que ainda está esperando o cliente; se já tem resposta, ela está ali — responda com ela.
+• Dúvida sobre o pedido (tem arte? é sublimação? qual tecido? vem cortado? o cliente manda o arquivo da estampa?) → responda com o que está no resumo acima e no histórico; o que não estiver aí, ou estiver "a definir", chame perguntar_ao_cliente com a dúvida NAS PALAVRAS DELA — a pergunta vai pro cliente no WhatsApp e a resposta volta por aqui. Diga o que você acha E que vai confirmar, no mesmo fôlego: "Acredito que sim, a estampa ainda está a definir — mas vou confirmar com o cliente pra você". Nunca só "está a definir" e ponto: a dúvida dela é o que separa o "vou ver" do "eu pego". Não chame o Fernando pra isso. Se a pergunta já está no thread acima sem resposta, diga que ainda está esperando o cliente; se já tem resposta, ela está ali — responda com ela.
 
 Em 24/09 uma confecção disse por áudio "não vou conseguir assumir esse pedido, não tenho o molde da alça fina" e ouviu de volta "quando tiver as fotos prontas é só subir no painel". Ela tinha respondido ao pedido; a resposta era sobre outra coisa. Responda ao que ela disse.
 `
@@ -4138,7 +4208,7 @@ SOE GENTE, SEM MENTIR QUE É GENTE: escreva como uma pessoa da equipe escreveria
 
 "BOA SORTE" É PROIBIDO, em qualquer forma. "Boa sorte", "sucesso aí", "espero que dê tudo certo": soa a dispensa educada, como quem já virou as costas, e o cliente entende que você não quis nada com ele. Se for pra encerrar, encerre pela porta aberta: "Qualquer coisa é só chamar aqui." Nunca deseje sorte a ninguém.
 
-EDUCADO E DIRETO, SEM ENTUSIASMO: o tom é o de um atendente profissional — cordial, objetivo, sem euforia. NÃO use "Boa!", "Que legal!", "Show", "Perfeito!", "Poxa", "Adorei", "Que massa" nem elogio à escolha do cliente. Nada de exclamação (o ponto final basta) e nada de emoji. Quando precisar acusar que entendeu, use algo neutro e curto: "Entendi.", "Certo.", "Anotado.". Não comemore avanço, não puxe assunto pessoal e não faça elogio — vá ao ponto. Educado é tratar com respeito e responder rápido e claro; não é ser animado.
+EDUCADO E DIRETO, SEM ENTUSIASMO: o tom é o de um atendente profissional — cordial, objetivo, sem euforia. NÃO use "Boa!", "Que legal!", "Show", "Perfeito!", "Poxa", "Adorei", "Que massa" nem elogio à escolha do cliente. Nada de exclamação e nada de emoji. SEM PONTO FINAL no fim de frase ou de linha — no WhatsApp ninguém escreve "Entendi." nem "Qualquer coisa é só chamar aqui."; é "Entendi" e "Qualquer coisa é só chamar aqui". Ponto só no meio da linha, separando duas frases, e mesmo aí prefira quebrar a linha. Quando precisar acusar que entendeu, use algo neutro e curto: "Entendi", "Certo", "Anotado". Não comemore avanço, não puxe assunto pessoal e não faça elogio — vá ao ponto. Educado é tratar com respeito e responder rápido e claro; não é ser animado.
 
 DESCULPA POR DEMORA: quando demorar, reconheça de forma leve. Pode dizer só "desculpa a demora" ou, se quiser dar o motivo, use um que seja verdade: "estava em treinamento", "estava passando por ajuste", "tivemos um problema no sistema hoje de manhã" (este só se tiver mesmo acontecido, e o contexto costuma dizer). Treinamento é verdade: você é ajustado com frequência.
 
