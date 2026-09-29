@@ -318,7 +318,7 @@ export async function listarPedidosPagos(): Promise<{
   // interrompe o disparo automático, não a escolha manual).
   const { data: fornRaw } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pecas, pedido_minimo, prazo_minimo_dias')
+    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pecas, pedido_minimo, prazo_minimo_dias, faccao')
     // QUEM O SISTEMA NÃO OFERTA, A TELA NÃO OFERECE — 12/09/2026.
     //
     // Esta lista carregava `leads_fornecedores` inteira, enquanto o matching

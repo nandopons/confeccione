@@ -23,6 +23,8 @@ export type FornecedorParaMatch = {
   pecas: string[] | null
   pedido_minimo: number | null
   prazo_minimo_dias: number | null
+  /** Só costura (facção). Ver a migration 20260929000000. */
+  faccao?: boolean | null
 }
 
 export type MatchFornecedor = {
@@ -51,6 +53,10 @@ export const PESO_CATEGORIA_SECUNDARIA = 10
  *  no bloco de peça, em `pontuarFornecedor`. */
 export const MOTIVO_PECA_DECLARADA = 'faz esse tipo de peça'
 export const MOTIVO_PECA_LEGADA = 'pode fazer'
+/** A confecção é facção (só costura). A tela pinta como tag. */
+export const MOTIVO_FACCAO = 'facção'
+/** Facção fora da cidade do pedido: a fila não oferta, a tela mostra o porquê. */
+export const MOTIVO_FACCAO_LONGE = 'facção fora da cidade — o cliente teria que levar o tecido'
 
 function normalizar(t: string | null | undefined): string {
   return (t ?? '')
@@ -213,6 +219,24 @@ export function pontuarFornecedor(
   if (f.status && f.status !== 'ativo') {
     pontos -= 15
     motivos.push(f.status)
+  }
+
+  // FACÇÃO SÓ CASA COM A PRÓPRIA CIDADE — 29/09/2026 (decisão do Fernando).
+  //
+  // Facção só costura: o cliente leva o tecido (muitas vezes já cortado) e
+  // busca as peças pra fazer o resto. Isso só funciona perto. Fora da cidade a
+  // fila automática não oferta (a Thannytt, em GO, aceitou o pedido da Kely, em
+  // outro estado, e desistiu no dia seguinte); a tela continua mostrando, com o
+  // motivo, porque o Fernando pode saber que o cliente tem logística própria.
+  if (f.faccao) {
+    const mesmaCidade = Boolean(cidadePedido && cidadeForn && cidadePedido === cidadeForn)
+    if (mesmaCidade) {
+      motivos.push(MOTIVO_FACCAO)
+    } else {
+      viavel = false
+      pontos -= 40
+      motivos.push(MOTIVO_FACCAO_LONGE)
+    }
   }
 
   return { pontos, motivos, viavel }

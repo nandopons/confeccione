@@ -55,6 +55,8 @@ export type CamposPerfil = {
   observacao?: string | null
   /** Prazo mínimo vive em leads_fornecedores porque o match lê de lá. */
   prazoMinimoDias?: number | null
+  /** Facção (só costura) — também em leads_fornecedores, pelo mesmo motivo. */
+  faccao?: boolean | null
 }
 
 /**
@@ -91,11 +93,11 @@ export async function salvarPerfil(fornecedorId: string, c: CamposPerfil): Promi
 
   // prazo_minimo_dias mora no cadastro porque é lá que o match lê. Gravar nos
   // dois lugares criaria duas verdades sobre a mesma pergunta.
-  if (c.prazoMinimoDias != null) {
-    await supabaseAdmin
-      .from('leads_fornecedores')
-      .update({ prazo_minimo_dias: c.prazoMinimoDias })
-      .eq('id', fornecedorId)
+  const cadastro: Record<string, unknown> = {}
+  if (c.prazoMinimoDias != null) cadastro.prazo_minimo_dias = c.prazoMinimoDias
+  if (c.faccao != null) cadastro.faccao = c.faccao
+  if (Object.keys(cadastro).length > 0) {
+    await supabaseAdmin.from('leads_fornecedores').update(cadastro).eq('id', fornecedorId)
   }
   return data
 }

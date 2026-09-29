@@ -2271,7 +2271,13 @@ const FERRAMENTA_PERFIL_PRODUCAO: Anthropic.Messages.Tool = {
       servicos: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'As palavras DELA, como ela falou — "regata com vivo", "calça de brim", facção, corte, estamparia. Isto é memória da conversa; quem faz o match é `pecas`.' },
       tecidos: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'malha, plana, suplex, moletom, jeans…' },
       maquinas: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'reta, overloque, galoneira, travete…' },
-      fornece_material: { type: 'boolean', description: 'true = fornece tecido e aviamento; false = facção pura.' },
+      fornece_material: { type: 'boolean', description: 'true = fornece tecido e aviamento; false = o cliente manda o material.' },
+      faccao: {
+        type: 'boolean',
+        description:
+          'true = FACÇÃO: só costura — não corta, não estampa, não fornece tecido ("só costuro", "o cliente manda cortado", ' +
+          '"não faço corte nem estampa"). false = confecção completa. Facção só recebe pedido da própria cidade.',
+      },
       capacidade_mes: { type: 'number', minimum: 1, description: 'Peças por mês, no número que ELA disse.' },
       aceita_encaixe: { type: 'boolean', description: 'Pega pedido no meio da agenda cheia?' },
       faz_desenvolvimento: { type: 'boolean', description: 'Desenvolve peça a partir de foto, sem molde pronto?' },
@@ -2676,6 +2682,7 @@ async function executarFerramenta(
         capacidadeMes: inteiro(entrada.capacidade_mes),
         aceitaEncaixe: bool(entrada.aceita_encaixe),
         fazDesenvolvimento: bool(entrada.faz_desenvolvimento),
+        faccao: bool(entrada.faccao),
         naoFaz: typeof entrada.nao_faz === 'string' ? entrada.nao_faz : null,
         observacao: typeof entrada.observacao === 'string' ? entrada.observacao : null,
       })
@@ -2754,7 +2761,7 @@ async function executarFerramenta(
         pedido: alvo.codigo,
         proximo_passo:
           'Diga em UMA linha que está certo, que tirou o pedido da lista dela e que a gente já está procurando outra confecção pro cliente. ' +
-          'Sem insistir, sem "tem certeza?", sem desculpa. Se ela contou o que não faz (corte, estampa), grave com salvar_perfil_producao (nao_faz).',
+          'Sem insistir, sem "tem certeza?", sem desculpa. Se ela contou o que não faz (corte, estampa), grave com salvar_perfil_producao (nao_faz) — e se ficou claro que ela SÓ COSTURA, faccao: true.',
       }
     }
     case 'perguntar_ao_cliente': {

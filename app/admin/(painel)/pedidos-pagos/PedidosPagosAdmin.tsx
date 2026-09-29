@@ -5,7 +5,7 @@ import { tipoLabel } from '@/app/lib/ofertas-labels'
 import { INFO_ETAPA, MOTIVO_LABEL, MOTIVOS_ENCERRAMENTO, ehEtapa, type Etapa, type GrupoEtapa, type MotivoEncerramento } from '@/app/lib/etapas-pedido-catalogo'
 // Módulo PURO (sem supabase) — ver o cabeçalho dele. É o que permite ordenar
 // aqui, no client, sem uma rota nova.
-import { ordenarFornecedoresPara, MOTIVO_PECA_DECLARADA, MOTIVO_PECA_LEGADA } from '@/app/lib/match-fornecedor'
+import { ordenarFornecedoresPara, MOTIVO_PECA_DECLARADA, MOTIVO_PECA_LEGADA, MOTIVO_FACCAO, MOTIVO_FACCAO_LONGE } from '@/app/lib/match-fornecedor'
 
 type Tamanho = { tamanho?: string | null; qtd?: number | null }
 type Estampa = { posicao?: string | null; tamanho?: string | null }
@@ -73,6 +73,8 @@ type Fornecedor = {
   pecas: string[] | null
   pedido_minimo: number | null
   prazo_minimo_dias: number | null
+  /** Só costura — ver migration 20260929000000. */
+  faccao?: boolean | null
 }
 
 // Detalhe do chat (reusa /api/admin/pedidos-assistente/[id])
@@ -823,6 +825,11 @@ export default function PedidosPagosAdmin() {
                               {x.pedido_minimo != null && x.pedido_minimo > 0 && (
                                 <span className="text-xs text-gray-500">mín. {x.pedido_minimo} pç</span>
                               )}
+                              {x.faccao && (
+                                <span className="text-[10px] font-semibold uppercase tracking-wide rounded px-1.5 py-0.5 bg-violet-50 text-violet-700" title="Só costura: o cliente leva o tecido (cortado) e busca as peças. Casa com pedido da mesma cidade.">
+                                  facção
+                                </span>
+                              )}
                               {/* DOIS SELOS, DUAS EVIDÊNCIAS — 12/09/2026.
                                   Verde só pra quem DECLAROU a peça no cadastro
                                   novo. Cinza pra quem apenas encosta pela
@@ -835,7 +842,9 @@ export default function PedidosPagosAdmin() {
                               {x.match.motivos.map((m) => {
                                 const forte = m === MOTIVO_PECA_DECLARADA
                                 const fraco = m.startsWith(MOTIVO_PECA_LEGADA)
-                                if (!forte && !fraco && m !== x.match.motivos[0]) return null
+                                // A tag FACÇÃO já está ao lado do nome; o motivo só aparece quando é o que barra.
+                                if (m === MOTIVO_FACCAO) return null
+                                if (!forte && !fraco && m !== x.match.motivos[0] && m !== MOTIVO_FACCAO_LONGE) return null
                                 const cor = !x.match.viavel
                                   ? 'bg-amber-50 text-amber-700'
                                   : forte

@@ -2354,6 +2354,12 @@ const FERRAMENTAS_CANDIDATO: Anthropic.Messages.Tool[] = [
         aceita_encaixe: { type: 'boolean', description: 'Pega pedido no meio da agenda cheia?' },
         faz_desenvolvimento: { type: 'boolean', description: 'Desenvolve peça a partir de foto, sem molde pronto?' },
         prazo_minimo_dias: { type: 'number', minimum: 1, maximum: 180, description: 'Prazo mínimo que ela aceita.' },
+        faccao: {
+          type: 'boolean',
+          description:
+            'true = FACÇÃO: só costura — não corta, não estampa, não fornece tecido ("só costuro", "o cliente manda cortado", ' +
+            '"não faço corte nem estampa"). false = confecção completa. Facção só recebe pedido da própria cidade.',
+        },
         nao_faz: { type: 'string', maxLength: 200, description: 'O que ela NÃO faz. Vale tanto quanto o que faz.' },
         observacao: { type: 'string', maxLength: 300 },
       },
@@ -2776,6 +2782,7 @@ export async function responderCandidato(params: {
                 aceitaEncaixe: bool(entrada.aceita_encaixe),
                 fazDesenvolvimento: bool(entrada.faz_desenvolvimento),
                 prazoMinimoDias: inteiro(entrada.prazo_minimo_dias),
+                faccao: bool(entrada.faccao),
                 naoFaz: str(entrada.nao_faz),
                 observacao: str(entrada.observacao),
               })
