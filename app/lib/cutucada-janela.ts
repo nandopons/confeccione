@@ -54,7 +54,7 @@ type Pedido = {
 
 export function textoDaCutucadaJanela(nome: string | null): string {
   const primeiro = (nome ?? '').trim().split(/\s+/)[0]
-  return `${primeiro ? `Oi, ${primeiro}! ` : 'Oi! '}Gostaria de concluir seu pedido? É só me responder por aqui que a gente continua de onde parou.`
+  return `${primeiro ? `Oi, ${primeiro}! ` : 'Oi! '}Gostaria de concluir seu pedido?`
 }
 
 export async function rodarCutucadaJanela(): Promise<ResultadoCutucadaJanela> {
@@ -82,6 +82,21 @@ export async function rodarCutucadaJanela(): Promise<ResultadoCutucadaJanela> {
   if (e2) throw new Error(`cutucada janela: extras — ${e2.message}`)
   const extra = new Map(((extras ?? []) as Array<{ id: string; resumo_enviado_em: string | null; lembretes_pausados_ate: string | null }>).map((x) => [x.id, x]))
 
+  // QUEM JÁ TEM PEDIDO ADIANTADO NÃO É CUTUCADO PELA CASCA — 29/09/2026.
+  // O Guilherme recebeu "gostaria de concluir seu pedido?" às 13:15 com o
+  // 343 já nas confecções: a pergunta veio pelo 255, a casca do site que
+  // ficou aberta como "captado". Se o mesmo telefone tem pedido além da
+  // entrada, a montagem já aconteceu — a casca é lixo, não pendência.
+  const tel8 = (t: string | null) => (t ?? '').replace(/\D/g, '').slice(-8)
+  const { data: adiantados, error: e4 } = await supabaseAdmin
+    .from('pedidos_assistente_etapas')
+    .select('telefone')
+    .in('etapa', ['buscando_fornecedor', 'sem_fornecedor', 'em_negociacao', 'orcamento_atrasado', 'aguardando_pagamento', 'sem_resposta', 'orcamento_vencido', 'pago', 'em_producao', 'pronto'])
+    .not('telefone', 'is', null)
+    .limit(1000)
+  if (e4) throw new Error(`cutucada janela: adiantados — ${e4.message}`)
+  const telAdiantado = new Set(((adiantados ?? []) as Array<{ telefone: string | null }>).map((x) => tel8(x.telefone)).filter((t) => t.length === 8))
+
   let enviadas = 0
   let puladas = 0
   const jaVistos = new Set<string>()
@@ -92,6 +107,7 @@ export async function rodarCutucadaJanela(): Promise<ResultadoCutucadaJanela> {
     if (x?.resumo_enviado_em) continue // é da cutucada-pos-resumo
     if (x?.lembretes_pausados_ate && new Date(x.lembretes_pausados_ate).getTime() > agora) continue
     if (!p.telefone) continue
+    if (telAdiantado.has(tel8(p.telefone))) continue
 
     try {
       const waId = normalizarWaId(p.telefone)
