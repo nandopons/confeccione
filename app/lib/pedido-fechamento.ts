@@ -31,6 +31,7 @@ import { CAMPOS_DO_RESUMO, hashDoResumo } from './resumo-hash'
 import type { LinhaPedido } from './pedido-assistente-oferta'
 import { ehPublicoValido } from './pecas'
 import { DIAS_DE_BUSCA } from './horario-comercial'
+import { encerrarPedido } from './etapas-pedido'
 
 export type PecaEntrada = {
   modelo?: string | null
@@ -470,6 +471,19 @@ export async function criarPedidoParaContato(params: {
     .maybeSingle<{ id: string; codigo: string | null; linhas: unknown; criado_em: string; origem: string | null }>()
   // Consulta que falha não é "não tem aberto": seria a trava sumindo em silêncio.
   if (eAberto) return { ok: false, erro: `não consegui conferir os pedidos abertos (${eAberto.message}); tente de novo` }
+
+  // A CASCA DO SITE NÃO DISPUTA COM O PEDIDO DE VERDADE — 29/09/2026.
+  //
+  // O Guilherme (GALERIA WM) tinha o 20260900255: lead do chat da home com 11
+  // categorias marcadas, zero peça com nome, zero quantidade. Vinte dias
+  // depois ele montou o pedido real pelo WhatsApp (10 modelos com logo) — e o
+  // 255 continuou aberto, agora como "captado", disputando o contexto do Luigi
+  // e a lista do painel. O Fernando: "não foi completo, deveria ter sido
+  // cancelado?". Deveria. Pedido aberto sem NENHUMA quantidade, que não foi o
+  // Luigi que abriu nesta conversa, não é "o pedido dele": é o formulário que
+  // ele largou no meio. O novo substitui a casca, e ela encerra com o motivo
+  // gravado — sem perguntar "é novo ou mudança?" sobre um pedido vazio.
+  const cascaDoSite = aberto && aberto.origem !== 'whatsapp_luigi' && !linhasTemQuantidade(aberto.linhas) ? aberto : null
   // O cliente respondeu que é pedido NOVO: confere e deixa passar.
   //
   // Confere de verdade — o código tem que ser de um pedido ABERTO DESTE contato.
@@ -477,7 +491,7 @@ export async function criarPedidoParaContato(params: {
   // que custou 23 duplicatas viraria enfeite.
   const separado = (params.separadoDoPedido ?? '').trim()
   let liberadoPeloCliente: string | null = null
-  if (separado && aberto) {
+  if (separado && aberto && !cascaDoSite) {
     const bate = separado === aberto.codigo || separado === aberto.id
     if (!bate) {
       return {
@@ -490,7 +504,7 @@ export async function criarPedidoParaContato(params: {
     liberadoPeloCliente = aberto.codigo ?? aberto.id
   }
 
-  if (aberto && !liberadoPeloCliente) {
+  if (aberto && !liberadoPeloCliente && !cascaDoSite) {
     // Devolve AS LINHAS junto: sem elas o Luigi não sabe o que já está lá e
     // pergunta tudo de novo, que é o comportamento que fez a Ana Vitória
     // repetir a mesma correção três vezes.
@@ -592,7 +606,28 @@ export async function criarPedidoParaContato(params: {
   const r = await definirPecasPedido(novo.id, params.pecas)
   if (!r.ok) return { ok: false, erro: r.erro, pedidoId: novo.id, codigo: novo.codigo ?? undefined }
 
+  // A casca encerra DEPOIS de o novo existir: se o insert falhar, ela fica —
+  // é o único registro do contato. Failure-soft, o pedido novo já está de pé.
+  if (cascaDoSite) {
+    await encerrarPedido(
+      cascaDoSite.id,
+      'outro',
+      'luigi',
+      `substituído pelo pedido ${novo.codigo ?? novo.id}: era um pedido do site sem peça nem quantidade`
+    ).catch((err) => console.error('[pedido-fechamento] não consegui encerrar a casca do site', { casca: cascaDoSite.id, err }))
+  }
+
   return { ok: true, pedidoId: novo.id, codigo: novo.codigo ?? undefined, resumo: r.resumo }
+}
+
+/** Alguma linha com quantidade > 0 (total ou grade) — o mínimo pra uma confecção avaliar. */
+function linhasTemQuantidade(linhas: unknown): boolean {
+  if (!Array.isArray(linhas)) return false
+  return (linhas as Array<{ total?: unknown; quantidade?: unknown; tamanhos?: Array<{ qtd?: unknown }> | null }>).some((l) => {
+    const total = typeof l.total === 'number' ? l.total : typeof l.quantidade === 'number' ? l.quantidade : 0
+    const grade = (l.tamanhos ?? []).reduce((s, t) => s + (typeof t.qtd === 'number' ? t.qtd : 0), 0)
+    return total > 0 || grade > 0
+  })
 }
 
 /**
