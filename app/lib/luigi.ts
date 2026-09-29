@@ -44,7 +44,7 @@ import { enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
 import { enviarImagemDoPedido, janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 // O tipo local LinhaPedido deste arquivo é um recorte antigo, sem material nem
 // descricao. Pra editar a peça de verdade usamos o tipo canônico do produto.
-import { definirStatusOferta, type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
+import { definirStatusOferta, desistirDoPedidoAceito, type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
 import { editarLinhasPedidoCliente, gradeDaFerramenta, linhasComAjuste } from './pedido-linhas-edicao'
 import { anexarFotoDaConversaAoModelo, conferirPedido, salvarDadosDoCliente, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores, pausarLembretesDoPedido, type Divergencia } from './pedido-fechamento'
 import {
@@ -733,6 +733,20 @@ type Contexto = {
    * dias. Ver `ofertasFechadasComOutra` — 25/09/2026, o Cristian.
    */
   ofertasFechadasComOutra: OfertaFechadaComOutra[]
+  /**
+   * Pedidos que ela ACEITOU e ainda não foram pagos. É daqui que sai o
+   * "não deu certo" → desistir_do_pedido (Thannytt, 29/09/2026).
+   */
+  ofertasAceitas: OfertaAceita[]
+}
+
+type OfertaAceita = {
+  id: string
+  pedidoId: string
+  codigo: string | null
+  resumo: string
+  aceitaEm: string
+  temOrcamento: boolean
 }
 
 type OfertaFechadaComOutra = {
@@ -816,6 +830,33 @@ async function ofertasFechadasComOutra(waId: string): Promise<OfertaFechadaComOu
         minutosAteFechar: Math.max(0, Math.round((new Date(fechouEm).getTime() - new Date(c.criado_em).getTime()) / 60000)),
       }
     })
+}
+
+/** Pedidos aceitos por esta confecção, ainda sem pagamento — mais recente primeiro. */
+async function ofertasAceitasDoFornecedor(waId: string): Promise<OfertaAceita[]> {
+  const fornecedorId = await fornecedorDoContato(waId)
+  if (!fornecedorId) return []
+  const { data, error } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id, pedido_id, respondido_em, criado_em, pedidos_assistente(codigo, linhas, pagamento_status, orcamento_status, encerrado_em)')
+    .eq('fornecedor_id', fornecedorId)
+    .eq('status', 'aceita')
+    .order('respondido_em', { ascending: false })
+    .limit(5)
+  if (error) throw new Error(`ofertas aceitas do fornecedor: ${error.message}`)
+  type Ped = { codigo: string | null; linhas: unknown; pagamento_status: string | null; orcamento_status: string | null; encerrado_em: string | null }
+  type R = { id: string; pedido_id: string; respondido_em: string | null; criado_em: string; pedidos_assistente: Ped | Ped[] | null }
+  return ((data ?? []) as unknown as R[])
+    .map((o) => ({ o, p: Array.isArray(o.pedidos_assistente) ? o.pedidos_assistente[0] : o.pedidos_assistente }))
+    .filter(({ p }) => p && p.pagamento_status !== 'pago' && !p.encerrado_em)
+    .map(({ o, p }) => ({
+      id: o.id,
+      pedidoId: o.pedido_id,
+      codigo: p?.codigo ?? null,
+      resumo: resumoDasLinhas(p?.linhas),
+      aceitaEm: o.respondido_em ?? o.criado_em,
+      temOrcamento: p?.orcamento_status === 'definido',
+    }))
 }
 
 /**
@@ -1642,7 +1683,7 @@ async function recusasAnterioresDaMesmaDivergencia(conversaId: string, divergenc
 }
 
 async function montarContexto(conversaId: string, waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
-  const [pedidos, conta, cadastroFornecedor, ofertasAbertas, ofertasFechadas] = await Promise.all([
+  const [pedidos, conta, cadastroFornecedor, ofertasAbertas, ofertasFechadas, ofertasAceitas] = await Promise.all([
     pedidosDoContato(waId, clienteId),
     clienteId
       ? supabaseAdmin.from('contas_clientes').select('nome, email').eq('id', clienteId).maybeSingle<{ nome: string | null; email: string | null }>()
@@ -1650,6 +1691,7 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
     ehFornecedor ? cadastroDoFornecedor(waId) : Promise.resolve(null),
     ehFornecedor ? ofertasAbertasDoFornecedor(waId) : Promise.resolve([] as OfertaAberta[]),
     ehFornecedor ? ofertasFechadasComOutra(waId) : Promise.resolve([] as OfertaFechadaComOutra[]),
+    ehFornecedor ? ofertasAceitasDoFornecedor(waId) : Promise.resolve([] as OfertaAceita[]),
   ])
 
   // Em aberto primeiro (mais recente no topo); fechados só os 2 últimos.
@@ -1768,6 +1810,7 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
     cadastroFornecedor,
     ofertasAbertas,
     ofertasFechadasComOutra: ofertasFechadas,
+    ofertasAceitas,
     contato: { nome, telefone: waId, conta: conta.data ? { nome: conta.data.nome, email: conta.data.email } : null },
     pedidos: lista,
     pedidoEmFoco: abertos[0] ?? null,
@@ -2281,6 +2324,22 @@ const FERRAMENTA_RECUSAR_OFERTA: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_DESISTIR_PEDIDO: Anthropic.Messages.Tool = {
+  name: 'desistir_do_pedido',
+  description:
+    'A confecção ACEITOU um pedido (está em PEDIDOS QUE ELA ACEITOU) e agora diz que não vai conseguir fazer: "não deu certo", ' +
+    '"ela precisa de corte e estampa também", "não vou pegar". Tira o pedido dela, avisa o cliente que a gente já está ' +
+    'procurando outra confecção e o pedido volta pra fila sozinho. Não use pra oferta ainda não aceita (recusar_oferta) nem pra pedido pago.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      pedido_codigo: { type: 'string', description: 'Código do pedido (está em PEDIDOS QUE ELA ACEITOU). Obrigatório se houver mais de um.' },
+      motivo: { type: 'string', maxLength: 300, description: 'Por que não vai dar, NAS PALAVRAS DELA.' },
+    },
+    required: ['motivo'],
+  },
+}
+
 const FERRAMENTA_PERGUNTAR_CLIENTE: Anthropic.Messages.Tool = {
   name: 'perguntar_ao_cliente',
   description:
@@ -2427,7 +2486,7 @@ function ferramentasDoModo(
   // precisa é registrar o próprio perfil e mandar foto.
   if (ehFornecedor) {
     return modo === 'responde'
-      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_CORRIGIR_TIPO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO, FERRAMENTA_COTAR_FRETE, FERRAMENTA_RECUSAR_OFERTA, FERRAMENTA_PERGUNTAR_CLIENTE]
+      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_CORRIGIR_TIPO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO, FERRAMENTA_COTAR_FRETE, FERRAMENTA_RECUSAR_OFERTA, FERRAMENTA_PERGUNTAR_CLIENTE, FERRAMENTA_DESISTIR_PEDIDO]
       : [FERRAMENTA_CHAMAR_HUMANO]
   }
   const fora = fechamento ? FORA_DA_MESA[fechamento] : null
@@ -2668,6 +2727,34 @@ async function executarFerramenta(
           pecasNovas.length === 0
             ? 'Gravei o que ela contou, mas NENHUMA peça foi pro match — só `pecas` faz o pedido chegar nela. Se ela citou peça, chame de novo com `pecas`. Não diga a ela que o cadastro está atualizado enquanto isso não acontecer.'
             : undefined,
+      }
+    }
+    case 'desistir_do_pedido': {
+      const motivo = String(entrada.motivo ?? '').trim()
+      if (!motivo) return { ok: false, aviso: 'mande o motivo, nas palavras dela' }
+      const aceitas = ctx.ofertasAceitas
+      if (aceitas.length === 0) return { ok: false, aviso: 'ela não tem pedido aceito em aberto. Se é oferta ainda não aceita, use recusar_oferta; se é pedido pago, chamar_humano.' }
+      const codigo = String(entrada.pedido_codigo ?? '').trim()
+      const alvo = codigo ? aceitas.find((o) => o.codigo === codigo) : aceitas.length === 1 ? aceitas[0] : null
+      if (!alvo) {
+        return {
+          ok: false,
+          aviso: codigo
+            ? `o pedido ${codigo} não está aceito por ela. Aceitos: ${aceitas.map((o) => o.codigo ?? o.id).join(', ')}.`
+            : `ela tem ${aceitas.length} pedidos aceitos (${aceitas.map((o) => o.codigo ?? o.id).join(', ')}): mande pedido_codigo dizendo de qual ela desistiu.`,
+        }
+      }
+      const r = await desistirDoPedidoAceito(alvo.id, motivo)
+      if (!r.ok) return { ok: false, aviso: `não consegui tirar o pedido dela: ${r.erro ?? 'erro'}` }
+      ctx.ofertasAceitas = aceitas.filter((o) => o.id !== alvo.id)
+      const quem = ctx.contato.nome ?? ctx.contato.telefone
+      await avisarGestor(`${quem} desistiu do pedido ${alvo.codigo ?? alvo.id} depois de aceitar: "${motivo}". O pedido voltou pra busca (fila automática) e o cliente foi avisado${r.clienteAvisado ? '' : ' (aviso ao cliente falhou — vale mandar à mão)'}.`)
+      return {
+        ok: true,
+        pedido: alvo.codigo,
+        proximo_passo:
+          'Diga em UMA linha que está certo, que tirou o pedido da lista dela e que a gente já está procurando outra confecção pro cliente. ' +
+          'Sem insistir, sem "tem certeza?", sem desculpa. Se ela contou o que não faz (corte, estampa), grave com salvar_perfil_producao (nao_faz).',
       }
     }
     case 'perguntar_ao_cliente': {
@@ -3698,12 +3785,25 @@ QUEM SOMOS, se ela perguntar: projeto de tecnologia pra confecção, de Recife, 
 PERGUNTA DELA VEM ANTES DA SUA. Se ela perguntou algo e você tem a resposta acima, responda ISSO nesta mensagem; a foto ou a peça você pede depois, na mensagem seguinte ou quando ela terminar de perguntar. Pedir foto em cima de uma pergunta não respondida é o mesmo que não ter lido.
 `
 
+function blocoOfertasAceitas(aceitas: OfertaAceita[]): string {
+  if (aceitas.length === 0) return ''
+  const linhas = aceitas.map((o) => `- pedido ${o.codigo ?? o.id}: ${o.resumo} · aceito ${quandoRecife(o.aceitaEm) ?? 'há pouco'}${o.temOrcamento ? ' · orçamento já enviado ao cliente' : ' · ainda sem orçamento'}`)
+  return `
+PEDIDOS QUE ELA ACEITOU (ela já tem o contato do cliente e fala direto com ele):
+${linhas.join('\n')}
+
+Se ela disser que NÃO VAI DAR ("não deu certo", "ela precisa de corte e estampa e eu só costuro", "não vou conseguir", "desisto") → chame desistir_do_pedido com o motivo NAS PALAVRAS DELA. O pedido sai da lista dela, o cliente é avisado e a busca recomeça sozinha — não peça pra ela avisar o cliente, não diga "registrado" e fique por isso: registrar o que ela não faz é o segundo passo (salvar_perfil_producao), o primeiro é soltar o pedido. A Thannytt (29/09) disse "não deu certo" e ouviu "registrado, quando cair pedido só de costura a gente manda" — e o pedido da Kely ficou preso com ela.
+Dúvida sobre o pedido aceito → responda com o que está aqui e no histórico; o resto ela pergunta direto ao cliente, que já é contato dela.
+`
+}
+
 function promptFornecedor(
   nome: string | null,
   jaSeApresentou: boolean,
   cadastro: CadastroFornecedor | null,
   ofertas: OfertaAberta[] = [],
-  fechadasComOutra: OfertaFechadaComOutra[] = []
+  fechadasComOutra: OfertaFechadaComOutra[] = [],
+  aceitas: OfertaAceita[] = []
 ): string {
   // O BLOCO DO QUE JÁ SABEMOS — 10/09/2026.
   //
@@ -3837,6 +3937,7 @@ QUEM PRECISA DA OUTRA É A GENTE. Ela tem produção; a gente tem pedido procura
 A FOTO É O VITRINE DELA, NÃO ARQUIVO NOSSO. Nunca diga "pra gente colocar no seu perfil", como se fosse cadastro interno. Diga pra que serve do lado dela: é o que o cliente vê quando escolhe a confecção que vai produzir.
 
 ${blocoOfertasFechadasComOutra(fechadasComOutra)}
+${blocoOfertasAceitas(aceitas)}
 ${ofertas.length > 0 ? blocoOfertasAbertas(ofertas) : fechadasComOutra.length > 0 ? '' : `SE ELA PERGUNTAR "QUE PEDIDO?", NÃO EXISTE PEDIDO. Não invente um, e não explique por quê. Uma linha e siga: "Não é um pedido específico — ${pedeUmaCoisa}" Só isso.`}
 
 NÃO CONTE A NOSSA COZINHA. Template, Meta, janela de 24 h, "o único formato aprovado", categoria que não filtra, como o match funciona, o que falta no cadastro dela pra pontuar: nada disso interessa a quem está costurando. É problema nosso. Explicar isso não soa transparente, soa confuso — e faz ela achar que vai dar trabalho falar com a gente. Peça o que você precisa e pronto; se ela quiser saber pra quê, uma frase resolve ("é pra te mandar só o que combina com o que vocês fazem").
@@ -3893,7 +3994,7 @@ NUNCA: prometa pedido, volume ou faturamento; combine preço; passe contato de c
 
 function promptSistema(modo: Exclude<ModoLuigi, 'desligado'>, ctx: Contexto, jaSeApresentou: boolean): Anthropic.Messages.TextBlockParam[] {
   const nome = primeiroNome(ctx.contato.nome) || primeiroNome(ctx.contato.conta?.nome) || null
-  if (ctx.ehFornecedor) return [{ type: 'text', text: promptFornecedor(nome, jaSeApresentou, ctx.cadastroFornecedor, ctx.ofertasAbertas, ctx.ofertasFechadasComOutra) }]
+  if (ctx.ehFornecedor) return [{ type: 'text', text: promptFornecedor(nome, jaSeApresentou, ctx.cadastroFornecedor, ctx.ofertasAbertas, ctx.ofertasFechadasComOutra, ctx.ofertasAceitas) }]
   const etapas = (Object.keys(ETAPA_PARA_CLIENTE) as Etapa[]).map((e) => `- ${e} (${INFO_ETAPA[e].label}): ${ETAPA_PARA_CLIENTE[e]}`).join('\n')
   const pedidos =
     ctx.pedidos.length === 0

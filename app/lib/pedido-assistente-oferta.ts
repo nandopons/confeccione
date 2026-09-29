@@ -878,6 +878,75 @@ export async function recusarOrcamentoCliente(pedidoId: string): Promise<{ ok: b
 }
 
 /**
+ * A CONFECÇÃO DESISTIU DEPOIS DE ACEITAR — 29/09/2026.
+ *
+ * Thannytt aceitou o 20260900337 (Kely), conversou com a cliente e voltou ao
+ * Luigi: "não deu certo, ela precisa que faça a estampa e corte as peças
+ * também". O Luigi gravou "não faz" no perfil e disse "registrado" — e o
+ * pedido continuou "em negociação" com ela, sem ninguém procurando outra
+ * confecção. O Fernando: "valia a pena o Luigi se antecipar e já reabrir a
+ * oferta". Aqui a oferta aceita vira recusada com o motivo, o orçamento (se
+ * houver e não estiver pago) é zerado, a busca ganha 7 dias novos e a fila
+ * volta a ofertar sozinha; o cliente recebe uma linha dizendo que a gente
+ * já está procurando outra. Pedido pago não passa por aqui.
+ */
+export async function desistirDoPedidoAceito(
+  ofertaId: string,
+  motivo: string
+): Promise<{ ok: boolean; erro?: string; codigo?: string | null; clienteAvisado?: boolean }> {
+  const { data: oferta } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .select('id, status, pedido_id, pedidos_assistente(codigo, nome, telefone, pagamento_status)')
+    .eq('id', ofertaId)
+    .maybeSingle()
+  type P = { codigo: string | null; nome: string | null; telefone: string | null; pagamento_status: string | null }
+  type R = { id: string; status: string; pedido_id: string; pedidos_assistente: P | P[] | null }
+  const o = oferta as unknown as R | null
+  if (!o) return { ok: false, erro: 'Oferta não encontrada.' }
+  if (o.status !== 'aceita') return { ok: false, erro: 'A oferta não está aceita — não há do que desistir.' }
+  const p = Array.isArray(o.pedidos_assistente) ? o.pedidos_assistente[0] : o.pedidos_assistente
+  if (p?.pagamento_status === 'pago') return { ok: false, erro: 'Pedido já pago — desistência agora é assunto do Fernando.' }
+
+  const agora = new Date().toISOString()
+  const { error: e1 } = await supabaseAdmin
+    .from('ofertas_pedido_assistente')
+    .update({ status: 'recusada', respondido_em: agora, observacao: `Desistiu depois de aceitar (WhatsApp): ${motivo.slice(0, 300)}` })
+    .eq('id', o.id)
+    .eq('status', 'aceita')
+  if (e1) return { ok: false, erro: e1.message }
+
+  // Volta pra busca: sem orçamento e com 7 dias novos na fila.
+  const { error: e2 } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .update({
+      orcamento_status: null,
+      orcamento_definido_em: null,
+      frete_centavos: null,
+      valor_centavos: null,
+      busca_valida_ate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      busca_perguntada_em: null,
+      busca_perguntada_vezes: 0,
+      atualizado_em: agora,
+    })
+    .eq('id', o.pedido_id)
+  if (e2) return { ok: false, erro: e2.message }
+
+  let clienteAvisado = false
+  if (p?.telefone) {
+    const primeiro = (p.nome ?? '').trim().split(/\s+/)[0]
+    const ref = p.codigo ? `pedido ${p.codigo}` : 'pedido'
+    clienteAvisado = await avisoOficial({
+      telefone: p.telefone,
+      nome: p.nome ?? null,
+      texto: `${primeiro ? `Oi, ${primeiro}! ` : 'Oi! '}A confecção que tinha assumido o seu ${ref} não vai conseguir fazer ele. Já voltei a procurar outra pra você — te aviso assim que uma aceitar.`,
+      resumo: `a confecção que tinha assumido o seu ${ref} não vai conseguir fazer; já estou procurando outra pra você`,
+      caminhoBotao: `visualizador/${o.pedido_id}`,
+    }).catch(() => false)
+  }
+  return { ok: true, codigo: p?.codigo ?? null, clienteAvisado }
+}
+
+/**
  * O cliente desistiu: avisa cada confecção que estava com o pedido (oferta em
  * aberto ou aceita) e cancela as ofertas.
  *
