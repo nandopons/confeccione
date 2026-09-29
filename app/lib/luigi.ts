@@ -1523,6 +1523,26 @@ async function liberarSeEleConfirmou(ctx: Contexto, corpo: string | null, conver
   const resposta = await respostaAoFechamento(conversaId, (corpo ?? '').trim(), criadoEm)
   if (!resposta || !resposta.fechamento || !eleDisseQuePode(resposta.linhas)) return nao
 
+  // O "SIM" AO RESUMO NÃO É O "SIM" À LIBERAÇÃO — 29/09/2026.
+  //
+  // Guilherme, 20260900343, 10:09: "Posso enviar o resumo do pedido pra você
+  // conferir antes de liberar pras confecções?" — "pode sim". A frase tem
+  // "liberar pras confecções" dentro, casou com PERGUNTA_DE_FECHAMENTO, e o
+  // código LIBEROU às 10:10 um pedido cujo resumo ele nunca tinha visto. Às
+  // 10:11 ele respondeu "ainda não, vamos aguardar" — já tinha oferta na rua
+  // às 10:20. Duas travas: se a pergunta do turno era a do resumo, o sim é
+  // pro resumo (enviarResumoSeEleConfirmou cuida); e liberação por código só
+  // existe DEPOIS de o resumo ter saído — "só libere com o sim dela ao resumo"
+  // é a regra do prompt, e regra que importa mora no código.
+  const doResumo = await respostaAoFechamento(conversaId, (corpo ?? '').trim(), criadoEm, PERGUNTA_DO_RESUMO)
+  if (doResumo?.fechamento) return nao
+  const { data: ped } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('resumo_enviado_em')
+    .eq('id', alvo.id)
+    .maybeSingle<{ resumo_enviado_em: string | null }>()
+  if (!ped?.resumo_enviado_em) return nao
+
   // Divergência continua barrando de propósito: é ambiguidade que a confecção
   // não consegue adivinhar, e quem resolve é a conversa. O modelo recebe a
   // recusa com o [como levar isto ao cliente] e pergunta — e o resumo sai da
@@ -3161,7 +3181,9 @@ async function executarFerramenta(
               // dúvida, nem a pergunta agora — ver a regra DÚVIDA DELE É PONTO
               // FINAL. Com o sim, o código manda (enviarResumoSeEleConfirmou).
               ? 'Pedido pronto. Se ele NÃO acabou de fazer uma pergunta, pergunte em uma linha: "Posso enviar o resumo ' +
-                'do pedido pra sua aprovação?". Com o sim, o resumo sai. Se ele fez uma pergunta, responda só ela.'
+                'do pedido pra sua aprovação?". Com o sim, o resumo sai. Se ele fez uma pergunta, responda só ela. ' +
+                'Não emende "antes de liberar pras confecções" nessa pergunta: são duas perguntas, uma de cada vez — ' +
+                'o resumo primeiro, a liberação só depois de ele ver o resumo.'
               : pronto.pecasCompletas
                 // As peças estão de pé — o que falta são dados de frete e nota.
                 // O PDF fica pro fim, com o sim dele (25/09): antes ia agora,
