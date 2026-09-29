@@ -74,6 +74,8 @@ export const TEMPLATE_SONDAGEM = process.env.WHATSAPP_TEMPLATE_SONDAGEM || 'sond
  * ou quando o pedido não tem imagem, sai o template antigo.
  */
 export const TEMPLATE_SONDAGEM_FOTO = process.env.WHATSAPP_TEMPLATE_SONDAGEM_FOTO || 'sondagem_foto_v1'
+/** Sem foto: só "Gostaria de tirar uma dúvida sobre uma produção com vocês" (29/09/2026). Cai no antigo enquanto não aprova. */
+export const TEMPLATE_SONDAGEM_V2 = process.env.WHATSAPP_TEMPLATE_SONDAGEM_V2 || 'sondagem_v2'
 
 
 /**
@@ -236,6 +238,15 @@ export async function templateSondagemAprovado(): Promise<boolean> {
   const aprovados = await listarTemplates()
   const ok = aprovados.some((t) => t.name === TEMPLATE_SONDAGEM && t.language === IDIOMA_TEMPLATE_SONDAGEM)
   if (ok) cacheAprovado = { ok, em: Date.now() }
+  return ok
+}
+
+let cacheAprovadoV2: { ok: boolean; em: number } | null = null
+export async function templateSondagemV2Aprovado(): Promise<boolean> {
+  if (cacheAprovadoV2?.ok && Date.now() - cacheAprovadoV2.em < CACHE_APROVACAO_MS) return true
+  const aprovados = await listarTemplates()
+  const ok = aprovados.some((t) => t.name === TEMPLATE_SONDAGEM_V2 && t.language === IDIOMA_TEMPLATE_SONDAGEM)
+  if (ok) cacheAprovadoV2 = { ok, em: Date.now() }
   return ok
 }
 
@@ -1452,6 +1463,8 @@ export function textoSondagemFoto(peca: string): string {
   return `Vocês produzem ${peca} nesse estilo?`
 }
 
+export const TEXTO_SONDAGEM_V2 = 'Gostaria de tirar uma dúvida sobre uma produção com vocês'
+
 export function textoSondagemWhatsApp(nomeConfeccao: string | null): string {
   const oi = nomeConfeccao ? `Oi, ${nomeConfeccao}, tudo bem?` : 'Oi, tudo bem?'
   return `${oi} Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês.`
@@ -1565,7 +1578,8 @@ export async function enviarSondagem(id: string, c: { nome: string | null; email
   } else if (c.whatsapp) {
     // Com foto quando dá (template aprovado + pedido com imagem); senão o antigo.
     const imagem = (await templateSondagemFotoAprovado()) ? await imagemDoPedido(perfil.pedidoId) : null
-    if (!imagem && !(await templateSondagemAprovado())) {
+    const v2 = !imagem && (await templateSondagemV2Aprovado())
+    if (!imagem && !v2 && !(await templateSondagemAprovado())) {
       whatsapp = false
       erros.push(`whatsapp: template ${TEMPLATE_SONDAGEM} ainda não aprovado na Meta`)
     } else {
@@ -1586,11 +1600,21 @@ export async function enviarSondagem(id: string, c: { nome: string | null; email
             { type: 'header', parameters: [{ type: 'image', image: { link: imagem } }] },
             { type: 'body', parameters: [{ type: 'text', text: peca }] },
           ])
-        : await enviarTemplate(c.whatsapp, TEMPLATE_SONDAGEM, IDIOMA_TEMPLATE_SONDAGEM, [
-            { type: 'body', parameters: [{ type: 'text', text: (c.nome || 'pessoal').slice(0, 60) }] },
-          ])
+        : v2
+          ? await enviarTemplate(c.whatsapp, TEMPLATE_SONDAGEM_V2, IDIOMA_TEMPLATE_SONDAGEM)
+          : await enviarTemplate(c.whatsapp, TEMPLATE_SONDAGEM, IDIOMA_TEMPLATE_SONDAGEM, [
+              { type: 'body', parameters: [{ type: 'text', text: (c.nome || 'pessoal').slice(0, 60) }] },
+            ])
       whatsapp = r.ok
-      if (r.ok) await registrarSaidaInbox(c.whatsapp, c.nome, r.wamid, imagem ? textoSondagemFoto(peca) : textoSondagemWhatsApp(c.nome), imagem ? TEMPLATE_SONDAGEM_FOTO : TEMPLATE_SONDAGEM, 'luigi')
+      if (r.ok)
+        await registrarSaidaInbox(
+          c.whatsapp,
+          c.nome,
+          r.wamid,
+          imagem ? textoSondagemFoto(peca) : v2 ? TEXTO_SONDAGEM_V2 : textoSondagemWhatsApp(c.nome),
+          imagem ? TEMPLATE_SONDAGEM_FOTO : v2 ? TEMPLATE_SONDAGEM_V2 : TEMPLATE_SONDAGEM,
+          'luigi'
+        )
       else erros.push(`whatsapp: ${r.erro}`)
     }
   }
@@ -2250,7 +2274,7 @@ function promptCandidato(cand: CandidatoLinha, perfil: PerfilBusca | null, pdfJa
           (perfil.prazoDias ? `\nPrazo que o cliente pediu: ${perfil.prazoDias} dias — só se ela perguntar; na abordagem não entra.` : '')
         : '')
     : 'pedido não encontrado (o Fernando resolve)'
-  return `Você é o Luigi, da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções de todo o Brasil (sede em Recife). Está falando pelo WhatsApp oficial com uma CONFECÇÃO que a gente abordou por causa de um pedido sem fornecedor. A abertura foi uma FOTO de um modelo do pedido com "Vocês produzem X nesse estilo?" (ou, sem foto, "Oi, tudo bem? Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês.") — o histórico mostra qual. NÃO SE APRESENTE ("Luigi, da Confeccione, de Recife" é proibido como abertura: a Tocha Confecções, 29/09, recebeu isso e um parágrafo de pedido). Quando ela responder: se disse "sim, fazemos" → vá explicando o pedido POR CONVERSA, curto: quantas peças, cor, entrega em que cidade, uma ou duas frases, e pergunte se dá pra vocês. Se ela respondeu "oi", "pode falar", "quem é?" → a dúvida em si, uma linha: "vocês produzem X? é um pedido de N peças pra entregar em Y". Só DEPOIS de ela dizer que faz e que dá, você conta em uma frase que é pela Confeccione (a gente conecta o pedido à confecção e o pagamento é garantido) e pergunta: posso encaminhar o pedido pra vocês como fornecedor? Com o sim, chame cadastrar_confeccao SEM entrevista (cadastro em off) — a oferta chega pra ela na hora. Se perguntarem o que é a Confeccione ou como funciona, a resposta é a fala literal de "SÓ QUANDO ELA PERGUNTAR" (abaixo) — e só quando perguntarem.
+  return `Você é o Luigi, da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções de todo o Brasil (sede em Recife). Está falando pelo WhatsApp oficial com uma CONFECÇÃO que a gente abordou por causa de um pedido sem fornecedor. A abertura foi uma FOTO de um modelo do pedido com "Vocês produzem X nesse estilo?" (ou, sem foto, só "Gostaria de tirar uma dúvida sobre uma produção com vocês") — o histórico mostra qual. NÃO SE APRESENTE ("Luigi, da Confeccione, de Recife" é proibido como abertura: a Tocha Confecções, 29/09, recebeu isso e um parágrafo de pedido). Quando ela responder: se disse "sim, fazemos" → vá explicando o pedido POR CONVERSA, curto: quantas peças, cor, entrega em que cidade, uma ou duas frases, e pergunte se dá pra vocês. Se ela respondeu "oi", "pode falar", "quem é?" → a dúvida em si, uma linha: "vocês produzem X? é um pedido de N peças pra entregar em Y". Só DEPOIS de ela dizer que faz e que dá, você conta em uma frase que é pela Confeccione (a gente conecta o pedido à confecção e o pagamento é garantido) e pergunta: posso encaminhar o pedido pra vocês como fornecedor? Com o sim, chame cadastrar_confeccao SEM entrevista (cadastro em off) — a oferta chega pra ela na hora. Se perguntarem o que é a Confeccione ou como funciona, a resposta é a fala literal de "SÓ QUANDO ELA PERGUNTAR" (abaixo) — e só quando perguntarem.
 
 ATUALIZAR O PERFIL DE PRODUÇÃO (quando a conversa for essa). Se a confecção já é cadastrada e o assunto é atualizar o perfil dela, o seu trabalho é uma conversa curta, não um questionário. O que a gente precisa saber, em ordem de importância:
 
@@ -2381,7 +2405,7 @@ FOTO, ARQUIVO E ÁUDIO. No histórico, [image] é foto que ela mandou sem texto;
 
 CATÁLOGO EM PDF É A RESPOSTA, NÃO UM ANEXO — 29/09/2026. Quando ela manda um PDF, ele vem INTEIRO no histórico e você LÊ. Catálogo, tabela de produtos, portfólio: tire dali as peças que ela faz e diga em uma linha o que viu ("vi no catálogo: jaleco, scrub, avental e calça de brim"), e grave — produtos do cadastrar_confeccao se ela ainda não tem cadastro, servicos do salvar_perfil_producao se já tem. NUNCA pergunte "o que vocês fabricam?" ou "cita 3 modelos" depois de receber o catálogo: a Bandar Uniformes mandou o catálogo e ouviu exatamente isso de volta. Se o histórico mostra só "[document]" (arquivo pesado que não deu pra abrir), aí sim diga que recebeu e peça as 3 peças principais por texto — uma vez.
 
-MENSAGEM AUTOMÁTICA DELA. "Bem-vindo à X", horário de atendimento, "informe seu nome, cidade e empresa" é robô de boas-vindas, não resposta à sua pergunta. Responda o que ele pede em uma linha ("Luigi, da Confeccione, de Recife") e mantenha a sua pergunta na mesma mensagem. O que estiver nessa mensagem automática (mínimo de peças, "só atacado", o que fazem) já vale como dado dela — não pergunte de novo.
+MENSAGEM AUTOMÁTICA DELA. "Bem-vindo à X", horário de atendimento, "informe seu nome, cidade e empresa", "envie a quantidade e uma foto de referência" é robô de boas-vindas, não resposta à sua pergunta. Trate como se ninguém tivesse falado: mande a dúvida do pedido em uma linha (quantidade, peça, cidade), sem se apresentar e SEM NARRAR o que você está fazendo. A SR7 (29/09) recebeu "É uma mensagem automática deles. Respondo o que pede e mantenho minha pergunta" — isso é o seu raciocínio vazando pra tela da confecção; nunca escreva frase sobre a conversa, só a conversa. O que estiver nessa mensagem automática (mínimo de peças, "só atacado", o que fazem) já vale como dado dela — não pergunte de novo.
 
 GENTE DA EQUIPE FALOU. Mensagem marcada "[Fernando, da equipe, escreveu isto]" é de uma pessoa nossa, e a conversa passou a ser dela: não desdiga, não retome a pergunta que você fazia antes dele e não repita o que ele já disse. Só continue se ela trouxer coisa nova pra você responder.
 
@@ -2552,6 +2576,26 @@ const FERRAMENTAS_CANDIDATO: Anthropic.Messages.Tool[] = [
 
 function textoDaResposta(content: Anthropic.Messages.ContentBlock[]): string {
   return content.filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text').map((b) => b.text).join('\n').trim()
+}
+
+/**
+ * RACIOCÍNIO NÃO VAI PRA TELA — 29/09/2026. A SR7 recebeu "É uma mensagem
+ * automática deles. Respondo o que pede e mantenho minha pergunta" e depois
+ * "---" e a pergunta. O modelo narrou o plano como se fosse fala. Parágrafo
+ * que fala DA conversa (em vez de falar COM ela) cai aqui, junto com o
+ * separador e a autoapresentação que o prompt já proíbe.
+ */
+const NARRACAO_INTERNA =
+  /^(é uma mensagem autom[aá]tica|mensagem autom[aá]tica d|respondo (o que|a)|mantenho (a|minha)|vou (responder|manter|mandar|perguntar|seguir)|ignoro|sigo com|como (ela|ele) (disse|respondeu|mandou))/i
+const AUTOAPRESENTACAO = /^luigi,? da confeccione(,? de recife)?[.!]?$/i
+export function semNarracaoInterna(texto: string): string {
+  const paragrafos = texto
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0 && !/^-{2,}$/.test(p) && !NARRACAO_INTERNA.test(p))
+    .map((p) => p.split('\n').filter((l) => !AUTOAPRESENTACAO.test(l.trim())).join('\n').trim())
+    .filter(Boolean)
+  return paragrafos.join('\n\n')
 }
 
 function paraWhatsApp(texto: string): string {
@@ -2984,7 +3028,7 @@ export async function responderCandidato(params: {
 
   // Escalou: quem fala em seguida é o Fernando, pelo inbox.
   if (!resposta && !escalada) resposta = ''
-  resposta = paraWhatsApp(resposta)
+  resposta = semNarracaoInterna(paraWhatsApp(resposta))
   void marcarComoLida(params.wamid).catch(() => false)
 
   // ---------------------------------------------------- não fale duas vezes

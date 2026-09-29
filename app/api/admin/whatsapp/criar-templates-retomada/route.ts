@@ -329,7 +329,19 @@ export async function POST(req: NextRequest) {
   // da Confeccione, de Recife", a abordagem é a foto de um modelo do pedido
   // com "Vocês produzem {{1}} nesse estilo?". Cabeçalho IMAGE exige um exemplo
   // subido pelo upload resumable (meta-upload.ts); montado aqui na hora.
-  const lista: Array<Record<string, unknown>> = [...TEMPLATES]
+  const lista: Array<Record<string, unknown>> = [
+    ...TEMPLATES,
+    // SONDAGEM SEM APRESENTAÇÃO — 29/09/2026 (decisão do Fernando): "esse
+    // início também pode morrer, coloca só: gostaria de tirar uma dúvida
+    // sobre uma produção com vocês". Sem nome, sem "aqui é o Luigi". É o
+    // fallback da sondagem com foto quando o pedido não tem imagem.
+    {
+      name: 'sondagem_v2',
+      language: 'pt_BR',
+      category: 'MARKETING',
+      components: [{ type: 'BODY', text: 'Gostaria de tirar uma dúvida sobre uma produção com vocês' }],
+    },
+  ]
   try {
     const exemplo = await fetch(EXEMPLO_IMAGEM_SONDAGEM)
     if (!exemplo.ok) throw new Error(`imagem de exemplo: HTTP ${exemplo.status}`)
