@@ -7,6 +7,7 @@ import { fecharPedidosProntos } from '@/app/lib/fechar-pedido-automatico'
 import { rodarCutucadaJanela } from '@/app/lib/cutucada-janela'
 import { rodarCobrancaOrcamento } from '@/app/lib/cobranca-orcamento'
 import { rodarRevisaoPerfil } from '@/app/lib/revisao-perfil'
+import { reconciliarPagamentosAsaas } from '@/app/lib/asaas-reconciliar'
 // criarEDispararOferta, avisarGestor, enviarTextoSimples e
 // emailAdminFornecedorExpirou saíram em 10/09/2026 junto com o reenvio da era
 // antiga (ver TAREFA 1). Quem oferta hoje é app/lib/oferta-automatica.ts.
@@ -121,6 +122,20 @@ export async function GET(req: Request) {
     revisaoPerfil = { erro: e instanceof Error ? e.message : String(e) }
   }
 
+  // TAREFA 16: reconciliar pagamentos com o Asaas, uma vez por hora
+  // (29/09/2026 — Ester 311 pagou em 17/09 sem webhook). Roda sempre, em
+  // qualquer horário: pagamento não espera segunda-feira. Ver asaas-reconciliar.ts.
+  let reconciliacaoAsaas: Awaited<ReturnType<typeof reconciliarPagamentosAsaas>> | { erro: string } | { pulado: string }
+  if (new Date().getMinutes() < 15) {
+    try {
+      reconciliacaoAsaas = await reconciliarPagamentosAsaas({ silencioso: false })
+    } catch (e) {
+      reconciliacaoAsaas = { erro: e instanceof Error ? e.message : String(e) }
+    }
+  } else {
+    reconciliacaoAsaas = { pulado: 'só na primeira rodada de cada hora' }
+  }
+
   // TAREFA 11 ANTES DA 10, DE PROPÓSITO — 15/09/2026.
   //
   // O aviso é barato (duas somas em `uso_ia`) e o reprocesso é caro (até 3
@@ -158,6 +173,7 @@ export async function GET(req: Request) {
       cutucada_janela: cutucadaJanela,
       cobranca_orcamento: cobrancaOrcamento,
       revisao_perfil: revisaoPerfil,
+      reconciliacao_asaas: reconciliacaoAsaas,
       reprocesso_ia: reprocesso,
       consumo_ia: consumoIa,
       duracao_ms: Date.now() - inicio,
@@ -462,6 +478,7 @@ export async function GET(req: Request) {
     cutucada_janela: cutucadaJanela,
     cobranca_orcamento: cobrancaOrcamento,
     revisao_perfil: revisaoPerfil,
+    reconciliacao_asaas: reconciliacaoAsaas,
     cutucada_captacao: cutucadaCaptacao,
     fechamento_automatico: fechamento,
     reprocesso_ia: reprocesso,
