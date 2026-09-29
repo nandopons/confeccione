@@ -1,23 +1,34 @@
 // app/lib/oferta-automatica.ts
 // ============================================================================
-// FILA DE OFERTA — uma confecção por vez (09/09/2026)
+// FILA DE OFERTA — uma confecção por vez, e a fila não para (09/09 → 29/09/2026)
 //
 // Regra definida pelo Fernando:
-//   • o pedido vai pra UMA confecção, a de melhor match
-//   • ela tem 3 horas COMERCIAIS pra aceitar ou recusar (7h–19h de Recife)
-//   • cada confecção segura no máximo 2 ofertas ao mesmo tempo
-//   • venceu ou recusou, passa pra próxima da lista
-//   • acabou a lista, o pedido vai pra captação de confecção nova
+//   • o pedido vai pra UMA confecção por vez, a de melhor match
+//   • ela tem uma janela de resposta (1 h se o cliente tem pressa, 2 h, 3 h —
+//     ver horasParaResponder), em horário de fábrica
+//   • passou a janela sem resposta, a PRÓXIMA da lista recebe — e a anterior
+//     continua podendo aceitar: a oferta dela não morre (29/09)
+//   • quem aceitar primeiro leva; o aceite cancela as outras
+//   • cada confecção segura no máximo 2 ofertas com janela viva ao mesmo tempo
+//   • passadas 24 h sem aceite, a captação sai atrás de confecção nova em
+//     paralelo (captacao-pedido.ts)
+//   • expediente: seg–sex, 8h–18h (estaEmHorarioDeOferta)
 //
-// POR QUE FILA E NÃO LEILÃO
-// Mandar o mesmo pedido pra 43 confecções de uma vez parece mais rápido e é
-// mais lento: ninguém se sente dono, todo mundo espera outro responder, e a
-// que aceita descobre que outras cinco também viram. Uma por vez cria dono e
-// dá um prazo real de resposta.
+// ISTO NÃO É LEILÃO — e o Fernando fez questão (29/09): "não quero que vire
+// leilão, é só agilizar pra girar mais rápido os pedidos". Continua sendo uma
+// por vez, na ordem do match, cada uma com o seu prazo. A oferta não diz
+// quantas já viram nem quantas ainda vão ver; a confecção não disputa preço
+// com ninguém — o orçamento é dela, depois do aceite. O que mudou é só o
+// destino da oferta que passou da hora: antes virava `cancelada` (a confecção
+// que abria o link à tarde encontrava "pedido fechado"), agora fica aberta.
+// Até 29/09, 28 ofertas em 60 dias morreram na guilhotina, e um pedido de
+// nicho levava uma semana pra passar por cinco confecções.
 //
-// O TETO DE 2 é o que impede a fila de sempre escolher a mesma confecção boa.
-// Sem ele, a melhor pontuada receberia todo pedido novo e viraria gargalo — a
-// fila estaria "funcionando" enquanto a operação trava numa pessoa só.
+// O TETO DE 2 (só oferta com `expira_em` no futuro conta) é o que impede a
+// fila de sempre escolher a mesma confecção boa — e é o que impede a fila de
+// travar: a vaga dela libera quando a janela passa, mesmo com a oferta ainda
+// aberta. Sem isso, oferta que não vence entupiria todo mundo no teto em
+// dois dias.
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
