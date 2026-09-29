@@ -53,7 +53,10 @@ const MAX_BUSCAS_WEB = 10
 const MAX_TOKENS_BUSCA = 4000
 const MAX_RODADAS_RESPOSTA = 4
 const MAX_TOKENS_RESPOSTA = 500
-const PEDIDOS_POR_RODADA = 4
+// Era 4. Subiu pra 8 em 29/09/2026 ("vamo nessa, botar pra trabalhar"): com a
+// captação rodando 5 vezes por dia (9, 11, 13, 15, 17h), 8 por rodada cobre os
+// ~10 pedidos em busca em duas rodadas em vez de esperar o dia seguinte.
+const PEDIDOS_POR_RODADA = 8
 const HISTORICO_MENSAGENS = 20
 
 /**
