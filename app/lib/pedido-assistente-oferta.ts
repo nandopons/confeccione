@@ -115,6 +115,7 @@ export type FornecedorOpcao = {
   /** Prazo mínimo que ela aceita. Null = não informou, recebe tudo. */
   prazo_minimo_dias: number | null
   faccao?: boolean | null
+  pecas_nao_faz?: string[] | null
   /** Histórico de resposta (engajamento-fornecedor.ts). Ausente = neutro. */
   engajamento?: { respondidas: number; ignoradas: number; horasResposta: number | null } | null
 }
@@ -323,7 +324,7 @@ export async function listarPedidosPagos(): Promise<{
   // interrompe o disparo automático, não a escolha manual).
   const { data: fornRaw } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pecas, pedido_minimo, prazo_minimo_dias, faccao')
+    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pecas, pecas_nao_faz, pedido_minimo, prazo_minimo_dias, faccao')
     // QUEM O SISTEMA NÃO OFERTA, A TELA NÃO OFERECE — 12/09/2026.
     //
     // Esta lista carregava `leads_fornecedores` inteira, enquanto o matching

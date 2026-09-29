@@ -845,11 +845,11 @@ export default function PedidosPagosAdmin() {
                                 const fraco = m.startsWith(MOTIVO_PECA_LEGADA)
                                 // A tag FACÇÃO já está ao lado do nome; o motivo só aparece quando é o que barra.
                                 if (m === MOTIVO_FACCAO) return null
-                                const engaj = m.startsWith('responde') || m.startsWith('ignorou')
+                                const engaj = m.startsWith('responde') || m.startsWith('ignorou') || m.startsWith('disse que não faz')
                                 if (!forte && !fraco && !engaj && m !== x.match.motivos[0] && m !== MOTIVO_FACCAO_LONGE) return null
                                 const cor = !x.match.viavel
                                   ? 'bg-amber-50 text-amber-700'
-                                  : m.startsWith('ignorou')
+                                  : m.startsWith('ignorou') || m.startsWith('disse que não faz')
                                     ? 'bg-red-50 text-red-600'
                                     : m.startsWith('responde')
                                       ? 'bg-sky-50 text-sky-700'

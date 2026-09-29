@@ -458,6 +458,27 @@ export function pareceRecadoInterno(texto: string): boolean {
 const PERGUNTA_PROIBIDA_FORNECEDOR =
   /tem\s+(mais\s+)?foto|mais\s+(uma\s+|alguma\s+)?foto|foto\s+de\s+\S+(\s+\S+)?\s+tamb[eé]m|(prazo|tempo)\s+(m[eé]dio|de\s+produ[cç][aã]o|de\s+entrega)|quanto\s+(tempo|menor|maior)|quantos\s+dias|em\s+m[eé]dia|(tamanho|lote|pedido)\s+m[ií]nimo|m[ií]nimo\s+de\s+(lote|pe[cç]as)|capacidade|restri[cç][aã]o|preferem\s+receber|costumam\s+(recusar|pegar)|que\s+tipos?\s+de\s+pedido/i
 
+/**
+ * "ESSE PRODUTO NÃO FAÇO" VIRA DADO — 29/09/2026 (decisão do Fernando): "o
+ * Luigi entende qual é o produto pra não ficar ofertando novamente". Grava os
+ * ids do catálogo em leads_fornecedores.pecas_nao_faz (união) e tira os mesmos
+ * de `pecas`, porque uma peça não pode estar nas duas listas. O match lê
+ * pecas_nao_faz e não oferta mais pedido dessa peça pra ela.
+ */
+async function registrarPecasQueNaoFaz(fornecedorId: string, ids: unknown): Promise<string[]> {
+  const novas = Array.isArray(ids) ? [...new Set(ids.map((x) => String(x).trim()).filter(pecaValida))] : []
+  if (novas.length === 0) return []
+  const { data: atual } = await supabaseAdmin
+    .from('leads_fornecedores')
+    .select('pecas, pecas_nao_faz')
+    .eq('id', fornecedorId)
+    .maybeSingle<{ pecas: string[] | null; pecas_nao_faz: string[] | null }>()
+  const naoFaz = [...new Set([...(atual?.pecas_nao_faz ?? []), ...novas])]
+  const faz = (atual?.pecas ?? []).filter((p) => !naoFaz.includes(p))
+  await supabaseAdmin.from('leads_fornecedores').update({ pecas_nao_faz: naoFaz, pecas: faz, tipos_produto: legadoDasPecas(faz) }).eq('id', fornecedorId)
+  return novas
+}
+
 export function perguntaProibidaAoFornecedor(balao: string): boolean {
   return balao.includes('?') && PERGUNTA_PROIBIDA_FORNECEDOR.test(balao)
 }
@@ -2309,6 +2330,12 @@ const FERRAMENTA_LIBERAR: Anthropic.Messages.Tool = {
   },
 }
 
+const PECAS_NAO_FAZ_SCHEMA = {
+  type: 'array' as const,
+  items: { type: 'string' as const, enum: PECAS.map((p) => p.id) },
+  description: 'SÓ se ela disse que não faz essa peça: ids do catálogo. Ela não recebe mais pedido dessas peças.',
+}
+
 const FERRAMENTA_PERFIL_PRODUCAO: Anthropic.Messages.Tool = {
   name: 'salvar_perfil_producao',
   description:
@@ -2343,6 +2370,10 @@ const FERRAMENTA_PERFIL_PRODUCAO: Anthropic.Messages.Tool = {
         type: 'array',
         items: { type: 'string', enum: PECAS.map((p) => p.id) },
         description: 'Peças que ela disse que NÃO faz mais / quer tirar da lista (ids do catálogo). Só quando ela pedir pra tirar — nunca por dedução.',
+      },
+      pecas_nao_faz: {
+        ...PECAS_NAO_FAZ_SCHEMA,
+        description: 'Peças que ela disse que NÃO FAZ ("não faço jeans", "não pego lingerie"), traduzidas pro id do catálogo. Vai pra lista que o match consulta: ela não recebe mais pedido disso. Mande junto com nao_faz (as palavras dela).',
       },
       servicos: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'As palavras DELA, como ela falou — "regata com vivo", "calça de brim", facção, corte, estamparia. Isto é memória da conversa; quem faz o match é `pecas`.' },
       tecidos: { type: 'array', items: { type: 'string', maxLength: 40 }, description: 'malha, plana, suplex, moletom, jeans…' },
@@ -2401,6 +2432,13 @@ const FERRAMENTA_RECUSAR_OFERTA: Anthropic.Messages.Tool = {
         description: 'Código do pedido recusado (está em OFERTAS EM ABERTO). Obrigatório se houver mais de uma oferta em aberto.',
       },
       motivo: { type: 'string', maxLength: 300, description: 'Por que ela não pega, NAS PALAVRAS DELA.' },
+      pecas_nao_faz: {
+        type: 'array',
+        items: { type: 'string', enum: PECAS.map((p) => p.id) },
+        description:
+          'SÓ se o motivo é "não faço essa peça / esse tipo de produto": os ids do catálogo da peça que ela disse que não faz (traduza: "não faço jaqueta" → moletom_jaqueta; "não pego lingerie" → intima). ' +
+          'Ela não recebe mais pedido dessas peças. NÃO mande se o motivo é agenda, prazo, mínimo, cliente longe ou tecido — isso não é "não faço".',
+      },
     },
     required: ['motivo'],
   },
@@ -2417,6 +2455,7 @@ const FERRAMENTA_DESISTIR_PEDIDO: Anthropic.Messages.Tool = {
     properties: {
       pedido_codigo: { type: 'string', description: 'Código do pedido (está em PEDIDOS QUE ELA ACEITOU). Obrigatório se houver mais de um.' },
       motivo: { type: 'string', maxLength: 300, description: 'Por que não vai dar, NAS PALAVRAS DELA.' },
+      pecas_nao_faz: PECAS_NAO_FAZ_SCHEMA,
     },
     required: ['motivo'],
   },
@@ -2816,6 +2855,8 @@ async function executarFerramenta(
       }
       // Toda conversa sobre o que ela faz conta como revisão do portfólio.
       patchLead.perfil_revisado_em = new Date().toISOString()
+      const naoFazGravadas = await registrarPecasQueNaoFaz(forn, entrada.pecas_nao_faz)
+      if (naoFazGravadas.length) delete patchLead.pecas // registrarPecasQueNaoFaz já gravou pecas sem as que ela não faz
 
       if (Object.keys(patchLead).length > 0) {
         await supabaseAdmin.from('leads_fornecedores').update(patchLead).eq('id', forn)
@@ -2850,6 +2891,8 @@ async function executarFerramenta(
       const r = await desistirDoPedidoAceito(alvo.id, motivo)
       if (!r.ok) return { ok: false, aviso: `não consegui tirar o pedido dela: ${r.erro ?? 'erro'}` }
       ctx.ofertasAceitas = aceitas.filter((o) => o.id !== alvo.id)
+      const fornDesiste = await fornecedorDoContato(ctx.contato.telefone)
+      if (fornDesiste) await registrarPecasQueNaoFaz(fornDesiste, entrada.pecas_nao_faz)
       const quem = ctx.contato.nome ?? ctx.contato.telefone
       await avisarGestor(`${quem} desistiu do pedido ${alvo.codigo ?? alvo.id} depois de aceitar: "${motivo}". O pedido voltou pra busca (fila automática) e o cliente foi avisado${r.clienteAvisado ? '' : ' (aviso ao cliente falhou — vale mandar à mão)'}.`)
       return {
@@ -2970,15 +3013,20 @@ async function executarFerramenta(
       // reoferta. Failure-soft — a recusa já está gravada.
       await supabaseAdmin.from('ofertas_pedido_assistente').update({ observacao: `Recusou pelo WhatsApp: ${motivo}` }).eq('id', alvo.id)
       ctx.ofertasAbertas = abertas.filter((o) => o.id !== alvo.id)
+      const fornRecusa = await fornecedorDoContato(ctx.contato.telefone)
+      const naoFazAgora = fornRecusa ? await registrarPecasQueNaoFaz(fornRecusa, entrada.pecas_nao_faz) : []
       const quem = ctx.contato.nome ?? ctx.contato.telefone
-      await avisarGestor(`${quem} recusou o pedido ${alvo.codigo ?? alvo.id} pelo WhatsApp: "${motivo}". A oferta foi fechada — é ofertar pra outra confecção pelo painel.`)
+      await avisarGestor(
+        `${quem} recusou o pedido ${alvo.codigo ?? alvo.id} pelo WhatsApp: "${motivo}".${naoFazAgora.length ? ` Anotei que ela não faz: ${naoFazAgora.map(pecaLabel).join(', ')} — não recebe mais pedido disso.` : ''} A fila segue pra próxima confecção.`
+      )
       return {
         ok: true,
         pedido: alvo.codigo,
+        pecas_que_nao_faz_gravadas: naoFazAgora,
         proximo_passo:
           'Diga em UMA linha que está certo e que esse fica de fora, e que o próximo que combinar com ela você manda. ' +
           'Não insista, não pergunte o porquê de novo, não peça desculpa, não ofereça outro pedido (não existe). ' +
-          'Se ela contou o que não faz, grave com salvar_perfil_producao (nao_faz).',
+          (naoFazAgora.length ? '' : 'Se o motivo foi "não faço essa peça" e você não mandou pecas_nao_faz, chame recusar_oferta de novo só com pecas_nao_faz — é isso que evita ofertar de novo.'),
       }
     }
     case 'cotar_frete': {
@@ -3834,7 +3882,7 @@ OFERTAS EM ABERTO PRA ELA — é disto que ela fala quando diz "esse pedido", "o
 ${linhas.join('\n')}
 
 O que fazer com o que ela disser sobre a oferta:
-• "NÃO VOU CONSEGUIR", "não pego", "não tenho o molde", "tô sem agenda", "não faço esse tipo" → chame recusar_oferta com o motivo NAS PALAVRAS DELA e responda em UMA linha: está certo, esse fica de fora, o próximo que combinar você manda. Sem insistir, sem "tem certeza?", sem desculpa. Se ela disse o que não faz, grave também em salvar_perfil_producao (nao_faz).
+• "NÃO VOU CONSEGUIR", "não pego", "não tenho o molde", "tô sem agenda", "não faço esse tipo" → chame recusar_oferta com o motivo NAS PALAVRAS DELA e responda em UMA linha: está certo, esse fica de fora, o próximo que combinar você manda. Sem insistir, sem "tem certeza?", sem desculpa. Se o motivo é "NÃO FAÇO essa peça / esse produto", mande TAMBÉM pecas_nao_faz com o id do catálogo dessa peça: é o que impede a gente de ofertar a mesma coisa pra ela de novo (decisão do Fernando, 29/09). Agenda, prazo, mínimo, distância NÃO são "não faço" — nesses, só o motivo.
 • "EU PEGO", "pode mandar", "aceito", "quero atender esse pedido", "Ver pedido" (é o texto do botão da oferta, chega como mensagem) → o aceite é no link da oferta (ela toca e aceita lá, é um toque): UMA linha + o link, e só. Se ela tem uma oferta aberta, é essa — não liste, não pergunte qual, não se apresente antes, não pergunte "posso ajudar com mais alguma coisa?". Exemplo do que NÃO fazer (LJ Fardamentos, 29/09): "quero atender esse pedido" recebeu apresentação, explicação do que são os links, "posso ajudar com mais alguma coisa?" e depois DOIS links, em seis balões. O certo era: "É só aceitar por aqui, é um toque:" + link. Aceitar lá é o que libera o contato do cliente e a ficha técnica pra ela. Não aceite por ela e não diga que "já está com ela".
 • "OK", "beleza", "certo", joinha depois de você mandar o link → ela recebeu; não responda nada (resposta vazia). "Qualquer coisa é só chamar aqui" duas vezes seguidas é ruído.
 • "VOU VER", "chegando lá eu olho", "depois te falo" → não é sim nem não. Responda curto e espere; não cobre, não repita a oferta.

@@ -195,7 +195,7 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
 async function candidatosDisponiveis(pedidoId: string): Promise<FornecedorOpcao[]> {
   const { data: forn, error: errForn } = await supabaseAdmin
     .from('leads_fornecedores')
-    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pecas, pedido_minimo, prazo_minimo_dias, faccao')
+    .select('id, nome, whatsapp, cidade, estado, status, tipos_produto, pecas, pecas_nao_faz, pedido_minimo, prazo_minimo_dias, faccao')
     .eq('aprovacao_status', 'aprovado')
     .eq('status', 'ativo')
     .is('pausado_em', null)

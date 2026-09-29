@@ -25,6 +25,8 @@ export type FornecedorParaMatch = {
   prazo_minimo_dias: number | null
   /** Só costura (facção). Ver a migration 20260929000000. */
   faccao?: boolean | null
+  /** Peças que ela disse que NÃO faz (ids do catálogo). Ver migration 20260929040000. */
+  pecas_nao_faz?: string[] | null
   /** Histórico de resposta às ofertas (engajamento-fornecedor.ts). Ausente = nunca ofertada = neutro. */
   engajamento?: { respondidas: number; ignoradas: number; horasResposta: number | null } | null
 }
@@ -62,6 +64,9 @@ export const PESO_IGNOROU = -15
 export const TETO_IGNOROU = -60
 /** Horas: abaixo disto é "responde rápido". */
 export const HORAS_RAPIDO = 6
+
+/** Ela disse que não faz a peça pedida. */
+export const MOTIVO_NAO_FAZ = 'disse que não faz'
 
 /** A confecção é facção (só costura). A tela pinta como tag. */
 export const MOTIVO_FACCAO = 'facção'
@@ -136,6 +141,21 @@ export function pontuarFornecedor(
   // ==========================================================================
   const pedidas = pecasDoPedido(pedido)
   const fazPecasNovo = (f.pecas ?? []).filter(Boolean)
+
+  // "ESSE PRODUTO NÃO FAÇO" — 29/09/2026 (decisão do Fernando). O que ela
+  // recusou dizendo que não faz não volta pra ela: se TODA peça do pedido está
+  // na lista, inviável; se parte, desconto forte. A lista vem do recusar_oferta
+  // / desistir_do_pedido / salvar_perfil_producao (ids do catálogo).
+  const naoFaz = new Set((f.pecas_nao_faz ?? []).filter(Boolean))
+  const pedidasQueNaoFaz = pedidas.filter((q) => naoFaz.has(q))
+  if (pedidas.length > 0 && pedidasQueNaoFaz.length === pedidas.length) {
+    viavel = false
+    pontos -= 80
+    motivos.push(`${MOTIVO_NAO_FAZ} (${pedidasQueNaoFaz.map((q) => q.replace(/_/g, ' ')).join(', ')})`)
+  } else if (pedidasQueNaoFaz.length > 0) {
+    pontos -= 30
+    motivos.push(`${MOTIVO_NAO_FAZ} ${pedidasQueNaoFaz.map((q) => q.replace(/_/g, ' ')).join(', ')}`)
+  }
   const bateNoVocabularioNovo =
     pedidas.length > 0 && fazPecasNovo.length > 0 && pedidas.some((q) => fazPecasNovo.includes(q))
 
