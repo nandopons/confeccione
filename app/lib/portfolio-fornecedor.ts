@@ -23,7 +23,10 @@ export const MAX_PORTFOLIO_BYTES = 10 * 1024 * 1024 // 10 MiB por foto (antes de
 /** Teto por fornecedor no portfólio. Subiu de 12 pra 24 em 05/09/2026: quem
  *  produz variado enchia o álbum e ficava sem espaço pra peça nova. Quem decide
  *  o que aparece na home é a curadoria, não este número. */
-export const MAX_FOTOS_POR_FORNECEDOR = 24
+// Era 24. O Joaquim (29/09/2026) mandou mais de 80 fotos e vídeos de uma vez
+// e o Fernando: "aceita todas, na vitrine eu seleciono". O teto é só pra não
+// virar depósito sem fim; a curadoria é na vitrine.
+export const MAX_FOTOS_POR_FORNECEDOR = 150
 
 export type PortfolioItem = {
   id: string
@@ -287,13 +290,53 @@ export async function salvarFotoDaConversa(
   if (!mime.startsWith('image/')) throw new Error('esse arquivo não é uma imagem')
 
   const nome = `whatsapp.${extensaoDoMime(mime)}`
-  return uploadPortfolio(fornecedorId, new File([new Uint8Array(bytes)], nome, { type: mime }), legenda)
+  return uploadPortfolio(fornecedorId, new File([new Uint8Array(bytes)], nome, { type: mime }), legenda, midiaPath)
+}
+
+/**
+ * TODA FOTO QUE ELA MANDA ENTRA — 29/09/2026 (decisão do Fernando: "aceita
+ * todas, na vitrine eu seleciono"). Antes dependia de o modelo chamar
+ * salvar_no_portfolio, com teto de 6 por chamada e de 24 por confecção; o
+ * Joaquim mandou 80 e o Luigi escalou. Agora o código varre as imagens de
+ * entrada da conversa que ainda não estão no portfólio (`midia_path` único)
+ * e guarda, no turno em que chegam. A ferramenta do Luigi virou só um jeito
+ * de pôr legenda.
+ */
+export async function guardarFotosDaConversa(fornecedorId: string, conversaId: string, opts: { legenda?: string | null; max?: number } = {}): Promise<{ guardadas: number; jaTinha: number; erros: string[] }> {
+  const { data: fotos } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('midia_path')
+    .eq('conversa_id', conversaId)
+    .eq('direcao', 'entrada')
+    .eq('tipo', 'image')
+    .not('midia_path', 'is', null)
+    .order('criado_em', { ascending: true })
+    .limit(300)
+  const caminhos = [...new Set(((fotos ?? []) as Array<{ midia_path: string | null }>).map((f) => f.midia_path).filter((p): p is string => Boolean(p)))]
+  if (caminhos.length === 0) return { guardadas: 0, jaTinha: 0, erros: [] }
+  const { data: jaSalvas } = await supabaseAdmin.from('portfolio_fornecedores').select('midia_path').eq('fornecedor_id', fornecedorId).in('midia_path', caminhos)
+  const tem = new Set(((jaSalvas ?? []) as Array<{ midia_path: string | null }>).map((x) => x.midia_path))
+  const novas = caminhos.filter((c) => !tem.has(c)).slice(0, opts.max ?? 60)
+  let guardadas = 0
+  const erros: string[] = []
+  for (const caminho of novas) {
+    try {
+      await salvarFotoDaConversa(fornecedorId, caminho, opts.legenda ?? null)
+      guardadas++
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'falha ao guardar'
+      erros.push(msg)
+      if (/limite de \d+ fotos/.test(msg)) break
+    }
+  }
+  return { guardadas, jaTinha: tem.size, erros }
 }
 
 export async function uploadPortfolio(
   fornecedorId: string,
   file: File,
   legenda?: string | null,
+  midiaPath?: string | null,
 ): Promise<PortfolioItem> {
   const { count } = await supabaseAdmin
     .from('portfolio_fornecedores')
@@ -342,6 +385,7 @@ export async function uploadPortfolio(
       legenda: legenda?.trim() || null,
       largura: normalizada.largura,
       altura: normalizada.altura,
+      midia_path: midiaPath ?? null,
     })
     .select(CAMPOS)
     .single()

@@ -39,7 +39,7 @@ import { ehFornecedorClassificado, impedimentoParaDeixarDeSerFornecedor, reclass
 import { blocoDoPdf, ehPdf, type BlocoPdf } from './anexo-pdf'
 import { salvarPerfil, lerPerfil } from './perfil-producao'
 import { pecaLabel, pecaValida, legadoDasPecas, PECAS } from './pecas'
-import { salvarFotoDaConversa } from './portfolio-fornecedor'
+import { guardarFotosDaConversa, salvarFotoDaConversa } from './portfolio-fornecedor'
 import { enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
 import { enviarImagemDoPedido, janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 // O tipo local LinhaPedido deste arquivo é um recorte antigo, sem material nem
@@ -3091,57 +3091,14 @@ async function executarFerramenta(
       }
     }
     case 'salvar_no_portfolio': {
+      // Desde 29/09 toda foto dela já entra sozinha (ver guardarFotosDaConversa
+      // no início do turno). A ferramenta ficou pra legenda e pra garantir.
       const forn = await fornecedorDoContato(ctx.contato.telefone)
       if (!forn) return { ok: false, aviso: 'não achei o cadastro de fornecedor desse número' }
-
-      // A CONSULTA NÃO FILTRAVA PELA CONVERSA — 10/09/2026.
-      //
-      // Ela pegava a foto de entrada mais recente da tabela INTEIRA. O join com
-      // wa_conversas estava lá, mas nada era comparado com esta conversa. Com
-      // várias conversas abertas ao mesmo tempo — e hoje são muitas — a foto que
-      // outra confecção acabou de mandar ia parar no portfólio desta. Foto de
-      // terceiro no perfil de quem não costurou aquilo é o pior tipo de erro
-      // aqui: aparece pro cliente e ninguém percebe que está errado.
-      //
-      // E SALVAVA UMA SÓ. Confecção manda foto em rajada — a Vanessa mandou
-      // três seguidas. Com limit(1) as outras se perdiam, e chamar a ferramenta
-      // de novo regravava a mesma. Agora pega a leva: tudo o que entrou desta
-      // conversa depois da última foto que já guardamos dela.
-      const { data: ultimaSalva } = await supabaseAdmin
-        .from('portfolio_fornecedores')
-        .select('criado_em')
-        .eq('fornecedor_id', forn)
-        .order('criado_em', { ascending: false })
-        .limit(1)
-        .maybeSingle<{ criado_em: string }>()
-
-      let q = supabaseAdmin
-        .from('wa_mensagens')
-        .select('midia_path, criado_em')
-        .eq('conversa_id', ctx.conversaId)
-        .eq('direcao', 'entrada')
-        .eq('tipo', 'image')
-        .not('midia_path', 'is', null)
-      if (ultimaSalva?.criado_em) q = q.gt('criado_em', ultimaSalva.criado_em)
-
-      const { data: fotos } = await q.order('criado_em', { ascending: true }).limit(6)
-      const caminhos = (fotos ?? []).map((f) => f.midia_path as string).filter(Boolean)
-      if (caminhos.length === 0) return { ok: false, aviso: 'não achei foto nova mandada por ela nesta conversa' }
-
       const legenda = typeof entrada.legenda === 'string' ? entrada.legenda : null
-      let guardadas = 0
-      let ultimoErro: string | null = null
-      for (const caminho of caminhos) {
-        try {
-          await salvarFotoDaConversa(forn, caminho, legenda)
-          guardadas++
-        } catch (e) {
-          // Uma foto corrompida ou grande demais não pode derrubar as outras.
-          ultimoErro = e instanceof Error ? e.message : 'falha ao guardar'
-        }
-      }
-      if (guardadas === 0) return { ok: false, erro: ultimoErro ?? 'falha ao guardar' }
-      return { ok: true, guardadas, aviso: ultimoErro ? `${guardadas} guardada(s); uma falhou: ${ultimoErro}` : undefined }
+      const r = await guardarFotosDaConversa(forn, ctx.conversaId, { legenda })
+      if (r.guardadas === 0 && r.jaTinha === 0) return { ok: false, aviso: r.erros[0] ?? 'não achei foto mandada por ela nesta conversa' }
+      return { ok: true, guardadas: r.guardadas, ja_estavam: r.jaTinha, aviso: r.erros.length ? `${r.guardadas} guardada(s); falhou: ${r.erros[0]}` : 'As fotos dela já estão no perfil. Uma frase curta e só — não descreva, não peça mais.' }
     }
     case 'chamar_humano': {
       // DEVOLVIDA À MÃO NÃO VOLTA — 10/09/2026.
@@ -5974,6 +5931,14 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // aprovada. Ali, ignorância mantém o que era; aqui, ausência de contato vai
     // pra cliente. São perguntas diferentes com respostas seguras diferentes.
     const ehFornecedor = contato?.fornecedor_id ? await fornecedorVigente(contato.fornecedor_id) : false
+
+    // TODA FOTO DA CONFECÇÃO VAI PRO PORTFÓLIO, SEM DEPENDER DO MODELO — 29/09/2026.
+    // O Joaquim mandou 80 fotos; o Luigi guardou nenhuma e escalou. O Fernando:
+    // "aceita todas, na vitrine eu seleciono". Failure-soft e antes do modelo:
+    // se ele responder besteira, as fotos já estão salvas.
+    if (ehFornecedor && contato?.fornecedor_id && params.tipo === 'image') {
+      await guardarFotosDaConversa(contato.fornecedor_id, params.conversaId).catch((err) => console.error('[luigi] portfólio automático', err))
+    }
 
     const base = {
       conversa_id: params.conversaId,
