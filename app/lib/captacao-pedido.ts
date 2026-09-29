@@ -27,6 +27,7 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { supabaseAdmin } from './supabase-server'
+import { refParaUrl } from './imagens-pedido-storage'
 import { salvarFotoDaConversa } from './portfolio-fornecedor'
 import { salvarPerfil } from './perfil-producao'
 import { registrarUsoIa } from './uso-ia'
@@ -62,6 +63,14 @@ const HISTORICO_MENSAGENS = 20
  * serve pra trocar de nome sem deploy.
  */
 export const TEMPLATE_SONDAGEM = process.env.WHATSAPP_TEMPLATE_SONDAGEM || 'sondagem_producao'
+/**
+ * SONDAGEM COM FOTO — 29/09/2026 (decisão do Fernando). "No lugar de 'Luigi,
+ * da Confeccione, de Recife', fala assim: vocês produzem corta-vento nesse
+ * estilo? e manda a foto de um modelo." Cabeçalho IMAGE (mockup ou foto do
+ * pedido) + "Vocês produzem {{1}} nesse estilo?". Enquanto a Meta não aprova,
+ * ou quando o pedido não tem imagem, sai o template antigo.
+ */
+export const TEMPLATE_SONDAGEM_FOTO = process.env.WHATSAPP_TEMPLATE_SONDAGEM_FOTO || 'sondagem_foto_v1'
 
 
 /**
@@ -225,6 +234,36 @@ export async function templateSondagemAprovado(): Promise<boolean> {
   const ok = aprovados.some((t) => t.name === TEMPLATE_SONDAGEM && t.language === IDIOMA_TEMPLATE_SONDAGEM)
   if (ok) cacheAprovado = { ok, em: Date.now() }
   return ok
+}
+
+let cacheAprovadoFoto: { ok: boolean; em: number } | null = null
+export async function templateSondagemFotoAprovado(): Promise<boolean> {
+  if (cacheAprovadoFoto?.ok && Date.now() - cacheAprovadoFoto.em < CACHE_APROVACAO_MS) return true
+  const aprovados = await listarTemplates()
+  const ok = aprovados.some((t) => t.name === TEMPLATE_SONDAGEM_FOTO && t.language === IDIOMA_TEMPLATE_SONDAGEM)
+  if (ok) cacheAprovadoFoto = { ok, em: Date.now() }
+  return ok
+}
+
+/**
+ * A foto que vai no cabeçalho da sondagem: o mockup do primeiro modelo, ou a
+ * primeira foto que o cliente mandou. URL pública (a rota /arquivo é aberta),
+ * porque a Meta busca a imagem de lá.
+ */
+export async function imagemDoPedido(pedidoId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin.from('pedidos_assistente').select('mockups').eq('id', pedidoId).maybeSingle<{ mockups: unknown }>()
+  const mapa = (data?.mockups ?? null) as Record<string, { ia?: Array<{ url?: string }>; fotos?: string[] }> | null
+  if (!mapa) return null
+  for (const k of Object.keys(mapa).sort()) {
+    const m = mapa[k]
+    const candidatos = [...(m?.ia ?? []).map((x) => x?.url), ...(m?.fotos ?? [])].filter((x): x is string => typeof x === 'string')
+    for (const ref of candidatos) {
+      const url = refParaUrl(ref, pedidoId)
+      if (url.startsWith('/')) return `https://www.confeccione.com.br${url}`
+      if (url.startsWith('http')) return url
+    }
+  }
+  return null
 }
 
 /** Situação do template na Meta, pro painel dizer se a sondagem sai também por WhatsApp. */
@@ -490,12 +529,25 @@ function telefoneParaWaId(v: string | null): { whatsapp: string | null; telefone
     nacional.length === 10 && /[6-9]/.test(nacional[2])
       ? `${nacional.slice(0, 2)}9${nacional.slice(2)}`
       : nacional
-  if (comNove.length !== 10 && comNove.length !== 11) return { whatsapp: null, telefone: null }
+  // FIXO NÃO TEM WHATSAPP — 29/09/2026. Império Vestidos (81 3731-1000),
+  // Ellegancy (11 5677-2429) e Lenix (48 3443-7011) vieram do Google Maps com
+  // telefone fixo, viraram wa_id e a sondagem morreu em "131026: Message
+  // undeliverable" — que parecia bloqueio da Meta. Não era: fixo tem 8 dígitos
+  // no local e nunca começa com 9. Fixo fica em `telefone`; a sondagem segue
+  // só por e-mail.
+  if (comNove.length !== 11 || comNove[2] !== '9') return { whatsapp: null, telefone: comNove.length >= 10 ? comNove : null }
   // `normalizarWaId` é a MESMA função que o resto do sistema usa pra falar com a
   // Meta. O critério dela é COMPRIMENTO, nunca prefixo — e isso importa:
   // 5591342110 é Caxias do Sul (DDD 55, 10 dígitos), e uma regra do tipo "se não
   // começa com 55, prefixa" deixaria essa linha quebrada pra sempre.
   return { whatsapp: normalizarWaId(comNove), telefone: null }
+}
+
+/** Celular brasileiro (55 + DDD + 9 dígitos começando em 9)? Fixo não recebe WhatsApp. */
+export function ehCelularBR(waId: string | null | undefined): boolean {
+  const d = (waId ?? '').replace(/\D/g, '')
+  const nacional = d.startsWith('55') && d.length >= 12 ? d.slice(2) : d
+  return nacional.length === 11 && nacional[2] === '9'
 }
 
 function emailValido(v: string | null): string | null {
@@ -900,12 +952,13 @@ async function cadastrarConfeccaoDaConversa(
   cand: CandidatoLinha,
   entrada: Record<string, unknown>,
   waId: string,
-  nomeContato: string | null
+  nomeContato: string | null,
+  perfilDoCandidato: PerfilBusca | null = null
 ): Promise<{ ok: boolean; pendente?: boolean; ofertou?: boolean; proximo_passo?: string; aviso: string }> {
   // TRAVA 1 — ELA TEM QUE TER CONFIRMADO.
   // O formulário dá de graça uma coisa que a conversa perde: a pessoa VÊ o que
   // preencheu antes de enviar. Na conversa isso só existe se for explícito.
-  if (entrada.confirmado_por_ela !== true) {
+  if (entrada.confirmado_por_ela !== true && cand.resposta !== 'interessado') {
     return {
       ok: false,
       aviso:
@@ -943,10 +996,17 @@ async function cadastrarConfeccaoDaConversa(
   // TRAVA 3 — PEDIDO MÍNIMO É NÚMERO.
   // "Depende" e "a partir de pouquinho" não gravam: o match usa este número pra
   // decidir se oferta, e um zero silencioso faz ela receber pedido de 1 peça.
+  // CADASTRO EM OFF — 29/09/2026 (decisão do Fernando): "se ele disser que
+  // sim, cadastra ele em off mesmo e já encaminha normal no nosso fluxo". Quem
+  // disse que FAZ a peça e topou receber o pedido não passa por entrevista:
+  // a peça é a do pedido, a cidade é a do Google/da conversa, o mínimo fica
+  // em branco (o mínimo dela aparece no orçamento). Quem NÃO faz a peça
+  // (galho b) continua precisando contar o que faz.
+  const emOff = cand.resposta === 'interessado'
   const minimo = typeof entrada.pedido_minimo === 'number' && Number.isFinite(entrada.pedido_minimo) && entrada.pedido_minimo > 0
     ? Math.round(entrada.pedido_minimo)
     : null
-  if (minimo === null) {
+  if (minimo === null && !emOff) {
     return {
       ok: false,
       aviso:
@@ -955,10 +1015,10 @@ async function cadastrarConfeccaoDaConversa(
     }
   }
 
-  const cidade = str(entrada.cidade)
-  const estado = (str(entrada.estado) ?? '').toUpperCase().slice(0, 2)
+  const cidade = str(entrada.cidade) ?? (emOff ? cand.cidade : null)
+  const estado = (str(entrada.estado) ?? (emOff ? cand.uf : null) ?? '').toUpperCase().slice(0, 2)
   if (!cidade || estado.length !== 2) {
-    return { ok: false, aviso: 'Faltou cidade ou estado (UF com duas letras).' }
+    return { ok: false, aviso: emOff ? 'Não sei a cidade dela: pergunte "vocês são de que cidade?" e chame de novo com cidade e estado.' : 'Faltou cidade ou estado (UF com duas letras).' }
   }
 
   // TRAVA 4 — O QUE ELA DISSE VIRA CATÁLOGO AQUI, NÃO NA CABEÇA DO MODELO.
@@ -973,9 +1033,10 @@ async function cadastrarConfeccaoDaConversa(
   // dois, grava os dois e segue. Só cai em `pendente` quando NENHUM for
   // reconhecido — e aí o texto dela inteiro vai pro `pecas_outro`, pro Fernando
   // decidir se o catálogo cresce (ver beca/estola/kimono no DEBT.md).
-  const ditos = Array.isArray(entrada.produtos)
+  const ditosEntrada = Array.isArray(entrada.produtos)
     ? entrada.produtos.map((x) => String(x).trim()).filter(Boolean).slice(0, 8)
     : []
+  const ditos = ditosEntrada.length > 0 || !emOff ? ditosEntrada : (perfilDoCandidato?.modelos ?? []).slice(0, 3)
   const pecas = [...new Set(ditos.map((d) => pecaDaLinha(d)).filter((x): x is string => Boolean(x)))]
   const foraDoCatalogo = ditos.length > 0 ? ditos.join('; ') : null
 
@@ -1388,6 +1449,10 @@ function lugarEntrega(perfil: PerfilBusca): string {
  * quando a confecção responde. Tem que bater com o corpo do template
  * `sondagem_producao` ({{1}} = nome da confecção).
  */
+export function textoSondagemFoto(peca: string): string {
+  return `Vocês produzem ${peca} nesse estilo?`
+}
+
 export function textoSondagemWhatsApp(nomeConfeccao: string | null): string {
   const oi = nomeConfeccao ? `Oi, ${nomeConfeccao}, tudo bem?` : 'Oi, tudo bem?'
   return `${oi} Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês.`
@@ -1495,8 +1560,13 @@ export async function enviarSondagem(id: string, c: { nome: string | null; email
     if (!r.ok) erros.push(`e-mail: ${r.erro}`)
   }
 
-  if (c.whatsapp) {
-    if (!(await templateSondagemAprovado())) {
+  if (c.whatsapp && !ehCelularBR(c.whatsapp)) {
+    whatsapp = false
+    erros.push('whatsapp: número fixo, sem WhatsApp — só e-mail')
+  } else if (c.whatsapp) {
+    // Com foto quando dá (template aprovado + pedido com imagem); senão o antigo.
+    const imagem = (await templateSondagemFotoAprovado()) ? await imagemDoPedido(perfil.pedidoId) : null
+    if (!imagem && !(await templateSondagemAprovado())) {
       whatsapp = false
       erros.push(`whatsapp: template ${TEMPLATE_SONDAGEM} ainda não aprovado na Meta`)
     } else {
@@ -1511,11 +1581,17 @@ export async function enviarSondagem(id: string, c: { nome: string | null; email
       const vinculo = await vincularContato(normalizarWaId(c.whatsapp), c.nome)
       if (vinculo.conflito) void avisarGestor(`Captação ia sondar um número que também é cliente. ${vinculo.conflito}`)
 
-      const r = await enviarTemplate(c.whatsapp, TEMPLATE_SONDAGEM, IDIOMA_TEMPLATE_SONDAGEM, [
-        { type: 'body', parameters: [{ type: 'text', text: (c.nome || 'pessoal').slice(0, 60) }] },
-      ])
+      const peca = (perfil.modelos[0] ?? 'essa peça').slice(0, 60)
+      const r = imagem
+        ? await enviarTemplate(c.whatsapp, TEMPLATE_SONDAGEM_FOTO, IDIOMA_TEMPLATE_SONDAGEM, [
+            { type: 'header', parameters: [{ type: 'image', image: { link: imagem } }] },
+            { type: 'body', parameters: [{ type: 'text', text: peca }] },
+          ])
+        : await enviarTemplate(c.whatsapp, TEMPLATE_SONDAGEM, IDIOMA_TEMPLATE_SONDAGEM, [
+            { type: 'body', parameters: [{ type: 'text', text: (c.nome || 'pessoal').slice(0, 60) }] },
+          ])
       whatsapp = r.ok
-      if (r.ok) await registrarSaidaInbox(c.whatsapp, c.nome, r.wamid, textoSondagemWhatsApp(c.nome), TEMPLATE_SONDAGEM, 'luigi')
+      if (r.ok) await registrarSaidaInbox(c.whatsapp, c.nome, r.wamid, imagem ? textoSondagemFoto(peca) : textoSondagemWhatsApp(c.nome), imagem ? TEMPLATE_SONDAGEM_FOTO : TEMPLATE_SONDAGEM, 'luigi')
       else erros.push(`whatsapp: ${r.erro}`)
     }
   }
@@ -2175,7 +2251,7 @@ function promptCandidato(cand: CandidatoLinha, perfil: PerfilBusca | null, pdfJa
           (perfil.prazoDias ? `\nPrazo que o cliente pediu: ${perfil.prazoDias} dias — só se ela perguntar; na abordagem não entra.` : '')
         : '')
     : 'pedido não encontrado (o Fernando resolve)'
-  return `Você é o Luigi, da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções de todo o Brasil (sede em Recife). Está falando pelo WhatsApp oficial com uma CONFECÇÃO que a gente abordou por causa de um pedido sem fornecedor. A abertura foi só "Oi, tudo bem? Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês." — então, quando ela responder ("oi", "pode falar", "quem é?"), a sua PRIMEIRA mensagem é a dúvida em si, natural e direta: temos um pedido de X pra entregar em Y, vocês produzem esse tipo de peça nessa quantidade? Não se apresente de novo (o nome já foi dito), não repita a dúvida depois. Se perguntarem o que é a Confeccione ou como funciona, a resposta é a fala literal de "SÓ QUANDO ELA PERGUNTAR" (abaixo) — e só quando perguntarem.
+  return `Você é o Luigi, da Confeccione, marketplace que conecta quem precisa produzir roupas a confecções de todo o Brasil (sede em Recife). Está falando pelo WhatsApp oficial com uma CONFECÇÃO que a gente abordou por causa de um pedido sem fornecedor. A abertura foi uma FOTO de um modelo do pedido com "Vocês produzem X nesse estilo?" (ou, sem foto, "Oi, tudo bem? Aqui é o Luigi, da Confeccione. Gostaria de tirar uma dúvida sobre uma produção com vocês.") — o histórico mostra qual. NÃO SE APRESENTE ("Luigi, da Confeccione, de Recife" é proibido como abertura: a Tocha Confecções, 29/09, recebeu isso e um parágrafo de pedido). Quando ela responder: se disse "sim, fazemos" → vá explicando o pedido POR CONVERSA, curto: quantas peças, cor, entrega em que cidade, uma ou duas frases, e pergunte se dá pra vocês. Se ela respondeu "oi", "pode falar", "quem é?" → a dúvida em si, uma linha: "vocês produzem X? é um pedido de N peças pra entregar em Y". Só DEPOIS de ela dizer que faz e que dá, você conta em uma frase que é pela Confeccione (a gente conecta o pedido à confecção e o pagamento é garantido) e pergunta: posso encaminhar o pedido pra vocês como fornecedor? Com o sim, chame cadastrar_confeccao SEM entrevista (cadastro em off) — a oferta chega pra ela na hora. Se perguntarem o que é a Confeccione ou como funciona, a resposta é a fala literal de "SÓ QUANDO ELA PERGUNTAR" (abaixo) — e só quando perguntarem.
 
 ATUALIZAR O PERFIL DE PRODUÇÃO (quando a conversa for essa). Se a confecção já é cadastrada e o assunto é atualizar o perfil dela, o seu trabalho é uma conversa curta, não um questionário. O que a gente precisa saber, em ordem de importância:
 
@@ -2234,12 +2310,12 @@ Mandar link de formulário no meio da conversa é perder a conversa: quatro conf
 A ORDEM (não é script, é ordem — e ela não avança enquanto a anterior não fechar):
 1. Você aborda com o pedido.
 2. Ela responde se faz ou não.
-   • FAZ → registrar_resposta interessado, e a mensagem seguinte é só a pergunta "${FALAS_CADASTRO.encaminhar}".
-   • NÃO FAZ → registrar_resposta nao_produz, e A CONVERSA NÃO ACABOU: um "não" pra esta peça não é um "não" pra plataforma. Siga pro mesmo cadastro, pelo galho (b) das perguntas.
+   • FAZ → registrar_resposta interessado. Explique o pedido por conversa (quantidade, cor, cidade — curto) se ainda não explicou, e quando ela disser que dá, uma frase sobre a Confeccione + a pergunta "${FALAS_CADASTRO.encaminhar}". Com o sim: cadastrar_confeccao direto, sem licença, sem as três perguntas, sem confirmação — é o CADASTRO EM OFF (decisão do Fernando, 29/09). Só pergunte a cidade se a ferramenta disser que não sabe.
+   • NÃO FAZ → registrar_resposta nao_produz, e A CONVERSA NÃO ACABOU: um "não" pra esta peça não é um "não" pra plataforma. Siga pro mesmo cadastro, pelo galho (b) das perguntas. NADA ESTÁ FORA DO ESCOPO: quem faz nécessaire, mochila, bolsa, boné, calçado, cama-mesa-banho, acessório, bordado, estamparia — produz, e entra. A Elisabete (29/09) disse "nécessaire, maletinha, mochila" e ouviu "a plataforma trabalha com vestuário, não é o perfil"; o Fernando teve que voltar e mandar o link. NUNCA diga "não é o perfil", "trabalhamos com vestuário", "não vou ter pedido que combine": diga que a gente recebe pedidos de todo tipo e pergunte se pode encaminhar o cadastro.
    • FAZ, MAS O MÍNIMO DELA É MAIOR QUE O PEDIDO ("só a partir de 100", e o pedido é de 1) → é o mesmo galho do NÃO FAZ: registrar_resposta nao_produz com a observação dizendo a peça e o mínimo ("faz bermuda; mínimo 100 peças"), e siga pelo galho (b). Em 24/09 esse caso ficou sem registro nenhum, e a cutucada automática perguntou de novo se ela fazia a peça.
    • NÃO DECIDE (balcão, vendas, robô) e indica outro número → registrar_outro_contato. Ver "QUANDO QUEM RESPONDE NÃO DECIDE".
 3. RESPONDA O QUE ELA PERGUNTAR, de verdade, até ela não ter mais dúvida. Pergunta técnica sobre o pedido (tem estampa? qual tamanho? é só a camisa?) se responde PRIMEIRO, com a resposta, e NUNCA na mesma mensagem que fala de cadastro. Em 10/09 uma confecção perguntou três vezes "terá bordado?" e levou duas respostas mandando ela ver o PDF e se cadastrar. Ela respondeu, mas não voltou.
-4. Com o sim dela pro "posso encaminhar", peça licença: "${FALAS_CADASTRO.licenca}" seguido de "${FALAS_CADASTRO.porque}"
+4. Com o sim dela pro "posso encaminhar": se ela FAZ a peça, cadastrar_confeccao AGORA (em off) e pare — os passos 5 e 6 são só pro galho (b), em que ela NÃO faz a peça do pedido. Nesse galho: peça licença: "${FALAS_CADASTRO.licenca}" seguido de "${FALAS_CADASTRO.porque}"
 5. Colete conversando, UMA pergunta por mensagem.
 6. Confirme e grave com cadastrar_confeccao. E PARA AÍ.
 
@@ -2258,7 +2334,7 @@ TRÊS É O TETO, e prazo NÃO entra. Prazo varia de negociação pra negociaçã
 
 CONFIRME ANTES DE GRAVAR, sempre, numa mensagem só, no formato:
 "${FALAS_CADASTRO.confirmacao}"
-Só chame cadastrar_confeccao depois do sim dela, com confirmado_por_ela: true. A ferramenta recusa sem isso — no formulário a pessoa VÊ o que preencheu antes de enviar, e aqui isso só existe se você fizer.
+No galho (b), só chame cadastrar_confeccao depois do sim dela, com confirmado_por_ela: true. A ferramenta recusa sem isso — no formulário a pessoa VÊ o que preencheu antes de enviar, e aqui isso só existe se você fizer.
 
 DEPOIS DE GRAVAR, diga LITERAL, conforme o galho:
 • Ela faz a peça do pedido: "${FALAS_CADASTRO.prontoFaz}"
@@ -2403,8 +2479,8 @@ const FERRAMENTAS_CANDIDATO: Anthropic.Messages.Tool[] = [
   {
     name: 'cadastrar_confeccao',
     description:
-      'Cria o cadastro da confecção AQUI na conversa, sem site. Só depois de ela dizer que faz, de você ' +
-      'ter respondido o que ela perguntou, e de ela CONFIRMAR o resumo do que você entendeu.',
+      'Cria o cadastro da confecção AQUI na conversa, sem site. Se ela FAZ a peça do pedido (resposta interessado) e disse SIM ao "posso encaminhar o pedido pra vocês?", chame SEM perguntar nada: a ferramenta preenche peça, cidade e estado sozinha (cadastro em off) e já oferta o pedido. ' +
+      'Se ela NÃO faz a peça, aí sim precisa de produtos, cidade, estado, mínimo e a confirmação dela.',
     input_schema: {
       type: 'object',
       properties: {
@@ -2426,7 +2502,7 @@ const FERRAMENTAS_CANDIDATO: Anthropic.Messages.Tool[] = [
             'Sem isso a ferramenta recusa.',
         },
       },
-      required: ['cidade', 'estado', 'pedido_minimo', 'confirmado_por_ela'],
+      required: [],
     },
   },
   {
@@ -2892,7 +2968,7 @@ export async function responderCandidato(params: {
           const r = await aceitarOfertaDaConversa(cand, entrada, waId)
           resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify(r) })
         } else if (uso.name === 'cadastrar_confeccao') {
-          const r = await cadastrarConfeccaoDaConversa(cand, entrada, waId, params.nome)
+          const r = await cadastrarConfeccaoDaConversa(cand, entrada, waId, params.nome, perfil)
           if (r.ok && r.pendente) escalada = 'confecção faz algo fora do catálogo de peças — confira o cadastro'
           resultados.push({ type: 'tool_result', tool_use_id: uso.id, content: JSON.stringify(r) })
         } else if (uso.name === 'registrar_outro_contato') {

@@ -17,6 +17,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
+import { uploadHeaderHandle } from '@/app/lib/meta-upload'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -28,6 +29,10 @@ const GRAPH_VERSION = process.env.WHATSAPP_GRAPH_VERSION || 'v23.0'
 const URL_VISUALIZADOR_DINAMICA = 'https://www.confeccione.com.br/visualizador/{{1}}'
 const EXEMPLO_VISUALIZADOR =
   'https://www.confeccione.com.br/visualizador/a1591a0f-007e-4e0d-a299-582138cc9bad'
+
+/** Mockup público de um pedido real (corta-vento do Big Shopp) — só pro exemplo do cabeçalho. */
+const EXEMPLO_IMAGEM_SONDAGEM =
+  'https://www.confeccione.com.br/api/pedido/assistente/0a468895-a9f9-4171-9ce3-b5f0229af2ff/arquivo?f=59e1e2124886544257b699000488f77c.jpg'
 
 const TEMPLATES = [
   // Confirmar pedido (marketing) — lembrete pro cliente que parou no caminho.
@@ -320,7 +325,30 @@ export async function POST(req: NextRequest) {
 
   const resultados: Array<{ nome: string; ok: boolean; id?: string; status?: string; erro?: string }> = []
 
-  for (const tpl of TEMPLATES) {
+  // SONDAGEM COM FOTO — 29/09/2026 (decisão do Fernando). No lugar de "Luigi,
+  // da Confeccione, de Recife", a abordagem é a foto de um modelo do pedido
+  // com "Vocês produzem {{1}} nesse estilo?". Cabeçalho IMAGE exige um exemplo
+  // subido pelo upload resumable (meta-upload.ts); montado aqui na hora.
+  const lista: Array<Record<string, unknown>> = [...TEMPLATES]
+  try {
+    const exemplo = await fetch(EXEMPLO_IMAGEM_SONDAGEM)
+    if (!exemplo.ok) throw new Error(`imagem de exemplo: HTTP ${exemplo.status}`)
+    const bytes = Buffer.from(await exemplo.arrayBuffer())
+    const handle = await uploadHeaderHandle(bytes, exemplo.headers.get('content-type') || 'image/jpeg')
+    lista.push({
+      name: 'sondagem_foto_v1',
+      language: 'pt_BR',
+      category: 'MARKETING',
+      components: [
+        { type: 'HEADER', format: 'IMAGE', example: { header_handle: [handle] } },
+        { type: 'BODY', text: 'Vocês produzem {{1}} nesse estilo?', example: { body_text: [['corta-vento com touca']] } },
+      ],
+    })
+  } catch (err) {
+    resultados.push({ nome: 'sondagem_foto_v1', ok: false, erro: `exemplo de imagem: ${err instanceof Error ? err.message : String(err)}` })
+  }
+
+  for (const tpl of lista) {
     try {
       const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${wabaId}/message_templates`, {
         method: 'POST',
@@ -329,15 +357,15 @@ export async function POST(req: NextRequest) {
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) {
-        resultados.push({ nome: tpl.name, ok: false, erro: data?.error?.message || `HTTP ${res.status}` })
+        resultados.push({ nome: String(tpl.name), ok: false, erro: data?.error?.message || `HTTP ${res.status}` })
       } else {
-        resultados.push({ nome: tpl.name, ok: true, id: data?.id, status: data?.status })
+        resultados.push({ nome: String(tpl.name), ok: true, id: data?.id, status: data?.status })
       }
     } catch (err) {
-      resultados.push({ nome: tpl.name, ok: false, erro: err instanceof Error ? err.message : String(err) })
+      resultados.push({ nome: String(tpl.name), ok: false, erro: err instanceof Error ? err.message : String(err) })
     }
   }
 
   const criados = resultados.filter((r) => r.ok).length
-  return NextResponse.json({ ok: true, criados, total: TEMPLATES.length, resultados })
+  return NextResponse.json({ ok: true, criados, total: lista.length, resultados })
 }
