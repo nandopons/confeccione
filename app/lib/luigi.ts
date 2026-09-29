@@ -49,7 +49,6 @@ import { editarLinhasPedidoCliente, gradeDaFerramenta, linhasComAjuste } from '.
 import { anexarFotoDaConversaAoModelo, conferirPedido, salvarDadosDoCliente, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores, pausarLembretesDoPedido, type Divergencia } from './pedido-fechamento'
 import {
   faltaParaMockup,
-  fotosDoModelo,
   gerarMockupDoModelo,
   type LinhaMockup,
   type MapaMockups,
@@ -110,19 +109,6 @@ const PROMESSA_DE_ACAO =
  * gente. As duas travas de "não fale por cima" leem esta lista.
  */
 const AGENTES_SAIDA = new Set(['luigi', 'mcp', 'gestao'])
-
-/**
- * O que dizer depois de mandar uma prévia — quatro jeitos da MESMA pergunta,
- * girando com o número da prévia do modelo (ver gerar_mockup_do_modelo). O
- * modelo copia o exemplo que recebe; dar sempre o mesmo era garantir a
- * repetição que o cliente lia na tela.
- */
-const EXEMPLOS_DEPOIS_DA_PREVIA = [
-  'assim fica bom? se quiser mudar alguma coisa eu faço outro.',
-  'ficou como você imaginou? qualquer ajuste é só me dizer que refaço.',
-  'é por aí? se preferir, me manda uma foto da peça que eu uso ela no lugar.',
-  'bateu com a ideia? posso mexer no que você quiser.',
-]
 
 /**
  * ORÇAMENTO DA RESPOSTA — 12/09/2026: 60 s.
@@ -1185,10 +1171,13 @@ function modelosParaGerarMockup(linhas: unknown, mockups: MapaMockups): number[]
   const alvos: number[] = []
   arr.forEach((linha, i) => {
     const mk = mockups[String(i)]
-    const temImagem =
-      fotosDoModelo(mk).length > 0 ||
-      (Array.isArray(mk?.ia) && mk.ia.length > 0) ||
-      Boolean(mk?.liso || mk?.arte)
+    // A FOTO DELE NÃO SUBSTITUI O VISUALIZADOR — 29/09/2026. O Guilherme
+    // prendeu a logo da marca nos 10 modelos; com `fotosDoModelo` contando
+    // como imagem, nenhum modelo entrou na lista e o pedido foi pras
+    // confecções sem uma única prévia. O Fernando quer o visualizador de CADA
+    // modelo antes do resumo, com a foto dele servindo de referência (logo,
+    // arte) pra geração — não de atalho pra pular a geração.
+    const temImagem = (Array.isArray(mk?.ia) && mk.ia.length > 0) || Boolean(mk?.liso || mk?.arte)
     if (!temImagem && faltaParaMockup(linha, mk).length === 0) alvos.push(i + 1)
   })
   return alvos
@@ -3458,7 +3447,20 @@ async function executarFerramenta(
       // Gerar é barato pro cliente (ele não vê) e vale pro PDF e pra confecção.
       // Mandar é que é intrusivo. Então: gera sempre, manda só o primeiro da
       // rodada e deixa os outros aparecerem juntos no resumo.
-      const primeiroDaRodada = ctx.mockupsNestaRodada === 0
+      // UM MODELO POR TURNO, CADA UM MOSTRADO — 29/09/2026 (decisão do
+      // Fernando). Antes: gerava todos e mandava só o primeiro, os outros iam
+      // calados pro PDF. Agora cada modelo é mostrado com "está bom?" antes do
+      // próximo, e o resumo só sai depois de todos. O teto de um por turno é
+      // código: de dentro da conversa gerar parece sempre útil.
+      if (ctx.mockupsNestaRodada >= 1) {
+        return {
+          ok: false,
+          aviso:
+            'Já gerou um visualizador neste turno. Um por vez: a pergunta "está bom?" já foi com a imagem — ' +
+            'espere a resposta dele e gere o PRÓXIMO modelo no próximo turno. Não escreva mais nada agora.',
+        }
+      }
+      const primeiroDaRodada = true
       ctx.mockupsNestaRodada += 1
 
       const imagem = r.ia[r.ia.length - 1]
@@ -3468,8 +3470,8 @@ async function executarFerramenta(
       // só é nomeado quando o pedido tem mais de um; a segunda geração diz que
       // refez. O "assim fica bom?" vem na fala do Luigi logo depois.
       const vez = Math.max(1, r.ia.length)
-      const qual = nModelos > 1 ? ` do modelo ${posicao}, ${r.modelo}` : ''
-      const legenda = vez > 1 ? `Refiz o visualizador${qual}.` : `Gerei esse visualizador${qual}.`
+      const qual = nModelos > 1 ? `Modelo ${posicao} (${r.modelo}): ` : ''
+      const legenda = vez > 1 ? `${qual}refiz o visualizador, ficou melhor assim?` : `${qual}gerei esse visualizador, está bom?`
       const envio =
         primeiroDaRodada && imagem
           ? await enviarImagemDoPedido({
@@ -3482,42 +3484,8 @@ async function executarFerramenta(
             })
           : { ok: false as const, erro: primeiroDaRodada ? 'mockup gerado sem imagem' : 'não enviado de propósito' }
 
-      // A MESMA PERGUNTA COM OUTRAS PALAVRAS — 25/09/2026. O modelo copia o
-      // exemplo daqui quase letra por letra, e na segunda prévia da mesma
-      // conversa o cliente lê duas vezes "ficou parecido com o que você quer?
-      // se quiser ajustar algum detalhe é só me falar, ou se tiver uma foto de
-      // referência é só mandar" (Big Shopp, 18:17 e 18:21: pediu touca, ganhou
-      // a touca e a mesma frase). O Fernando: "parece que ele repete; coloca
-      // pra falar a mesma coisa mudando as palavras". Então o exemplo gira
-      // com o número da prévia daquele modelo, e a partir da segunda a
-      // instrução é dizer o que mudou e não repetir a frase anterior.
-      // A rotação é pela CONVERSA, não pelo modelo: pedido de três peças
-      // gerando a primeira prévia de cada uma usaria o mesmo exemplo três
-      // vezes seguidas se o índice fosse `vez`. Conta as imagens que o Luigi
-      // já mandou nesta conversa (a de agora inclusive).
-      const { count: jaMandadas } = await supabaseAdmin
-        .from('wa_mensagens')
-        .select('id', { count: 'exact', head: true })
-        .eq('conversa_id', ctx.conversaId)
-        .eq('direcao', 'saida')
-        .eq('tipo', 'image')
-        .eq('autor', 'luigi')
-      const exemplo = EXEMPLOS_DEPOIS_DA_PREVIA[Math.max(0, (jaMandadas ?? 1) - 1) % EXEMPLOS_DEPOIS_DA_PREVIA.length]
-      // A MUDANÇA DA PRÉVIA É MUDANÇA DA PEÇA — 25/09/2026. Big Shopp pediu
-      // "faça outro com touca"; a prévia ganhou a touca, a peça não. Na hora do
-      // resumo o modelo não sabia se o pedido tinha touca e perguntou de novo.
-      const refeita =
-        vez > 1
-          ? ` Esta é a ${vez}ª prévia deste modelo nesta conversa: abra dizendo em poucas palavras o que mudou ` +
-            '("agora com o capuz", "trocada pra manga longa") e NÃO repita a frase que você usou na prévia ' +
-            'anterior — ele lê as duas juntas na tela. Mesma pergunta, palavras diferentes.' +
-            (instrucoes
-              ? ' E o que você passou em `instrucoes` ainda NÃO está na peça: grave agora, neste turno, com ' +
-                'ajustar_peca_pedido (descricao, ou o campo certo), senão o resumo sai sem a mudança e você vai ' +
-                'perguntar de novo o que ele já disse.'
-              : '')
-          : ''
-
+      // A pergunta vai NA LEGENDA da imagem (29/09/2026) — o modelo não escreve
+      // nada depois. A rotação de exemplos de 25/09 saiu com ela.
       return {
         ok: true,
         codigo: p.codigo,
@@ -3525,12 +3493,14 @@ async function executarFerramenta(
         usou_arte_do_cliente: r.referenciasUsadas > 0,
         enviado_no_whatsapp: envio.ok,
         aviso: envio.ok
-          ? `A imagem JÁ FOI para o WhatsApp dele com a legenda "${legenda}" — não descreva a imagem nem repita ` +
-            'a legenda. Agora pergunte, em UMA linha curta, se assim fica bom. Se quiser, diga em poucas palavras ' +
-            'que refaz se ele pedir (ele diz o que mudar e você gera de novo com `instrucoes`) ou que a foto dele ' +
-            'serve no lugar (você prende com anexar_foto_ao_modelo) — mas sem virar parágrafo. ' +
-            `Com as SUAS palavras — algo como: "${exemplo}"` +
-            refeita +
+          ? `A imagem JÁ FOI para o WhatsApp dele com a legenda "${legenda}" — a pergunta já está na legenda. ` +
+            'NÃO escreva mais nada neste turno: nem descrição da imagem, nem "assim fica bom?" de novo, nem texto de cortesia. ' +
+            'Resposta vazia. No próximo turno: se ele aprovar ou não pedir mudança, gere o próximo modelo da lista ' +
+            'modelos_para_gerar_mockup; se pedir mudança, gere este de novo com `instrucoes`; quando a lista estiver vazia, ' +
+            'siga pro resumo.' +
+            (vez > 1 && instrucoes
+              ? ' O que você passou em `instrucoes` ainda NÃO está na peça: grave agora com ajustar_peca_pedido (descricao ou o campo certo).'
+              : '') +
             ' Nunca diga que é foto de produção.'
           : !primeiroDaRodada
             ? 'Mockup gravado no pedido (não mandei a imagem aqui — uma por vez já basta; as outras aparecem no ' +
@@ -4115,11 +4085,11 @@ O QUE VOCÊ ENTENDEU DA IMAGEM VIRA TEXTO NO MODELO. A foto vai junto, mas quem 
 
 PRENDA A FOTO NO MODELO CERTO, sempre, com anexar_foto_ao_modelo — é assim que ela aparece no resumo e na ficha da confecção. Se o pedido tem mais de um modelo e não está claro de qual ela é, pergunte ("essa é da preta ou da branca?"): foto na peça errada faz produzir errado. Mas NUNCA narre a mecânica: nada de "foto presa", "anexei ao modelo", "registrei no sistema". Ele não tem sistema, ele tem um pedido.
 
-PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos_para_gerar_mockup". Se tiver posição nessa lista, gere o mockup de TODAS elas com gerar_mockup_do_modelo ANTES de mandar o resumo — o PDF leva as imagens junto, e pedido de três cores com um modelo ilustrado e dois vazios é meia organização. Só a primeira imagem vai pro WhatsApp; as outras entram no pedido caladas e aparecem no resumo. O cliente aprova lendo "camiseta oversized preta, algodão fio 30, 120 peças" e imaginando o resto; a confecção produz a partir da mesma frase. Toda diferença entre o que ele imaginou e o que chegou nasce aí, e o mockup é onde ela aparece a tempo de ser corrigida.
+PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos_para_gerar_mockup". Se tiver posição nessa lista, gere o visualizador de TODAS elas com gerar_mockup_do_modelo ANTES de mandar o resumo — UM modelo por mensagem, em ordem: a imagem sai com a legenda "Modelo 1 (camiseta): gerei esse visualizador, está bom?", você não escreve mais nada, espera a resposta dele, e com o ok (ou sem pedido de mudança) gera o próximo. A foto que ele mandou (logo, arte, referência) entra na geração — ela NÃO dispensa o visualizador. Só quando a lista estiver vazia o resumo sai. (Decisão do Fernando, 29/09/2026: o Guilherme aprovou 10 modelos sem ver nenhum.) O cliente aprova lendo "camiseta oversized preta, algodão fio 30, 120 peças" e imaginando o resto; a confecção produz a partir da mesma frase. Toda diferença entre o que ele imaginou e o que chegou nasce aí, e o mockup é onde ela aparece a tempo de ser corrigida.
 
-A imagem sai por aqui com uma legenda curta ("Gerei esse visualizador."). Não descreva a imagem que ele está vendo, não repita a legenda e NUNCA diga que é foto de produção nossa ou de peça pronta — é uma prévia gerada do que ele descreveu; se ele perguntar se é foto real, diga que é uma prévia gerada por IA pra conferir a ideia.
+A imagem sai por aqui com a legenda pronta ("Modelo 1 (camiseta): gerei esse visualizador, está bom?"). Depois dela você NÃO escreve nada no mesmo turno: a pergunta já foi. Não descreva a imagem, não repita a legenda e NUNCA diga que é foto de produção nossa ou de peça pronta — é uma prévia gerada do que ele descreveu; se ele perguntar se é foto real, diga que é uma prévia gerada por IA pra conferir a ideia.
 
-DEPOIS DE MOSTRAR, PERGUNTE SE ASSIM FICA BOM. Uma linha curta: "assim fica bom? se quiser mudar alguma coisa eu faço outro." Pode lembrar que a foto dele serve no lugar, em poucas palavras, sem virar parágrafo. A foto dele vale MAIS que a nossa prévia: é a peça que ele tem na cabeça, e é o que a confecção vai olhar pra produzir. Quando ela chegar, prenda no modelo com anexar_foto_ao_modelo e siga — não precisa gerar prévia nova em cima dela. Se ele pedir mudança, chame gerar_mockup_do_modelo de novo com "instrucoes" no que ele falou. Se ele disser que está certo, siga pro resumo. E se a lista vier vazia, não gere nada: já existe imagem naquele modelo.
+A RESPOSTA DELE AO VISUALIZADOR. "Está bom", "ok", "pode ser", ou qualquer coisa que não seja pedido de mudança → gere o próximo modelo da lista (ou, acabou a lista, siga pro resumo). Pedido de mudança ("mais folgada", "com capuz", "cor mais escura") → gere o MESMO modelo de novo com "instrucoes" no que ele falou e grave a mudança na peça com ajustar_peca_pedido. Foto dele da peça ou da arte → prenda com anexar_foto_ao_modelo e gere o visualizador com ela de referência; a foto ajuda a geração, não a substitui. Nunca diga que já existe imagem só porque ele mandou foto.
 
 NUNCA A MESMA FRASE DUAS VEZES NA MESMA CONVERSA. Quando ele pede um ajuste e você manda a prévia refeita, a pergunta é a mesma, as palavras não: diga primeiro o que mudou ("agora com o capuz") e pergunte de outro jeito. "Ficou parecido com o que você quer? Se quiser ajustar algum detalhe é só me falar" duas vezes seguidas, na tela dele, é robô lendo script. Vale pra toda fala sua que se repete por natureza (a pergunta depois da prévia, o "posso liberar?", o fecho): antes de escrever, olhe a sua última mensagem no histórico e não a reescreva igual.
 
