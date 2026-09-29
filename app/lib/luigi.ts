@@ -1608,9 +1608,9 @@ async function enviarResumoSeEleConfirmou(ctx: Contexto, corpo: string | null, c
     return nao
   }
   alvo.proximo_passo =
-    'O RESUMO EM PDF ACABOU DE SER ENVIADO a ele, neste turno, porque ele disse que podia. Não avise que ' +
-    '"o PDF foi enviado" (ele está vendo o arquivo), não gere prévia, não pergunte se pode mandar. Faça só a ' +
-    'pergunta de fechamento, fechada, em uma linha: "posso confirmar seu pedido e mandar pras confecções?".'
+    'O RESUMO EM PDF ACABOU DE SER ENVIADO a ele, neste turno, porque ele disse que podia — e a legenda do PDF ' +
+    'já pergunta se está tudo certo e se pode liberar pras confecções. NÃO escreva mais nada neste turno: nem ' +
+    '"o PDF foi enviado", nem prévia, nem a pergunta de novo. Resposta vazia. O sim dele à legenda libera sozinho.'
   return { enviou: true, codigo: alvo.codigo }
 }
 
@@ -3563,11 +3563,10 @@ async function executarFerramenta(
         ok: true,
         codigo: p.codigo,
         aviso:
-          'O resumo em PDF já chegou no WhatsApp dele — não avise que "o PDF foi enviado", ele está vendo o ' +
-          'arquivo. Agora faça UMA pergunta de fechamento, fechada: "posso confirmar seu pedido e mandar ' +
-          'pras confecções?". Não pergunte "está tudo certo?" — pergunta aberta convida a olhar depois, e é aí ' +
-          'que o pedido para. Com o sim, chame liberar_para_fornecedores na mesma vez. Se ele quiser mudar algo, ' +
-          'ajuste e pergunte de novo do mesmo jeito.',
+          'O resumo em PDF já chegou no WhatsApp dele, e a legenda do PDF já pergunta se está tudo certo e se ' +
+          'pode liberar pras confecções. NÃO escreva mais nada neste turno — nem "o PDF foi enviado", nem a ' +
+          'pergunta de novo. Resposta vazia. O sim dele libera sozinho; se ele quiser mudar algo, ajuste e mande ' +
+          'o resumo de novo (a pergunta vai junto).',
       }
     }
     case 'liberar_para_fornecedores': {

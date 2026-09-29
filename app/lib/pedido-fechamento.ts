@@ -1060,7 +1060,11 @@ export async function enviarResumoParaCliente(
       {
         telefone: p.telefone,
         nome: (p.nome as string | null) ?? null,
-        legenda: 'Resumo do seu pedido. Confere se está tudo certo e me diz se quer ajustar alguma coisa.',
+        // A PERGUNTA DE FECHAMENTO VAI NA LEGENDA DO PDF — 29/09/2026 (Fernando):
+        // o cliente revisa tudo aqui e o "sim" dele é o que libera. O texto tem
+        // que casar com PERGUNTA_DE_FECHAMENTO ("posso liberar … confec") e NÃO
+        // com PERGUNTA_DO_RESUMO — é essa legenda que liberarSeEleConfirmou lê.
+        legenda: 'Segue o resumo do seu pedido. Me confirma se está tudo certinho e se posso liberar o pedido pras confecções?',
       },
     ],
     // Quem mandou foi o Luigi. Sem esta marca a linha entra como nula no inbox,
