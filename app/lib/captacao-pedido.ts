@@ -121,7 +121,7 @@ export const FALAS_CADASTRO = {
   confirmacao: 'Então: vocês fazem {peças}, em {cidade}/{UF}, mínimo {N} peças. Confere?',
   /** Fecho do galho (a): ela faz a peça, então o pedido da região dela vale. */
   prontoFaz:
-    'Pronto, já está valendo. Assim que entrar pedido da sua região que combine com o que vocês fazem, você recebe aqui.',
+    'Pronto. Te encaminhei o pedido {pedido}. Topam?',
   /** Fecho do galho (b): NÃO pode sugerir que ESTE pedido vai — ela disse que
    *  não faz esta peça. Fica no genérico. */
   prontoNaoFaz: 'Pronto, já está valendo. Assim que entrar pedido que combine com vocês, você recebe aqui.',
@@ -1218,8 +1218,8 @@ async function ofertarNaConversa(cand: CandidatoLinha, fornecedorId: string): Pr
   return {
     ok: true,
     aviso:
-      'O pedido já está com ela. Mostre o resumo EM NÚMEROS (peça, quantidade, cidade do cliente, prazo que ele pediu) ' +
-      'e pergunte se ela assume. Com o sim, chame aceitar_oferta.',
+      'O pedido já está com ela. Diga SÓ isto, uma linha: "Pronto. Te encaminhei o pedido dos {N} {peça}. Topam?" — a conversa inteira já foi sobre esse pedido, ' +
+      'NÃO descreva de novo, NÃO diga "já está valendo, assim que entrar pedido da sua região" (a Tocha, 29/09, ouviu isso e depois "aliás, tem um pedido que pode ser de vocês", como se fosse novidade). Com o sim, chame aceitar_oferta.',
   }
 }
 
@@ -2332,7 +2332,7 @@ TRÊS É O TETO, e prazo NÃO entra. Prazo varia de negociação pra negociaçã
 NÃO CONFIRME, NÃO REPITA DE VOLTA. Com a última resposta na mão, grave com cadastrar_confeccao e diga a frase de pronto. A Tocha (29/09) respondeu três perguntas e recebeu "Então: vocês fazem corta-vento, social, profissional e camisetas, em Santo André/SP, mínimo 20 por item. Confere?" — o Fernando: "redundância demais; anota o que foi dito e vai". Nada de "confere?", "está certo?", "só pra confirmar".
 
 DEPOIS DE GRAVAR, diga LITERAL, conforme o galho:
-• Ela faz a peça do pedido: "${FALAS_CADASTRO.prontoFaz}"
+• Ela faz a peça do pedido: "${FALAS_CADASTRO.prontoFaz}" (troque {pedido} por "dos 500 corta-vento", nas palavras do pedido). É a ÚNICA mensagem: o pedido que ela acabou de conversar é o que foi encaminhado — nada de "assim que entrar pedido da sua região".
 • Ela não faz: "${FALAS_CADASTRO.prontoNaoFaz}" — repare que esta NÃO fala da região nem sugere que o pedido de agora vai. Ela disse que não faz; prometer esse pedido é mentir na primeira frase do relacionamento.
 NÃO prometa volume nem número de pedidos: são 4 pedidos entregues em 229.
 
