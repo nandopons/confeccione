@@ -456,7 +456,7 @@ export function pareceRecadoInterno(texto: string): boolean {
  * turno sai normal; se sobrar nada, não manda nada.
  */
 const PERGUNTA_PROIBIDA_FORNECEDOR =
-  /(prazo|tempo)\s+(m[eé]dio|de\s+produ[cç][aã]o|de\s+entrega)|quanto\s+(tempo|menor|maior)|quantos\s+dias|em\s+m[eé]dia|(tamanho|lote|pedido)\s+m[ií]nimo|m[ií]nimo\s+de\s+(lote|pe[cç]as)|capacidade|restri[cç][aã]o|preferem\s+receber|costumam\s+(recusar|pegar)|que\s+tipos?\s+de\s+pedido/i
+  /tem\s+(mais\s+)?foto|mais\s+(uma\s+|alguma\s+)?foto|foto\s+de\s+\S+(\s+\S+)?\s+tamb[eé]m|(prazo|tempo)\s+(m[eé]dio|de\s+produ[cç][aã]o|de\s+entrega)|quanto\s+(tempo|menor|maior)|quantos\s+dias|em\s+m[eé]dia|(tamanho|lote|pedido)\s+m[ií]nimo|m[ií]nimo\s+de\s+(lote|pe[cç]as)|capacidade|restri[cç][aã]o|preferem\s+receber|costumam\s+(recusar|pegar)|que\s+tipos?\s+de\s+pedido/i
 
 export function perguntaProibidaAoFornecedor(balao: string): boolean {
   return balao.includes('?') && PERGUNTA_PROIBIDA_FORNECEDOR.test(balao)
@@ -4086,11 +4086,11 @@ ${perguntaPecas ? 'VOCÊ QUER DUAS COISAS DELA, NESTA ORDEM.' : 'VOCÊ QUER UMA 
 ${perguntaPecas}
 ${perguntaPecas ? '2. FOTO' : 'FOTO'}. Peça direto: "me manda foto de produções que você já fez". Não espere ela oferecer. Foto é o que o cliente olha na hora de escolher, e confecção quase sempre tem no celular. Quando chegar, guarde com salvar_no_portfolio.
 
-QUANDO A FOTO CHEGAR, ELOGIE O TRABALHO — E OLHE A FOTO PRA ELOGIAR. Você enxerga a imagem: diga o que viu. "Ficou bem acabada essa calça", "gostei do caimento", "esse zíper na barra ficou bom", "costura limpa". Ela costurou aquilo e está mostrando pra alguém que entende — reconhecer o trabalho é o que transforma uma sondagem em relação.
+QUANDO A FOTO CHEGAR: UMA FRASE CURTA, E SÓ. Você enxerga a imagem — diga UMA coisa que viu, em até dez palavras: "ficou bem acabada essa calça", "costura limpa", "bom caimento". Ela costurou aquilo e está mostrando pra alguém que entende — uma frase certa vale; um parágrafo é bajulação. O Joaquim (29/09) mandou fotos e recebeu TRÊS balões: um inventário do conjunto ("top nadador com alças cruzadas, legging com estampa da marca na coxa, usado em competição, qualidade bem visível"), "o Fernando vai subir tudo, tem foto de short ou camisa dry também?" e mais um parágrafo sobre credibilidade de foto de ação versus manequim. O Fernando: "tem que ser muito mais sutil". Então: um balão, uma frase, sem descrever a foto de volta pra quem tirou, sem pedir mais foto ("tem foto de X também?" é proibido — se ela quiser mandar mais, manda), sem falar do Fernando, sem teoria sobre o que passa credibilidade. Várias fotos de uma vez = UMA frase pro conjunto, não uma por foto.
 
-Elogio genérico não vale e é pior que nenhum: "que legal", "muito bom", "adorei" servem pra qualquer foto e por isso não dizem nada. Uma frase, sobre a peça que está na foto, e segue. Sem exclamação, sem emoji, sem "parabéns pelo trabalho". Se a foto estiver ruim de ver ou não der pra dizer nada específico, um "boa" honesto basta — nunca invente detalhe que você não viu.
+Elogio genérico não vale: "que legal", "muito bom", "adorei" servem pra qualquer foto. Sem exclamação, sem emoji, sem "parabéns pelo trabalho". Se a foto estiver ruim de ver ou não der pra dizer nada específico, um "boa" honesto basta — nunca invente detalhe que você não viu.
 
-AO ENCERRAR, DIGA ONDE AS FOTOS VÃO PARAR. Uma linha, no fim: as fotos entram no perfil da confecção e é o que o cliente vê na hora de escolher quem vai produzir; se ela quiser subir mais, é pelo painel dela. Isso não é agrado — é o motivo pelo qual vale a pena ela mandar foto, e a maioria não sabe que existe. Diga uma vez, sem transformar em propaganda do painel.
+AO ENCERRAR, DIGA ONDE AS FOTOS VÃO PARAR. Uma linha, uma vez, no fim: as fotos entram no perfil dela e é o que o cliente vê na hora de escolher; se quiser subir mais, é pelo painel. Sem transformar em propaganda do painel.
 
 Grave cada resposta na hora com salvar_perfil_producao. A conversa pode parar depois da primeira, e o que ela já disse vale.
 
@@ -6314,7 +6314,10 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       const todasAsPartes = r.escalada || vazandoInterno ? [] : mensagensSeparadas(r.texto)
       // Ver perguntaProibidaAoFornecedor: pergunta de entrevista que o prompt
       // proíbe e o modelo insiste em fazer não chega na confecção.
-      const partes = ehFornecedor ? todasAsPartes.filter((p) => !perguntaProibidaAoFornecedor(p)) : todasAsPartes
+      // CONFECÇÃO RECEBE NO MÁXIMO DOIS BALÕES — 29/09/2026 ("tem que ser muito
+      // mais sutil"). Cliente em montagem às vezes precisa de três (texto +
+      // link + pergunta); com confecção, o terceiro balão é sempre o que sobra.
+      const partes = ehFornecedor ? todasAsPartes.filter((p) => !perguntaProibidaAoFornecedor(p)).slice(0, 2) : todasAsPartes
       if (partes.length < todasAsPartes.length) {
         console.error(`[luigi] pergunta proibida à confecção BARRADA em ${params.conversaId}: "${todasAsPartes.filter((p) => perguntaProibidaAoFornecedor(p)).join(' | ').slice(0, 200)}"`)
       }

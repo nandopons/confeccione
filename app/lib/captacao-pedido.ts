@@ -633,7 +633,13 @@ function promptBusca(perfil: PerfilBusca, regiao: RegiaoBusca, quantos: number, 
 PEDIDO: ${perfil.descricao}${perfil.prazoDias ? `, prazo desejado de ${perfil.prazoDias} dias` : ''}. Entrega em ${[perfil.cidade, perfil.uf].filter(Boolean).join('/') || 'local não informado'}. Peças: ${perfil.modelos.join(', ')}. ${perfil.materiais.length ? `Materiais: ${perfil.materiais.join(', ')}. ` : ''}${perfil.tecnicas.length ? `Técnicas: ${perfil.tecnicas.join(', ')}. ` : ''}
 
 ONDE PROCURAR: ${descricaoDaRegiao(perfil, regiao)}.
-
+${
+  perfil.quantidade > 0 && perfil.quantidade < 10
+    ? `
+PEDIDO PEQUENO (${perfil.quantidade} peça${perfil.quantidade > 1 ? 's' : ''}): fábrica e facção não pegam lote assim — quem faz é ATELIÊ DE COSTURA, costureira sob medida, ateliê de peça única/uniforme personalizado. Procure isso, não confecção de atacado: "ateliê de costura <cidade>", "costureira sob medida <cidade> whatsapp", "ateliê ${perfil.modelos[0]} sob encomenda <cidade>", "site:instagram.com ateliê de costura <cidade>". Ateliê que faz peça única serve mesmo sem "fabricação" no nome. Decisão do Fernando (29/09): "vamos tentar encontrar quem faça, normalmente ateliê faz essas coisas".
+`
+    : ''
+}
 COMO PROCURAR: use a busca na web várias vezes, com consultas diferentes, em português: "confecção de ${perfil.modelos[0]} em <cidade>", "facção ${perfil.modelos[0]} <UF> whatsapp", "fábrica de ${perfil.modelos[0]} <cidade> atacado", "site:instagram.com confecção ${perfil.modelos[0]} <cidade>", "ateliê de costura ${perfil.modelos[0]} <UF>"${temPlaces ? ', e a ferramenta buscar_google_places pra pegar telefone e site de empresas do Google Maps' : ''}. Leia os trechos: perfis do Instagram costumam trazer cidade e WhatsApp na bio; sites trazem e-mail e telefone.
 
 QUEM SERVE: confecção, facção, ateliê, estamparia, bordado ou fábrica que PRODUZ esse tipo de peça sob encomenda ou no atacado — PARA TERCEIROS — com pelo menos um contato (WhatsApp, telefone ou e-mail). Sinais de que produz: "fabricação própria", "facção", "private label", "produzimos para marcas", "sob encomenda", "direto da fábrica", "pedido mínimo", CNAE de confecção.
