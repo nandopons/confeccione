@@ -13,6 +13,7 @@
 // ============================================================================
 
 import { enviarTemplate, normalizarWaId } from './whatsapp-cloud'
+import { registrarSaidaInbox } from './whatsapp-notify'
 import { enviarEmailMarketing } from './email'
 import { visualizadorPedidoUrl } from './url'
 import { renderBlocosHtml, type Bloco } from './email-blocos'
@@ -140,7 +141,13 @@ export async function enviarConteudo(c: ConteudoEnvio, lead: Lead): Promise<Resu
     })
   }
   try {
-    const r = await enviarTemplate(normalizarWaId(lead.telefone), c.templateMeta, 'pt_BR', components)
+    const waId = normalizarWaId(lead.telefone)
+    const r = await enviarTemplate(waId, c.templateMeta, 'pt_BR', components)
+    // O TEMPLATE DA RÉGUA APARECE NO INBOX — 29/09/2026. O Icaro recebeu a
+    // "Régua 4" domingo 22:30 e a conversa dele no painel não mostrava nada:
+    // o envio ficava só em contatos_marketing. O Fernando concluiu que ninguém
+    // tinha tentado. Failure-soft: o envio já aconteceu.
+    if (r.ok) await registrarSaidaInbox(waId, lead.nome ?? null, r.wamid, corpo || `[template ${c.templateMeta}]`, c.templateMeta, 'regua').catch(() => undefined)
     // O ERRO DA META VAI INTEIRO — 09/09/2026.
     // Antes isso virava "Meta recusou o envio". A mensagem real ("Number of
     // parameters does not match") ficava só no log, e quem lia o painel achava

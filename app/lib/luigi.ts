@@ -108,7 +108,7 @@ const PROMESSA_DE_ACAO =
  * `autor` nulo, que é como a mensagem digitada pelo Fernando fica gravada — é
  * gente. As duas travas de "não fale por cima" leem esta lista.
  */
-const AGENTES_SAIDA = new Set(['luigi', 'mcp', 'gestao'])
+const AGENTES_SAIDA = new Set(['luigi', 'mcp', 'gestao', 'regua'])
 
 /**
  * ORÇAMENTO DA RESPOSTA — 12/09/2026: 60 s.

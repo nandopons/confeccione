@@ -4,6 +4,7 @@ import { estaEmHorarioComercial, estaEmJanelaRetryPassivo } from '@/app/lib/hora
 import { rodarCutucadaPosResumo } from '@/app/lib/cutucada-pos-resumo'
 import { rodarCutucadaCaptacao } from '@/app/lib/cutucada-captacao'
 import { fecharPedidosProntos } from '@/app/lib/fechar-pedido-automatico'
+import { rodarCutucadaJanela } from '@/app/lib/cutucada-janela'
 // criarEDispararOferta, avisarGestor, enviarTextoSimples e
 // emailAdminFornecedorExpirou saíram em 10/09/2026 junto com o reenvio da era
 // antiga (ver TAREFA 1). Quem oferta hoje é app/lib/oferta-automatica.ts.
@@ -88,6 +89,17 @@ export async function GET(req: Request) {
     fechamento = { erro: e instanceof Error ? e.message : String(e) }
   }
 
+  // TAREFA 13: "gostaria de concluir seu pedido?" antes de a janela fechar
+  // (29/09/2026). Antes da porteira pelo mesmo motivo do fechador: a janela de
+  // 24 h do cliente que escreveu sexta à noite não espera segunda 9h. Horário
+  // próprio (8h–21h) dentro de rodarCutucadaJanela. Ver cutucada-janela.ts.
+  let cutucadaJanela: Awaited<ReturnType<typeof rodarCutucadaJanela>> | { erro: string }
+  try {
+    cutucadaJanela = await rodarCutucadaJanela()
+  } catch (e) {
+    cutucadaJanela = { erro: e instanceof Error ? e.message : String(e) }
+  }
+
   // TAREFA 11 ANTES DA 10, DE PROPÓSITO — 15/09/2026.
   //
   // O aviso é barato (duas somas em `uso_ia`) e o reprocesso é caro (até 3
@@ -122,6 +134,7 @@ export async function GET(req: Request) {
       ok: true,
       pulado: 'fora do horário comercial',
       fechamento_automatico: fechamento,
+      cutucada_janela: cutucadaJanela,
       reprocesso_ia: reprocesso,
       consumo_ia: consumoIa,
       duracao_ms: Date.now() - inicio,
@@ -423,6 +436,7 @@ export async function GET(req: Request) {
     duracao_ms: Date.now() - inicio,
     ...resumo,
     cutucada_pos_resumo: cutucada,
+    cutucada_janela: cutucadaJanela,
     cutucada_captacao: cutucadaCaptacao,
     fechamento_automatico: fechamento,
     reprocesso_ia: reprocesso,
