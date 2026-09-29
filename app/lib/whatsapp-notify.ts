@@ -374,7 +374,14 @@ export async function notificarOfertaFornecedor(params: {
     const quantidade = limpa(params.quantidade, 40)
     const estado = limpa(params.estado, 30)
     const prazo = limpa(params.prazo, 60)
-    const detalhes = limpa(params.detalhes)
+    // ENQUANTO A v5 NÃO SAI DA ANÁLISE DA META — 29/09/2026. A v4 exige o 5º
+    // parâmetro ("Detalhes: {{5}}") e a Meta não deixa mandar sem ele. O
+    // Fernando viu a ficha com o parágrafo de detalhes de novo e pediu pra
+    // tirar: enquanto o fallback for a v4, o campo vai com "ver no pedido" —
+    // uma linha curta, não a descrição inteira. `params.detalhes` fica na
+    // assinatura pra não mexer em quem chama; não é lido mais.
+    void params.detalhes
+    const detalhes = 'ver no pedido'
 
     const botao = {
       type: 'button' as const,

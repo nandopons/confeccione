@@ -37,6 +37,7 @@ import { enviarEmailOrcamentoFinal } from './email-pedido'
 import { atualizarValorCobrancaPix } from './pedido-pagamento'
 import { calcularOrcamento, type PesquisaPreco } from './orcamento'
 import { salvarLinhasEditadas, type LinhaEditada } from './pedido-linhas-edicao'
+import { comEngajamento } from './engajamento-fornecedor'
 
 export const COMISSAO_PCT = 0.03
 
@@ -112,6 +113,9 @@ export type FornecedorOpcao = {
   pedido_minimo: number | null
   /** Prazo mínimo que ela aceita. Null = não informou, recebe tudo. */
   prazo_minimo_dias: number | null
+  faccao?: boolean | null
+  /** Histórico de resposta (engajamento-fornecedor.ts). Ausente = neutro. */
+  engajamento?: { respondidas: number; ignoradas: number; horasResposta: number | null } | null
 }
 
 // ---------------------------------------------------------------------------
@@ -348,7 +352,8 @@ export async function listarPedidosPagos(): Promise<{
       linhas: Array.isArray(p.linhas) ? (p.linhas as LinhaPedido[]) : [],
       ofertas: ofertasPorPedido.get(p.id) ?? [],
     })),
-    fornecedores: (fornRaw ?? []) as FornecedorOpcao[],
+    // Com o histórico de resposta: a tela ordena com o mesmo match da fila.
+    fornecedores: await comEngajamento((fornRaw ?? []) as FornecedorOpcao[]),
   }
 }
 

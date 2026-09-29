@@ -75,6 +75,7 @@ type Fornecedor = {
   prazo_minimo_dias: number | null
   /** Só costura — ver migration 20260929000000. */
   faccao?: boolean | null
+  engajamento?: { respondidas: number; ignoradas: number; horasResposta: number | null } | null
 }
 
 // Detalhe do chat (reusa /api/admin/pedidos-assistente/[id])
@@ -844,9 +845,14 @@ export default function PedidosPagosAdmin() {
                                 const fraco = m.startsWith(MOTIVO_PECA_LEGADA)
                                 // A tag FACÇÃO já está ao lado do nome; o motivo só aparece quando é o que barra.
                                 if (m === MOTIVO_FACCAO) return null
-                                if (!forte && !fraco && m !== x.match.motivos[0] && m !== MOTIVO_FACCAO_LONGE) return null
+                                const engaj = m.startsWith('responde') || m.startsWith('ignorou')
+                                if (!forte && !fraco && !engaj && m !== x.match.motivos[0] && m !== MOTIVO_FACCAO_LONGE) return null
                                 const cor = !x.match.viavel
                                   ? 'bg-amber-50 text-amber-700'
+                                  : m.startsWith('ignorou')
+                                    ? 'bg-red-50 text-red-600'
+                                    : m.startsWith('responde')
+                                      ? 'bg-sky-50 text-sky-700'
                                   : forte
                                     ? 'bg-[#E1F5EE] text-[#0F6E56] font-medium'
                                     : fraco

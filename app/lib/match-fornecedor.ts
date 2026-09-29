@@ -25,6 +25,8 @@ export type FornecedorParaMatch = {
   prazo_minimo_dias: number | null
   /** Só costura (facção). Ver a migration 20260929000000. */
   faccao?: boolean | null
+  /** Histórico de resposta às ofertas (engajamento-fornecedor.ts). Ausente = nunca ofertada = neutro. */
+  engajamento?: { respondidas: number; ignoradas: number; horasResposta: number | null } | null
 }
 
 export type MatchFornecedor = {
@@ -53,6 +55,14 @@ export const PESO_CATEGORIA_SECUNDARIA = 10
  *  no bloco de peça, em `pontuarFornecedor`. */
 export const MOTIVO_PECA_DECLARADA = 'faz esse tipo de peça'
 export const MOTIVO_PECA_LEGADA = 'pode fazer'
+/** Engajamento — 29/09/2026. Bônus por responder, desconto por deixar vencer. */
+export const PESO_RESPONDE = 25
+export const PESO_RESPONDE_RAPIDO = 10
+export const PESO_IGNOROU = -15
+export const TETO_IGNOROU = -60
+/** Horas: abaixo disto é "responde rápido". */
+export const HORAS_RAPIDO = 6
+
 /** A confecção é facção (só costura). A tela pinta como tag. */
 export const MOTIVO_FACCAO = 'facção'
 /** Facção fora da cidade do pedido: a fila não oferta, a tela mostra o porquê. */
@@ -219,6 +229,31 @@ export function pontuarFornecedor(
   if (f.status && f.status !== 'ativo') {
     pontos -= 15
     motivos.push(f.status)
+  }
+
+  // QUEM RESPONDE SOBE, QUEM IGNORA DESCE — 29/09/2026 (decisão do Fernando).
+  //
+  // Camada por cima de geografia e peça. Responder a maioria (aceitar OU
+  // recusar — recusa rápida é engajamento) vale +25, e +10 se costuma
+  // responder em menos de 6 h. Cada oferta que venceu sem resposta tira 15,
+  // até −60: com quatro ignoradas a confecção fica abaixo de qualquer uma da
+  // mesma cidade que nunca foi testada. Quem nunca recebeu oferta é neutra —
+  // é o "ir testando" da decisão. Ver engajamento-fornecedor.ts.
+  const e = f.engajamento
+  if (e && (e.respondidas > 0 || e.ignoradas > 0)) {
+    const total = e.respondidas + e.ignoradas
+    if (e.respondidas >= 2 && e.respondidas / total >= 0.6) {
+      pontos += PESO_RESPONDE
+      motivos.push(`responde (${e.respondidas} de ${total})`)
+      if (e.horasResposta != null && e.horasResposta < HORAS_RAPIDO) {
+        pontos += PESO_RESPONDE_RAPIDO
+        motivos.push(e.horasResposta < 1 ? 'responde em minutos' : `responde em ~${Math.round(e.horasResposta)} h`)
+      }
+    }
+    if (e.ignoradas > 0) {
+      pontos += Math.max(TETO_IGNOROU, PESO_IGNOROU * e.ignoradas)
+      motivos.push(`ignorou ${e.ignoradas} oferta${e.ignoradas > 1 ? 's' : ''}`)
+    }
   }
 
   // FACÇÃO SÓ CASA COM A PRÓPRIA CIDADE — 29/09/2026 (decisão do Fernando).

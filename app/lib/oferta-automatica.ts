@@ -29,6 +29,7 @@ import { supabaseAdmin } from './supabase-server'
 // alguém acha daqui a um mês sem saber se pode remover.
 import { estaEmHorarioComercial, FORA_DA_JANELA } from './horario'
 import { ofertarPedido, ordenarFornecedoresPara, resumirLinhas, type FornecedorOpcao, type LinhaPedido } from './pedido-assistente-oferta'
+import { comEngajamento } from './engajamento-fornecedor'
 
 /** Ofertas em aberto que uma confecção pode segurar ao mesmo tempo. */
 export const MAX_OFERTAS_ABERTAS = 2
@@ -233,7 +234,8 @@ async function candidatosDisponiveis(pedidoId: string): Promise<FornecedorOpcao[
     carga.set(o.fornecedor_id, (carga.get(o.fornecedor_id) ?? 0) + 1)
   }
 
-  return todos.filter((f) => !viram.has(f.id) && (carga.get(f.id) ?? 0) < MAX_OFERTAS_ABERTAS)
+  // Histórico de resposta entra no match (engajamento-fornecedor.ts, 29/09).
+  return comEngajamento(todos.filter((f) => !viram.has(f.id) && (carga.get(f.id) ?? 0) < MAX_OFERTAS_ABERTAS))
 }
 
 /**
