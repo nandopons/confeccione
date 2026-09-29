@@ -359,6 +359,28 @@ export async function listarPedidosPagos(): Promise<{
   }
 }
 
+/**
+ * O "Tipo" que vai na ficha do template de oferta. Antes era a categoria do
+ * site — e a categoria é o que o cliente CLICOU, não o que pediu: a Samira
+ * clicou "Camisetas e t-shirts + Camisas e polos + Vestidos + Saias…" e pediu
+ * vestido, saia, calça alfaiataria, colete, short e blusa social. O Joaquim
+ * (fitness) leu "camisetas" na ficha. Com linhas, o tipo é a lista dos
+ * modelos (o template corta em 60 caracteres, daí o "+N").
+ */
+export function produtoDaOferta(categoria: string | null | undefined, linhas: { modelo?: string | null }[]): string {
+  const modelos = [...new Set(linhas.map((l) => (l.modelo ?? '').trim()).filter(Boolean))]
+  if (modelos.length === 0) return categoria?.trim() || 'Produção sob medida'
+  let texto = modelos[0]
+  for (let i = 1; i < modelos.length; i++) {
+    const restantes = modelos.length - i
+    const tentativa = `${texto}, ${modelos[i]}`
+    const sufixo = restantes > 1 ? ` +${restantes - 1}` : ''
+    if ((tentativa + sufixo).length > 60) return `${texto} +${restantes}`
+    texto = tentativa
+  }
+  return texto
+}
+
 // ---------------------------------------------------------------------------
 // Ofertar: cria (ou reativa) ofertas pros fornecedores escolhidos e dispara
 // WhatsApp. Idempotente por par (pedido,fornecedor).
@@ -568,7 +590,7 @@ export async function ofertarPedido(
       const enviadoOficial = await notificarOfertaFornecedor({
         telefone: forn.whatsapp,
         nome: forn.nome ?? null,
-        produto: pedido.categoria?.trim() || linhas[0]?.modelo?.trim() || 'Produção sob medida',
+        produto: produtoDaOferta(pedido.categoria, linhas),
         quantidade: `${totalPecas} ${totalPecas === 1 ? 'peça' : 'peças'}`,
         estado: pedido.uf?.trim() || 'a confirmar',
         prazo: pedido.prazo_dias ? `${pedido.prazo_dias} dias` : 'a combinar',

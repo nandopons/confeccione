@@ -156,8 +156,24 @@ export function pontuarFornecedor(
     pontos -= 30
     motivos.push(`${MOTIVO_NAO_FAZ} ${pedidasQueNaoFaz.map((q) => q.replace(/_/g, ' ')).join(', ')}`)
   }
-  const bateNoVocabularioNovo =
-    pedidas.length > 0 && fazPecasNovo.length > 0 && pedidas.some((q) => fazPecasNovo.includes(q))
+  // COBERTURA, NÃO ENCOSTO — 29/09/2026 (Samira × Joaquim). Pedido de
+  // alfaiataria social feminina (vestido, saia, calça, colete, short social,
+  // blusa social, macacão) foi pro Joaquim, que faz fitness — porque "short
+  // social" vira `bermuda_short` e "blusa social" vira `blusa_top`, e ele
+  // declara os dois. Duas peças em sete davam os 20 pontos inteiros de "faz
+  // esse tipo de peça". Agora o ponto é proporcional à parte do pedido que
+  // ela cobre, e quem cobre um terço ou menos de um pedido com 3+ peças
+  // diferentes não recebe a oferta — o pedido é de outro ofício. Quem não
+  // declarou peça nenhuma (só `tipos_produto` legado) não é afetado.
+  const pedidasQueFaz = pedidas.filter((q) => fazPecasNovo.includes(q))
+  const cobertura = pedidas.length > 0 ? pedidasQueFaz.length / pedidas.length : 0
+  const bateNoVocabularioNovo = pedidasQueFaz.length > 0
+  const coberturaInsuficiente = bateNoVocabularioNovo && pedidas.length >= 3 && cobertura <= 1 / 3
+  if (coberturaInsuficiente) {
+    viavel = false
+    pontos -= 40
+    motivos.push(`faz só ${pedidasQueFaz.length} de ${pedidas.length} peças do pedido`)
+  }
 
   // ==========================================================================
   // DUAS EVIDÊNCIAS, DOIS PESOS — 12/09/2026.
@@ -206,9 +222,13 @@ export function pontuarFornecedor(
     }
   }
 
-  if (bateNoVocabularioNovo) {
+  if (bateNoVocabularioNovo && cobertura >= 0.5) {
     pontos += PESO_PECA_DECLARADA
-    motivos.push(MOTIVO_PECA_DECLARADA)
+    motivos.push(pedidas.length > 1 && cobertura < 1 ? `${MOTIVO_PECA_DECLARADA} (${pedidasQueFaz.length} de ${pedidas.length})` : MOTIVO_PECA_DECLARADA)
+  } else if (bateNoVocabularioNovo && !coberturaInsuficiente) {
+    // Cobre menos da metade: vale proporcional, e o motivo diz quanto.
+    pontos += Math.max(1, Math.round(PESO_PECA_DECLARADA * cobertura))
+    motivos.push(`${MOTIVO_PECA_DECLARADA} (${pedidasQueFaz.length} de ${pedidas.length})`)
   } else if (pontosLegado > 0) {
     pontos += pontosLegado
     motivos.push(`${MOTIVO_PECA_LEGADA} (${(legadoCasou ?? '').replace(/_/g, ' ')})`)

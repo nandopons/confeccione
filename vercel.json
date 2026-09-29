@@ -38,7 +38,7 @@
     },
     {
       "path": "/api/cron/captacao-pedidos",
-      "schedule": "0 12,14,16,18,20 * * 1-5"
+      "schedule": "0 12,13 * * 1-5"
     },
     {
       "path": "/api/cron/luigi-seguir",
