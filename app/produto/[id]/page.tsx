@@ -18,7 +18,7 @@ import SiteHeader from "@/app/components/SiteHeader";
 import SiteFooter from "@/app/components/SiteFooter";
 import { getOutrosDoFornecedor, getProdutoPublico } from "@/app/lib/portfolio-fornecedor";
 import { SITE_URL } from "@/app/lib/url";
-import FormPedidoProduto from "./FormPedidoProduto";
+import BotaoPedidoVitrine from "@/app/components/BotaoPedidoVitrine";
 
 export const revalidate = 300;
 
@@ -165,12 +165,15 @@ export default async function ProdutoPage({ params }: Props) {
             Seu pedido vai direto para {p.fornecedorNome ?? "esta confecção"}. Se ela não puder
             atender, a gente te avisa e busca outra opção.
           </p>
-          <FormPedidoProduto
-            produtoId={p.id}
-            produtoNome={p.nome}
-            pedidoMinimo={p.pedidoMinimo}
-            fornecedorNome={p.fornecedorNome}
-          />
+          {/* 29/09/2026: o pedido é conversado no WhatsApp com o Luigi, que já
+              sabe a peça e a confecção pelo marcador da mensagem. */}
+          <BotaoPedidoVitrine
+            itemId={p.id}
+            nome={p.nome}
+            className="inline-flex items-center justify-center gap-2 bg-[#1D9E75] hover:bg-[#0F6E56] text-white px-7 py-3.5 rounded-xl text-sm font-medium transition-colors"
+          >
+            Fazer pedido no WhatsApp →
+          </BotaoPedidoVitrine>
         </div>
 
         {outros.length > 0 && (

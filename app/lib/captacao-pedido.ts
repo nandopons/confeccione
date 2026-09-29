@@ -958,14 +958,10 @@ async function cadastrarConfeccaoDaConversa(
   // TRAVA 1 — ELA TEM QUE TER CONFIRMADO.
   // O formulário dá de graça uma coisa que a conversa perde: a pessoa VÊ o que
   // preencheu antes de enviar. Na conversa isso só existe se for explícito.
-  if (entrada.confirmado_por_ela !== true && cand.resposta !== 'interessado') {
-    return {
-      ok: false,
-      aviso:
-        'Você ainda não confirmou com ela. Repita numa mensagem só o que entendeu (produtos, cidade, ' +
-        'pedido mínimo) e pergunte se está certo. Só chame esta ferramenta depois do sim dela.',
-    }
-  }
+  // SEM CONFIRMAÇÃO — 29/09/2026. A trava "confirmado_por_ela" fazia o Luigi
+  // repetir tudo de volta ("Então: vocês fazem corta-vento, social... mínimo
+  // 20. Confere?"). O Fernando: "não precisa ficar confirmando, redundância
+  // demais; anota o que foi dito e vai". O que ela disse é o dado.
 
   // TRAVA 2 — TEM QUE HAVER UMA RESPOSTA DELA, DE UM DOS DOIS TIPOS.
   //
@@ -2317,11 +2313,12 @@ A ORDEM (não é script, é ordem — e ela não avança enquanto a anterior nã
 3. RESPONDA O QUE ELA PERGUNTAR, de verdade, até ela não ter mais dúvida. Pergunta técnica sobre o pedido (tem estampa? qual tamanho? é só a camisa?) se responde PRIMEIRO, com a resposta, e NUNCA na mesma mensagem que fala de cadastro. Em 10/09 uma confecção perguntou três vezes "terá bordado?" e levou duas respostas mandando ela ver o PDF e se cadastrar. Ela respondeu, mas não voltou.
 4. Com o sim dela pro "posso encaminhar": se ela FAZ a peça, cadastrar_confeccao AGORA (em off) e pare — os passos 5 e 6 são só pro galho (b), em que ela NÃO faz a peça do pedido. Nesse galho: peça licença: "${FALAS_CADASTRO.licenca}" seguido de "${FALAS_CADASTRO.porque}"
 5. Colete conversando, UMA pergunta por mensagem.
-6. Confirme e grave com cadastrar_confeccao. E PARA AÍ.
+6. Grave com cadastrar_confeccao, sem confirmar. E PARA AÍ.
 
 LEIA A CONVERSA ANTES DE PERGUNTAR. Metade do cadastro costuma já ter sido dita: se ela falou que faz camiseta e bordado, já deu prazo ou já citou preço, NÃO PERGUNTE DE NOVO. Perguntar o que a pessoa acabou de responder é o jeito mais rápido de perder ela. Pergunte só o que falta.
 
 AS TRÊS PERGUNTAS, nesta ordem, pulando as que ela já respondeu:
+(Ela respondeu duas de uma vez? Grave as duas, pule. Cada resposta dela vale como está: "social, profissional, camisetas" é a lista, não peça pra confirmar.)
 1. PRODUTOS — e a pergunta muda conforme ela fazer ou não a peça do pedido:
    • Ela FAZ: "${FALAS_CADASTRO.produtosFaz}" (troque {peça} pela peça do pedido). A peça do pedido já conta, não precisa ela repetir.
    • Ela NÃO FAZ: "${FALAS_CADASTRO.produtosNaoFaz}" — e a peça do pedido NÃO entra no que ela faz.
@@ -2332,9 +2329,7 @@ AS TRÊS PERGUNTAS, nesta ordem, pulando as que ela já respondeu:
 
 TRÊS É O TETO, e prazo NÃO entra. Prazo varia de negociação pra negociação; perguntado aqui vira chute, e ele volta no orçamento como número assumido. Não pergunte CNPJ, dado bancário, faturamento nem nada sensível: isso é do primeiro pagamento.
 
-CONFIRME ANTES DE GRAVAR, sempre, numa mensagem só, no formato:
-"${FALAS_CADASTRO.confirmacao}"
-No galho (b), só chame cadastrar_confeccao depois do sim dela, com confirmado_por_ela: true. A ferramenta recusa sem isso — no formulário a pessoa VÊ o que preencheu antes de enviar, e aqui isso só existe se você fizer.
+NÃO CONFIRME, NÃO REPITA DE VOLTA. Com a última resposta na mão, grave com cadastrar_confeccao e diga a frase de pronto. A Tocha (29/09) respondeu três perguntas e recebeu "Então: vocês fazem corta-vento, social, profissional e camisetas, em Santo André/SP, mínimo 20 por item. Confere?" — o Fernando: "redundância demais; anota o que foi dito e vai". Nada de "confere?", "está certo?", "só pra confirmar".
 
 DEPOIS DE GRAVAR, diga LITERAL, conforme o galho:
 • Ela faz a peça do pedido: "${FALAS_CADASTRO.prontoFaz}"
@@ -2495,12 +2490,6 @@ const FERRAMENTAS_CANDIDATO: Anthropic.Messages.Tool[] = [
         estado: { type: 'string', description: 'UF, duas letras.' },
         pedido_minimo: { type: 'number', description: 'NÚMERO de peças. "depende" não serve.' },
         email: { type: 'string' },
-        confirmado_por_ela: {
-          type: 'boolean',
-          description:
-            'true SÓ se você repetiu o resumo numa mensagem e ela respondeu confirmando. ' +
-            'Sem isso a ferramenta recusa.',
-        },
       },
       required: [],
     },

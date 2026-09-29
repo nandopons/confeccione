@@ -24,9 +24,9 @@
 // ============================================================================
 
 import Image from "next/image";
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import BotaoIrParaPedido from "@/app/components/BotaoIrParaPedido";
+import BotaoPedidoVitrine from "@/app/components/BotaoPedidoVitrine";
 import type { ItemVitrine } from "@/app/lib/portfolio-fornecedor";
 
 const INTERVALO_MS = 4500;
@@ -205,29 +205,22 @@ export default function CarrosselVitrine({ itens }: { itens: ItemVitrine[] }) {
                 inert={loop && i >= itens.length}
                 className="snap-start shrink-0 w-[46%] sm:w-[31%] lg:w-[23%] relative group rounded-xl overflow-hidden bg-gray-100"
               >
-                {item.nome ? (
-                  <Link
-                    href={`/produto/${item.id}`}
-                    className="block"
-                    aria-label={`Ver detalhes de ${item.nome}`}
-                  >
-                    {conteudo}
-                    <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/25 transition-colors">
-                      <span className="bg-white text-gray-900 text-xs md:text-sm font-medium px-4 py-2 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity">
-                        Ver detalhes →
-                      </span>
+                {/* 29/09/2026: todo card vai direto pro WhatsApp do Luigi com o
+                    produto citado — ver BotaoPedidoVitrine. A página do produto
+                    continua existindo (/produto/[id]) pra quem chega por link. */}
+                <BotaoPedidoVitrine
+                  itemId={item.id}
+                  nome={item.nome}
+                  className="block w-full text-left"
+                  aria-label={item.nome ? `Fazer pedido: ${item.nome}` : "Fazer um pedido"}
+                >
+                  {conteudo}
+                  <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/25 transition-colors">
+                    <span className="bg-[#1D9E75] text-white text-xs md:text-sm font-medium px-4 py-2 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity">
+                      Fazer pedido →
                     </span>
-                  </Link>
-                ) : (
-                  <BotaoIrParaPedido className="block w-full text-left" aria-label="Fazer um pedido">
-                    {conteudo}
-                    <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/25 transition-colors">
-                      <span className="bg-[#1D9E75] text-white text-xs md:text-sm font-medium px-4 py-2 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity">
-                        Fazer pedido →
-                      </span>
-                    </span>
-                  </BotaoIrParaPedido>
-                )}
+                  </span>
+                </BotaoPedidoVitrine>
               </li>
             );
           })}

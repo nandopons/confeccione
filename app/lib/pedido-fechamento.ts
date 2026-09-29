@@ -400,6 +400,9 @@ export async function criarPedidoParaContato(params: {
    * escreve em campo nenhum faz a pergunta voltar pra sempre.
    */
   separadoDoPedido?: string | null
+  /** Veio da vitrine (29/09/2026): o produto clicado e a confecção dona dele. */
+  vitrineItemId?: string | null
+  fornecedorPreferidoId?: string | null
 }): Promise<{
   ok: boolean
   erro?: string
@@ -574,6 +577,8 @@ export async function criarPedidoParaContato(params: {
       linhas: [],
       status: 'completo',
       origem: 'whatsapp_luigi',
+      vitrine_item_id: params.vitrineItemId ?? null,
+      fornecedor_preferido_id: params.fornecedorPreferidoId ?? null,
       telefone: tel,
       nome: params.nome ?? (anterior?.nome as string | null) ?? null,
       email: (anterior?.email as string | null) ?? null,

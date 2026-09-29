@@ -8,6 +8,7 @@ import { rodarCutucadaJanela } from '@/app/lib/cutucada-janela'
 import { rodarCobrancaOrcamento } from '@/app/lib/cobranca-orcamento'
 import { rodarRevisaoPerfil } from '@/app/lib/revisao-perfil'
 import { reconciliarPagamentosAsaas } from '@/app/lib/asaas-reconciliar'
+import { rodarFichaVitrine } from '@/app/lib/vitrine-luigi'
 // criarEDispararOferta, avisarGestor, enviarTextoSimples e
 // emailAdminFornecedorExpirou saíram em 10/09/2026 junto com o reenvio da era
 // antiga (ver TAREFA 1). Quem oferta hoje é app/lib/oferta-automatica.ts.
@@ -122,6 +123,15 @@ export async function GET(req: Request) {
     revisaoPerfil = { erro: e instanceof Error ? e.message : String(e) }
   }
 
+  // TAREFA 17: ficha técnica da vitrine — pergunta à confecção tecido/mínimo/
+  // preço das peças com nome (29/09/2026). Ver vitrine-luigi.ts.
+  let fichaVitrine: Awaited<ReturnType<typeof rodarFichaVitrine>> | { erro: string }
+  try {
+    fichaVitrine = await rodarFichaVitrine()
+  } catch (e) {
+    fichaVitrine = { erro: e instanceof Error ? e.message : String(e) }
+  }
+
   // TAREFA 16: reconciliar pagamentos com o Asaas, uma vez por hora
   // (29/09/2026 — Ester 311 pagou em 17/09 sem webhook). Roda sempre, em
   // qualquer horário: pagamento não espera segunda-feira. Ver asaas-reconciliar.ts.
@@ -173,6 +183,7 @@ export async function GET(req: Request) {
       cutucada_janela: cutucadaJanela,
       cobranca_orcamento: cobrancaOrcamento,
       revisao_perfil: revisaoPerfil,
+      ficha_vitrine: fichaVitrine,
       reconciliacao_asaas: reconciliacaoAsaas,
       reprocesso_ia: reprocesso,
       consumo_ia: consumoIa,
@@ -478,6 +489,7 @@ export async function GET(req: Request) {
     cutucada_janela: cutucadaJanela,
     cobranca_orcamento: cobrancaOrcamento,
     revisao_perfil: revisaoPerfil,
+    ficha_vitrine: fichaVitrine,
     reconciliacao_asaas: reconciliacaoAsaas,
     cutucada_captacao: cutucadaCaptacao,
     fechamento_automatico: fechamento,

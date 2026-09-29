@@ -104,6 +104,8 @@ type PedidoFila = {
   pecas: string[] | null
   linhas: unknown
   prazo_dias: number | null
+  /** Veio da vitrine: a confecção dona do produto recebe primeiro (29/09/2026). */
+  fornecedor_preferido_id?: string | null
 }
 
 /** Pedidos confirmados que ainda não têm confecção nem oferta em aberto. */
@@ -160,12 +162,12 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
   // confirmado_em — não passou no filtro da view, então não chega aqui.
   const { data: extras, error: errExtras } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, pecas, prazo_dias')
+    .select('id, pecas, prazo_dias, fornecedor_preferido_id')
     .in('id', daView.map((p) => p.id))
     .gte('busca_valida_ate', new Date().toISOString())
   if (errExtras) throw new Error(`fila: pecas/prazo dos pedidos — ${errExtras.message}`)
   const extraPorId = new Map(
-    ((extras ?? []) as Array<{ id: string; pecas: string[] | null; prazo_dias: number | null }>).map((e) => [e.id, e])
+    ((extras ?? []) as Array<{ id: string; pecas: string[] | null; prazo_dias: number | null; fornecedor_preferido_id: string | null }>).map((e) => [e.id, e])
   )
 
   const candidatos: Array<PedidoFila & { etapa: string }> = daView
@@ -174,6 +176,7 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
       ...p,
       pecas: extraPorId.get(p.id)?.pecas ?? null,
       prazo_dias: extraPorId.get(p.id)?.prazo_dias ?? null,
+      fornecedor_preferido_id: extraPorId.get(p.id)?.fornecedor_preferido_id ?? null,
     }))
 
   // Quem já tem aceite, ou oferta cuja janela de resposta ainda corre, não
@@ -291,9 +294,12 @@ export async function rodarFilaDeOfertas(): Promise<ResultadoFila> {
     // `linhas` já vinha no select; só não estava tipado. É de onde a peça do
     // pedido é derivada agora (`pecasDoPedido`), em vez do `pecas` declarado na
     // criação — que nestes pedidos do cron é quase sempre vazio.
-    const escolhido = ordenarFornecedoresPara({ ...p, linhas, prazoDias: p.prazo_dias }, disponiveis, totalPecas || null).find(
-      (f) => f.match.viavel
-    )
+    // VEIO DA VITRINE, A DONA DO PRODUTO RECEBE PRIMEIRO — 29/09/2026 (decisão
+    // do Fernando). Ela ainda não viu o pedido (candidatosDisponiveis já tira
+    // quem viu) e está com vaga: vai pra ela sem passar pelo ranking.
+    const ordenados = ordenarFornecedoresPara({ ...p, linhas, prazoDias: p.prazo_dias }, disponiveis, totalPecas || null)
+    const preferida = p.fornecedor_preferido_id ? ordenados.find((f) => f.id === p.fornecedor_preferido_id) : null
+    const escolhido = preferida ?? ordenados.find((f) => f.match.viavel)
     if (!escolhido) {
       semCandidato.push(p.codigo ?? p.id)
       continue

@@ -40,6 +40,7 @@ import { blocoDoPdf, ehPdf, type BlocoPdf } from './anexo-pdf'
 import { salvarPerfil, lerPerfil } from './perfil-producao'
 import { pecaLabel, pecaValida, legadoDasPecas, PECAS } from './pecas'
 import { guardarFotosDaConversa, salvarFotoDaConversa } from './portfolio-fornecedor'
+import { registrarVitrineCitada, produtoDaVitrineDaConversa, fichasPendentesDoFornecedor, salvarFichaVitrine, reais as reaisVitrine, type ProdutoVitrine, type FichaPendente } from './vitrine-luigi'
 import { enviarTexto, marcarComoLida, normalizarWaId } from './whatsapp-cloud'
 import { enviarImagemDoPedido, janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
 // O tipo local LinhaPedido deste arquivo é um recorte antigo, sem material nem
@@ -739,6 +740,10 @@ type PedidoContexto = {
 type Contexto = {
   /** Conversa do inbox — é por ela que a ferramenta acha a foto que ELE mandou. */
   conversaId: string
+  /** O cliente veio da vitrine: produto e confecção de origem (29/09/2026). Ver vitrine-luigi.ts. */
+  vitrine: ProdutoVitrine | null
+  /** Confecção: produtos da vitrine dela com ficha pendente que a gente perguntou. */
+  fichasVitrine: FichaPendente[]
   contato: { nome: string | null; telefone: string; conta: { nome: string | null; email: string | null } | null }
   pedidos: PedidoContexto[]
   /** O pedido que uma chamada sem `pedido` alcança. Muda dentro do turno quando criar_pedido abre um novo. */
@@ -1752,7 +1757,7 @@ async function recusasAnterioresDaMesmaDivergencia(conversaId: string, divergenc
 }
 
 async function montarContexto(conversaId: string, waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
-  const [pedidos, conta, cadastroFornecedor, ofertasAbertas, ofertasFechadas, ofertasAceitas] = await Promise.all([
+  const [pedidos, conta, cadastroFornecedor, ofertasAbertas, ofertasFechadas, ofertasAceitas, vitrine, fichasVitrine] = await Promise.all([
     pedidosDoContato(waId, clienteId),
     clienteId
       ? supabaseAdmin.from('contas_clientes').select('nome, email').eq('id', clienteId).maybeSingle<{ nome: string | null; email: string | null }>()
@@ -1761,6 +1766,8 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
     ehFornecedor ? ofertasAbertasDoFornecedor(waId) : Promise.resolve([] as OfertaAberta[]),
     ehFornecedor ? ofertasFechadasComOutra(waId) : Promise.resolve([] as OfertaFechadaComOutra[]),
     ehFornecedor ? ofertasAceitasDoFornecedor(waId) : Promise.resolve([] as OfertaAceita[]),
+    ehFornecedor ? Promise.resolve(null) : produtoDaVitrineDaConversa(conversaId).catch(() => null),
+    ehFornecedor ? fornecedorDoContato(waId).then((id) => (id ? fichasPendentesDoFornecedor(id) : [])).catch(() => [] as FichaPendente[]) : Promise.resolve([] as FichaPendente[]),
   ])
 
   // Em aberto primeiro (mais recente no topo); fechados só os 2 últimos.
@@ -1898,6 +1905,8 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
 
   return {
     conversaId,
+    vitrine,
+    fichasVitrine,
     ehFornecedor,
     cadastroFornecedor,
     ofertasAbertas,
@@ -2509,6 +2518,26 @@ const FERRAMENTA_RESPONDER_PERGUNTA: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_FICHA_VITRINE: Anthropic.Messages.Tool = {
+  name: 'salvar_ficha_vitrine',
+  description:
+    'Grava os dados que a confecção deu sobre uma peça da vitrine dela (ver FICHA DA VITRINE no contexto): nome, tecido, grade, cores, mínimo, prazo e valor unitário. Só o que ela disse; campo ausente fica como está.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      item_id: { type: 'string', description: 'item_id da lista FICHA DA VITRINE.' },
+      nome: { type: 'string', maxLength: 80 },
+      tecido: { type: 'string', maxLength: 120 },
+      tamanhos: { type: 'string', maxLength: 120, description: 'Grade, como ela disse: "P ao GG".' },
+      cores: { type: 'string', maxLength: 120 },
+      pedido_minimo: { type: 'integer', description: 'Mínimo de peças pra essa peça.' },
+      preco_centavos: { type: 'integer', description: 'Valor unitário aproximado em CENTAVOS (R$ 35 = 3500).' },
+      prazo_dias: { type: 'integer' },
+    },
+    required: ['item_id'],
+  },
+}
+
 const FERRAMENTA_PORTFOLIO: Anthropic.Messages.Tool = {
   name: 'salvar_no_portfolio',
   description:
@@ -2619,7 +2648,7 @@ function ferramentasDoModo(
   // precisa é registrar o próprio perfil e mandar foto.
   if (ehFornecedor) {
     return modo === 'responde'
-      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_CORRIGIR_TIPO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO, FERRAMENTA_COTAR_FRETE, FERRAMENTA_RECUSAR_OFERTA, FERRAMENTA_PERGUNTAR_CLIENTE, FERRAMENTA_DESISTIR_PEDIDO]
+      ? [FERRAMENTA_CHAMAR_HUMANO, FERRAMENTA_CORRIGIR_TIPO, FERRAMENTA_PERFIL_PRODUCAO, FERRAMENTA_PORTFOLIO, FERRAMENTA_COTAR_FRETE, FERRAMENTA_RECUSAR_OFERTA, FERRAMENTA_PERGUNTAR_CLIENTE, FERRAMENTA_DESISTIR_PEDIDO, FERRAMENTA_FICHA_VITRINE]
       : [FERRAMENTA_CHAMAR_HUMANO]
   }
   const fora = fechamento ? FORA_DA_MESA[fechamento] : null
@@ -3090,6 +3119,23 @@ async function executarFerramenta(
         nota_interna: 'Repasse a cotação como está. Diga o aviso UMA vez por conversa, não a cada cotação.',
       }
     }
+    case 'salvar_ficha_vitrine': {
+      const forn = await fornecedorDoContato(ctx.contato.telefone)
+      if (!forn) return { ok: false, aviso: 'não achei o cadastro de fornecedor desse número' }
+      const itemId = String(entrada.item_id ?? '').trim()
+      if (!ctx.fichasVitrine.some((f) => f.item_id === itemId)) return { ok: false, aviso: 'item_id não está na lista FICHA DA VITRINE do contexto' }
+      const r = await salvarFichaVitrine(itemId, forn, {
+        nome: str(entrada.nome) ?? null,
+        tecido: str(entrada.tecido) ?? null,
+        tamanhos: str(entrada.tamanhos) ?? null,
+        cores: str(entrada.cores) ?? null,
+        pedido_minimo: num(entrada.pedido_minimo) ?? null,
+        preco_centavos: num(entrada.preco_centavos) ?? null,
+        prazo_dias: num(entrada.prazo_dias) ?? null,
+      })
+      if (!r.ok) return { ok: false, aviso: r.erro ?? 'falha ao gravar' }
+      return { ok: true, proximo_passo: 'UMA linha: "anotado". Nada mais.' }
+    }
     case 'salvar_no_portfolio': {
       // Desde 29/09 toda foto dela já entra sozinha (ver guardarFotosDaConversa
       // no início do turno). A ferramenta ficou pra legenda e pra garantir.
@@ -3398,6 +3444,8 @@ async function executarFerramenta(
       const r = await criarPedidoParaContato({
         telefone: ctx.contato.telefone,
         nome: ctx.contato.nome,
+        vitrineItemId: ctx.vitrine?.item_id ?? null,
+        fornecedorPreferidoId: ctx.vitrine?.fornecedor_id ?? null,
         prazoDias: num(entrada.prazo_dias) ?? null,
         observacoes: str(entrada.observacoes) ?? null,
         separadoDoPedido: str(entrada.separado_do_pedido),
@@ -4127,9 +4175,42 @@ QUANDO NÃO SOUBER, PERGUNTE AO FERNANDO — E FIQUE CALADO COM ELA. Preço, pra
 NUNCA: prometa pedido, volume ou faturamento; combine preço; passe contato de cliente; invente número de confecções ou de pedidos. O que você não leu de ferramenta, você não afirma.`
 }
 
+/**
+ * ELE VEIO DA VITRINE — 29/09/2026 (decisão do Fernando). O botão do card
+ * abre o WhatsApp com "(vitrine 8hex)"; o Luigi já sabe a peça e a confecção,
+ * não pergunta "qual a peça", e o pedido vai pra essa confecção primeiro.
+ */
+function blocoVitrine(v: ProdutoVitrine | null): string {
+  if (!v) return ''
+  const linhas = [
+    `ELE VEIO DA VITRINE DO SITE, do produto ${v.nome ? `"${v.nome}"` : 'sem nome'}${v.tipo ? ` (${v.tipo})` : ''} da confecção ${v.fornecedor_nome ?? 'cadastrada'}${v.fornecedor_cidade ? ` (${[v.fornecedor_cidade, v.fornecedor_uf].filter(Boolean).join('/')})` : ''}.`,
+    v.tecido ? `Tecido: ${v.tecido}.` : null,
+    v.tamanhos ? `Grade: ${v.tamanhos}.` : null,
+    v.cores ? `Cores: ${v.cores}.` : null,
+    v.pedido_minimo != null ? `Mínimo dessa confecção pra essa peça: ${v.pedido_minimo} peças.` : null,
+    v.prazo_dias != null ? `Prazo de referência: ${v.prazo_dias} dias.` : null,
+    v.preco_centavos != null ? `Preço de referência que a confecção deu: ${reaisVitrine(v.preco_centavos)} por peça (é referência, o orçamento final vem dela depois do aceite).` : null,
+  ].filter(Boolean)
+  return `
+${linhas.join(' ')}
+O QUE ISSO MUDA: você JÁ SABE a peça — não pergunte "qual é a peça". Confirme em uma linha que é esse modelo e vá pro que falta: quantidade, cor (se ele quiser diferente), prazo, cidade de entrega. Ao criar o pedido, o modelo é esse produto (nome + tecido) e o pedido vai primeiro pra essa confecção — não diga isso como promessa ("vai ser ela"), diga que a confecção que fez esse modelo é a primeira a receber. ${v.preco_centavos != null ? 'Se ele perguntar preço, pode dizer o valor de referência por peça e que o orçamento fechado vem da confecção. ' : 'Se ele perguntar preço: o valor sai no orçamento da confecção depois do aceite; não invente número. '}${v.pedido_minimo != null ? `Se ele quiser menos que ${v.pedido_minimo} peças, diga que essa confecção pede ${v.pedido_minimo} e que a gente procura outra se precisar. ` : ''}
+`
+}
+
+/** Confecção: os produtos da vitrine dela que a gente perguntou e ainda faltam dados. */
+function blocoFichasVitrine(fichas: FichaPendente[]): string {
+  if (fichas.length === 0) return ''
+  const linhas = fichas.map((f) => `- item_id ${f.item_id}: ${f.nome ? `"${f.nome}"` : 'peça sem nome'} — falta: ${f.falta.join(', ')}${f.tecido ? ` (tecido já anotado: ${f.tecido})` : ''}`)
+  return `
+FICHA DA VITRINE: a gente perguntou a ela, por mensagem, os dados que faltam destas peças do perfil dela (o cliente vê a vitrine e o Luigi responde na hora com esses dados):
+${linhas.join('\n')}
+Se a mensagem dela agora traz algum desses dados ("é dry fit, mínimo 20, uns 35 reais"), grave com salvar_ficha_vitrine (item_id da lista; valor em centavos: 35 reais = 3500) e responda "anotado" em UMA linha — sem repetir os dados, sem perguntar os outros na mesma hora. Se faltar algo, UMA pergunta curta pelo que falta, só uma vez. Não transforme isso em entrevista.
+`
+}
+
 function promptSistema(modo: Exclude<ModoLuigi, 'desligado'>, ctx: Contexto, jaSeApresentou: boolean): Anthropic.Messages.TextBlockParam[] {
   const nome = primeiroNome(ctx.contato.nome) || primeiroNome(ctx.contato.conta?.nome) || null
-  if (ctx.ehFornecedor) return [{ type: 'text', text: promptFornecedor(nome, jaSeApresentou, ctx.cadastroFornecedor, ctx.ofertasAbertas, ctx.ofertasFechadasComOutra, ctx.ofertasAceitas) }]
+  if (ctx.ehFornecedor) return [{ type: 'text', text: promptFornecedor(nome, jaSeApresentou, ctx.cadastroFornecedor, ctx.ofertasAbertas, ctx.ofertasFechadasComOutra, ctx.ofertasAceitas) + blocoFichasVitrine(ctx.fichasVitrine) }]
   const etapas = (Object.keys(ETAPA_PARA_CLIENTE) as Etapa[]).map((e) => `- ${e} (${INFO_ETAPA[e].label}): ${ETAPA_PARA_CLIENTE[e]}`).join('\n')
   const pedidos =
     ctx.pedidos.length === 0
@@ -4365,7 +4446,7 @@ PERGUNTE MAIS, ENQUANTO ELE ESTIVER INTERESSADO: quase toda mensagem sua termina
 QUEM ESTÁ FALANDO: ${nome ?? 'nome desconhecido'} (${ctx.contato.telefone})${ctx.contato.conta ? `, com conta no site${ctx.contato.conta.email ? ` (${ctx.contato.conta.email})` : ''}` : ''}.
 
 PEDIDOS DESTE CONTATO (em aberto primeiro, do mais recente pro mais antigo; o primeiro em aberto é o pedido em foco, salvo se o cliente falar de outro):
-${pedidos}
+${blocoVitrine(ctx.vitrine)}${pedidos}
 
 ${
     jaSeApresentou
@@ -5883,6 +5964,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // Antes de qualquer contexto: se a mensagem cita o pedido do site, ele
     // passa a ser deste número. Failure-soft — não segura a resposta.
     await adotarPedidoCitado(params.corpo, waId).catch((err) => console.error('[luigi] adotar pedido citado falhou', { err }))
+    await registrarVitrineCitada(params.corpo, params.conversaId).catch((err) => console.error('[luigi] vitrine citada falhou', { err }))
 
     const modoAgora = await modoLuigi()
     if (modoAgora === 'desligado') return
