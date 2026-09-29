@@ -2,7 +2,7 @@
  * GET    /api/admin/fornecedores/[id]   — detalhes + métricas + histórico
  * PATCH  /api/admin/fornecedores/[id]   — edita campos permitidos + audit
  *
- * Métricas calculadas:
+ * Métricas calculadas (das duas eras de oferta — ver admin-fornecedor-ofertas.ts):
  *   - ofertas_aceitas: count(ofertas where status='aceita')
  *   - taxa_resposta: (aceitas + recusadas) / (enviadas - expiradas)
  *   - ultima_oferta_em: max(enviada_em)
@@ -19,6 +19,7 @@ import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
 import { legadoDasPecas, pecaValida } from '@/app/lib/pecas'
 import { registrarAudit, diffMudancas } from '@/app/lib/audit'
+import { metricasDasOfertas, ofertasDoFornecedor } from '@/app/lib/admin-fornecedor-ofertas'
 
 const CAMPOS_EDITAVEIS = [
   'nome',
@@ -56,83 +57,17 @@ export async function GET(
     return NextResponse.json({ erro: 'Fornecedor não encontrado' }, { status: 404 })
   }
 
-  const { data: stats, error: errS } = await supabaseAdmin
-    .from('ofertas')
-    .select('status, enviada_em, respondida_em, pedido_id')
-    .eq('fornecedor_id', id)
-
-  if (errS) return NextResponse.json({ erro: errS.message }, { status: 500 })
-
-  const ofertas = stats ?? []
-  let aceitas = 0
-  let recusadas = 0
-  let expiradas = 0
-  const enviadas = ofertas.length
-  let ultimaOferta: string | null = null
-  let ultimaAceitacao: string | null = null
-  let somaRespostaMs = 0
-  let countResposta = 0
-  const pedidosOfertados: string[] = []
-
-  for (const o of ofertas) {
-    if (o.status === 'aceita') aceitas++
-    else if (o.status === 'recusada') recusadas++
-    else if (o.status === 'expirada') expiradas++
-    if (o.pedido_id) pedidosOfertados.push(o.pedido_id)
-    if (!ultimaOferta || (o.enviada_em && o.enviada_em > ultimaOferta)) {
-      ultimaOferta = o.enviada_em
-    }
-    // Tempo médio de resposta: só ofertas aceitas+recusadas, ignora expiradas/pendentes
-    if (
-      (o.status === 'aceita' || o.status === 'recusada') &&
-      o.enviada_em &&
-      o.respondida_em
-    ) {
-      const delta =
-        new Date(o.respondida_em).getTime() - new Date(o.enviada_em).getTime()
-      if (delta >= 0) {
-        somaRespostaMs += delta
-        countResposta++
-      }
-    }
-    // Última aceitação: max(respondida_em) onde status='aceita'
-    if (o.status === 'aceita' && o.respondida_em) {
-      if (!ultimaAceitacao || o.respondida_em > ultimaAceitacao) {
-        ultimaAceitacao = o.respondida_em
-      }
-    }
+  // As duas eras de oferta (ver admin-fornecedor-ofertas.ts): o card lia só
+  // `ofertas` (fluxo antigo, parado desde maio) e mostrava "última oferta: 4
+  // meses atrás" pra quem tinha recebido oferta de manhã.
+  let metricas
+  try {
+    metricas = metricasDasOfertas(id, await ofertasDoFornecedor(id))
+  } catch (e) {
+    return NextResponse.json({ erro: e instanceof Error ? e.message : 'falha ao ler ofertas' }, { status: 500 })
   }
 
-  const denom = enviadas - expiradas
-  const taxaResposta = denom > 0 ? (aceitas + recusadas) / denom : null
-  const tempoMedioRespostaMs =
-    countResposta > 0 ? Math.round(somaRespostaMs / countResposta) : null
-
-  let perdeuParaOutro = 0
-  if (pedidosOfertados.length > 0) {
-    const { data: pedidos } = await supabaseAdmin
-      .from('pedidos')
-      .select('id, fornecedor_aceito_id')
-      .in('id', pedidosOfertados)
-      .not('fornecedor_aceito_id', 'is', null)
-      .neq('fornecedor_aceito_id', id)
-    perdeuParaOutro = pedidos?.length ?? 0
-  }
-
-  return NextResponse.json({
-    fornecedor,
-    metricas: {
-      ofertas_aceitas: aceitas,
-      ofertas_recusadas: recusadas,
-      ofertas_enviadas: enviadas,
-      ofertas_expiradas: expiradas,
-      taxa_resposta: taxaResposta,
-      ultima_oferta_em: ultimaOferta,
-      perdeu_para_outro: perdeuParaOutro,
-      tempo_medio_resposta_ms: tempoMedioRespostaMs,
-      ultima_aceitacao_em: ultimaAceitacao,
-    },
-  })
+  return NextResponse.json({ fornecedor, metricas })
 }
 
 export async function PATCH(

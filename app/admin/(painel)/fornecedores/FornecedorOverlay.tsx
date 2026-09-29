@@ -63,6 +63,7 @@ type FiltroOferta = 'todas' | 'aceita' | 'recusada' | 'expirada' | 'pendente'
 
 interface PedidoOferta {
   id: string
+  codigo?: string | null
   tipo: string
   quantidade: number | null
   estado: string | null
@@ -839,7 +840,7 @@ function LinhaOferta({
               )}
             </div>
             <div className="text-xs text-gray-400 mt-0.5">
-              {pedido.id.slice(0, 8)}…
+              {pedido.codigo ? `Nº ${pedido.codigo}` : `${pedido.id.slice(0, 8)}…`}
             </div>
           </div>
         ) : (

@@ -1,7 +1,8 @@
 /**
  * GET /api/admin/fornecedores/[id]/ofertas
  *
- * Lista paginada de ofertas enviadas pra esse fornecedor + dados do pedido.
+ * Lista paginada de ofertas enviadas pra esse fornecedor + dados do pedido,
+ * das duas eras (`ofertas` legado + `ofertas_pedido_assistente`).
  *
  * Query string:
  *   ?status=todas|aceita|recusada|expirada|pendente  default: todas
@@ -19,8 +20,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/app/lib/supabase-server'
 import { COOKIE_ADMIN, ehTokenAdminValido } from '@/app/lib/admin-auth'
+import { ofertasDoFornecedor } from '@/app/lib/admin-fornecedor-ofertas'
 
 const STATUS_FINAIS = ['aceita', 'recusada', 'expirada'] as const
 
@@ -42,68 +43,28 @@ export async function GET(
     Math.max(1, Number(url.searchParams.get('por_pagina')) || 20),
   )
 
-  let q = supabaseAdmin
-    .from('ofertas')
-    .select(
-      'id, status, enviada_em, respondida_em, tentativa_numero, ' +
-        'pedido:pedidos(id, tipo, quantidade, estado, prazo, status, ' +
-        'criado_em, fornecedor_aceito_id)',
-      { count: 'exact' },
-    )
-    .eq('fornecedor_id', id)
-
-  if (status === 'aceita' || status === 'recusada' || status === 'expirada') {
-    q = q.eq('status', status)
-  } else if (status === 'pendente') {
-    q = q.not('status', 'in', `(${STATUS_FINAIS.map((s) => `"${s}"`).join(',')})`)
+  // As duas eras (ver admin-fornecedor-ofertas.ts). O volume por confecção
+  // é pequeno (dezenas), então a paginação é em memória depois do merge.
+  let todas
+  try {
+    todas = await ofertasDoFornecedor(id)
+  } catch (e) {
+    console.error('[GET /admin/fornecedores/[id]/ofertas] erro:', e)
+    return NextResponse.json({ erro: e instanceof Error ? e.message : 'falha ao ler ofertas' }, { status: 500 })
   }
-  // status === 'todas' → sem filtro
-
-  q = q.order('enviada_em', { ascending: false })
+  const filtradas =
+    status === 'aceita' || status === 'recusada' || status === 'expirada'
+      ? todas.filter((o) => o.status === status)
+      : status === 'pendente'
+        ? todas.filter((o) => !(STATUS_FINAIS as readonly string[]).includes(o.status))
+        : todas
 
   const inicio = (pagina - 1) * porPagina
-  const fim = inicio + porPagina - 1
-  q = q.range(inicio, fim)
-
-  const { data, error, count } = await q
-
-  if (error) {
-    console.error('[GET /admin/fornecedores/[id]/ofertas] erro:', error)
-    return NextResponse.json({ erro: error.message }, { status: 500 })
-  }
-
-  // Enriquece com tempo_resposta_ms calculado
-  type LinhaOferta = {
-    id: string
-    status: string
-    enviada_em: string | null
-    respondida_em: string | null
-    tentativa_numero: number | null
-    pedido: unknown
-  }
-  const dados = (data ?? []).map((o) => {
-    const linha = o as unknown as LinhaOferta
-    let tempo_resposta_ms: number | null = null
-    if (linha.enviada_em && linha.respondida_em) {
-      const delta =
-        new Date(linha.respondida_em).getTime() -
-        new Date(linha.enviada_em).getTime()
-      tempo_resposta_ms = delta >= 0 ? delta : null
-    }
-    return {
-      id: linha.id,
-      status: linha.status,
-      enviada_em: linha.enviada_em,
-      respondida_em: linha.respondida_em,
-      tentativa_numero: linha.tentativa_numero,
-      tempo_resposta_ms,
-      pedido: linha.pedido,
-    }
-  })
+  const dados = filtradas.slice(inicio, inicio + porPagina)
 
   return NextResponse.json({
     dados,
-    total: count ?? 0,
+    total: filtradas.length,
     pagina,
     por_pagina: porPagina,
   })
