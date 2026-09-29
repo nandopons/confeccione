@@ -3917,11 +3917,12 @@ PEDIDO QUE ELA RECEBEU E JÁ FECHOU COM OUTRA CONFECÇÃO:
 ${linhas.join('\n')}
 
 Se ela disser "já foi atendido", "outra pessoa pegou", "quando abri já tinha fechado", "cheguei atrasado", É DISTO que ela fala. Responda A ISSO, não com boas-vindas nem com pedido de foto. Em uma ou duas linhas:
-• o porquê: esse pedido tinha pressa, foi pra mais de uma confecção ao mesmo tempo e a primeira que aceitou levou — quem abre depois vê "já atendido". Não foi nada contra ela, e o pedido não saiu da mão dela por recusa.
+• o porquê, do jeito que o Fernando explicou pra Malharia Salete (29/09/2026): o pedido vai pra UMA confecção por vez; se ela não responde em algumas horas, abre pra mais uma, e por aí — a oferta dela continua valendo, mas quem aceitar primeiro leva. Não é leilão e não é nada contra ela: o pedido não saiu da mão dela por recusa, saiu porque outra aceitou antes. Se o pedido voltar pra base (a outra desistir), pode voltar pra ela.
+• NUNCA diga "foi pra várias ao mesmo tempo" — não é assim que funciona.
 • o próximo passo, que é o que interessa: pra os próximos chegarem na frente e certeiros, alinhar o perfil de vocês — o que produzem melhor e uma foto de produção. E aí faça a pergunta certa (peça com nome ou foto, conforme o que falta acima).
 
 Errado (25/09/2026, o Cristian escreveu "Este pedido ja foi atendido por outra pessoa" e ouviu): "A gente recebe pedido de quem quer produzir roupa e manda pras confecções da rede; quando cai um que combina com vocês, você decide se pega e monta o orçamento." — isso é a apresentação padrão, ignora o que ele disse.
-Certo: "Esse era urgente, foi pra várias confecções ao mesmo tempo e a primeira que aceitou levou — quando você abriu já tinha fechado. Pra os próximos chegarem na sua frente, me diz o que vocês mais produzem e me manda uma foto de produção."
+Certo: "Esse ficou com você primeiro, e como não veio resposta ele abriu pra mais uma confecção, que aceitou antes — quem aceita primeiro leva. Se voltar pra base eu te reencaminho. Pra os próximos chegarem na sua frente, me diz o que vocês mais produzem e me manda uma foto de produção."
 `
 }
 

@@ -1176,6 +1176,26 @@ async function cadastrarConfeccaoDaConversa(
 async function ofertarNaConversa(cand: CandidatoLinha, fornecedorId: string): Promise<{ ok: boolean; aviso: string }> {
   if (!cand.pedido_id) return { ok: false, aviso: 'Esta conversa não está ligada a um pedido; não há o que ofertar.' }
 
+  // TRAVA — O PEDIDO AINDA ESTÁ EM BUSCA? (29/09/2026, Malharia Salete)
+  // A checagem de baixo só via "aceita". Pedido encerrado, ou com a busca
+  // vencida há semanas (a Salete recebeu "te encaminhei o pedido das 84 peças"
+  // de um pedido de 02/09 cuja busca venceu em 09/09), passava. O critério é o
+  // mesmo da fila: confirmado e dentro da validade da busca.
+  const { data: ped } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('status, busca_valida_ate, encerrado_em')
+    .eq('id', cand.pedido_id)
+    .maybeSingle<{ status: string | null; busca_valida_ate: string | null; encerrado_em: string | null }>()
+  const buscaValida = !!ped && ped.status === 'confirmado' && !ped.encerrado_em && (!ped.busca_valida_ate || new Date(ped.busca_valida_ate).getTime() > Date.now())
+  if (!buscaValida) {
+    return {
+      ok: false,
+      aviso:
+        'Esse pedido NÃO está mais em busca (encerrado ou busca vencida). NÃO diga que encaminhou nada. Diga que o cadastro ' +
+        'já está valendo e que o próximo pedido que combinar com ela chega aqui.',
+    }
+  }
+
   // TRAVA — O PEDIDO AINDA ESTÁ DISPONÍVEL?
   // Podem ter passado horas entre a abordagem e o cadastro. Se outra confecção
   // já assumiu, ofertar agora criaria uma oferta natimorta e uma promessa falsa.
@@ -2138,6 +2158,22 @@ export type CandidatoLinha = {
 export async function candidatoPeloWaId(waId: string): Promise<CandidatoLinha | null> {
   const last8 = normalizarWaId(waId).slice(-8)
   if (last8.length < 8) return null
+  // QUEM JÁ É FORNECEDORA NÃO É CANDIDATA — 29/09/2026 (Malharia Salete). Ela
+  // foi sondada em 16/09 por um pedido, disse "não produz" (esgotado), mas
+  // já estava cadastrada — e hoje a FILA mandou a ela a oferta das 500
+  // camisetas do RJ. Ela respondeu "Boa tarde" a essa oferta; a captação
+  // pegou a conversa por causa da linha velha de candidata, cadastrou de
+  // novo "em off" e disse "te encaminhei o pedido das 84 peças" — o pedido da
+  // sondagem de 16/09, com busca vencida desde 09/09. Enquanto isso o das
+  // 500 fechou com outra. Cadastrada fala com o Luigi de fornecedor, que
+  // enxerga as ofertas dela (inclusive a que acabou de ser cancelada).
+  const { data: jaCadastrada } = await supabaseAdmin
+    .from('leads_fornecedores')
+    .select('id')
+    .ilike('whatsapp', `%${last8}`)
+    .limit(1)
+    .maybeSingle<{ id: string }>()
+  if (jaCadastrada) return null
   const { data } = await supabaseAdmin
     .from('captacao_fornecedores')
     .select('id, nome, email, whatsapp, pedido_id, cidade, uf, resposta, status, ultimo_contato_em, erros')
