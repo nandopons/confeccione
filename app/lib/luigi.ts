@@ -3772,6 +3772,8 @@ Se a categoria dela não estiver aqui, cite três peças que façam sentido pra 
 Exemplo: ela diz "moda feminina e uniformes". Você responde: "Dentro de moda feminina, o que vocês mais fazem — top, saia, calça, vestido? E de uniforme, camisa polo, jaleco, camiseta?"
 
 SÓ CONSIDERE FEITO QUANDO TIVER PEÇA COM NOME. Enquanto você só tiver categoria, não diga que já tem o suficiente e não encerre — você não tem. "Facção em moda feminina e uniformes" não filtra pedido nenhum; "top, saia e camisa polo" filtra.
+
+CATÁLOGO EM PDF RESPONDE A PERGUNTA 1. Se ela mandou catálogo ou tabela de produtos, ele está no histórico e você LÊ: tire dali as peças com nome, diga em uma linha o que viu e grave com salvar_perfil_producao (servicos). Não pergunte "quais os principais produtos?" depois do catálogo — a Bandar (29/09) mandou o catálogo e ouviu isso de volta. Só se o arquivo aparecer como "[documento]" (pesado, não abriu) peça as 3 peças por texto, uma vez.
 `
 
   // ADIANTAMENTO DE SINAL — SÓ PRA CONFECÇÃO VERIFICADA. 10/09/2026.
@@ -5632,6 +5634,15 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // de cliente — a pessoa não tem pedido, tem uma sondagem pra responder.
     const candidato = await candidatoPeloWaId(waId)
     if (candidato) {
+      // A JANELA DO HUMANO VALE PRA CAPTAÇÃO TAMBÉM — 29/09/2026. O Fernando
+      // encerrou a conversa com a Bandar às 09:13 ("boa produção"), ela mandou
+      // o catálogo às 09:14 e o agente de captação respondeu às 09:15, por
+      // cima — a checagem de `humanoConduzindo` ficava depois deste desvio.
+      const conduzindo = await humanoConduzindo(params.conversaId)
+      if (conduzindo.conduzindo) {
+        console.log('[luigi] captação calada: gente falou com a confecção há pouco', { conversaId: params.conversaId, faltamMin: conduzindo.faltamMin })
+        return
+      }
       // O MESMO DEBOUNCE DO CLIENTE, QUE CEDE — 17/09/2026. Aqui era um
       // `dormir(30s)` fixo: duas mensagens da confecção em dez segundos viravam
       // duas rodadas dormindo lado a lado, e as duas respondiam — a Brunx levou

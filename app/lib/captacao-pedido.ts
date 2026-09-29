@@ -44,6 +44,7 @@ import { avisarGestor, marcarEscalada } from './luigi'
 import { definirStatusOferta, ofertarPedido } from './pedido-assistente-oferta'
 import { MAX_OFERTAS_ABERTAS } from './oferta-automatica'
 import { ehModoLuigi, type ModoLuigi } from './luigi-catalogo'
+import { blocoDoPdf, ehPdf } from './anexo-pdf'
 
 const MODELO = 'claude-sonnet-4-6'
 const MAX_RODADAS_BUSCA = 8
@@ -2101,23 +2102,46 @@ function motivoDaFalhaMeta(erro: string | null): string {
   return e || 'entrega falhou (sem motivo da Meta)'
 }
 
-type LinhaMensagem = { direcao: string; tipo: string; corpo: string | null; criado_em: string }
+type LinhaMensagem = { direcao: string; tipo: string; corpo: string | null; criado_em: string; autor: string | null; midia_path: string | null; midia_mime: string | null }
 
+/**
+ * O histórico que o agente de captação lê.
+ *
+ * O PDF DELA ENTRA INTEIRO — 29/09/2026. A Bandar Uniformes mandou o catálogo
+ * ("SETEMBRO 2026 - SEM PREÇO") e ouviu de volta "recebi o documento, consegue
+ * me dizer quais são os principais produtos?". O catálogo É a resposta; o
+ * agente via só "[document]". Agora o último PDF que ela mandou vai como bloco
+ * `document` (o mesmo do Luigi de cliente, até 4 MB) e a regra do prompt manda
+ * tirar as peças dali. E a fala da equipe vem marcada: o Fernando tinha
+ * encerrado a conversa ("bom dia e boa produção") um minuto antes.
+ */
 async function historicoConversa(conversaId: string): Promise<Anthropic.Messages.MessageParam[]> {
   const { data } = await supabaseAdmin
     .from('wa_mensagens')
-    .select('direcao, tipo, corpo, criado_em')
+    .select('direcao, tipo, corpo, criado_em, autor, midia_path, midia_mime')
     .eq('conversa_id', conversaId)
     .order('criado_em', { ascending: false })
     .limit(HISTORICO_MENSAGENS)
   const linhas = ((data ?? []) as LinhaMensagem[]).reverse()
+  const ultimoPdf = [...linhas].reverse().find((m) => m.direcao === 'entrada' && m.midia_path && ehPdf(m.midia_mime))
+  const blocoPdf = ultimoPdf ? await blocoDoPdf(ultimoPdf.midia_path as string, ultimoPdf.midia_mime) : null
+
   const msgs: Anthropic.Messages.MessageParam[] = []
   for (const m of linhas) {
     const role: 'user' | 'assistant' = m.direcao === 'entrada' ? 'user' : 'assistant'
-    const texto = m.corpo?.trim() || `[${m.tipo}]`
+    const ehEquipe = role === 'assistant' && (m.autor ?? '').trim().toLowerCase() === 'equipe'
+    const cru = m.corpo?.trim() || (m.tipo === 'document' ? (blocoPdf && m === ultimoPdf ? 'Mandei este arquivo.' : '[document]') : `[${m.tipo}]`)
+    const texto = ehEquipe ? `[Fernando, da equipe, escreveu isto — não é você] ${cru}` : cru
+    const comPdf = blocoPdf && m === ultimoPdf
     const anterior = msgs[msgs.length - 1]
-    if (anterior && anterior.role === role && typeof anterior.content === 'string') anterior.content = `${anterior.content}\n\n${texto}`
-    else msgs.push({ role, content: texto })
+    if (anterior && anterior.role === role && !comPdf) {
+      if (typeof anterior.content === 'string') anterior.content = `${anterior.content}\n\n${texto}`
+      else anterior.content = [...anterior.content, { type: 'text', text: texto }]
+    } else if (comPdf) {
+      msgs.push({ role, content: [blocoPdf, { type: 'text', text: texto }] })
+    } else {
+      msgs.push({ role, content: texto })
+    }
   }
   if (msgs.length && msgs[0].role !== 'user') msgs.unshift({ role: 'user', content: '[início da conversa]' })
   return msgs
@@ -2265,7 +2289,13 @@ QUANDO QUEM RESPONDE NÃO DECIDE. Empresa maior atende pelo número de vendas ou
 
 QUANDO ELA PEDIR POR E-MAIL, MANDE. "Manda a solicitação por e-mail" com um endereço é pedido de empresa com processo de compras — e é assim que chega pedido grande. Chame enviar_por_email com o endereço que ela passou, diga em uma linha que mandou, e continue aqui no WhatsApp com a pergunta de sempre: vocês produzem esse tipo de peça? Nunca responda "a gente opera diferente" nem "os detalhes ficam na plataforma".
 
-FOTO, ARQUIVO E ÁUDIO. No histórico, [image] e [document] são foto e arquivo que ela mandou sem texto — catálogo, tabela, foto de peça. Agradeça em uma linha e siga o assunto; se ela já está cadastrada e é foto de peça, salvar_no_portfolio. Áudio que não deu pra ouvir já recebe, sem você, um pedido pra escrever.
+FOTO, ARQUIVO E ÁUDIO. No histórico, [image] é foto que ela mandou sem texto; se ela já está cadastrada e é foto de peça, salvar_no_portfolio. Áudio que não deu pra ouvir já recebe, sem você, um pedido pra escrever.
+
+CATÁLOGO EM PDF É A RESPOSTA, NÃO UM ANEXO — 29/09/2026. Quando ela manda um PDF, ele vem INTEIRO no histórico e você LÊ. Catálogo, tabela de produtos, portfólio: tire dali as peças que ela faz e diga em uma linha o que viu ("vi no catálogo: jaleco, scrub, avental e calça de brim"), e grave — produtos do cadastrar_confeccao se ela ainda não tem cadastro, servicos do salvar_perfil_producao se já tem. NUNCA pergunte "o que vocês fabricam?" ou "cita 3 modelos" depois de receber o catálogo: a Bandar Uniformes mandou o catálogo e ouviu exatamente isso de volta. Se o histórico mostra só "[document]" (arquivo pesado que não deu pra abrir), aí sim diga que recebeu e peça as 3 peças principais por texto — uma vez.
+
+MENSAGEM AUTOMÁTICA DELA. "Bem-vindo à X", horário de atendimento, "informe seu nome, cidade e empresa" é robô de boas-vindas, não resposta à sua pergunta. Responda o que ele pede em uma linha ("Luigi, da Confeccione, de Recife") e mantenha a sua pergunta na mesma mensagem. O que estiver nessa mensagem automática (mínimo de peças, "só atacado", o que fazem) já vale como dado dela — não pergunte de novo.
+
+GENTE DA EQUIPE FALOU. Mensagem marcada "[Fernando, da equipe, escreveu isto]" é de uma pessoa nossa, e a conversa passou a ser dela: não desdiga, não retome a pergunta que você fazia antes dele e não repita o que ele já disse. Só continue se ela trouxer coisa nova pra você responder.
 
 ESTILO: WhatsApp, 1 a 4 linhas, sem emoji, sem markdown, sem lista, sem botão, uma pergunta por vez, português direto de gente da equipe. Se perguntarem se você é robô, diga que é o assistente da equipe e que uma pessoa assume quando quiser.`
 }
