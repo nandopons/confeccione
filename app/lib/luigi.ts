@@ -444,6 +444,87 @@ export function pareceRecadoInterno(texto: string): boolean {
 }
 
 /**
+ * NARRAÇÃO DO PROCESSO NÃO VAI PRO CLIENTE — 29/09/2026 (Fernando: "viajando
+ * na maionese", "Luigi meio fora de compasso"). Frases de HOJE, todas entregues
+ * a cliente:
+ *   "Deixa eu verificar o pedido que já temos aberto e montar tudo direitinho"
+ *   "Vejo que já temos um pedido montado com as suas peças"
+ *   "Agora preciso prender as fotos de referência nos modelos e depois gero a prévia"
+ *   "Deixa eu prender as fotos e gerar as prévias das duas peças"
+ *   "O pedido já estava exatamente assim no sistema, tudo que a gente combinou já estava gravado certinho"
+ *   "Antes de liberar, preciso prender a foto de referência que você mandou nos modelos … qual delas é a foto principal"
+ *
+ * É o modelo pensando alto entre uma ferramenta e outra — o mesmo defeito que
+ * a captação teve com a SR7, agora do lado do cliente. Ninguém que compra sabe
+ * o que é "prender foto", nem quer saber que existe "sistema". A FRASE cai; o
+ * resto do balão segue (um "me passa o CEP" no fim sobrevive). `pareceRecadoInterno`
+ * continua sendo a peneira grossa (barra o balão inteiro); esta é a fina.
+ */
+const NARRACAO_AO_CLIENTE: RegExp[] = [
+  /^(agora |mas antes,? |antes de (liberar|gerar|mandar)[^,.:]*,? |primeiro,? |s[óo] )?(eu )?(preciso|vou|deixa eu|deixe-me|deixa-me|s[óo] preciso|primeiro (preciso|vou)) (prender|anexar|verificar|conferir|checar|gravar|salvar|olhar|ver o pedido|montar tudo|montar o pedido|organizar)\b/i,
+  /\b(prender|anexar) (a|as|essa|essas|sua|suas) fotos?\b/i,
+  /\bfoto principal( de refer[êe]ncia)?\b/i,
+  /\bvejo que (j[áa] )?(temos|tem|existe)\b/i,
+  /\bj[áa] (temos|existe|tem) (um )?pedido (montado|aberto|criado|em aberto)\b/i,
+  /\b(no|do|pelo) sistema\b/i,
+  /\bexatamente assim\b/i,
+  /\b(est[áa]|estava|ficou|foi) gravad[oa]s?\b/i,
+  /\bpedido que (j[áa] )?temos aberto\b/i,
+  /^vou montar o pedido( agora)?$/i,
+]
+
+/** Divide em frases sem perder as quebras de linha: cada linha é uma lista de frases. */
+function porFrases(texto: string): string[][] {
+  return texto.split('\n').map((linha) => linha.split(/(?<=[.!?])\s+/).map((f) => f.trim()).filter(Boolean))
+}
+
+function remontar(linhas: string[][]): string {
+  return linhas
+    .map((frases) => frases.join(' '))
+    .filter((l) => l.trim())
+    .join('\n')
+    .trim()
+}
+
+export function semNarracaoAoCliente(parte: string): string {
+  const linhas = porFrases(parte).map((frases) =>
+    frases
+      .map((f) => f.replace(/^anota a[íi]:?\s*/i, ''))
+      .filter((f) => f && !NARRACAO_AO_CLIENTE.some((re) => re.test(f)))
+  )
+  return remontar(linhas)
+}
+
+/**
+ * O TEXTO NÃO PODE DESDIZER O QUE A FERRAMENTA JÁ FEZ — 29/09/2026.
+ *
+ * Guilherme, 20:13: o turno chamou enviar_resumo_pedido (o PDF SAIU) e o
+ * modelo fechou com "Tudo certo. Vou gerar as prévias das 5 cores antes de
+ * mandar o resumo". Gabi, 17:59: a imagem do Modelo 1 saiu com a legenda
+ * "gerei esse visualizador, está bom?" e logo atrás veio "Agora vou gerar as
+ * prévias. São 8 modelos, vou mandar um por vez". O resultado da ferramenta
+ * já dizia "não escreva mais nada"; regra sem trava é sugestão.
+ *
+ * Depois do PDF: qualquer frase sobre resumo/prévia cai. Depois da imagem:
+ * cai a frase que anuncia geração. O que sobrar ("Tudo certo") segue.
+ */
+const FRASE_SOBRE_RESUMO_OU_PREVIA = /\b(resumo|pr[ée]vias?|mockups?|visualizador(es)?|pdf)\b/i
+const FRASE_ANUNCIANDO_PREVIA =
+  /\b(vou gerar|agora vou gerar|gerar (as |a |o |os )?(pr[ée]vias?|visualizador(es)?|mockups?)|s[ãa]o \d+ modelos|vou mandar (um|uma) (por vez|de cada vez)|come[çc]ando pel[oa]|pr[ée]vias? de cada modelo)\b/i
+
+export function semContradicaoComAsFerramentas(parte: string, feito: { resumoSaiu: boolean; mockupSaiu: boolean }): string {
+  if (!feito.resumoSaiu && !feito.mockupSaiu) return parte
+  const linhas = porFrases(parte).map((frases) =>
+    frases.filter((f) => {
+      if (feito.resumoSaiu && FRASE_SOBRE_RESUMO_OU_PREVIA.test(f)) return false
+      if (feito.mockupSaiu && FRASE_ANUNCIANDO_PREVIA.test(f)) return false
+      return true
+    })
+  )
+  return remontar(linhas)
+}
+
+/**
  * PERGUNTA QUE NÃO SAI PRA CONFECÇÃO — 29/09/2026 (decisão do Fernando).
  *
  * "Muitos questionamentos de um tema que já deveria ter sido superado, e
@@ -773,6 +854,14 @@ type Contexto = {
    * peça nossa fora do ar — e a imagem é desejável, não obrigatória.
    */
   mockupIndisponivel: boolean
+  /**
+   * O cliente mandou a referência em PDF nesta conversa (7 dias) — 29/09/2026.
+   * O visualizador de IA não enxerga o arquivo: a prévia da Gabi saiu "nada a
+   * ver" com o lookbook de 5 peças que ela tinha mandado. Com isto ligado,
+   * nenhum modelo entra em modelos_para_gerar_mockup e o resumo não exige
+   * prévia — o pedido vai com a descrição do que o Luigi leu no PDF.
+   */
+  referenciaEmPdf: boolean
   /** O que a confecção JÁ nos deu. Null quando não é fornecedor. */
   cadastroFornecedor: CadastroFornecedor | null
   /**
@@ -1023,6 +1112,29 @@ async function pedidosDoContato(waId: string, clienteId: string | null): Promise
           .ilike('email', conta.email.trim())
           .order('criado_em', { ascending: false })
           .limit(10) as unknown as Promise<{ data: unknown }>
+      )
+    }
+  }
+  // O NÚMERO QUE ELE DIGITOU NO SITE TAMBÉM É DELE — 29/09/2026. O Guilherme
+  // e o Marcos (sócios, mesmo e-mail) abriram o 20260900348 no site com o
+  // número do Guilherme; o Marcos clicou o botão do WhatsApp e o pedido
+  // passou pro número dele (adotarPedidoCitado), ficando o do Guilherme só em
+  // `telefone_digitado`. Quando o Guilherme escreveu, o Luigi não viu pedido
+  // nenhum, abriu o 349 e pediu e-mail e CEP que já estavam no 348 — "o
+  // cliente já vem com CEP do site e o Luigi fica pedindo dado que já tem".
+  // Só pedido recente e vivo: digitado errado de um mês atrás não é dele.
+  if (tel8.length === 8) {
+    const { data: digitados } = await supabaseAdmin
+      .from('pedidos_assistente')
+      .select('id')
+      .like('telefone_digitado', `%${tel8}`)
+      .is('encerrado_em', null)
+      .gte('criado_em', new Date(Date.now() - 7 * 86400_000).toISOString())
+      .limit(5)
+    const ids = (digitados ?? []).map((d) => d.id as string)
+    if (ids.length > 0) {
+      consultas.push(
+        supabaseAdmin.from('pedidos_assistente_etapas').select(COLUNAS_ETAPA).in('id', ids).order('criado_em', { ascending: false }) as unknown as Promise<{ data: unknown }>
       )
     }
   }
@@ -1707,7 +1819,7 @@ async function enviarResumoSeEleConfirmou(ctx: Contexto, corpo: string | null, c
   if (!resposta || !resposta.fechamento || !eleDisseQuePode(resposta.linhas)) return nao
 
   const pendentes = await faltamMockups(alvo.id).catch(() => [] as number[])
-  if (pendentes.length > 0 && !ctx.mockupIndisponivel) {
+  if (pendentes.length > 0 && !ctx.mockupIndisponivel && !ctx.referenciaEmPdf) {
     alvo.proximo_passo =
       'ELE ACABOU DE DIZER QUE PODE MANDAR O RESUMO. Gere a imagem que falta no(s) modelo(s) ' +
       `${pendentes.join(', ')} com gerar_mockup_do_modelo e chame enviar_resumo_pedido NESTE turno. ` +
@@ -1757,6 +1869,7 @@ async function recusasAnterioresDaMesmaDivergencia(conversaId: string, divergenc
 }
 
 async function montarContexto(conversaId: string, waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
+  const referenciaEmPdf = await conversaTemPdfDoCliente(conversaId)
   const [pedidos, conta, cadastroFornecedor, ofertasAbertas, ofertasFechadas, ofertasAceitas, vitrine, fichasVitrine] = await Promise.all([
     pedidosDoContato(waId, clienteId),
     clienteId
@@ -1895,7 +2008,7 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
       // Só faz sentido perseguir imagem em pedido que ainda vai pro cliente.
       // Pedido pago/produzindo já foi aprovado como está; mexer nele agora só
       // criaria diferença entre o que a confecção recebeu e o que está na tela.
-      modelos_para_gerar_mockup: emAberto ? modelosParaGerarMockup(p.linhas, mockups.get(p.id) ?? {}) : [],
+      modelos_para_gerar_mockup: emAberto && !referenciaEmPdf ? modelosParaGerarMockup(p.linhas, mockups.get(p.id) ?? {}) : [],
       link_do_pedido: visualizadorPedidoUrl(p.id),
       motivo_parada: p.motivo_parada,
       encerrado_motivo: p.encerrado_motivo,
@@ -1917,7 +2030,22 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
     pedidoEmFoco: abertos[0] ?? null,
     mockupsNestaRodada: 0,
     mockupIndisponivel: false,
+    referenciaEmPdf,
   }
+}
+
+/** Entrada do cliente em PDF nos últimos 7 dias — ver Contexto.referenciaEmPdf. */
+async function conversaTemPdfDoCliente(conversaId: string): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('id')
+    .eq('conversa_id', conversaId)
+    .eq('direcao', 'entrada')
+    .eq('tipo', 'document')
+    .ilike('midia_mime', '%pdf%')
+    .gte('criado_em', new Date(Date.now() - 7 * 86400_000).toISOString())
+    .limit(1)
+  return (data ?? []).length > 0
 }
 
 /**
@@ -3728,7 +3856,15 @@ async function executarFerramenta(
       // só é nomeado quando o pedido tem mais de um; a segunda geração diz que
       // refez. O "assim fica bom?" vem na fala do Luigi logo depois.
       const vez = Math.max(1, r.ia.length)
-      const qual = nModelos > 1 ? `Modelo ${posicao} (${r.modelo}): ` : ''
+      // MESMO MODELO EM DUAS CORES GANHA A COR NA LEGENDA — 29/09/2026. A Gabi
+      // recebeu "Modelo 1 (Conjunto cropped halter neck + saia longa…)" e logo
+      // depois "Modelo 2 (Conjunto cropped halter neck + saia longa…)": o 2 era
+      // o mesmo conjunto em vinho, e a legenda não dizia.
+      const linhasAtuais = (Array.isArray(atual?.linhas) ? atual.linhas : []) as Array<{ modelo?: string | null; cor?: string | null }>
+      const nomeRepetido = linhasAtuais.filter((l) => (l?.modelo ?? '').trim().toLowerCase() === (r.modelo ?? '').trim().toLowerCase()).length > 1
+      const corDaLinha = (linhasAtuais[posicao - 1]?.cor ?? '').trim()
+      const rotulo = nomeRepetido && corDaLinha ? `${r.modelo}, ${corDaLinha}` : r.modelo
+      const qual = nModelos > 1 ? `Modelo ${posicao} (${rotulo}): ` : ''
       const legenda = vez > 1 ? `${qual}refiz o visualizador, ficou melhor assim?` : `${qual}gerei esse visualizador, está bom?`
       const envio =
         primeiroDaRodada && imagem
@@ -3801,7 +3937,7 @@ async function executarFerramenta(
       // que depende do modelo lembrar dela no meio de uma sequência. Aqui a
       // ferramenta recusa até o pedido estar inteiro.
       const pendentes = await faltamMockups(p.id)
-      if (pendentes.length > 0 && !ctx.mockupIndisponivel) {
+      if (pendentes.length > 0 && !ctx.mockupIndisponivel && !ctx.referenciaEmPdf) {
         throw new Error(
           `ainda falta imagem no(s) modelo(s) ${pendentes.join(', ')} deste pedido. ` +
             'Gere com gerar_mockup_do_modelo ANTES de mandar o resumo — o PDF leva as imagens junto, e resumo com ' +
@@ -4327,6 +4463,8 @@ FOTO QUE ELE MANDA VOCÊ PRENDE NA PEÇA. Toda foto de referência — a peça q
 VOCÊ ENXERGA AS IMAGENS: quando o cliente manda foto, você a vê de verdade. Use o que está nela — modelo da peça, cor, estampa, referência que ele mandou — pra preencher o pedido e pra confirmar com ele o que entendeu ("essa camisa é gola careca, certo?"). Nunca peça pra ele descrever o que já está na foto. Diga o que vê de forma concreta, e pergunte só o que a imagem não responde (quantidade, tamanhos, público). Se a foto estiver ruim ou não der pra concluir, diga o que não deu pra ver em vez de adivinhar.
 
 VOCÊ TAMBÉM LÊ PDF E ESCUTA ÁUDIO. O PDF chega inteiro pra você, com o layout: ficha técnica, tabela de grade e tamanhos, arte da estampa, orçamento que ele pediu em outro lugar. Leia e USE — se a tabela de grade traz P 10, M 20, G 15, isso é a quantidade do pedido e você não pergunta de novo. O áudio chega já transcrito no texto da mensagem; trate como se ele tivesse escrito. Nos dois casos, confirme o que entendeu em uma frase antes de gravar, porque transcrição erra nome e número: "entendi 40 camisas, 20 P e 20 M, confere?". Nunca peça pra ele digitar o que já mandou no arquivo — foi justamente pra não digitar que ele mandou.
+
+REFERÊNCIA EM PDF (catálogo, lookbook, várias peças num arquivo): você já viu as peças. NÃO pergunte "qual é a foto principal", NÃO peça pra mandar as fotos separadas, NÃO fale em "prender a foto nos modelos" — isso é mecânica sua, não assunto dele (a Gabi, 29/09, mandou um PDF com 5 peças e ouviu "qual delas é a foto principal de referência?"). Descreva cada peça no campo descricao da linha com o que você viu no arquivo e siga. E NÃO gere prévia de IA de peça que veio em PDF: o visualizador não enxerga o arquivo e a imagem sai "nada a ver" (foi o que a Gabi respondeu à primeira prévia). Prévia é pra peça que ele descreveu em texto ou mandou como foto.
 
 PEDIDO QUE VOCÊ MESMO ABRIU: cada pedido do contexto traz "aberto: hoje 14:30, aberto por você nesta conversa". Esse é o pedido DELE, montado por você nesta mesma conversa — não é "um pedido antigo", não é dúvida, não se pergunta se é novo ou mudança e não se cancela pra abrir outro. Se ele pediu pra cancelar e abrir um novo e o pedido em aberto foi aberto DEPOIS desse pedido dele, o novo é esse: já está feito, siga com ele. Olhe o relógio ("aberto" e "encerrado") antes de decidir qual é o antigo.
 
@@ -5427,6 +5565,9 @@ async function primeiraReplicaAoHumano(conversaId: string, humanoFalouEm: string
 
 /** Minutos de silêncio do cliente, depois de uma dúvida respondida, até o Luigi voltar sozinho. */
 const MINUTOS_ATE_SEGUIR = 3
+/** A última fala do Luigi PEDE algo — a bola está com o cliente, não se cutuca. */
+const LUIGI_PEDE_ALGO_AO_CLIENTE =
+  /\b(me (passa|manda|conta|diz|fala|envia|informa)|pode me (passar|mandar|dizer|falar)|qual (é|e|seria)|quais|quant[ao]s?|preciso (do|da|de|que)|s[óo] falta|falta (o|a|só)|confirma)\b/i
 const FRASES_DE_SEGUIMENTO = ['Ficou alguma dúvida?', 'Tem mais alguma dúvida?', 'Posso ajudar em mais alguma coisa?']
 
 /**
@@ -5841,6 +5982,34 @@ async function chegouMensagemMaisNova(conversaId: string, wamid: string, criadoE
   return Boolean(data?.wamid && data.wamid !== wamid && new Date(data.criado_em).getTime() > new Date(criadoEm).getTime())
 }
 
+/**
+ * O último turno de agente desta conversa (antes deste começar) foi pra uma
+ * mensagem igual ou mais nova que a minha? Se foi, o histórico dele tinha a
+ * minha dentro e a resposta me cobre. Se foi pra uma mais velha, a resposta
+ * cruzou com a minha mensagem e não responde nada dela. Sem log (saída do
+ * cron, da gestão, do inbox), fica o comportamento antigo: cobre.
+ */
+async function turnoQueRespondeuViuAMensagem(conversaId: string, wamid: string, criadoEm: string, inicioDoTurno: string): Promise<boolean> {
+  const { data: turno } = await supabaseAdmin
+    .from('luigi_whatsapp_log')
+    .select('wamid_entrada, criado_em')
+    .eq('conversa_id', conversaId)
+    .in('status', ['enviada', 'sugerida'])
+    .lt('criado_em', inicioDoTurno)
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ wamid_entrada: string | null; criado_em: string }>()
+  if (!turno?.wamid_entrada) return true
+  if (turno.wamid_entrada === wamid) return true
+  const { data: msg } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('criado_em')
+    .eq('wamid', turno.wamid_entrada)
+    .maybeSingle<{ criado_em: string }>()
+  if (!msg) return true
+  return new Date(msg.criado_em).getTime() >= new Date(criadoEm).getTime()
+}
+
 /** Espera a vez desta conversa. 'ceder' = chegou mensagem mais nova; o turno dela cobre esta. */
 async function esperarAVez(params: { conversaId: string; wamid: string; criadoEm: string }): Promise<'seguir' | 'ceder'> {
   const comecou = Date.now()
@@ -6246,7 +6415,18 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       const devolucaoManual = Boolean(params.retomada)
       const respostaDeAgente =
         ultimaSaida && AGENTES_SAIDA.has((ultimaSaida.autor ?? '').trim().toLowerCase()) ? ultimaSaida : null
-      if (!devolucaoManual && respostaDeAgente && new Date(respostaDeAgente.criado_em).getTime() > new Date(params.criadoEm).getTime()) {
+      // RESPOSTA QUE CRUZOU NÃO É RESPOSTA — 29/09/2026. O MV escreveu
+      // "Masculino e feminino" às 19:54:15 e "Minto, masculino e unissex" às
+      // 19:54:37; a resposta ao primeiro ("São dois modelos então…") saiu às
+      // 19:54:37, um instante DEPOIS da correção. Esta trava leu "saída de
+      // agente mais nova que a mensagem" e descartou a resposta à correção —
+      // que ficou sem resposta nenhuma. Saída mais nova só conta se o turno
+      // que a gerou VIU a minha mensagem: o log diz de qual mensagem foi cada
+      // turno; se foi de uma mais velha que a minha, cruzou, e a minha
+      // continua de pé.
+      const respostaVeioDepois = Boolean(respostaDeAgente) && new Date(respostaDeAgente!.criado_em).getTime() > new Date(params.criadoEm).getTime()
+      const respostaCobreAMinha = respostaVeioDepois ? await turnoQueRespondeuViuAMensagem(params.conversaId, params.wamid, params.criadoEm, inicioDoTurno) : false
+      if (!devolucaoManual && respostaVeioDepois && respostaCobreAMinha) {
         await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'já respondemos depois dessa mensagem' })
         return
       }
@@ -6413,9 +6593,21 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       // CONFECÇÃO RECEBE NO MÁXIMO DOIS BALÕES — 29/09/2026 ("tem que ser muito
       // mais sutil"). Cliente em montagem às vezes precisa de três (texto +
       // link + pergunta); com confecção, o terceiro balão é sempre o que sobra.
-      const partes = ehFornecedor ? todasAsPartes.filter((p) => !perguntaProibidaAoFornecedor(p)).slice(0, 2) : todasAsPartes
-      if (partes.length < todasAsPartes.length) {
-        console.error(`[luigi] pergunta proibida à confecção BARRADA em ${params.conversaId}: "${todasAsPartes.filter((p) => perguntaProibidaAoFornecedor(p)).join(' | ').slice(0, 200)}"`)
+      // Narração do processo e contradição com o que a ferramenta já mandou
+      // caem frase a frase — ver semNarracaoAoCliente / semContradicaoComAsFerramentas.
+      const feitoNoTurno = {
+        resumoSaiu: fechamento === 'resumo' || r.ferramentas.some((f) => f.nome === 'enviar_resumo_pedido' && f.ok),
+        mockupSaiu: r.ferramentas.some((f) => f.nome === 'gerar_mockup_do_modelo' && f.ok),
+      }
+      const partesLimpas = todasAsPartes
+        .map((p) => semPontoFinal(semContradicaoComAsFerramentas(semNarracaoAoCliente(p), feitoNoTurno)))
+        .filter(Boolean)
+      if (partesLimpas.join('|') !== todasAsPartes.join('|')) {
+        console.log(`[luigi] narração/contradição cortada em ${params.conversaId}: "${todasAsPartes.join(' | ').slice(0, 200)}" → "${partesLimpas.join(' | ').slice(0, 200)}"`)
+      }
+      const partes = ehFornecedor ? partesLimpas.filter((p) => !perguntaProibidaAoFornecedor(p)).slice(0, 2) : partesLimpas
+      if (partes.length < partesLimpas.length) {
+        console.error(`[luigi] pergunta proibida à confecção BARRADA em ${params.conversaId}: "${partesLimpas.filter((p) => perguntaProibidaAoFornecedor(p)).join(' | ').slice(0, 200)}"`)
       }
       if (r.escalada && r.texto.trim()) {
         console.log(`[luigi] escalou e tentou falar; texto descartado em ${params.conversaId}: "${r.texto.slice(0, 80)}"`)
@@ -6457,7 +6649,11 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       if (envio.ok && modo === 'responde' && !r.escalada) {
         const ultimaDele = mensagens[mensagens.length - 1]
         const textoDele = ultimaDele && ultimaDele.role === 'user' && typeof ultimaDele.content === 'string' ? ultimaDele.content : (params.corpo ?? '')
-        await armarSeguir(params.conversaId, ctx, textoDele.includes('?'), r.texto.includes('?'), fechamento).catch(() => undefined)
+        // "Ficou alguma dúvida?" em cima de "me passa o CEP" (G., 18:23) é
+        // cutucar quem já foi cutucado: pedido ao cliente conta como pergunta.
+        const ultimaParte = partes[partes.length - 1] ?? r.texto
+        const luigiPediuAlgo = r.texto.includes('?') || LUIGI_PEDE_ALGO_AO_CLIENTE.test(ultimaParte)
+        await armarSeguir(params.conversaId, ctx, textoDele.includes('?'), luigiPediuAlgo, fechamento).catch(() => undefined)
       }
 
       const semTexto = partes.length === 0 && !vazandoInterno

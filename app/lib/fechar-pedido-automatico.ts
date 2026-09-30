@@ -147,6 +147,99 @@ async function humanoFalouAgora(telefone: string): Promise<boolean> {
   return false
 }
 
+/**
+ * A BOLA ESTÁ COM QUEM? — 29/09/2026 (Fernando: "Luigi meio fora de compasso").
+ *
+ * O fechador olhava só relógio: cliente calado há 15 min, ninguém da casa há
+ * 60 s → manda o PDF. Duas vezes no mesmo dia isso saiu no momento errado:
+ *   • Gabi, 18:04: "Ta tudo errado: esquece". O Luigi: "me conta o que ficou
+ *     errado e a gente corrige". 18:31, o fechador: "Segue o resumo do seu
+ *     pedido, posso liberar pras confecções?" — o resumo do pedido que ela
+ *     acabou de dizer que está todo errado.
+ *   • G., 18:44: o Fernando escreveu "posso te chamar amanhã cedo pra
+ *     finalizar? vou precisar largar agora". 19:00, o fechador mandou o PDF.
+ *
+ * O fechador existe pro pedido PARADO: pronto, com a última fala nossa sendo
+ * afirmação ("vou gerar as prévias e mandar o resumo") e ninguém esperando
+ * nada de ninguém. Fica fora quando:
+ *   • a última saída é de GENTE — a conversa está na mão do Fernando, e o que
+ *     ele combinou ("amanhã") vale mais que o relógio;
+ *   • a última fala do Luigi PEDE algo ao cliente (pergunta, "me passa", "me
+ *     conta") — a bola está com o cliente, e PDF em cima de pergunta aberta é
+ *     falar por cima de si mesmo;
+ *   • a última mensagem do cliente é reclamação ou recuo ("errado", "esquece",
+ *     "nada a ver", "cancela") — aí o pedido não está pronto, está em disputa,
+ *     e quem resolve é conversa, não documento.
+ */
+const RECLAMACAO_DO_CLIENTE =
+  /\b(errad[oa]s?|esquece|esquecer|deixa pra l[áa]|nada a ver|cancela|cancelar|desist|n[ãa]o (quero|é isso|era isso|foi isso)|n[ãa]o t[áa] certo|n[ãa]o est[áa] certo|tudo errado)\b/i
+const LUIGI_PEDE_ALGO =
+  /\?|\b(me (passa|manda|conta|diz|fala|envia|informa)|pode me (passar|mandar|dizer|falar)|qual (é|e|seria)|quais|quant[ao]s?|preciso (do|da|de|que)|s[óo] falta|falta (o|a|só)|confirma)\b/i
+
+type UltimasFalas = { cliente: string | null; nossa: { corpo: string | null; autor: string | null } | null; ultimaEhNossa: boolean }
+
+async function ultimasFalas(telefone: string): Promise<UltimasFalas | null> {
+  const digitos = telefone.replace(/\D/g, '').slice(-8)
+  if (digitos.length < 8) return null
+  const { data: contatos } = await supabaseAdmin.from('wa_contatos').select('id').like('wa_id', `%${digitos}`)
+  const ids = (contatos ?? []).map((c) => c.id as string)
+  if (ids.length === 0) return null
+  const { data: conversas } = await supabaseAdmin.from('wa_conversas').select('id').in('contato_id', ids)
+  const convIds = (conversas ?? []).map((c) => c.id as string)
+  if (convIds.length === 0) return null
+  const { data } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('direcao, corpo, autor, tipo, criado_em')
+    .in('conversa_id', convIds)
+    .order('criado_em', { ascending: false })
+    .limit(12)
+  const msgs = (data ?? []) as Array<{ direcao: string; corpo: string | null; autor: string | null; tipo: string; criado_em: string }>
+  if (msgs.length === 0) return null
+  const cliente = msgs.find((m) => m.direcao === 'entrada' && (m.corpo ?? '').trim())
+  const nossa = msgs.find((m) => m.direcao === 'saida' && m.tipo !== 'document')
+  return {
+    cliente: cliente?.corpo ?? null,
+    nossa: nossa ? { corpo: nossa.corpo, autor: nossa.autor } : null,
+    ultimaEhNossa: msgs[0].direcao === 'saida',
+  }
+}
+
+/** O cliente mandou PDF nesta conversa nos últimos 7 dias? */
+async function clienteMandouPdf(telefone: string): Promise<boolean> {
+  const digitos = telefone.replace(/\D/g, '').slice(-8)
+  if (digitos.length < 8) return false
+  const { data: contatos } = await supabaseAdmin.from('wa_contatos').select('id').like('wa_id', `%${digitos}`)
+  const ids = (contatos ?? []).map((c) => c.id as string)
+  if (ids.length === 0) return false
+  const { data: conversas } = await supabaseAdmin.from('wa_conversas').select('id').in('contato_id', ids)
+  const convIds = (conversas ?? []).map((c) => c.id as string)
+  if (convIds.length === 0) return false
+  const { data } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('id')
+    .in('conversa_id', convIds)
+    .eq('direcao', 'entrada')
+    .eq('tipo', 'document')
+    .ilike('midia_mime', '%pdf%')
+    .gte('criado_em', new Date(Date.now() - 7 * 86400_000).toISOString())
+    .limit(1)
+  return (data ?? []).length > 0
+}
+
+/** Por que o fechador não deve entrar agora — ou null se pode. Puro, pra teste. */
+export function motivoParaFicarFora(f: UltimasFalas | null): string | null {
+  if (!f) return null
+  const autorNossa = (f.nossa?.autor ?? '').trim().toLowerCase()
+  const nossaEhDeGente = Boolean(f.nossa) && autorNossa !== 'luigi' && autorNossa !== 'gestao'
+  if (f.ultimaEhNossa && nossaEhDeGente) return 'a última fala é de gente da casa — a conversa está com o Fernando'
+  // A oferta do resumo ("posso te mandar o resumo?") é a exceção: o PDF é
+  // exatamente o que foi oferecido, e a legenda dele já pede a confirmação.
+  const ehOfertaDoResumo = Boolean(f.nossa?.corpo) && /\b(mand[oa]r?|envi[oa]r?)\b[^?]{0,40}\bresumo\b/i.test(f.nossa?.corpo ?? '')
+  if (f.ultimaEhNossa && f.nossa?.corpo && !ehOfertaDoResumo && LUIGI_PEDE_ALGO.test(f.nossa.corpo)) return 'a última fala do Luigi pede algo ao cliente — a bola está com ele'
+  if (f.cliente && RECLAMACAO_DO_CLIENTE.test(f.cliente)) return `o cliente reclamou ou recuou ("${f.cliente.slice(0, 60)}") — resolve na conversa, não com PDF`
+  return null
+}
+
 /** Quando o cliente falou pela última vez — o sinal de "está acordado, esperando". */
 async function ultimaFalaDoCliente(telefone: string): Promise<Date | null> {
   const digitos = telefone.replace(/\D/g, '').slice(-8)
@@ -342,6 +435,11 @@ async function varrer(saida: ResultadoFechamento): Promise<ResultadoFechamento> 
       saida.pulados.push({ pedido: rotulo, motivo: 'gente da casa na conversa agora' })
       continue
     }
+    const fora = motivoParaFicarFora(await ultimasFalas(p.telefone))
+    if (fora) {
+      saida.pulados.push({ pedido: rotulo, motivo: fora })
+      continue
+    }
 
     // PRÉVIA QUE FALHA NÃO FECHA O PEDIDO CALADA — 11/09/2026.
     //
@@ -356,7 +454,9 @@ async function varrer(saida: ResultadoFechamento): Promise<ResultadoFechamento> 
     // não pode é esperar pra sempre, então depois de MAX_ADIAMENTOS_PREVIA o
     // resumo sai do mesmo jeito — só que dizendo, no rastro e pro Fernando,
     // quais modelos foram sem foto.
-    const previas = await gerarMockupsQueFaltam(p)
+    // Referência em PDF: sem prévia de IA (ver Contexto.referenciaEmPdf em
+    // luigi.ts — a prévia da Gabi saiu "nada a ver" com o lookbook dela).
+    const previas = (await clienteMandouPdf(p.telefone)) ? { gerados: 0, falharam: [] } : await gerarMockupsQueFaltam(p)
     if (previas.falharam.length > 0) {
       const modelos = previas.falharam.map((f) => f.index + 1)
       const adiado = await adiamentosPorPrevia(rotulo)

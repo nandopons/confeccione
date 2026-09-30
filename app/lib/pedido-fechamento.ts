@@ -563,10 +563,13 @@ export async function criarPedidoParaContato(params: {
     }
   }
 
+  // Herda também do pedido em que este número foi o DIGITADO no site (29/09/2026,
+  // Guilherme: o e-mail e o CEP estavam no 348, que passou pro número do sócio;
+  // o 349 nasceu vazio e o Luigi pediu tudo de novo). O mais recente vence.
   const { data: anterior } = await supabaseAdmin
     .from('pedidos_assistente')
     .select('nome, email, conta_id, cep, logradouro, numero, complemento, bairro, cidade, uf, cpf_cnpj')
-    .like('telefone', `%${tel8}`)
+    .or(`telefone.like.%${tel8},telefone_digitado.like.%${tel8}`)
     .order('criado_em', { ascending: false })
     .limit(1)
     .maybeSingle<Record<string, unknown>>()
