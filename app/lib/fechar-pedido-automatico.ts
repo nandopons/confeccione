@@ -113,6 +113,7 @@ type PedidoLinha = {
   telefone: string | null
   linhas: LinhaMockup[] | null
   mockups: MapaMockups | null
+  previas_lote_em?: string | null
 }
 
 /** Já existe prévia de IA pra este modelo? */
@@ -372,7 +373,7 @@ async function varrer(saida: ResultadoFechamento): Promise<ResultadoFechamento> 
 
   const { data, error } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, codigo, telefone, linhas, mockups')
+    .select('id, codigo, telefone, linhas, mockups, previas_lote_em')
     .is('resumo_enviado_em', null)
     .not('telefone', 'is', null)
     .neq('status', 'cancelado')
@@ -438,6 +439,12 @@ async function varrer(saida: ResultadoFechamento): Promise<ResultadoFechamento> 
     const fora = motivoParaFicarFora(await ultimasFalas(p.telefone))
     if (fora) {
       saida.pulados.push({ pedido: rotulo, motivo: fora })
+      continue
+    }
+    // Lote de prévias em andamento (previas-lote.ts): o Luigi está mostrando
+    // os modelos ao cliente agora; o resumo vem depois do fecho do lote.
+    if (p.previas_lote_em) {
+      saida.pulados.push({ pedido: rotulo, motivo: 'prévias em lote ainda saindo — a conversa é do Luigi' })
       continue
     }
 

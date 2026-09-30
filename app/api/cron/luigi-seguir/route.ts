@@ -11,6 +11,7 @@
 // quase sempre vazio. Cada marca é cumprida ou desarmada uma vez.
 import { NextRequest, NextResponse } from 'next/server'
 import { seguirConversasParadas } from '@/app/lib/luigi'
+import { enviarPreviasPendentes } from '@/app/lib/previas-lote'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -23,7 +24,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ erro: 'Não autorizado' }, { status: 401 })
   }
   try {
-    return NextResponse.json({ ok: true, ...(await seguirConversasParadas()) })
+    const seguimento = await seguirConversasParadas()
+    // Prévias em lote que não couberam no turno (29/09/2026) — ver previas-lote.ts.
+    // Depois do seguimento, que é leve; o orçamento da função é 60 s.
+    let previas: Awaited<ReturnType<typeof enviarPreviasPendentes>> | { erro: string }
+    try {
+      previas = await enviarPreviasPendentes(45_000)
+    } catch (e) {
+      previas = { erro: e instanceof Error ? e.message : String(e) }
+    }
+    return NextResponse.json({ ok: true, ...seguimento, previas })
   } catch (e) {
     const erro = e instanceof Error ? e.message : String(e)
     console.error('[cron/luigi-seguir] falhou', { erro })

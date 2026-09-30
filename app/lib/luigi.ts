@@ -48,6 +48,7 @@ import { enviarImagemDoPedido, janela24hAberta, registrarSaidaInbox } from './wh
 import { definirStatusOferta, desistirDoPedidoAceito, reabrirBuscaPeloCliente, type LinhaPedido as LinhaPedidoCompleta } from './pedido-assistente-oferta'
 import { editarLinhasPedidoCliente, gradeDaFerramenta, linhasComAjuste } from './pedido-linhas-edicao'
 import { anexarFotoDaConversaAoModelo, conferirPedido, salvarDadosDoCliente, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores, pausarLembretesDoPedido, type Divergencia } from './pedido-fechamento'
+import { pedirLotePrevias, rodarLotePrevias } from './previas-lote'
 import {
   faltaParaMockup,
   gerarMockupDoModelo,
@@ -1821,9 +1822,10 @@ async function enviarResumoSeEleConfirmou(ctx: Contexto, corpo: string | null, c
   const pendentes = await faltamMockups(alvo.id).catch(() => [] as number[])
   if (pendentes.length > 0 && !ctx.mockupIndisponivel && !ctx.referenciaEmPdf) {
     alvo.proximo_passo =
-      'ELE ACABOU DE DIZER QUE PODE MANDAR O RESUMO. Gere a imagem que falta no(s) modelo(s) ' +
-      `${pendentes.join(', ')} com gerar_mockup_do_modelo e chame enviar_resumo_pedido NESTE turno. ` +
-      'Não pergunte de novo se pode mandar, não confirme detalhe nenhum antes: ele já respondeu.'
+      'ELE ACABOU DE DIZER QUE PODE MANDAR O RESUMO, mas o(s) modelo(s) ' +
+      `${pendentes.join(', ')} ainda não têm prévia: chame gerar_previas_do_pedido (gera e manda todas) e PARE — ` +
+      'o fecho do lote pergunta de novo se pode mandar o resumo, e com o sim dele o PDF vai por código. ' +
+      'Não pergunte nada antes: ele já respondeu.'
     return nao
   }
 
@@ -2396,19 +2398,29 @@ const FERRAMENTA_PAUSAR_LEMBRETES: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_PREVIAS_LOTE: Anthropic.Messages.Tool = {
+  name: 'gerar_previas_do_pedido',
+  description:
+    'Gera com IA e MANDA pro cliente, de uma vez, a prévia de TODOS os modelos do pedido que ainda não têm imagem ' +
+    '(os de "modelos_para_gerar_mockup"), cada uma com a legenda "Modelo 1 (peça, cor)", "Modelo 2 (…)"… e, no fim, ' +
+    'uma linha de fecho perguntando se quer ajustar algum e se pode mandar o resumo — tudo por código. ' +
+    'USE UMA VEZ, quando as peças estiverem completas e ANTES de enviar_resumo_pedido. Depois de chamar, NÃO escreva ' +
+    'nada: as imagens e o fecho saem sozinhos (o que não couber agora sai em instantes). ' +
+    'Se o cliente pedir ajuste em um modelo ("a logo maior no 3"), aí sim use gerar_mockup_do_modelo com `instrucoes`.',
+  input_schema: {
+    type: 'object',
+    properties: { pedido: { type: 'string', description: 'Código ou id. Sem isto, usa o pedido em foco.' } },
+  },
+}
+
 const FERRAMENTA_MOCKUP_IA: Anthropic.Messages.Tool = {
   name: 'gerar_mockup_do_modelo',
   description:
-    'Gera com IA uma imagem do modelo dentro do pedido, a partir do que já está definido (tipo da peça, cor, tecido, ' +
-    'estampa) e da arte/foto que o cliente tiver anexado. A imagem entra no pedido e aparece no resumo em PDF, no ' +
-    'visualizador e na oferta que a confecção recebe. ' +
-    'USE ANTES de enviar_resumo_pedido, nos modelos que o contexto listar em "modelos_para_gerar_mockup". ' +
-    'Pedido sem imagem é aprovado no escuro: o cliente lê a frase e imagina o resto, a confecção produz a partir da ' +
-    'mesma frase, e a diferença entre as duas imaginações aparece só na entrega. ' +
-    'NÃO é foto real de produção e você não deve dizer que é: ao mostrar, diga que é uma prévia gerada pra ele conferir ' +
-    'a ideia, e pergunte se é isso que ele tem em mente. ' +
-    'Se ele pedir mudança ("a logo maior", "quero na cor vinho", "põe nas costas"), chame de novo passando ' +
-    '`instrucoes` com o que ele falou.',
+    'REFAZ com IA a imagem de UM modelo do pedido a partir do ajuste que o cliente pediu ("a logo maior", "quero na ' +
+    'cor vinho", "põe nas costas") — passe em `instrucoes` o que ele falou. A imagem nova entra no pedido, aparece no ' +
+    'resumo em PDF e vai pro WhatsApp dele com a legenda "refiz o visualizador, ficou melhor assim?". ' +
+    'Pra gerar as prévias que FALTAM, não use esta: use gerar_previas_do_pedido, que faz todas de uma vez. ' +
+    'NÃO é foto real de produção e você não deve dizer que é.',
   input_schema: {
     type: 'object',
     properties: {
@@ -2707,7 +2719,7 @@ type FechamentoPorCodigo = 'liberou' | 'recusou' | 'resumo' | null
  * modelo grava em `confirmado_pelo_cliente` e libera no mesmo turno.
  */
 const FORA_DA_MESA: Record<Exclude<FechamentoPorCodigo, null>, ReadonlySet<string>> = {
-  liberou: new Set(['criar_pedido', 'definir_pecas_pedido', 'ajustar_peca_pedido', 'gerar_mockup_do_modelo', 'enviar_resumo_pedido', 'liberar_para_fornecedores']),
+  liberou: new Set(['criar_pedido', 'definir_pecas_pedido', 'ajustar_peca_pedido', 'gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido', 'liberar_para_fornecedores']),
   recusou: new Set(['criar_pedido', 'definir_pecas_pedido', 'enviar_resumo_pedido']),
   // `resumo` (o código mandou o PDF neste turno, porque ele disse que podia):
   // Big Shopp, 25/09 18:24 — "posso te mandar o resumo?" "sim" → o modelo
@@ -2716,7 +2728,7 @@ const FORA_DA_MESA: Record<Exclude<FechamentoPorCodigo, null>, ReadonlySet<strin
   // resumo já enviado, o que cabe é a pergunta de fechamento; peça, prévia e
   // pedido novo saem da mesa — igual ao `liberou`. Liberar fica: se ele
   // emendar "pode mandar pras confecções" na mesma fala, é o turno certo.
-  resumo: new Set(['criar_pedido', 'definir_pecas_pedido', 'ajustar_peca_pedido', 'gerar_mockup_do_modelo', 'enviar_resumo_pedido']),
+  resumo: new Set(['criar_pedido', 'definir_pecas_pedido', 'ajustar_peca_pedido', 'gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido']),
 }
 
 /** Etapas em que o pedido já saiu da mão do cliente — o resumo não volta a sair. */
@@ -2790,6 +2802,7 @@ function ferramentasDoModo(
         FERRAMENTA_DEFINIR_PECAS,
         FERRAMENTA_CRIAR_PEDIDO,
         FERRAMENTA_FOTO_MODELO,
+        FERRAMENTA_PREVIAS_LOTE,
         FERRAMENTA_MOCKUP_IA,
         FERRAMENTA_PAUSAR_LEMBRETES,
         FERRAMENTA_DADOS_CLIENTE,
@@ -3753,6 +3766,38 @@ async function executarFerramenta(
           'que existe uma máquina cobrando. Também não peça mais nenhum dado agora.',
       }
     }
+    case 'gerar_previas_do_pedido': {
+      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+      if (ctx.referenciaEmPdf) {
+        throw new Error('a referência deste cliente veio em PDF e a prévia de IA não enxerga o arquivo — siga sem prévia, direto pro resumo quando as peças estiverem completas.')
+      }
+      const faltavam = await faltamMockups(p.id)
+      if (faltavam.length === 0) {
+        return { ok: true, aviso: 'Todos os modelos já têm prévia. Não há o que gerar: se as peças estão completas, o próximo passo é o resumo.' }
+      }
+      await pedirLotePrevias(p.id)
+      // O turno já gastou o debounce e a rodada do modelo; 90 s de geração
+      // cabem no orçamento de 300 s do webhook, e o cron de 1 min termina o resto.
+      const lote = await rodarLotePrevias(p.id, 90_000)
+      ctx.mockupsNestaRodada += lote.enviadas
+      if (lote.motivo?.includes('indisponível')) {
+        ctx.mockupIndisponivel = true
+        void avisarMockupIndisponivelUmaVezPorDia(lote.motivo).catch(() => undefined)
+        return {
+          ok: false,
+          aviso: `a geração de imagem está indisponível agora (${lote.motivo}). Siga o pedido normalmente SEM as prévias e não comente isso com o cliente.`,
+        }
+      }
+      return {
+        ok: true,
+        enviadas_agora: lote.enviadas,
+        restantes: lote.restantes,
+        aviso: lote.concluido
+          ? `Saíram ${lote.enviadas} prévia(s) com legenda "Modelo N (…)" e a linha de fecho já foi (pergunta se quer ajustar e se pode mandar o resumo). NÃO escreva nada neste turno — resposta vazia. No próximo turno: ajuste em um modelo → gerar_mockup_do_modelo com instrucoes; "pode mandar o resumo" o código já trata.`
+          : `Saíram ${lote.enviadas} prévia(s) agora; as outras ${lote.restantes} saem sozinhas em instantes, e a linha de fecho vai por código depois da última. NÃO escreva nada neste turno — resposta vazia.`,
+      }
+    }
     case 'gerar_mockup_do_modelo': {
       const p = await acharNoContexto(ctx, str(entrada.pedido))
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
@@ -3889,9 +3934,8 @@ async function executarFerramenta(
         aviso: envio.ok
           ? `A imagem JÁ FOI para o WhatsApp dele com a legenda "${legenda}" — a pergunta já está na legenda. ` +
             'NÃO escreva mais nada neste turno: nem descrição da imagem, nem "assim fica bom?" de novo, nem texto de cortesia. ' +
-            'Resposta vazia. No próximo turno: se ele aprovar ou não pedir mudança, gere o próximo modelo da lista ' +
-            'modelos_para_gerar_mockup; se pedir mudança, gere este de novo com `instrucoes`; quando a lista estiver vazia, ' +
-            'siga pro resumo.' +
+            'Resposta vazia. No próximo turno: se ele aprovar, é o sim ao resumo (o código manda o PDF; se não sair, enviar_resumo_pedido); ' +
+            'se pedir outra mudança, refaça este de novo com `instrucoes`; se faltar prévia em outros modelos, gerar_previas_do_pedido.' +
             (vez > 1 && instrucoes
               ? ' O que você passou em `instrucoes` ainda NÃO está na peça: grave agora com ajustar_peca_pedido (descricao ou o campo certo).'
               : '') +
@@ -3936,13 +3980,17 @@ async function executarFerramenta(
       // A ordem estava escrita no prompt e não se sustentou — como toda ordem
       // que depende do modelo lembrar dela no meio de uma sequência. Aqui a
       // ferramenta recusa até o pedido estar inteiro.
+      const { data: lote } = await supabaseAdmin.from('pedidos_assistente').select('previas_lote_em').eq('id', p.id).maybeSingle<{ previas_lote_em: string | null }>()
+      if (lote?.previas_lote_em) {
+        throw new Error('as prévias deste pedido ainda estão saindo (lote em andamento). NÃO mande o resumo agora e NÃO escreva nada: o fecho do lote vai perguntar se pode mandar o resumo.')
+      }
       const pendentes = await faltamMockups(p.id)
       if (pendentes.length > 0 && !ctx.mockupIndisponivel && !ctx.referenciaEmPdf) {
         throw new Error(
           `ainda falta imagem no(s) modelo(s) ${pendentes.join(', ')} deste pedido. ` +
-            'Gere com gerar_mockup_do_modelo ANTES de mandar o resumo — o PDF leva as imagens junto, e resumo com ' +
-            'modelo vazio é o que a confecção vai usar pra produzir. Só a primeira imagem vai pro WhatsApp; as ' +
-            'outras entram caladas. Depois de gerar todas, chame esta ferramenta de novo.'
+            'Chame gerar_previas_do_pedido ANTES de mandar o resumo — ela gera e manda todas de uma vez e fecha ' +
+            'perguntando se pode mandar o resumo; o PDF leva as imagens junto, e resumo com modelo vazio é o que a ' +
+            'confecção vai usar pra produzir. NÃO chame esta ferramenta de novo neste turno.'
         )
       }
 
@@ -4540,11 +4588,11 @@ O QUE VOCÊ ENTENDEU DA IMAGEM VIRA TEXTO NO MODELO. A foto vai junto, mas quem 
 
 PRENDA A FOTO NO MODELO CERTO, sempre, com anexar_foto_ao_modelo — é assim que ela aparece no resumo e na ficha da confecção. Se o pedido tem mais de um modelo e não está claro de qual ela é, pergunte ("essa é da preta ou da branca?"): foto na peça errada faz produzir errado. Mas NUNCA narre a mecânica: nada de "foto presa", "anexei ao modelo", "registrei no sistema". Ele não tem sistema, ele tem um pedido.
 
-PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos_para_gerar_mockup". Se tiver posição nessa lista, gere o visualizador de TODAS elas com gerar_mockup_do_modelo ANTES de mandar o resumo — UM modelo por mensagem, em ordem: a imagem sai com a legenda "Modelo 1 (camiseta): gerei esse visualizador, está bom?", você não escreve mais nada, espera a resposta dele, e com o ok (ou sem pedido de mudança) gera o próximo. A foto que ele mandou (logo, arte, referência) entra na geração — ela NÃO dispensa o visualizador. Só quando a lista estiver vazia o resumo sai. (Decisão do Fernando, 29/09/2026: o Guilherme aprovou 10 modelos sem ver nenhum.) O cliente aprova lendo "camiseta oversized preta, algodão fio 30, 120 peças" e imaginando o resto; a confecção produz a partir da mesma frase. Toda diferença entre o que ele imaginou e o que chegou nasce aí, e o mockup é onde ela aparece a tempo de ser corrigida.
+PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos_para_gerar_mockup". Se tiver posição nessa lista e as peças estiverem completas, chame gerar_previas_do_pedido UMA vez: o código gera e manda TODAS as prévias, cada uma com a legenda "Modelo 1 (peça, cor)", "Modelo 2 (…)"…, e fecha com uma linha perguntando se ele quer ajustar algum e se pode mandar o resumo (decisão do Fernando, 29/09/2026: tudo de uma vez, e o cliente diz "ajusta tal coisa no modelo 3" se quiser). Depois de chamar, você NÃO escreve nada — nem "vou gerar", nem "seguindo pro modelo 3", nem "está bom?": tudo isso já sai por código. A foto que ele mandou (logo, arte, referência) entra na geração — ela NÃO dispensa a prévia. Só quando a lista estiver vazia o resumo sai. O cliente aprova lendo "camiseta oversized preta, algodão fio 30, 120 peças" e imaginando o resto; a confecção produz a partir da mesma frase. Toda diferença entre o que ele imaginou e o que chegou nasce aí, e a prévia é onde ela aparece a tempo de ser corrigida.
 
-A imagem sai por aqui com a legenda pronta ("Modelo 1 (camiseta): gerei esse visualizador, está bom?"). Depois dela você NÃO escreve nada no mesmo turno: a pergunta já foi. Não descreva a imagem, não repita a legenda e NUNCA diga que é foto de produção nossa ou de peça pronta — é uma prévia gerada do que ele descreveu; se ele perguntar se é foto real, diga que é uma prévia gerada por IA pra conferir a ideia.
+AJUSTE É POR MODELO. "A logo maior no 3", "o 2 em vinho", "põe nas costas": gerar_mockup_do_modelo com "modelo" e "instrucoes" nas palavras dele — refaz só aquele, a imagem vai com "refiz o visualizador, ficou melhor assim?", e você não escreve nada depois. NUNCA diga que a prévia é foto de produção nossa ou de peça pronta — é uma prévia gerada do que ele descreveu; se ele perguntar se é foto real, diga que é uma prévia gerada por IA pra conferir a ideia.
 
-A RESPOSTA DELE AO VISUALIZADOR. "Está bom", "ok", "pode ser", ou qualquer coisa que não seja pedido de mudança → gere o próximo modelo da lista (ou, acabou a lista, siga pro resumo). Pedido de mudança ("mais folgada", "com capuz", "cor mais escura") → gere o MESMO modelo de novo com "instrucoes" no que ele falou e grave a mudança na peça com ajustar_peca_pedido. Foto dele da peça ou da arte → prenda com anexar_foto_ao_modelo e gere o visualizador com ela de referência; a foto ajuda a geração, não a substitui. Nunca diga que já existe imagem só porque ele mandou foto.
+A RESPOSTA DELE ÀS PRÉVIAS. Aprovação ("está bom", "ok", "pode ser", "pode mandar") é o sim ao fecho do lote: o PDF do resumo sai por código — você não escreve nada; se o contexto disser que o resumo NÃO saiu, chame enviar_resumo_pedido. Pedido de mudança ("mais folgada no 2", "com capuz", "cor mais escura") → gerar_mockup_do_modelo DAQUELE modelo com "instrucoes" no que ele falou, e grave a mudança na peça com ajustar_peca_pedido. Se ele mandar foto da peça ou da arte no meio → prenda com anexar_foto_ao_modelo e refaça aquele modelo com ela de referência; a foto ajuda a geração, não a substitui. Nunca diga que já existe imagem só porque ele mandou foto.
 
 NUNCA A MESMA FRASE DUAS VEZES NA MESMA CONVERSA. Quando ele pede um ajuste e você manda a prévia refeita, a pergunta é a mesma, as palavras não: diga primeiro o que mudou ("agora com o capuz") e pergunte de outro jeito. "Ficou parecido com o que você quer? Se quiser ajustar algum detalhe é só me falar" duas vezes seguidas, na tela dele, é robô lendo script. Vale pra toda fala sua que se repete por natureza (a pergunta depois da prévia, o "posso liberar?", o fecho): antes de escrever, olhe a sua última mensagem no histórico e não a reescreva igual.
 
@@ -6597,7 +6645,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       // caem frase a frase — ver semNarracaoAoCliente / semContradicaoComAsFerramentas.
       const feitoNoTurno = {
         resumoSaiu: fechamento === 'resumo' || r.ferramentas.some((f) => f.nome === 'enviar_resumo_pedido' && f.ok),
-        mockupSaiu: r.ferramentas.some((f) => f.nome === 'gerar_mockup_do_modelo' && f.ok),
+        mockupSaiu: r.ferramentas.some((f) => (f.nome === 'gerar_mockup_do_modelo' || f.nome === 'gerar_previas_do_pedido') && f.ok),
       }
       const partesLimpas = todasAsPartes
         .map((p) => semPontoFinal(semContradicaoComAsFerramentas(semNarracaoAoCliente(p), feitoNoTurno)))
