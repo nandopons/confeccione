@@ -1859,6 +1859,24 @@ const ESCOLHEU_GERAR = /\b(gera|gerar|gere|pr[ée]via|simula|simula[çc][ãa]o|v
 type Escada = { degrau: FechamentoPorCodigo; falouPorCodigo: string | null; instrucao: string | null }
 const SEM_DEGRAU: Escada = { degrau: null, falouPorCodigo: null, instrucao: null }
 
+/**
+ * "OBRIGADO" TEM RESPOSTA DE UMA LINHA, POR CÓDIGO — 29/09/2026 (Fernando).
+ * A Gleicy recebeu o orçamento, escreveu "Ok, obrigada" e ouviu de volta o
+ * orçamento inteiro de novo, em três balões ("já está definido pela Dom
+ * Santo, no valor de…"). Agradecimento puro não é pergunta nem pedido: a
+ * resposta é "por nada, estamos à disposição" — e se a última fala nossa já
+ * foi isso, é silêncio (o segundo "obrigada" não pede outro "por nada").
+ */
+const AGRADECIMENTO_PURO =
+  /^[\s\p{Extended_Pictographic}\uFE0F\u200D]*(ok|okay|okey|certo|beleza|blz|show( de bola)?|perfeito|top|combinado|entendid[oa]|t[áa] bom|tudo bem|legal|[óo]timo|boa|massa)?[\s,.!]*(muito\s+|mt\s+|mto\s+)?(obrigad[oa]s?|obrigadíssim[oa]|brigad[oa]s?|obg|obgd|valeu|vlw|agrade[çc]o|thanks?|gratid[ãa]o)(\s+(pel[ao]|por)\s+(aten[çc][ãa]o|ajuda|retorno|resposta|apoio|paci[êe]ncia|tudo|agora))?[\s,.!…\p{Extended_Pictographic}\uFE0F\u200D]*$/iu
+export const FECHO_DO_AGRADECIMENTO = 'Por nada, estamos à disposição. Qualquer coisa é só chamar aqui'
+const JA_FECHOU_COM_DISPOSICAO = /s[óo] chamar aqui|[àa] disposi[çc][ãa]o|por nada|imagina/i
+
+export function ehAgradecimentoPuro(corpo: string | null): boolean {
+  const t = (corpo ?? '').trim()
+  return t.length > 0 && t.length <= 60 && AGRADECIMENTO_PURO.test(t)
+}
+
 /** Mensagem que não precisa do modelo: sem pergunta, curta ou um "sim". */
 export function mensagemTrivial(corpo: string | null, tipo: string): boolean {
   const t = (corpo ?? '').trim()
@@ -6593,6 +6611,33 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     try {
       // Uma sugestão por conversa: a nova mensagem do cliente supera a anterior.
       if (modo === 'sugere') await resolverSugestoes(params.conversaId, 'descartada').catch(() => undefined)
+
+      // "Obrigado" → "por nada", por código, sem modelo (ver ehAgradecimentoPuro).
+      if (modo === 'responde' && params.tipo === 'text' && !params.retomada && ehAgradecimentoPuro(params.corpo)) {
+        const { data: conv } = await supabaseAdmin.from('wa_conversas').select('luigi_escalado_em').eq('id', params.conversaId).maybeSingle<{ luigi_escalado_em: string | null }>()
+        if (!conv?.luigi_escalado_em && (await janela24hAberta(waId))) {
+          const ultima = await ultimaFalaNossa(params.conversaId)
+          const jaFechou = Boolean(ultima && JA_FECHOU_COM_DISPOSICAO.test(ultima))
+          void marcarComoLida(params.wamid).catch(() => false)
+          let ok = false
+          if (!jaFechou) ok = await falarPorCodigo(waId, nome, FECHO_DO_AGRADECIMENTO)
+          await gravarLog({
+            ...base,
+            resposta: jaFechou ? null : FECHO_DO_AGRADECIMENTO,
+            pedido_id: null,
+            ferramentas: [{ nome: 'agradecimento_por_codigo', argumentos: { ja_fechou: jaFechou }, ok: jaFechou || ok, via: 'codigo' }],
+            escalado: false,
+            motivo_escalada: jaFechou ? 'sem resposta por escolha' : null,
+            status: jaFechou ? 'ignorada' : ok ? 'enviada' : 'falhou',
+            rodadas: 0,
+            tokens_entrada: 0,
+            tokens_saida: 0,
+            duracao_ms: Date.now() - inicio,
+            erro: null,
+          })
+        }
+        return
+      }
 
       const [ctx, historico] = await Promise.all([montarContexto(params.conversaId, waId, nome, contato?.cliente_id ?? null, ehFornecedor), historicoConversa(params.conversaId)])
 
