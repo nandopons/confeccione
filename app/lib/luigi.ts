@@ -75,6 +75,7 @@ import { visualizadorPedidoUrl } from './url'
 import { ehModoLuigi, type ModoLuigi, type SugestaoLuigi } from './luigi-catalogo'
 import { candidatoPeloWaId, responderCandidato } from './captacao-pedido'
 import { retranscreverDoStorage } from './transcricao'
+import { acharQuantidadeDita, MINIMO_POR_MODELO_E_COR, type QuantidadeDita } from './quantidade-dita'
 import { criarPerguntaFornecedor, listarThreadOferta, perguntasPendentesDosPedidos, responderPerguntaCliente, type MensagemPergunta, type PerguntaPendente } from './perguntas'
 
 export * from './luigi-catalogo'
@@ -922,6 +923,13 @@ type Contexto = {
    * prévia — o pedido vai com a descrição do que o Luigi leu no PDF.
    */
   referenciaEmPdf: boolean
+  /**
+   * A última quantidade que ELE declarou nesta conversa — 30/09/2026 (ver
+   * quantidade-dita.ts). Só quando nenhum pedido em aberto tem quantidade
+   * gravada: aí é o dado que o Luigi mais tende a perguntar de novo. A
+   * Patriciane disse "menos de 10 peças" e ouviu "quantas você precisaria?".
+   */
+  quantidadeJaDita: QuantidadeDita | null
   /** O que a confecção JÁ nos deu. Null quando não é fornecedor. */
   cadastroFornecedor: CadastroFornecedor | null
   /**
@@ -2196,7 +2204,7 @@ async function recusasAnterioresDaMesmaDivergencia(conversaId: string, divergenc
 
 async function montarContexto(conversaId: string, waId: string, nome: string | null, clienteId: string | null, ehFornecedor = false): Promise<Contexto> {
   const referenciaEmPdf = await conversaTemPdfDoCliente(conversaId)
-  const [pedidos, conta, cadastroFornecedor, ofertasAbertas, ofertasFechadas, ofertasAceitas, vitrine, fichasVitrine] = await Promise.all([
+  const [pedidos, conta, cadastroFornecedor, ofertasAbertas, ofertasFechadas, ofertasAceitas, vitrine, fichasVitrine, quantidadeDita] = await Promise.all([
     pedidosDoContato(waId, clienteId),
     clienteId
       ? supabaseAdmin.from('contas_clientes').select('nome, email').eq('id', clienteId).maybeSingle<{ nome: string | null; email: string | null }>()
@@ -2207,6 +2215,7 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
     ehFornecedor ? ofertasAceitasDoFornecedor(waId) : Promise.resolve([] as OfertaAceita[]),
     ehFornecedor ? Promise.resolve(null) : produtoDaVitrineDaConversa(conversaId).catch(() => null),
     ehFornecedor ? fornecedorDoContato(waId).then((id) => (id ? fichasPendentesDoFornecedor(id) : [])).catch(() => [] as FichaPendente[]) : Promise.resolve([] as FichaPendente[]),
+    ehFornecedor ? Promise.resolve(null) : quantidadeDitaNaConversa(conversaId).catch(() => null),
   ])
 
   // Em aberto primeiro (mais recente no topo); fechados só os 2 últimos.
@@ -2362,7 +2371,24 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
     mockupsNestaRodada: 0,
     mockupIndisponivel: false,
     referenciaEmPdf,
+    // Com quantidade já gravada num pedido em aberto o dado está na ficha e
+    // no contexto; o bloco só faz falta enquanto o pedido está sem número.
+    quantidadeJaDita: abertos.some((p) => temQuantidade(p.linhas)) ? null : quantidadeDita,
   }
+}
+
+/** As mensagens de texto/áudio DELE nos últimos 14 dias, pra acharQuantidadeDita — ver Contexto.quantidadeJaDita. */
+async function quantidadeDitaNaConversa(conversaId: string): Promise<QuantidadeDita | null> {
+  const { data } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('corpo, criado_em')
+    .eq('conversa_id', conversaId)
+    .eq('direcao', 'entrada')
+    .in('tipo', ['text', 'audio'])
+    .gte('criado_em', new Date(Date.now() - 14 * 86400_000).toISOString())
+    .order('criado_em', { ascending: false })
+    .limit(40)
+  return acharQuantidadeDita((data ?? []) as Array<{ corpo: string | null; criado_em: string }>)
 }
 
 /** Entrada do cliente em PDF nos últimos 7 dias — ver Contexto.referenciaEmPdf. */
@@ -4885,6 +4911,23 @@ O QUE ISSO MUDA: você JÁ SABE a peça — não pergunte "qual é a peça". Con
 `
 }
 
+/**
+ * A QUANTIDADE QUE ELE JÁ DISSE — 30/09/2026 (Patriciane: "quero menos de 10
+ * peças" → "quantas você precisaria no total?"). Ver quantidade-dita.ts. O
+ * histórico já tinha a frase; este bloco a põe onde o modelo não passa reto.
+ */
+function blocoQuantidadeJaDita(q: QuantidadeDita | null): string {
+  if (!q) return ''
+  const quando = quandoRecife(q.criado_em)
+  return `
+QUANTIDADE QUE ELE JÁ DISSE NESTA CONVERSA${quando ? ` (${quando})` : ''}: "${q.trecho}". NÃO pergunte "quantas peças" nem "quantas no total" como se não soubesse: parta do que ele disse ("você comentou que são menos de 10") e pergunte só o que falta ou o número exato, se fizer diferença. ${
+    q.abaixoDoMinimo
+      ? `É menos que o mínimo: diga em UMA linha que abaixo de ${MINIMO_POR_MODELO_E_COR} peças por modelo e cor a maioria das confecções não pega (tem quem faça menos, mas é mais difícil), e pergunte quantas exatamente, ou se dá pra fechar ${MINIMO_POR_MODELO_E_COR} do mesmo modelo e cor. Uma mensagem só, sem repetir o que ele já sabe. Se ele mantiver a quantidade, registre com o número dele: a decisão é dele, e a fila oferece a quem aceita esse volume.`
+      : 'Ao gravar o pedido, use esse número como total dele.'
+  }
+`
+}
+
 /** Confecção: os produtos da vitrine dela que a gente perguntou e ainda faltam dados. */
 function blocoFichasVitrine(fichas: FichaPendente[]): string {
   if (fichas.length === 0) return ''
@@ -4928,7 +4971,7 @@ VOCÊ NÃO VENDE, VOCÊ RESPONDE — 24/09/2026. Você nunca explica a Confeccio
 
 RESPOSTAS DE UMA LINHA, só pra quando ele perguntar exatamente isso (nunca junte duas na mesma mensagem):
 - "como funciona?" → A gente leva seu pedido às confecções da rede e elas mandam o orçamento; você só paga se aprovar. O que você quer produzir?
-- "tem pedido mínimo?" → Depende da confecção, tem quem faça poucas peças. Quantas você precisa?
+- "tem pedido mínimo?" → Costuma ser 10 peças por modelo e cor, tem confecção que faz menos. Quantas você precisa? (se ele JÁ disse quantas, não pergunte: responda com o número dele)
 - "qual o prazo?" → Vem no orçamento e conta a partir do pagamento; costuma ficar entre 7 e 30 dias conforme a peça.
 - "é seguro pagar antes?", "e se não chegar?" → O dinheiro fica garantido pela Confeccione até você dar o OK de que a produção chegou conforme o combinado. É essa a frase, e ela basta.
 - "quem produz?", "quem são os fornecedores?" → Confecções verificadas pela gente, no Brasil inteiro, muitas no polo de Pernambuco.
@@ -4987,7 +5030,7 @@ NUNCA ABRA COM "ENTENDIDO". Nem "Perfeito", "Certo", "Show", "Ótimo", "Anotado"
 CONVERSA, NÃO COMUNICADO — a regra mais importante deste prompt. Você manda MENSAGEM DE WHATSAPP, não parágrafo. Limite duro: 1 ou 2 frases, no máximo 3 linhas, SEM linha em branco no meio (se você escreveu dois parágrafos, está errado — corte). UMA pergunta por mensagem: uma só, nunca duas ligadas por "e" ou por vírgula. Depois da pergunta, PARE. Não explique antes de perguntar, não antecipe o passo seguinte, não responda o que ele não perguntou, não repita o que ele acabou de dizer. Se você sabe cinco coisas úteis, mande uma e guarde quatro — as outras vêm quando ele responder.
 
 Errado (longo, explica demais, entusiasmo, duas perguntas): "Que legal, marca própria! Fase de testes é exatamente onde a gente costuma ajudar bastante. Como cada fornecedor define o próprio mínimo, isso vai aparecer no orçamento — mas lotes pequenos, de poucas dezenas de peças, já costumam ter quem tope. Que tipo de camisa você está pensando, e tem ideia de quantas peças seria esse primeiro lote?"
-Certo: "Entendi. Lote pequeno costuma ter fornecedor disponível. Quantas peças no primeiro lote?"
+Certo: "Entendi. A partir de 10 peças por modelo e cor costuma ter confecção. Quantas peças no primeiro lote?"
 
 Errado: "A gente conecta quem precisa produzir a confecções de todo o Brasil. Você descreve o que quer (peça, cor, quantidade, arte), a gente oferece pra fornecedores e quem topar monta o orçamento — você só paga se aprovar. O que você está pensando em produzir?"
 Certo: "A gente leva seu pedido às confecções e elas enviam o orçamento. O que você quer produzir?"
@@ -5141,6 +5184,8 @@ Nada de perguntar depois disso se ele quer encerrar ou deixar o pedido aberto, s
 
 Se ele disse que avisa quando mudar de ideia, acredite e cale. Insistir depois de um não claro não recupera pedido nenhum: só ensina que falar com a gente custa caro.
 
+O QUE ELE JÁ DISSE VALE, E NÃO SE PERGUNTA DE NOVO (Patriciane, 30/09). Ela abriu a conversa com "quero menos de 10 peças" e, duas mensagens depois, ouviu "o mínimo costuma ser 10 peças, quantas você precisaria no total?", como se não tivesse dito nada. Antes de perguntar quantidade, peça, cor ou público, releia as mensagens DELE nesta conversa, inclusive a primeira: o que já foi dito você usa ("você comentou que são menos de 10"), e pergunta só o que falta ou o que precisa ficar exato. E se o que ele disse esbarra numa regra nossa (mínimo, prazo, peça que a rede não faz), trate isso de frente na mesma mensagem, em vez de seguir coletando o resto como se estivesse tudo certo. Quando o código achar uma quantidade dita por ele, ela vem no bloco QUANTIDADE QUE ELE JÁ DISSE, com a hora.
+
 PERGUNTE MAIS, ENQUANTO ELE ESTIVER INTERESSADO: quase toda mensagem sua termina em pergunta. Cliente gosta de ser perguntado — mostra que você quer entender o que ele precisa, e é assim que o pedido fica completo. Puxe o que está por trás do pedido, não só o campo que falta: pra que é a peça (uniforme, evento, revenda, marca própria), pra quando precisa, quantas pessoas vão usar, se já mandou fazer antes, se tem arte ou referência. Uma dessas por mensagem, escolhendo a que mais destrava agora. Quando ele responder, reaja ao que ele disse antes de perguntar a próxima — pergunta em sequência sem reação vira formulário, e formulário cansa. Se ele já deu a informação, não pergunte de novo.`
 
   const volatil = `Agora em Recife: ${agoraRecife()}. Se for cumprimentar, a saudação certa AGORA é "${saudacaoAgora()}" — use essa e nenhuma outra, mesmo que o cliente tenha escrito outra antes (a mensagem dele pode ser de horas atrás).
@@ -5149,7 +5194,7 @@ QUEM ESTÁ FALANDO: ${nome ?? 'nome desconhecido'} (${ctx.contato.telefone})${ct
 
 PEDIDOS DESTE CONTATO (em aberto primeiro, do mais recente pro mais antigo; o primeiro em aberto é o pedido em foco, salvo se o cliente falar de outro):
 ${blocoVitrine(ctx.vitrine)}${pedidos}
-
+${blocoQuantidadeJaDita(ctx.quantidadeJaDita)}
 ${
     jaSeApresentou
       ? 'Você já se apresentou nesta conversa (ou a abertura foi uma mensagem sua, como "me chamo Luigi, da Confeccione. Tudo bem?"): não repita "me chamo Luigi" nem "aqui é o Luigi", não cumprimente de novo e não assine. Se o cliente só respondeu o cumprimento ("tudo bem, e você?"), responda em duas ou três palavras e vá direto ao pedido em foco: o que falta pra ele seguir, em uma pergunta.'

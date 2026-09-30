@@ -655,6 +655,11 @@ async function notificarAceiteEContatos(ofertaId: string, pedidoId: string, forn
     // só funciona com a janela de 24h aberta. O link no texto é a garantia de
     // entrega no caso fechado — e não custa nada quando o arquivo chega.
     const linkResumo = `${SITE_URL}/api/pedido/assistente/${pedidoId}/resumo-pdf`
+    // A CONFECÇÃO RECEBE A FICHA, NÃO O RESUMO DO CLIENTE — 30/09/2026. O
+    // resumo é público por uuid e feito pro cliente (convite pro painel, sem
+    // contato). A ficha tem CPF/CNPJ, e-mail, telefone e endereço completo, e
+    // só abre pela oferta ACEITA — ver /api/fornecedor/oferta/[id]/ficha-pdf.
+    const linkFicha = `${SITE_URL}/api/fornecedor/oferta/${ofertaId}/ficha-pdf`
     const local = [pedido.cidade, pedido.uf].filter(Boolean).join('/')
     const destino = [local, pedido.cep ? `CEP ${pedido.cep}` : ''].filter(Boolean).join(' — ')
 
@@ -667,7 +672,7 @@ async function notificarAceiteEContatos(ofertaId: string, pedidoId: string, forn
         (pedido.telefone ? `📱 ${telBR(pedido.telefone)}\n` : '') +
         (pedido.email ? `✉️ ${pedido.email}\n` : '') +
         (destino ? `📍 ${destino}\n` : '') +
-        `\n📄 Ficha técnica do pedido (modelos, grade, artes):\n${linkResumo}\n` +
+        `\n📄 Ficha técnica do pedido (dados do cliente, modelos, grade, artes):\n${linkFicha}\n` +
         (pago
           ? `\n✅ Este pedido já está pago — pode iniciar a produção assim que combinar os detalhes.`
           : `\n💰 Depois de alinhar, *defina o orçamento final* (produtos + frete) aqui — é assim que o cliente paga com segurança pela Confeccione:\n${linkOrcamento}\n\n⚠️ Reforce com o cliente: o orçamento e o pagamento precisam ser feitos pela plataforma. Combinar e cobrar por fora tira o suporte e a garantia de pagamento da Confeccione (e é contra os termos de uso).`)
@@ -710,7 +715,8 @@ async function notificarAceiteEContatos(ofertaId: string, pedidoId: string, forn
           ? [{
               telefone: forn.whatsapp,
               nome: forn.nome ?? null,
-              legenda: `Ficha técnica do pedido ${refPedido(pedidoId)} — modelos, grade de tamanhos, artes e endereço de entrega.`,
+              legenda: `Ficha técnica do pedido ${refPedido(pedidoId)} — dados do cliente, modelos, grade de tamanhos, artes e endereço de entrega.`,
+              papel: 'confeccao' as const,
             }]
           : []),
         ...(pedido.telefone
@@ -718,6 +724,7 @@ async function notificarAceiteEContatos(ofertaId: string, pedidoId: string, forn
               telefone: pedido.telefone,
               nome: pedido.nome ?? null,
               legenda: `Resumo do seu pedido ${refPedido(pedidoId)}. Confira a grade e as artes — se algo estiver diferente, ajuste no site antes da produção começar.`,
+              papel: 'cliente' as const,
             }]
           : []),
       ],

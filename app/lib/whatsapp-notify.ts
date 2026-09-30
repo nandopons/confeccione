@@ -539,12 +539,23 @@ export async function janela24hAberta(waId: string): Promise<boolean> {
 // em vez de fingir sucesso — quem chama já mandou o link do PDF no texto do
 // aviso, e é esse link que garante a entrega no caso fechado.
 //
-// GERA UMA VEZ, ENVIA PRA VÁRIOS
-// O PDF do pedido é o mesmo pro fornecedor e pro cliente. Gerar e subir duas
-// vezes seria pagar dobrado por um arquivo idêntico — o media id da Meta é
-// reutilizável entre destinatários do mesmo número.
+// GERA UMA VEZ POR VERSÃO, ENVIA PRA VÁRIOS
+// Duas versões, no máximo: a do CLIENTE (resumo, com o convite pro painel) e
+// a da CONFECÇÃO (ficha técnica, com os dados do cliente — 30/09/2026, ver
+// ResumoPedido.paraConfeccao). Cada uma é gerada e sobe uma vez; o media id
+// da Meta é reutilizável entre destinatários do mesmo número.
 // ---------------------------------------------------------------------------
-type DestinoResumo = { telefone: string; nome: string | null; legenda: string }
+type DestinoResumo = {
+  telefone: string
+  nome: string | null
+  legenda: string
+  /**
+   * 'confeccao' recebe a FICHA (com CPF/CNPJ, e-mail, telefone e endereço do
+   * cliente). Sem papel é cliente: o resumo de sempre, sem dado sensível —
+   * é o que vai pra quem ainda nem assumiu nada.
+   */
+  papel?: 'cliente' | 'confeccao'
+}
 
 export async function enviarResumoPdfPedido(params: {
   pedidoId: string
@@ -577,7 +588,7 @@ export async function enviarResumoPdfPedido(params: {
   try {
     const { data } = await supabaseAdmin
       .from('pedidos_assistente')
-      .select(`id, codigo, telefone, resumo_enviado_hash, ${CAMPOS_DO_RESUMO}`)
+      .select(`id, codigo, telefone, email, cpf_cnpj, resumo_enviado_hash, ${CAMPOS_DO_RESUMO}`)
       .eq('id', params.pedidoId)
       .maybeSingle<Record<string, unknown>>()
     if (!data) return { enviados: 0, total }
@@ -622,22 +633,36 @@ export async function enviarResumoPdfPedido(params: {
       imagens: Array.isArray(data.imagens) ? (data.imagens as string[]) : null,
     }
 
-    const bytes = await gerarResumoPedidoPdf(pedido)
-    // `bytes.buffer` pode ser maior que o conteúdo (Uint8Array é uma janela
-    // sobre o buffer). O slice recorta exatamente o PDF.
-    const arquivo = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-    const nomeArquivo = `confeccione-pedido-${pedido.id.slice(0, 8)}.pdf`
-
-    const up = await uploadMidia(arquivo, 'application/pdf', nomeArquivo)
-    if (!up.ok) {
-      console.error('[wa-notify] upload do resumo em PDF falhou', { erro: up.erro })
-      return { enviados: 0, total }
+    // Uma versão por papel presente entre os destinos abertos: o cliente recebe
+    // o resumo; a confecção que assumiu recebe a ficha com os dados dele.
+    type Versao = { arquivo: ArrayBuffer; nomeArquivo: string; mediaId: string }
+    const versoes = new Map<'cliente' | 'confeccao', Versao>()
+    for (const papel of new Set(abertos.map(({ destino }) => destino.papel ?? 'cliente'))) {
+      const bytes = await gerarResumoPedidoPdf(
+        papel === 'confeccao'
+          ? { ...pedido, paraConfeccao: { telefone: (data.telefone as string | null) ?? null, email: (data.email as string | null) ?? null, cpfCnpj: (data.cpf_cnpj as string | null) ?? null } }
+          : pedido,
+      )
+      // `bytes.buffer` pode ser maior que o conteúdo (Uint8Array é uma janela
+      // sobre o buffer). O slice recorta exatamente o PDF.
+      const arquivo = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+      const nomeArquivo = `confeccione-${papel === 'confeccao' ? 'ficha' : 'pedido'}-${pedido.id.slice(0, 8)}.pdf`
+      const up = await uploadMidia(arquivo, 'application/pdf', nomeArquivo)
+      if (!up.ok) {
+        console.error('[wa-notify] upload do resumo em PDF falhou', { erro: up.erro, papel })
+        continue
+      }
+      versoes.set(papel, { arquivo, nomeArquivo, mediaId: up.mediaId })
     }
+    if (versoes.size === 0) return { enviados: 0, total }
 
     let enviados = 0
     for (const { waId, destino } of abertos) {
+      const versao = versoes.get(destino.papel ?? 'cliente')
+      if (!versao) continue
+      const { arquivo, nomeArquivo } = versao
       const agoraEnvio = new Date().toISOString()
-      const r = await enviarMidiaPorId(waId, 'document', up.mediaId, {
+      const r = await enviarMidiaPorId(waId, 'document', versao.mediaId, {
         caption: destino.legenda.slice(0, 1024),
         filename: nomeArquivo,
       })

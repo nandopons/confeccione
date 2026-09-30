@@ -370,6 +370,16 @@ export default function OfertaCliente({ oferta }: { oferta: Oferta }) {
                 {oferta.contatoCliente.telefone && (
                   <p className="mt-1.5 text-center text-xs text-gray-500">{oferta.contatoCliente.telefone}</p>
                 )}
+                {/* A ficha completa (CPF/CNPJ, e-mail, telefone, endereço,
+                    modelos, grade, artes) em PDF — 30/09/2026. O aviso de
+                    aceite pelo WhatsApp já leva o mesmo link; aqui ele fica
+                    à mão pra quem voltar à página depois. */}
+                <a
+                  href={`/api/fornecedor/oferta/${oferta.ofertaId}/ficha-pdf`}
+                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 hover:bg-gray-100"
+                >
+                  📄 Baixar ficha técnica do pedido (PDF)
+                </a>
                 {!oferta.pago && (
                   <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-3 leading-snug">
                     ⚠️ Alinhe os detalhes à vontade, mas o orçamento e o pagamento precisam ser feitos aqui na Confeccione — combinar por fora tira o suporte e a garantia de pagamento.

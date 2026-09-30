@@ -38,6 +38,32 @@ export type ResumoPedido = {
   observacoes?: string | null
   mockups?: MapaMockups | null
   imagens?: string[] | null
+  /**
+   * A FICHA DA CONFECÇÃO — 30/09/2026 (Fernando: "quando o fornecedor
+   * aceita o pedido não tá vindo várias infos, como e-mail do cliente, CPF").
+   * Com isto preenchido o PDF é a versão pra quem vai PRODUZIR: em vez do
+   * "acompanhe seu pedido no painel" (que é pro cliente), sai um bloco com os
+   * dados do cliente que a confecção precisa pra falar com ele, emitir a nota
+   * e despachar — nome, CPF/CNPJ, e-mail, telefone e endereço completo. Só
+   * sai depois do aceite: antes disso ninguém de fora vê contato do cliente.
+   */
+  paraConfeccao?: { telefone?: string | null; email?: string | null; cpfCnpj?: string | null } | null
+}
+
+function formatarCpfCnpj(v: string | null | undefined): string | null {
+  const d = (v ?? '').replace(/\D/g, '')
+  if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
+  if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5')
+  return (v ?? '').trim() || null
+}
+
+function formatarTelefone(v: string | null | undefined): string | null {
+  let d = (v ?? '').replace(/\D/g, '')
+  if (!d) return null
+  if (d.startsWith('55') && (d.length === 12 || d.length === 13)) d = d.slice(2)
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`
+  return (v ?? '').trim() || null
 }
 
 const VERDE = rgb(0.114, 0.62, 0.459) // #1D9E75
@@ -241,7 +267,8 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
   }
 
   // Título
-  linha('Resumo do pedido', { size: 18, font: bold, cor: ESCURO, gap: 2 })
+  const confeccao = pedido.paraConfeccao ?? null
+  linha(confeccao ? 'Ficha técnica do pedido' : 'Resumo do pedido', { size: 18, font: bold, cor: ESCURO, gap: 2 })
   const totalPecas = pedido.linhas.reduce((a, l) => a + qtdDaLinha(l), 0)
   const metaLinha = [
     `Pedido nº ${pedido.codigo || pedido.id.slice(0, 8).toUpperCase()}`,
@@ -249,19 +276,52 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
     `${totalPecas} ${totalPecas === 1 ? 'peça' : 'peças'} no total`,
   ].join('   ·   ')
   linha(metaLinha, { size: 9.5, cor: CINZA, gap: 6 })
-  if (pedido.nome) linha(`Cliente: ${pedido.nome}`, { size: 10, cor: ESCURO, gap: 2 })
+  if (pedido.nome && !confeccao) linha(`Cliente: ${pedido.nome}`, { size: 10, cor: ESCURO, gap: 2 })
 
   // Endereço de entrega
   const endParte1 = [pedido.logradouro, pedido.numero].filter(Boolean).join(', ')
   const endParte2 = [pedido.bairro, [pedido.cidade, pedido.uf].filter(Boolean).join('/'), pedido.cep ? `CEP ${pedido.cep}` : null, pedido.complemento].filter(Boolean).join(' · ')
-  if (endParte1 || endParte2) {
-    linha(`Entrega: ${[endParte1, endParte2].filter(Boolean).join(' — ')}`, { size: 9.5, cor: CINZA, gap: 8 })
-  } else {
-    y -= 4
+  const endereco = [endParte1, endParte2].filter(Boolean).join(' — ')
+  if (!confeccao) {
+    if (endereco) linha(`Entrega: ${endereco}`, { size: 9.5, cor: CINZA, gap: 8 })
+    else y -= 4
   }
 
-  // Callout destacado: acompanhe o pedido pelo painel (clicável).
-  {
+  if (confeccao) {
+    // Bloco "Dados do cliente": o que a confecção precisa pra falar com ele,
+    // emitir a nota e despachar. Mesmo visual do callout do cliente.
+    const itens: Array<[string, string]> = []
+    if (pedido.nome) itens.push(['Nome', pedido.nome])
+    const doc = formatarCpfCnpj(confeccao.cpfCnpj)
+    if (doc) itens.push([doc.length === 18 ? 'CNPJ' : 'CPF', doc])
+    const tel = formatarTelefone(confeccao.telefone)
+    if (tel) itens.push(['Telefone', tel])
+    if (confeccao.email?.trim()) itens.push(['E-mail', confeccao.email.trim()])
+    if (endereco) itens.push(['Entrega', endereco])
+    const linhasBloco = itens.flatMap(([rotulo, valor]) => wrap(`${rotulo}: ${valor}`, reg, 10, maxW - 32))
+    const boxH = 30 + linhasBloco.length * 14
+    garantir(boxH + 8)
+    const top = y
+    const bottom = y - boxH
+    page.drawRectangle({ x: MX, y: bottom, width: maxW, height: boxH, color: rgb(0.882, 0.961, 0.933) })
+    page.drawRectangle({ x: MX, y: bottom, width: 4, height: boxH, color: VERDE_ESC })
+    const ix = MX + 16
+    page.drawText('Dados do cliente', { x: ix, y: top - 19, size: 11.5, font: bold, color: VERDE_ESC })
+    let ly = top - 35
+    for (const ln of linhasBloco) {
+      const sep = ln.indexOf(': ')
+      const rotulo = sep > 0 && itens.some(([r]) => ln.startsWith(`${r}: `)) ? ln.slice(0, sep + 2) : ''
+      page.drawText(rotulo, { x: ix, y: ly, size: 10, font: reg, color: CINZA })
+      // +1.5 pt além do espaço: "(21)" começa colado nos dois pontos sem isso.
+      page.drawText(ln.slice(rotulo.length), { x: ix + reg.widthOfTextAtSize(rotulo, 10) + (rotulo ? 1.5 : 0), y: ly, size: 10, font: bold, color: ESCURO })
+      ly -= 14
+    }
+    y -= boxH + 14
+  }
+
+  // Callout destacado: acompanhe o pedido pelo painel (clicável). Só pro
+  // cliente — a confecção tem o bloco de dados acima no lugar dele.
+  if (!confeccao) {
     const url = `https://${SITE}/cliente/painel`
     const boxH = 50
     garantir(boxH + 8)
