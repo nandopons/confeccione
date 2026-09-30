@@ -84,6 +84,8 @@ export function modelosQueFaltam(linhas: LinhaMockup[], mockups: MapaMockups | n
   const out: number[] = []
   linhas.forEach((l, i) => {
     if (temPrevia(mockups, i)) return
+    // A foto dele é o visualizador (decisão dele): não gera.
+    if (mockups?.[String(i)]?.previa === 'cliente') return
     if (faltaParaMockup(l, mockups?.[String(i)]).length > 0) return
     out.push(i)
   })

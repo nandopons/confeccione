@@ -270,6 +270,11 @@ async function gerarMockupsQueFaltam(p: PedidoLinha): Promise<Previas> {
   const r: Previas = { gerados: 0, falharam: [] }
   for (const [i, linha] of linhas.entries()) {
     if (temMockupIa(p.mockups, i)) continue
+    // A foto do cliente vale como visualizador quando ele decidiu isso — e
+    // também enquanto não decidiu: o fechador não inventa prévia por cima da
+    // imagem que ele mesmo mandou (29/09/2026, Gleicy).
+    const mk = p.mockups?.[String(i)]
+    if (mk?.previa === 'cliente' || (mk?.previa !== 'gerar' && (mk?.fotos?.length ?? 0) > 0)) continue
     // Peça incompleta não é falha: não há o que ilustrar, e o `conferirPedido`
     // já barrou o pedido antes se isso importasse pra liberar.
     if (faltaParaMockup(linha, p.mockups?.[String(i)]).length > 0) continue

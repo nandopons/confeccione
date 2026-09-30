@@ -472,7 +472,21 @@ const NARRACAO_AO_CLIENTE: RegExp[] = [
   /\b(est[áa]|estava|ficou|foi) gravad[oa]s?\b/i,
   /\bpedido que (j[áa] )?temos aberto\b/i,
   /^vou montar o pedido( agora)?$/i,
+  /\b(vinculad[oa]s?|prendid[oa]s?|anexad[oa]s?) (ao|no) pedido\b/i,
 ]
+
+/**
+ * "[foto 1]", "[imagem 2]", "[documento]" são rótulos que o histórico põe pra
+ * o modelo se referir ao anexo — e a Gleicy leu "a estampa que você mandou na
+ * [foto 1]" (29/09). O rótulo cai; a frase fica.
+ */
+export function semRotulosDeAnexo(texto: string): string {
+  return texto
+    .replace(/\s*\b(na|no|em|da|do|nas|nos)\s+\[(foto|imagem|documento|pdf|[áa]udio)\s*\d*\]/gi, '')
+    .replace(/\s*\[(foto|imagem|documento|pdf|[áa]udio)\s*\d*\]/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
 
 /** Divide em frases sem perder as quebras de linha: cada linha é uma lista de frases. */
 function porFrases(texto: string): string[][] {
@@ -488,7 +502,7 @@ function remontar(linhas: string[][]): string {
 }
 
 export function semNarracaoAoCliente(parte: string): string {
-  const linhas = porFrases(parte).map((frases) =>
+  const linhas = porFrases(semRotulosDeAnexo(parte)).map((frases) =>
     frases
       .map((f) => f.replace(/^anota a[íi]:?\s*/i, ''))
       .filter((f) => f && !NARRACAO_AO_CLIENTE.some((re) => re.test(f)))
@@ -805,6 +819,12 @@ type PedidoContexto = {
    * Vazia significa "todo mundo tem imagem": não é convite pra gerar mais uma.
    */
   modelos_para_gerar_mockup: number[]
+  /**
+   * Modelos em que o cliente mandou a própria imagem da peça e ainda não disse
+   * se ela é o visualizador do pedido ou se quer prévia de IA (29/09/2026).
+   * Enquanto tiver posição aqui, a pergunta é uma só e é dele.
+   */
+  modelos_com_foto_do_cliente_a_decidir: number[]
   link_do_pedido: string
   motivo_parada: string | null
   encerrado_motivo: string | null
@@ -1406,7 +1426,25 @@ function modelosParaGerarMockup(linhas: unknown, mockups: MapaMockups): number[]
     // modelo antes do resumo, com a foto dele servindo de referência (logo,
     // arte) pra geração — não de atalho pra pular a geração.
     const temImagem = (Array.isArray(mk?.ia) && mk.ia.length > 0) || Boolean(mk?.liso || mk?.arte)
+    // A FOTO DELE PODE SER O VISUALIZADOR — 29/09/2026 (Gleicy mandou frente e
+    // costas prontas e ouviu "posso gerar uma prévia?"). Foto do cliente sem
+    // decisão não entra aqui: vai pra `modelos_com_foto_do_cliente_a_decidir`,
+    // e a pergunta é dele. Decidiu 'cliente' → a foto vale como imagem.
+    if (mk?.previa === 'cliente') return
+    if (!temImagem && mk?.previa !== 'gerar' && (mk?.fotos?.length ?? 0) > 0) return
     if (!temImagem && faltaParaMockup(linha, mk).length === 0) alvos.push(i + 1)
+  })
+  return alvos
+}
+
+/** Modelos com foto do cliente, sem prévia de IA e sem decisão dele (ver Mockup.previa). */
+function modelosComFotoADecidir(linhas: unknown, mockups: MapaMockups): number[] {
+  const arr = Array.isArray(linhas) ? (linhas as LinhaMockup[]) : []
+  const alvos: number[] = []
+  arr.forEach((_, i) => {
+    const mk = mockups[String(i)]
+    const temIa = Array.isArray(mk?.ia) && mk.ia.length > 0
+    if (!temIa && !mk?.previa && (mk?.fotos?.length ?? 0) > 0) alvos.push(i + 1)
   })
   return alvos
 }
@@ -1787,6 +1825,147 @@ async function liberarSeEleConfirmou(ctx: Contexto, corpo: string | null, conver
   return { liberou: true, codigo: alvo.codigo }
 }
 
+// ─── A ESCADA DO FECHAMENTO — 29/09/2026 ────────────────────────────────────
+//
+// "A conversa vai fluindo bem e no final o Luigi tá bugando e dando voltas.
+// Precisa ser mais direto e organizado com o fechamento do pedido." (Fernando,
+// 29/09, depois de clicar "buscar fornecedor" na mão pra Gleicy.)
+//
+// O fechamento tinha quatro degraus e cada um dependia de o modelo lembrar de
+// dar o passo certo, uma vez, sem narrar: decidir se a foto do cliente vale
+// como visualizador, gerar as prévias, oferecer o resumo, liberar. Hoje ele
+// perguntou "posso gerar uma prévia?" duas vezes, gerou por cima da resposta
+// do Fernando, e disse "a foto já estava vinculada ao pedido" a quem só queria
+// o preço. A liberação (liberarSeEleConfirmou) e o PDF (enviarResumoSeEle-
+// Confirmou) já eram código; faltavam os dois degraus de cima.
+//
+// Agora, com o pedido PRONTO (peças e dados completos), o código sobe a escada
+// ANTES de o modelo abrir a boca:
+//   1. foto do cliente sem decisão → UMA pergunta fixa; a resposta é lida aqui
+//   2. modelo sem prévia → o lote gera e manda (previas-lote.ts), fecho incluso
+//   3. sem resumo enviado → UMA pergunta fixa; o "sim" já era código
+//   4. o "sim" à legenda do PDF libera (já era código)
+// Mensagem trivial ("sim", "ok", "por favor") nem chega ao modelo: o degrau
+// sai por código e o turno acaba. Pergunta do cliente ainda vai ao modelo, com
+// a instrução do degrau e as ferramentas do degrau fora da mesa (FORA_DA_MESA).
+// ============================================================================
+
+const PERGUNTA_DA_PREVIA = 'Você mandou a imagem da peça: uso ela como visualizador do pedido, ou quer que eu gere uma prévia a partir dela?'
+const PERGUNTA_DA_PREVIA_RE = /uso ela como visualizador|gere uma pr[ée]via a partir dela/i
+const PERGUNTA_DO_RESUMO_POR_CODIGO = 'Peças e dados completos. Posso te mandar o resumo do pedido pra você conferir?'
+const ESCOLHEU_A_PROPRIA = /\b(minha|minhas|a foto|a imagem|as fotos|as imagens|ess[ae]s? mesm[ao]s?|pode usar|usa|use|usar|a que (eu )?mandei|n[ãa]o precisa|dispensa|a própria|a propria)\b/i
+const ESCOLHEU_GERAR = /\b(gera|gerar|gere|pr[ée]via|simula|simula[çc][ãa]o|visualizador|quero ver|pode gerar|faz uma|manda uma)\b/i
+
+type Escada = { degrau: FechamentoPorCodigo; falouPorCodigo: string | null; instrucao: string | null }
+const SEM_DEGRAU: Escada = { degrau: null, falouPorCodigo: null, instrucao: null }
+
+/** Mensagem que não precisa do modelo: sem pergunta, curta ou um "sim". */
+export function mensagemTrivial(corpo: string | null, tipo: string): boolean {
+  const t = (corpo ?? '').trim()
+  if (tipo !== 'text' || !t) return false
+  if (t.includes('?')) return false
+  return t.length <= 60 || eleDisseQuePode([t])
+}
+
+async function ultimaFalaNossa(conversaId: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from('wa_mensagens')
+    .select('corpo, autor, tipo')
+    .eq('conversa_id', conversaId)
+    .eq('direcao', 'saida')
+    .order('criado_em', { ascending: false })
+    .limit(3)
+  const m = ((data ?? []) as Array<{ corpo: string | null; autor: string | null; tipo: string }>).find((x) => (x.corpo ?? '').trim())
+  return m?.corpo ?? null
+}
+
+async function marcarDecisaoDaPrevia(pedidoId: string, decisao: 'cliente' | 'gerar'): Promise<void> {
+  const { data } = await supabaseAdmin.from('pedidos_assistente').select('mockups').eq('id', pedidoId).maybeSingle<{ mockups: MapaMockups | null }>()
+  const mockups: MapaMockups = { ...(data?.mockups ?? {}) }
+  for (const k of Object.keys(mockups)) {
+    const mk = mockups[k]
+    if (!mk?.previa && (mk?.fotos?.length ?? 0) > 0) mockups[k] = { ...mk, previa: decisao }
+  }
+  await supabaseAdmin.from('pedidos_assistente').update({ mockups, atualizado_em: new Date().toISOString() }).eq('id', pedidoId)
+}
+
+async function falarPorCodigo(waId: string, nome: string | null, texto: string): Promise<boolean> {
+  const r = await enviarTexto(waId, texto)
+  if (r.ok) await registrarSaidaInbox(waId, nome, r.wamid, texto, null, 'luigi')
+  return r.ok
+}
+
+async function avancarFechamento(
+  ctx: Contexto,
+  params: { conversaId: string; waId: string; nome: string | null; corpo: string | null; tipo: string }
+): Promise<Escada> {
+  if (ctx.ehFornecedor) return SEM_DEGRAU
+  const alvo = ctx.pedidos.find((p) => p.em_aberto && !JA_FOI_PRAS_CONFECCOES.has(p.etapa))
+  if (!alvo) return SEM_DEGRAU
+  const { data: conv } = await supabaseAdmin.from('wa_conversas').select('luigi_escalado_em').eq('id', params.conversaId).maybeSingle<{ luigi_escalado_em: string | null }>()
+  if (conv?.luigi_escalado_em) return SEM_DEGRAU
+
+  const { data: ped } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('resumo_enviado_em, previas_lote_em')
+    .eq('id', alvo.id)
+    .maybeSingle<{ resumo_enviado_em: string | null; previas_lote_em: string | null }>()
+  if (!ped || ped.resumo_enviado_em) return SEM_DEGRAU
+  if (ped.previas_lote_em) {
+    return { degrau: 'aguardando_previas', falouPorCodigo: null, instrucao: 'As prévias deste pedido estão saindo por código agora. NÃO fale de prévia nem de resumo, não pergunte nada disso: responda só o que ele perguntou, se perguntou; senão, resposta vazia.' }
+  }
+  const conferido = await conferirPedido(alvo.id).catch(() => null)
+  if (!conferido?.pronto) return SEM_DEGRAU
+
+  const corpo = (params.corpo ?? '').trim()
+  const trivial = mensagemTrivial(params.corpo, params.tipo)
+  const ultima = await ultimaFalaNossa(params.conversaId)
+
+  // Degrau 1 — a imagem dele é o visualizador?
+  const aDecidir = ctx.referenciaEmPdf ? [] : await fotosADecidir(alvo.id).catch(() => [] as number[])
+  if (aDecidir.length > 0) {
+    if (ultima && PERGUNTA_DA_PREVIA_RE.test(ultima) && corpo) {
+      const gerar = ESCOLHEU_GERAR.test(corpo) && !ESCOLHEU_A_PROPRIA.test(corpo)
+      const propria = !gerar && (ESCOLHEU_A_PROPRIA.test(corpo) || eleDisseQuePode([corpo]))
+      if (gerar || propria) {
+        await marcarDecisaoDaPrevia(alvo.id, gerar ? 'gerar' : 'cliente')
+        // segue pros degraus de baixo no mesmo turno
+      } else {
+        return { degrau: 'perguntou_previa', falouPorCodigo: null, instrucao: `Ele não respondeu claro se usa a imagem dele como visualizador ou se quer prévia de IA. Pergunte de novo, em UMA linha e de outro jeito, e nada mais.` }
+      }
+    } else if (corpo.includes('?')) {
+      return { degrau: 'perguntou_previa', falouPorCodigo: null, instrucao: `Responda a pergunta dele em uma ou duas linhas e termine com esta pergunta, exatamente: "${PERGUNTA_DA_PREVIA}". Nada de prévia nem de resumo antes disso.` }
+    } else {
+      const ok = await falarPorCodigo(params.waId, params.nome, PERGUNTA_DA_PREVIA)
+      return { degrau: 'perguntou_previa', falouPorCodigo: ok ? PERGUNTA_DA_PREVIA : null, instrucao: ok ? 'A pergunta sobre a imagem dele acabou de ir por código. NÃO escreva nada — resposta vazia.' : null }
+    }
+  }
+
+  // Degrau 2 — prévias que faltam saem em lote, por código.
+  const faltam = ctx.referenciaEmPdf || ctx.mockupIndisponivel ? [] : await faltamMockups(alvo.id).catch(() => [] as number[])
+  if (faltam.length > 0) {
+    await pedirLotePrevias(alvo.id)
+    const lote = await rodarLotePrevias(alvo.id, 90_000).catch((err) => ({ enviadas: 0, restantes: faltam.length, concluido: false, motivo: err instanceof Error ? err.message : String(err) }))
+    if (lote.motivo?.includes('indisponível')) {
+      ctx.mockupIndisponivel = true
+      void avisarMockupIndisponivelUmaVezPorDia(lote.motivo).catch(() => undefined)
+      // sem provedor, a escada segue sem prévia: cai no degrau 3
+    } else {
+      return {
+        degrau: 'previas',
+        falouPorCodigo: lote.enviadas > 0 ? `[${lote.enviadas} prévia(s) + fecho do lote]` : null,
+        instrucao: `As prévias saíram por código (${lote.enviadas} agora${lote.restantes > 0 ? `, ${lote.restantes} em instantes` : ''}) e o fecho do lote já pergunta se quer ajustar e se pode mandar o resumo. NÃO escreva nada sobre prévia nem resumo: responda só o que ele perguntou, se perguntou; senão, resposta vazia.`,
+      }
+    }
+  }
+
+  // Degrau 3 — oferecer o resumo, uma vez.
+  if (ultima && PERGUNTA_DO_RESUMO.test(ultima)) return SEM_DEGRAU // já perguntamos; o sim é código, o resto é o modelo
+  if (!trivial) return SEM_DEGRAU // pergunta dele primeiro; a escada volta no próximo turno
+  const ok = await falarPorCodigo(params.waId, params.nome, PERGUNTA_DO_RESUMO_POR_CODIGO)
+  return { degrau: 'perguntou_resumo', falouPorCodigo: ok ? PERGUNTA_DO_RESUMO_POR_CODIGO : null, instrucao: ok ? 'A oferta do resumo acabou de ir por código. NÃO escreva nada — resposta vazia.' : null }
+}
+
 /**
  * A pergunta que oferece o resumo, como ele a escreve: "Posso te mandar o resumo
  * em PDF pra você conferir?", "Mando o resumo em PDF pra você conferir?", e a
@@ -2011,6 +2190,7 @@ async function montarContexto(conversaId: string, waId: string, nome: string | n
       // Pedido pago/produzindo já foi aprovado como está; mexer nele agora só
       // criaria diferença entre o que a confecção recebeu e o que está na tela.
       modelos_para_gerar_mockup: emAberto && !referenciaEmPdf ? modelosParaGerarMockup(p.linhas, mockups.get(p.id) ?? {}) : [],
+      modelos_com_foto_do_cliente_a_decidir: emAberto && !referenciaEmPdf ? modelosComFotoADecidir(p.linhas, mockups.get(p.id) ?? {}) : [],
       link_do_pedido: visualizadorPedidoUrl(p.id),
       motivo_parada: p.motivo_parada,
       encerrado_motivo: p.encerrado_motivo,
@@ -2057,6 +2237,17 @@ async function conversaTemPdfDoCliente(conversaId: string): Promise<boolean> {
  * mockups, `modelos_para_gerar_mockup` de lá está desatualizado. Quem decide se
  * o resumo pode sair precisa do estado de AGORA.
  */
+/** Modelos com foto do cliente e sem decisão dele — ver modelosComFotoADecidir. */
+async function fotosADecidir(pedidoId: string): Promise<number[]> {
+  const { data } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('linhas, mockups')
+    .eq('id', pedidoId)
+    .maybeSingle<{ linhas: unknown; mockups: MapaMockups | null }>()
+  if (!data) return []
+  return modelosComFotoADecidir(data.linhas, data.mockups && typeof data.mockups === 'object' ? data.mockups : {})
+}
+
 async function faltamMockups(pedidoId: string): Promise<number[]> {
   const { data } = await supabaseAdmin
     .from('pedidos_assistente')
@@ -2398,6 +2589,21 @@ const FERRAMENTA_PAUSAR_LEMBRETES: Anthropic.Messages.Tool = {
   },
 }
 
+const FERRAMENTA_FOTO_COMO_PREVIA: Anthropic.Messages.Tool = {
+  name: 'usar_fotos_do_cliente_como_previa',
+  description:
+    'O cliente disse que a imagem que ELE mandou é o visualizador do pedido (não quer prévia de IA). Marca os modelos ' +
+    'assim: a foto dele vale como imagem no resumo e na ficha da confecção, e nenhuma prévia é gerada pra eles. ' +
+    'Use só depois que ele escolher — a pergunta é "uso a sua imagem como visualizador ou quer que eu gere uma prévia a partir dela?".',
+  input_schema: {
+    type: 'object',
+    properties: {
+      pedido: { type: 'string', description: 'Código ou id. Sem isto, usa o pedido em foco.' },
+      modelos: { type: 'array', items: { type: 'number', minimum: 1, maximum: 50 }, description: 'Posições (1 = Modelo 1). Vazio = todos os modelos que têm foto dele.' },
+    },
+  },
+}
+
 const FERRAMENTA_PREVIAS_LOTE: Anthropic.Messages.Tool = {
   name: 'gerar_previas_do_pedido',
   description:
@@ -2690,7 +2896,7 @@ const FERRAMENTA_PORTFOLIO: Anthropic.Messages.Tool = {
 }
 
 /** O que o código fez com o fechamento ANTES de o modelo falar — ver liberarSeEleConfirmou. */
-type FechamentoPorCodigo = 'liberou' | 'recusou' | 'resumo' | null
+type FechamentoPorCodigo = 'liberou' | 'recusou' | 'resumo' | 'aguardando_previas' | 'perguntou_previa' | 'previas' | 'perguntou_resumo' | null
 
 /**
  * O QUE SAI DA MESA NO TURNO DE FECHAMENTO — 16/09 e 17/09/2026.
@@ -2729,6 +2935,13 @@ const FORA_DA_MESA: Record<Exclude<FechamentoPorCodigo, null>, ReadonlySet<strin
   // pedido novo saem da mesa — igual ao `liberou`. Liberar fica: se ele
   // emendar "pode mandar pras confecções" na mesma fala, é o turno certo.
   resumo: new Set(['criar_pedido', 'definir_pecas_pedido', 'ajustar_peca_pedido', 'gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido']),
+  // A ESCADA DO FECHAMENTO (29/09/2026, ver avancarFechamento): quando o
+  // código já deu o passo do turno, o modelo não pode dar o mesmo passo nem
+  // pular pro seguinte. O que fica na mesa é responder pergunta e ajustar peça.
+  aguardando_previas: new Set(['gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido', 'liberar_para_fornecedores', 'criar_pedido']),
+  perguntou_previa: new Set(['gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido', 'liberar_para_fornecedores', 'criar_pedido']),
+  previas: new Set(['gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido', 'liberar_para_fornecedores', 'criar_pedido']),
+  perguntou_resumo: new Set(['gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido', 'liberar_para_fornecedores', 'criar_pedido']),
 }
 
 /** Etapas em que o pedido já saiu da mão do cliente — o resumo não volta a sair. */
@@ -2802,6 +3015,7 @@ function ferramentasDoModo(
         FERRAMENTA_DEFINIR_PECAS,
         FERRAMENTA_CRIAR_PEDIDO,
         FERRAMENTA_FOTO_MODELO,
+        FERRAMENTA_FOTO_COMO_PREVIA,
         FERRAMENTA_PREVIAS_LOTE,
         FERRAMENTA_MOCKUP_IA,
         FERRAMENTA_PAUSAR_LEMBRETES,
@@ -3766,9 +3980,42 @@ async function executarFerramenta(
           'que existe uma máquina cobrando. Também não peça mais nenhum dado agora.',
       }
     }
+    case 'usar_fotos_do_cliente_como_previa': {
+      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+      const { data: atual } = await supabaseAdmin.from('pedidos_assistente').select('linhas, mockups').eq('id', p.id).maybeSingle<{ linhas: unknown[] | null; mockups: MapaMockups | null }>()
+      const mockups: MapaMockups = { ...(atual?.mockups ?? {}) }
+      const n = Array.isArray(atual?.linhas) ? atual.linhas.length : 0
+      const pedidos = Array.isArray(entrada.modelos) ? (entrada.modelos as unknown[]).map((x) => Number(x)).filter((x) => Number.isInteger(x) && x >= 1 && x <= n) : []
+      const alvos = pedidos.length > 0 ? pedidos.map((x) => x - 1) : Array.from({ length: n }, (_, i) => i).filter((i) => (mockups[String(i)]?.fotos?.length ?? 0) > 0)
+      const marcados: number[] = []
+      for (const i of alvos) {
+        if ((mockups[String(i)]?.fotos?.length ?? 0) === 0) continue
+        mockups[String(i)] = { ...(mockups[String(i)] ?? {}), previa: 'cliente' }
+        marcados.push(i + 1)
+      }
+      if (marcados.length === 0) throw new Error('nenhum desses modelos tem foto do cliente prendida — prenda com anexar_foto_ao_modelo antes, ou gere prévia com gerar_previas_do_pedido.')
+      const { error } = await supabaseAdmin.from('pedidos_assistente').update({ mockups, atualizado_em: new Date().toISOString() }).eq('id', p.id)
+      if (error) throw new Error(`não consegui gravar: ${error.message}`)
+      return { ok: true, modelos: marcados, aviso: `A imagem dele vale como visualizador no(s) modelo(s) ${marcados.join(', ')}; nenhuma prévia será gerada pra eles. Siga o pedido: se as peças e os dados estão completos, o próximo passo é o resumo.` }
+    }
     case 'gerar_previas_do_pedido': {
       const p = await acharNoContexto(ctx, str(entrada.pedido))
       if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+      // Ele escolheu a prévia: modelos com foto dele e sem decisão passam a 'gerar'.
+      {
+        const { data: atual } = await supabaseAdmin.from('pedidos_assistente').select('mockups').eq('id', p.id).maybeSingle<{ mockups: MapaMockups | null }>()
+        const mockups: MapaMockups = { ...(atual?.mockups ?? {}) }
+        let mudou = false
+        for (const k of Object.keys(mockups)) {
+          const mk = mockups[k]
+          if (!mk?.previa && (mk?.fotos?.length ?? 0) > 0) {
+            mockups[k] = { ...mk, previa: 'gerar' }
+            mudou = true
+          }
+        }
+        if (mudou) await supabaseAdmin.from('pedidos_assistente').update({ mockups }).eq('id', p.id)
+      }
       if (ctx.referenciaEmPdf) {
         throw new Error('a referência deste cliente veio em PDF e a prévia de IA não enxerga o arquivo — siga sem prévia, direto pro resumo quando as peças estiverem completas.')
       }
@@ -3983,6 +4230,14 @@ async function executarFerramenta(
       const { data: lote } = await supabaseAdmin.from('pedidos_assistente').select('previas_lote_em').eq('id', p.id).maybeSingle<{ previas_lote_em: string | null }>()
       if (lote?.previas_lote_em) {
         throw new Error('as prévias deste pedido ainda estão saindo (lote em andamento). NÃO mande o resumo agora e NÃO escreva nada: o fecho do lote vai perguntar se pode mandar o resumo.')
+      }
+      const aDecidir = await fotosADecidir(p.id)
+      if (aDecidir.length > 0 && !ctx.referenciaEmPdf) {
+        throw new Error(
+          `o(s) modelo(s) ${aDecidir.join(', ')} têm a imagem que o cliente mandou e ele ainda não disse se ela é o visualizador do pedido ` +
+            'ou se quer uma prévia de IA. Pergunte, em uma linha: "uso a sua imagem como visualizador do pedido ou quer que eu gere uma prévia a partir dela?" ' +
+            'Com a resposta: usar_fotos_do_cliente_como_previa ou gerar_previas_do_pedido. Só depois o resumo.'
+        )
       }
       const pendentes = await faltamMockups(p.id)
       if (pendentes.length > 0 && !ctx.mockupIndisponivel && !ctx.referenciaEmPdf) {
@@ -4584,11 +4839,15 @@ DESCREVA, CONFIRME, E SÓ ENTÃO PERGUNTE. Nesta ordem, numa mensagem curta: o q
 
 O QUE VOCÊ VÊ E ELE NÃO FALOU, PERGUNTE. Gola, forro, punho, comprimento da manga, acabamento da barra, se o que aparece na foto entra ou não no pedido. É aqui que o pedido ganha a precisão que a confecção precisa — e é a pergunta que só alguém que olhou consegue fazer.
 
-O QUE VOCÊ ENTENDEU DA IMAGEM VIRA TEXTO NO MODELO. A foto vai junto, mas quem vai costurar lê a descrição: passe o detalhe pra ajustar_peca com as palavras dele ("borda branca no veludo da manga", "logo do Insper na estola"). Imagem sem descrição vira interpretação de quem estiver na máquina.
+O QUE VOCÊ ENTENDEU DA IMAGEM VIRA TEXTO NO MODELO. A foto vai junto, mas quem vai costurar lê a descrição — e a prévia de IA também é gerada a partir dela. Na descricao da peça, pra CADA aplicação que você vê na foto ou que ele descreve: O QUÊ (logo, texto, ilustração, com as cores), ONDE (frente, costas, manga, peito esquerdo) e o TAMANHO (pequeno no peito, ~10 cm; grande nas costas ocupando a largura). A Gleicy (29/09) mandou frente com a logo "VIDA Pedagogia" pequena no peito e costas com a ilustração grande; a peça ficou só com "estampa nas costas", e a prévia saiu sem a frente. Use as palavras dele ("borda branca no veludo da manga", "logo do Insper na estola") e as suas quando ele só mandou a foto. Imagem sem descrição vira interpretação de quem estiver na máquina.
 
 PRENDA A FOTO NO MODELO CERTO, sempre, com anexar_foto_ao_modelo — é assim que ela aparece no resumo e na ficha da confecção. Se o pedido tem mais de um modelo e não está claro de qual ela é, pergunte ("essa é da preta ou da branca?"): foto na peça errada faz produzir errado. Mas NUNCA narre a mecânica: nada de "foto presa", "anexei ao modelo", "registrei no sistema". Ele não tem sistema, ele tem um pedido.
 
-PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos_para_gerar_mockup". Se tiver posição nessa lista e as peças estiverem completas, chame gerar_previas_do_pedido UMA vez: o código gera e manda TODAS as prévias, cada uma com a legenda "Modelo 1 (peça, cor)", "Modelo 2 (…)"…, e fecha com uma linha perguntando se ele quer ajustar algum e se pode mandar o resumo (decisão do Fernando, 29/09/2026: tudo de uma vez, e o cliente diz "ajusta tal coisa no modelo 3" se quiser). Depois de chamar, você NÃO escreve nada — nem "vou gerar", nem "seguindo pro modelo 3", nem "está bom?": tudo isso já sai por código. A foto que ele mandou (logo, arte, referência) entra na geração — ela NÃO dispensa a prévia. Só quando a lista estiver vazia o resumo sai. O cliente aprova lendo "camiseta oversized preta, algodão fio 30, 120 peças" e imaginando o resto; a confecção produz a partir da mesma frase. Toda diferença entre o que ele imaginou e o que chegou nasce aí, e a prévia é onde ela aparece a tempo de ser corrigida.
+A IMAGEM DELE PODE SER O VISUALIZADOR. Se o contexto traz posição em "modelos_com_foto_do_cliente_a_decidir", o cliente mandou a própria imagem da peça (frente, costas, arte aplicada) e a prévia de IA pode ser redundante — a Gleicy (29/09) mandou frente e costas prontas e ouviu "posso gerar uma prévia da camiseta?". NÃO gere nada: pergunte, em uma linha só, "uso a sua imagem como visualizador do pedido ou quer que eu gere uma prévia a partir dela?". Se ele escolher a imagem dele → usar_fotos_do_cliente_como_previa. Se quiser a prévia → gerar_previas_do_pedido. Vale pra qualquer foto que ele prendeu num modelo, logo inclusive: a pergunta é uma e é dele.
+
+O FECHAMENTO É UMA ESCADA, E QUEM SOBE É O CÓDIGO. Quando as peças e os dados estão completos, o sistema faz sozinho, na ordem, um degrau por turno: pergunta se a imagem dele vale como visualizador (se ele mandou foto), gera e manda as prévias em lote, oferece o resumo, manda o PDF com o sim, libera com o sim. O que o código fez no turno vem em "proximo_passo" — leia e OBEDEÇA: se disser "não escreva nada", resposta vazia. Você não puxa esses degraus por conta própria; só chama gerar_previas_do_pedido ou enviar_resumo_pedido se proximo_passo mandar ou se ELE pedir com todas as letras. Seu papel no fechamento é responder pergunta e ajustar peça — não conduzir.
+
+PEDIDO SEM IMAGEM É APROVADO NO ESCURO. O contexto de cada pedido traz "modelos_para_gerar_mockup". Se tiver posição nessa lista, as peças estiverem completas e proximo_passo mandar (ou ele pedir), chame gerar_previas_do_pedido UMA vez: o código gera e manda TODAS as prévias, cada uma com a legenda "Modelo 1 (peça, cor)", "Modelo 2 (…)"…, e fecha com uma linha perguntando se ele quer ajustar algum e se pode mandar o resumo (decisão do Fernando, 29/09/2026: tudo de uma vez, e o cliente diz "ajusta tal coisa no modelo 3" se quiser). Depois de chamar, você NÃO escreve nada — nem "vou gerar", nem "seguindo pro modelo 3", nem "está bom?": tudo isso já sai por código. A foto que ele mandou (logo, arte, referência) entra na geração — ela NÃO dispensa a prévia. Só quando a lista estiver vazia o resumo sai. O cliente aprova lendo "camiseta oversized preta, algodão fio 30, 120 peças" e imaginando o resto; a confecção produz a partir da mesma frase. Toda diferença entre o que ele imaginou e o que chegou nasce aí, e a prévia é onde ela aparece a tempo de ser corrigida.
 
 AJUSTE É POR MODELO. "A logo maior no 3", "o 2 em vinho", "põe nas costas": gerar_mockup_do_modelo com "modelo" e "instrucoes" nas palavras dele — refaz só aquele, a imagem vai com "refiz o visualizador, ficou melhor assim?", e você não escreve nada depois. NUNCA diga que a prévia é foto de produção nossa ou de peça pronta — é uma prévia gerada do que ele descreveu; se ele perguntar se é foto real, diga que é uma prévia gerada por IA pra conferir a ideia.
 
@@ -5188,7 +5447,17 @@ async function rodarLuigi(
   }
 
   if (!texto) {
-    estado.escalada = estado.escalada ?? { motivo: 'o Luigi não conseguiu formular resposta' }
+    // SILÊNCIO DEPOIS DE ENTREGAR NÃO É FALHA — 29/09/2026. A Gleicy disse
+    // "por gentileza", o turno gerou e mandou a prévia (a legenda já pergunta
+    // "está bom?") e, como manda a ferramenta, o modelo não escreveu nada.
+    // Isto aqui lia texto vazio como "não conseguiu formular resposta" e
+    // chamou o Fernando — pra um turno que fez exatamente o que devia. Quando
+    // uma ferramenta já falou com o cliente (imagem, lote de prévias, PDF) ou
+    // o código mandou o resumo, o vazio é o certo.
+    const entregouPorFerramenta =
+      fechamentoPorCodigo === 'resumo' ||
+      ferramentas.some((f) => f.ok && (f.nome === 'gerar_mockup_do_modelo' || f.nome === 'gerar_previas_do_pedido' || f.nome === 'enviar_resumo_pedido'))
+    if (!entregouPorFerramenta) estado.escalada = estado.escalada ?? { motivo: 'o Luigi não conseguiu formular resposta' }
     // Sem texto: quando o Luigi escala, quem fala em seguida é o Fernando.
     texto = ''
   }
@@ -6369,7 +6638,41 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
         modo === 'responde' && !auto.liberou && !auto.recusa
           ? await enviarResumoSeEleConfirmou(ctx, params.corpo, params.conversaId, params.criadoEm).catch(() => ({ enviou: false, codigo: null }))
           : { enviou: false, codigo: null }
-      const fechamento: FechamentoPorCodigo = auto.liberou ? 'liberou' : auto.recusa ? 'recusou' : resumoAuto.enviou ? 'resumo' : null
+      let fechamento: FechamentoPorCodigo = auto.liberou ? 'liberou' : auto.recusa ? 'recusou' : resumoAuto.enviou ? 'resumo' : null
+
+      // A ESCADA DO FECHAMENTO — ver avancarFechamento. Só quando nenhum dos
+      // degraus de baixo (liberou/resumo) já aconteceu neste turno.
+      let escada: Escada = SEM_DEGRAU
+      if (modo === 'responde' && !fechamento && !params.retomada) {
+        escada = await avancarFechamento(ctx, { conversaId: params.conversaId, waId, nome, corpo: params.corpo, tipo: params.tipo }).catch((err) => {
+          console.error('[luigi] escada do fechamento falhou', { conversaId: params.conversaId, err })
+          return SEM_DEGRAU
+        })
+        if (escada.degrau) {
+          fechamento = escada.degrau
+          const alvo = ctx.pedidos.find((p) => p.em_aberto && !JA_FOI_PRAS_CONFECCOES.has(p.etapa))
+          if (alvo && escada.instrucao) alvo.proximo_passo = escada.instrucao
+        }
+        // O código falou e a mensagem dele era trivial: o turno acaba aqui, sem modelo.
+        if (escada.falouPorCodigo && mensagemTrivial(params.corpo, params.tipo)) {
+          void marcarComoLida(params.wamid).catch(() => false)
+          await gravarLog({
+            ...base,
+            resposta: escada.falouPorCodigo,
+            pedido_id: ctx.pedidoEmFoco?.id ?? null,
+            ferramentas: [{ nome: 'fechamento_por_codigo', argumentos: { degrau: escada.degrau }, ok: true, via: 'codigo' }],
+            escalado: false,
+            motivo_escalada: null,
+            status: 'enviada',
+            rodadas: 0,
+            tokens_entrada: 0,
+            tokens_saida: 0,
+            duracao_ms: Date.now() - inicio,
+            erro: null,
+          })
+          return
+        }
+      }
 
       const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada), fechamento)
       const pedidoId = ctx.pedidoEmFoco?.id ?? null
@@ -6501,18 +6804,26 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       // suspensório — o `autor` já resolve o caso conhecido (o PDF do resumo),
       // isto cobre o próximo envio que alguém esquecer de assinar.
       const AGENTES = AGENTES_SAIDA
+      // O FERNANDO QUE DIGITA DURANTE O TURNO TAMBÉM CONTA — 29/09/2026. A
+      // Gleicy escreveu 21:37:0x, o turno começou; o Fernando digitou "posso
+      // usar a sua foto de referência mesmo, então" às 21:37; e às 21:38 o
+      // Luigi mandou dois balões por cima ("a foto já estava vinculada ao
+      // pedido, posso gerar a prévia?"). O corte em `inicioDoTurno` deixava a
+      // fala dele de fora. Texto sem autor depois do início do turno é gente
+      // no inbox (ferramenta assina 'luigi' e manda imagem/PDF, não texto).
       const { data: ultimasSaidas } = await supabaseAdmin
         .from('wa_mensagens')
-        .select('autor, criado_em')
+        .select('autor, criado_em, tipo')
         .eq('conversa_id', params.conversaId)
         .eq('direcao', 'saida')
         .gt('criado_em', new Date(Date.now() - MINUTOS_DONO_HUMANO * 60_000).toISOString())
-        .lt('criado_em', inicioDoTurno)
         .order('criado_em', { ascending: false })
         .limit(10)
 
-      const humanoRecente = ((ultimasSaidas ?? []) as Array<{ autor: string | null; criado_em: string }>).find(
-        (m) => !AGENTES.has((m.autor ?? '').trim().toLowerCase()),
+      const humanoRecente = ((ultimasSaidas ?? []) as Array<{ autor: string | null; criado_em: string; tipo: string | null }>).find(
+        (m) =>
+          !AGENTES.has((m.autor ?? '').trim().toLowerCase()) &&
+          (m.criado_em < inicioDoTurno || (m.tipo === 'text' && !m.autor)),
       )
 
       // QUEM TIRA O LUIGI DA CONVERSA É O CLIQUE, NÃO A DIGITAÇÃO — 10/09/2026.
@@ -6645,7 +6956,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       // caem frase a frase — ver semNarracaoAoCliente / semContradicaoComAsFerramentas.
       const feitoNoTurno = {
         resumoSaiu: fechamento === 'resumo' || r.ferramentas.some((f) => f.nome === 'enviar_resumo_pedido' && f.ok),
-        mockupSaiu: r.ferramentas.some((f) => (f.nome === 'gerar_mockup_do_modelo' || f.nome === 'gerar_previas_do_pedido') && f.ok),
+        mockupSaiu: fechamento === 'previas' || r.ferramentas.some((f) => (f.nome === 'gerar_mockup_do_modelo' || f.nome === 'gerar_previas_do_pedido') && f.ok),
       }
       const partesLimpas = todasAsPartes
         .map((p) => semPontoFinal(semContradicaoComAsFerramentas(semNarracaoAoCliente(p), feitoNoTurno)))

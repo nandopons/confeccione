@@ -66,7 +66,15 @@ export const TENTATIVAS_MOCKUP = 2
 const MAX_REFS = 3
 
 export type IAItem = { url: string; prompt?: string }
-export type Mockup = { liso?: string; arte?: string; fotos?: string[]; ia?: IAItem[] }
+/**
+ * `previa` — 29/09/2026 (Fernando: "a cliente pediu pra usar o visualizador
+ * dela"). Quando o cliente manda a própria imagem da peça (frente/costas
+ * prontas, como a Gleicy), a prévia de IA é redundante. A decisão é dele:
+ * 'cliente' = a foto dele É o visualizador do pedido (não gerar);
+ * 'gerar' = ele quer a prévia de IA a partir da foto. Sem valor = ainda não
+ * perguntou.
+ */
+export type Mockup = { liso?: string; arte?: string; fotos?: string[]; ia?: IAItem[]; previa?: 'cliente' | 'gerar' }
 export type MapaMockups = Record<string, Mockup>
 
 /**
@@ -374,9 +382,17 @@ export function montarPromptMockup(e: EntradaPrompt): { prompt: string; imagens:
       artes.length > 1
         ? 'As imagens fornecidas são as logos/artes do cliente.'
         : 'A imagem fornecida é a logo/arte do cliente.',
+      // A DESCRIÇÃO DA LINHA ENTRA AQUI TAMBÉM — 29/09/2026 (Gleicy: "logo
+      // pequena no peito, ilustração grande nas costas"; a prévia saiu só com
+      // as costas). Este galho só mandava a arte e as instruções do turno; o
+      // que o Luigi tinha anotado na peça (onde, tamanho, frente/costas) ficava
+      // de fora, e a IA aplicava "centralizado no peito" por bom senso.
+      descricao ? `Onde e como aplicar, conforme o pedido: ${descricao}.` : '',
       instr
         ? `Aplique conforme as instruções do cliente: ${instr}.`
-        : 'Aplique a arte de forma centralizada e proporcional na área mais natural do produto (peito, em roupas), com bom senso.',
+        : descricao
+          ? 'Siga a aplicação descrita acima (posição, tamanho, frente e costas).'
+          : 'Aplique a arte de forma centralizada e proporcional na área mais natural do produto (peito, em roupas), com bom senso.',
       ENQUADRAMENTO,
       FECHAMENTO,
     ]
