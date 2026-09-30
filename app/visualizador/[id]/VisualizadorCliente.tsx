@@ -13,6 +13,7 @@
 // ============================================================================
 
 import { useEffect, useRef, useState, type ReactElement } from "react";
+import { medirPagamentoIniciado, medirPedidoConfirmado } from "@/app/lib/oaiq";
 import Link from "next/link";
 import ListaColeta from "./ListaColeta";
 import ProdutoChat, { type LinhaProduto } from "./ProdutoChat";
@@ -798,6 +799,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           value: typeof pedido.valor_centavos === "number" ? pedido.valor_centavos / 100 : undefined,
           currency: "BRL",
         });
+        // ChatGPT Ads: pedido confirmado = checkout_started (app/lib/oaiq.ts).
+        medirPedidoConfirmado(String(pedido.id), typeof pedido.valor_centavos === "number" ? pedido.valor_centavos : null);
       } catch { /* analytics nunca quebra o fluxo */ }
       setConfirmadoEm(d.confirmadoEm ?? new Date().toISOString());
       setConfirmadoMsg(true);
@@ -874,6 +877,8 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
           value: typeof d.valorCentavos === "number" ? d.valorCentavos / 100 : undefined,
           currency: "BRL",
         });
+        // ChatGPT Ads: cobrança gerada = order_created (app/lib/oaiq.ts).
+        medirPagamentoIniciado(String(pedido.id), typeof d.valorCentavos === "number" ? d.valorCentavos : null);
       } catch { /* analytics nunca quebra o fluxo */ }
       setConfirmStep("feito");
     } catch (e) {

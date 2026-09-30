@@ -8,6 +8,7 @@
 // ============================================================================
 import type { ReactNode } from "react";
 import { linkWhatsAppSuporte } from "@/app/lib/contatos";
+import { medirCliqueWhatsApp } from "@/app/lib/oaiq";
 
 export function mensagemPedidoVitrine(itemId: string, nome: string | null): string {
   const peca = nome ? `"${nome}"` : "um modelo";
@@ -40,6 +41,8 @@ export default function BotaoPedidoVitrine({
         } catch {
           /* rastro é bônus */
         }
+        // ChatGPT Ads: clique pro WhatsApp pela vitrine (app/lib/oaiq.ts).
+        medirCliqueWhatsApp(`vitrine_${itemId}`);
       }}
     >
       {children ?? "Fazer pedido →"}

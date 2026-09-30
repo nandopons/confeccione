@@ -33,6 +33,7 @@ import { atribuicao } from "@/app/lib/rastreio";
 import { PECAS_PRINCIPAIS, PECAS_EXTRAS } from "@/app/lib/pecas";
 import { linkWhatsAppSuporte, WHATSAPP_SUPORTE_FORMATADO } from "@/app/lib/contatos";
 import { track } from "@/app/lib/rastreio";
+import { medirCliqueWhatsApp, medirPedidoCriado } from "@/app/lib/oaiq";
 
 // ────────────────────────────────────────────────────────────────────────────
 // A CONVERSÃO MUDOU DE BOTÃO — 10/09/2026.
@@ -58,6 +59,8 @@ function marcarContatoWhatsApp(pedidoId: string): void {
     w.dataLayer = w.dataLayer || [];
     w.dataLayer.push({ event: "contato_whatsapp", pedido_id: pedidoId, value: 1, currency: "BRL" });
   } catch { /* analytics nunca quebra o fluxo */ }
+  // ChatGPT Ads: a mesma conversão, pelo pixel da OpenAI (app/lib/oaiq.ts).
+  medirCliqueWhatsApp(pedidoId);
 }
 
 // O PASSO 4 VIRA WHATSAPP — 10/09/2026.
@@ -281,6 +284,8 @@ export default function PedidoSteps() {
         // Mandar um número aqui seria inventar dado dentro do GA4.
         w.dataLayer.push({ event: "generate_lead", pedido_id: String(data.id), value: 1, currency: "BRL" });
       } catch { /* analytics nunca quebra o fluxo */ }
+      // ChatGPT Ads: pedido salvo = lead (app/lib/oaiq.ts).
+      medirPedidoCriado(String(data.id));
 
       // Sem navegação: o passo 4 é o chat, aqui mesmo. A URL passa a ser
       // /alinhar/{id} pra F5 e "voltar" caírem no mesmo pedido — a rota

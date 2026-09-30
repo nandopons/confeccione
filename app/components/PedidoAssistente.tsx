@@ -12,6 +12,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { atribuicao, track } from "@/app/lib/rastreio";
+import { medirPedidoCriado } from "@/app/lib/oaiq";
 import { WHATSAPP_SUPORTE_FORMATADO } from "@/app/lib/contatos";
 
 type Tamanho = { tamanho: string; qtd: number | null };
@@ -187,6 +188,8 @@ export default function PedidoAssistente() {
         setProtocolo(novoId);
         // Funil: pedido salvo (liga a sessão anônima ao pedido criado).
         track("pedido_enviado", { referenciaId: novoId });
+        // ChatGPT Ads: pedido salvo = lead (app/lib/oaiq.ts).
+        medirPedidoCriado(novoId);
         try {
           const w = window as unknown as { dataLayer?: Record<string, unknown>[] };
           w.dataLayer = w.dataLayer || [];
