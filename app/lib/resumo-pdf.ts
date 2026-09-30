@@ -90,6 +90,18 @@ function qtdDaLinha(l: LinhaResumo): number {
   return typeof l.total === 'number' && l.total > 0 ? l.total : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0)
 }
 
+// Encurta o texto (com reticências) até caber em maxW — pra texto de UMA
+// linha que não pode quebrar, como o subtítulo da faixa "Modelo N". Exportado
+// pra teste.
+export function caberNaLargura(texto: string, font: PDFFont, size: number, maxW: number): string {
+  if (maxW <= 0) return ''
+  if (font.widthOfTextAtSize(texto, size) <= maxW) return texto
+  const tico = '…'
+  let t = texto
+  while (t.length > 0 && font.widthOfTextAtSize(t.trimEnd() + tico, size) > maxW) t = t.slice(0, -1)
+  return t.length > 0 ? t.trimEnd() + tico : ''
+}
+
 // quebra texto em linhas que cabem em maxW
 function wrap(texto: string, font: PDFFont, size: number, maxW: number): string[] {
   const palavras = texto.split(/\s+/)
@@ -291,11 +303,20 @@ export async function gerarResumoPedidoPdf(pedido: ResumoPedido): Promise<Uint8A
     const qtd = qtdDaLinha(l)
     garantir(96)
     // Faixa "Modelo N" (igual à página do pedido).
+    //
+    // O subtítulo (modelo · cor) é alinhado à direita e NÃO quebra linha: com
+    // uma descrição longa ("preta com listras diagonais vermelho e cinza nas
+    // laterais e acabamento vermelho nas mangas", Michelly, 30/09) ele
+    // começava antes da faixa, por cima do "Modelo 1" e do branco da página.
+    // Cabe no espaço que sobra à direita do rótulo, ou sai encurtado com
+    // reticências — o título completo vem logo abaixo, em negrito e com quebra.
     {
       const barH = 20
+      const rotulo = `Modelo ${i + 1}`
       page.drawRectangle({ x: MX, y: y - barH + 4, width: maxW, height: barH, color: VERDE_ESC })
-      page.drawText(`Modelo ${i + 1}`, { x: MX + 10, y: y - barH + 4 + (barH - 9) / 2, size: 10, font: bold, color: rgb(1, 1, 1) })
-      const sub = [l.modelo, corLabel(l.cor)].filter(Boolean).join(' · ')
+      page.drawText(rotulo, { x: MX + 10, y: y - barH + 4 + (barH - 9) / 2, size: 10, font: bold, color: rgb(1, 1, 1) })
+      const espacoSub = maxW - 10 - bold.widthOfTextAtSize(rotulo, 10) - 16 - 10
+      const sub = caberNaLargura([l.modelo, corLabel(l.cor)].filter(Boolean).join(' · '), reg, 9, espacoSub)
       if (sub) {
         const subW = reg.widthOfTextAtSize(sub, 9)
         page.drawText(sub, { x: A4.w - MX - 10 - subW, y: y - barH + 4 + (barH - 8) / 2, size: 9, font: reg, color: rgb(0.9, 0.96, 0.93) })
