@@ -54,6 +54,8 @@ export async function registrarVersaoOrcamento(params: {
   autorId?: string | null
   autorNome?: string | null
   motivo?: string | null
+  /** Observações que a confecção escreveu pro cliente nesta versão (29/09/2026). */
+  observacoes?: string | null
 }): Promise<void> {
   try {
     const { data: ultima } = await supabaseAdmin
@@ -80,6 +82,7 @@ export async function registrarVersaoOrcamento(params: {
       autor_id: params.autorId ?? null,
       autor_nome: params.autorNome ?? null,
       motivo: params.motivo ?? null,
+      observacoes: params.observacoes ?? null,
     })
   } catch (e) {
     console.error('[orcamento-versoes] não foi possível registrar a versão', e)

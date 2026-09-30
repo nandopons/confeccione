@@ -23,7 +23,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
   const { data } = await supabase
     .from('pedidos_assistente')
-    .select('id, codigo, conta_id, categoria, linhas, nome, telefone, email, cep, numero, complemento, logradouro, bairro, cidade, uf, status, mockups, prazo_dias, confirmado_em, orcamento_status, valor_centavos, frete_centavos, pagamento_status')
+    .select('id, codigo, conta_id, categoria, linhas, nome, telefone, email, cep, numero, complemento, logradouro, bairro, cidade, uf, status, mockups, prazo_dias, confirmado_em, orcamento_status, valor_centavos, frete_centavos, pagamento_status, orcamento_observacoes')
     .eq('id', id)
     .single()
 

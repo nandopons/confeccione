@@ -69,6 +69,9 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
   // o único prazo do sistema era o DESEJO do cliente (pedidos_assistente.
   // prazo_dias). Orçamento sem prazo não é orçamento, é preço.
   const [prazo, setPrazo] = useState<string>('')
+  // Observações pro cliente (29/09/2026): vão junto do valor no WhatsApp, no
+  // e-mail e no visualizador. Começa com o que já foi enviado, se houver.
+  const [observacoes, setObservacoes] = useState<string>(dados.observacoesAtuais ?? '')
   const [calculadoraAberta, setCalculadoraAberta] = useState(false)
   const [enviando, setEnviando] = useState(false)
   // CONFIRMAÇÃO NA PÁGINA, NÃO EM window.confirm — 29/09/2026. A Rafaelle
@@ -159,6 +162,7 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
           freteCentavos: paraCentavos(frete || '0'),
           prazoProducaoDias: dias,
           freteMe,
+          observacoes: observacoes.trim() || null,
         }),
       })
       const j = await r.json()
@@ -309,6 +313,21 @@ export default function OrcamentoFornecedor({ dados }: { dados: OrcamentoFornece
               ) : (
                 <p className="text-[11px] text-gray-400 mt-1">Deixe 0,00 se o frete já está embutido nos produtos.</p>
               )}
+            </div>
+
+            <div className="rounded-xl border border-gray-200 bg-gray-50/60 px-4 py-3.5">
+              <label htmlFor="obs-orcamento" className="block text-sm font-semibold text-gray-900">Observações pro cliente (opcional)</label>
+              <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">Vai junto do valor, no WhatsApp, no e-mail e na página do pedido. Ex.: “cores sujeitas à malha disponível”, “envio em 2 volumes”, “o valor inclui embalagem individual”.</p>
+              <textarea
+                id="obs-orcamento"
+                value={observacoes}
+                onChange={(e) => setObservacoes(e.target.value.slice(0, 600))}
+                rows={3}
+                maxLength={600}
+                placeholder="Escreva aqui o que o cliente precisa saber sobre este orçamento"
+                className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1D9E75]/40"
+              />
+              <p className="text-[11px] text-gray-400 mt-1 text-right">{observacoes.length}/600</p>
             </div>
 
             <PortfolioUploader ofertaId={dados.ofertaId} inicial={dados.portfolio} />

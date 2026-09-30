@@ -135,11 +135,18 @@ export async function enviarEmailOrcamentoFinal(p: {
   totalCentavos: number
   freteCentavos: number | null
   linhas: LinhaEmail[]
+  /** O que a confecção escreveu pro cliente junto do valor (29/09/2026). */
+  observacoes?: string | null
 }): Promise<void> {
   const id8 = p.id.slice(0, 8)
   const linkVis = `${SITE}/visualizador/${p.id}`
   const frete = p.freteCentavos ?? 0
   const produtos = Math.max(p.totalCentavos - frete, 0)
+  const obs = (p.observacoes ?? '').trim()
+  const obsHtml = obs
+    ? `<p style="font-size:13px;color:#888;text-transform:uppercase;letter-spacing:.04em;margin:18px 0 6px;">Observações da confecção</p>
+      <p style="font-size:14px;color:#333;margin:0;line-height:1.55;white-space:pre-wrap;background:#F6F8F7;border-radius:8px;padding:10px 12px;">${obs.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`
+    : ''
 
   const conteudo = `
       <p style="font-size:16px;color:#111;margin:0 0 4px;">Olá${p.nome ? `, ${p.nome.split(' ')[0]}` : ''}! 🎉</p>
@@ -153,6 +160,7 @@ export async function enviarEmailOrcamentoFinal(p: {
         <tr><td style="padding:3px 0;">Frete</td><td align="right">${frete > 0 ? brl(frete) : 'incluso'}</td></tr>
         <tr><td style="padding:8px 0 0;font-size:15px;color:#111;font-weight:bold;">Total</td><td align="right" style="padding:8px 0 0;font-size:18px;color:#0F6E56;font-weight:bold;">${brl(p.totalCentavos)}</td></tr>
       </table>
+      ${obsHtml}
 
       <table width="100%" style="margin-top:20px;"><tr><td align="center">
         <a href="${linkVis}" style="display:inline-block;background:#1D9E75;color:#fff;text-decoration:none;font-size:15px;font-weight:bold;padding:12px 28px;border-radius:10px;">Ver orçamento e pagar</a>
@@ -161,7 +169,7 @@ export async function enviarEmailOrcamentoFinal(p: {
       <p style="font-size:12px;color:#555;margin:20px 0 0;line-height:1.6;">🔒 <strong>Pagamento garantido pela Confeccione:</strong> seguramos o valor e só repassamos ao fornecedor quando você confirmar que recebeu tudo em conformidade.</p>
       <p style="font-size:12px;color:#999;margin:14px 0 0;line-height:1.5;">Dúvidas? Responda este e-mail ou fale no WhatsApp (81) 99593-2695.</p>`
 
-  const text = `Seu orçamento saiu! Pedido #${id8}${p.fornecedorNome ? ` — fornecedor: ${p.fornecedorNome}` : ''}\n\nProdutos: ${brl(produtos)}\nFrete: ${frete > 0 ? brl(frete) : 'incluso'}\nTotal: ${brl(p.totalCentavos)}\n\nVer e pagar: ${linkVis}\n\nConfeccione`
+  const text = `Seu orçamento saiu! Pedido #${id8}${p.fornecedorNome ? ` — fornecedor: ${p.fornecedorNome}` : ''}\n\nProdutos: ${brl(produtos)}\nFrete: ${frete > 0 ? brl(frete) : 'incluso'}\nTotal: ${brl(p.totalCentavos)}${obs ? `\n\nObservações da confecção: ${obs}` : ''}\n\nVer e pagar: ${linkVis}\n\nConfeccione`
 
   await enviar(p.email, `Seu orçamento saiu! Pedido #${id8} — ${brl(p.totalCentavos)} 💰`, moldura(conteudo), text)
 }

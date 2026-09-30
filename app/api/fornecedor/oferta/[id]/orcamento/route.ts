@@ -68,6 +68,8 @@ const BodySchema = z.object({
   // declara mínimo 120 não consegue gravar 120 aqui.
   prazoProducaoDias: z.number().int().min(1).max(180),
   freteMe: FreteMeSchema.nullable().optional(),
+  // Observações da confecção pro cliente (29/09/2026) — vão junto do valor.
+  observacoes: z.string().max(600, 'Observações: no máximo 600 caracteres.').nullable().optional(),
 })
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -88,7 +90,7 @@ export async function POST(req: Request, ctx: Ctx) {
     p.data.freteCentavos,
     p.data.freteMe ?? null,
     p.data.prazoProducaoDias,
-    { linhas: p.data.linhas ?? null }
+    { linhas: p.data.linhas ?? null, observacoes: p.data.observacoes ?? null }
   )
   if (!r.ok) return NextResponse.json({ erro: r.erro ?? 'Falha ao salvar' }, { status: 409 })
 

@@ -71,6 +71,8 @@ export type PedidoVis = {
   orcamento_status?: string | null;
   valor_centavos?: number | null;
   frete_centavos?: number | null;
+  /** Observações que a confecção escreveu junto do orçamento (29/09/2026). */
+  orcamento_observacoes?: string | null;
   pagamento_status?: string | null;
   fornecedor_nome?: string | null;
   fornecedor_whatsapp?: string | null;
@@ -1323,6 +1325,12 @@ export default function VisualizadorCliente({ pedido }: { pedido: PedidoVis }) {
             <p className="text-sm font-medium text-gray-900">Valor total</p>
             <p className="text-xl font-bold text-[#0F6E56] leading-tight">{brl(pedido.valor_centavos ?? 0)}</p>
           </div>
+          {(pedido.orcamento_observacoes ?? "").trim() && (
+            <div className="mt-3 rounded-xl bg-[#F6F8F7] border border-gray-200 px-3.5 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">📝 Observações da confecção</p>
+              <p className="text-sm text-gray-800 mt-1 leading-relaxed whitespace-pre-wrap">{pedido.orcamento_observacoes}</p>
+            </div>
+          )}
           {!pago ? (
             <>
               <button type="button"

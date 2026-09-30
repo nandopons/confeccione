@@ -1366,6 +1366,8 @@ export type OrcamentoFornecedorDados = {
   uf: string | null
   cep: string | null
   bairro: string | null
+  /** O que a confecção já escreveu pro cliente no orçamento atual (29/09/2026). */
+  observacoesAtuais: string | null
 }
 
 function qtdDaLinha(l: LinhaPedido): number {
@@ -1384,7 +1386,7 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
 
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, nome, linhas, mockups, prazo_dias, pagamento_status, orcamento_status, orcamento_definido_em, frete_centavos, cidade, uf, cep, bairro')
+    .select('id, nome, linhas, mockups, prazo_dias, pagamento_status, orcamento_status, orcamento_definido_em, frete_centavos, cidade, uf, cep, bairro, orcamento_observacoes')
     .eq('id', oferta.pedido_id)
     .maybeSingle<{
       id: string
@@ -1400,6 +1402,7 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
       uf: string | null
       cep: string | null
       bairro: string | null
+      orcamento_observacoes: string | null
     }>()
   if (!pedido) return null
 
@@ -1459,6 +1462,7 @@ export async function carregarOrcamentoFornecedor(ofertaId: string): Promise<Orc
     uf: pedido.uf ?? null,
     cep: pedido.cep ?? null,
     bairro: pedido.bairro ?? null,
+    observacoesAtuais: pedido.orcamento_observacoes ?? null,
   }
 }
 
@@ -1507,8 +1511,17 @@ export async function salvarOrcamentoFornecedor(
      * recebe uma mensagem só, com o que mudou e o valor novo.
      */
     linhas?: LinhaOrcamentoEditada[] | null
+    /**
+     * OBSERVAÇÕES DA CONFECÇÃO — 29/09/2026 (Fernando). Texto livre que vai
+     * junto do valor: no WhatsApp, no e-mail e no visualizador do cliente.
+     * "Cores sujeitas à malha disponível", "envio em dois volumes", "o valor
+     * inclui embalagem individual" — o que hoje ela mandava pelo Luigi ou não
+     * mandava. Null/vazio limpa a observação anterior (é o orçamento atual).
+     */
+    observacoes?: string | null
   } = {}
 ): Promise<{ ok: boolean; erro?: string; valorClienteCentavos?: number; repasseCentavos?: number; itensAjustados?: boolean }> {
+  const observacoes = (opts.observacoes ?? '').replace(/\s+\n/g, '\n').trim().slice(0, 600) || null
   const { data: oferta } = await supabaseAdmin
     .from('ofertas_pedido_assistente')
     .select('id, pedido_id, status, fornecedor_id, leads_fornecedores(nome)')
@@ -1590,6 +1603,7 @@ export async function salvarOrcamentoFornecedor(
       frete_me: freteMe ? { ...freteMe, cotado_em: agora } : null,
       orcamento_status: 'definido',
       orcamento_definido_em: agora,
+      orcamento_observacoes: observacoes,
       atualizado_em: agora,
     })
     .eq('id', pedido.id)
@@ -1623,6 +1637,7 @@ export async function salvarOrcamentoFornecedor(
     autor: 'fornecedor',
     autorNome: oferta.leads_fornecedores?.nome ?? null,
     prazoProducaoDias: typeof prazoProducaoDias === 'number' ? Math.round(prazoProducaoDias) : null,
+    observacoes,
   })
 
   // cobrança já gerada (não paga) com valor antigo → atualiza no ASAAS
@@ -1658,6 +1673,7 @@ export async function salvarOrcamentoFornecedor(
           tamanhos: (l.tamanhos ?? []).filter((t) => t.tamanho).map((t) => ({ tamanho: String(t.tamanho), qtd: t.qtd ?? null })),
           estampas: (l.estampas ?? []).filter((e) => e.posicao && e.tamanho).map((e) => ({ posicao: String(e.posicao), tamanho: String(e.tamanho) })),
         })),
+        observacoes,
       })
     } catch (e) {
       console.error('[orcamento-fornecedor] e-mail ao cliente falhou', e)
@@ -1677,6 +1693,7 @@ export async function salvarOrcamentoFornecedor(
         (fornecedorNome && !ajuste ? `O fornecedor *${fornecedorNome}* vai atender seu pedido.\n` : '') +
         `💰 Total: *${brl(valorCliente)}*` +
         (freteCliente > 0 ? ` (produtos ${brl(valorCliente - freteCliente)} + frete ${brl(freteCliente)})` : ' (frete incluso)') +
+        (observacoes ? `\n\n📝 Observações da confecção: ${observacoes}` : '') +
         `\n\nVeja os detalhes e finalize o pagamento (PIX ou cartão):\n${SITE_URL}/visualizador/${pedido.id}`
       await avisoOficial({
         telefone: pedido.telefone,
