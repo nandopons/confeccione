@@ -222,6 +222,21 @@ export function pontuarFornecedor(
     }
   }
 
+  // SEM EVIDÊNCIA DE PEÇA NÃO É CANDIDATA — 29/09/2026 (Joaquim, de novo). O
+  // pedido de cueca boxer e sunga (moda íntima/praia, MG) foi pro Joaquim
+  // (fitness, CE) com ZERO pontos de peça: ninguém na rede declara moda
+  // íntima, e a fila pega "o primeiro viável" — que era ele, empurrado pro
+  // topo pelo bônus de engajamento (responde rápido). Pedido com peça
+  // reconhecida e confecção que não a declara nem encosta pela categoria
+  // legada: não é candidata. O pedido fica sem fornecedor e a captação vai
+  // buscar quem faz — que é o que o Fernando pediu ("vamo tentar encontrar
+  // quem faça"), não mandar pra quem vai recusar.
+  if (pedidas.length > 0 && !bateNoVocabularioNovo && pontosLegado === 0) {
+    viavel = false
+    pontos -= 50
+    motivos.push(`não declara ${pedidas.map((q) => q.replace(/_/g, ' ')).join(', ')}`)
+  }
+
   if (bateNoVocabularioNovo && cobertura >= 0.5) {
     pontos += PESO_PECA_DECLARADA
     motivos.push(pedidas.length > 1 && cobertura < 1 ? `${MOTIVO_PECA_DECLARADA} (${pedidasQueFaz.length} de ${pedidas.length})` : MOTIVO_PECA_DECLARADA)
