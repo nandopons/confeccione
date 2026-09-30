@@ -49,6 +49,7 @@ import { definirStatusOferta, desistirDoPedidoAceito, reabrirBuscaPeloCliente, t
 import { editarLinhasPedidoCliente, gradeDaFerramenta, linhasComAjuste } from './pedido-linhas-edicao'
 import { anexarFotoDaConversaAoModelo, conferirPedido, salvarDadosDoCliente, criarPedidoParaContato, definirPecasPedido, enviarResumoParaCliente, liberarParaFornecedores, pausarLembretesDoPedido, type Divergencia } from './pedido-fechamento'
 import { pedirLotePrevias, rodarLotePrevias } from './previas-lote'
+import { lerBlocos, montarProposta } from './proposta-pedido'
 import {
   faltaParaMockup,
   gerarMockupDoModelo,
@@ -442,7 +443,7 @@ function dias(desde: string | null | undefined): number | null {
  * cliente ler o avesso do sistema.
  */
 const VOCABULARIO_INTERNO =
-  /\b(falta_para_liberar|ja_temos|modelos_para_gerar_mockup|pedido_id|conversa_id|wa_id|tool_result|tool_use|salvar_dados_do_cliente|enviar_resumo_pedido|gerar_mockup_do_modelo|chamar_humano|pausar_lembretes_do_pedido|nota do sistema|nota interna|\[respondendo à SUA mensagem)\b/i
+  /\b(falta_para_liberar|ja_temos|modelos_para_gerar_mockup|pedido_id|conversa_id|wa_id|tool_result|tool_use|salvar_dados_do_cliente|enviar_resumo_pedido|montar_proposta_do_pedido|gerar_mockup_do_modelo|chamar_humano|pausar_lembretes_do_pedido|nota do sistema|nota interna|\[respondendo à SUA mensagem)\b/i
 
 /**
  * A SEGUNDA PERNA: TOM DE RELATÓRIO — 10/09/2026.
@@ -1880,6 +1881,28 @@ async function liberarSeEleConfirmou(ctx: Contexto, corpo: string | null, conver
 const PERGUNTA_DA_PREVIA = 'Você mandou a imagem da peça: uso ela como visualizador do pedido, ou quer que eu gere uma prévia a partir dela?'
 const PERGUNTA_DA_PREVIA_RE = /uso ela como visualizador|gere uma pr[ée]via a partir dela/i
 const PERGUNTA_DO_RESUMO_POR_CODIGO = 'Peças e dados completos. Posso te mandar o resumo do pedido pra você conferir?'
+/**
+ * DEGRAU 0 — A FOTO DE REFERÊNCIA, PEDIDA UMA VEZ POR CÓDIGO — 29/09/2026.
+ * "Quando o cliente não enviar foto, vale a pena a gente provocar o cliente a
+ * enviar foto de referência, pra gente se guiar." (Fernando, olhando o pedido
+ * da Gabi e "muitos outros".) Pedido descrito só em texto vira suposição na
+ * confecção e prévia genérica. Então, com o pedido pronto e nenhuma foto dele
+ * em modelo nenhum (nem PDF, nem foto solta na conversa), ANTES das prévias
+ * vai esta pergunta, uma vez; `foto_referencia_pedida_em` garante o "uma vez".
+ */
+const PEDIDO_DE_FOTO = (varias: boolean) =>
+  `Antes de eu seguir: tem alguma foto de referência ${varias ? 'das peças' : 'da peça'}, pode ser print da internet? Ajuda a confecção a acertar o modelo. ` +
+  'Se tiver, manda aqui; se não tiver, me diz que eu sigo com a descrição'
+/** A mesma pergunta, pro fechador automático (fechar-pedido-automatico.ts). */
+export function perguntaDaFotoDeReferencia(varias: boolean): string {
+  return PEDIDO_DE_FOTO(varias)
+}
+const ESPERA_DA_FOTO = 'Pode mandar, fico no aguardo'
+export const ESPERANDO_FOTO_RE = /foto de refer[êe]ncia[^\n]{0,200}sigo com a descri|fico no aguardo/i
+/** "vou mandar", "tenho sim", "pera" — ele vai mandar a foto; a escada espera uma rodada. */
+export const VAI_MANDAR_FOTO = /\b(vou (mandar|enviar|procurar|ver|pegar)|j[áa] (te )?(mando|envio)|mando (j[áa]|agora)|tenho sim|tenho uma|tenho algumas|pera|per[aá][íi]|espera|s[óo] um (minuto|momento|instante)|um minuto|calma|deixa eu|aguarda)\b|^\s*(sim|tenho)\s*[.!]*\s*$/i
+/** "não tenho", "segue assim" — sem foto; a escada continua no mesmo turno. */
+export const NAO_TEM_FOTO = /\b(n[ãa]o (tenho|tem|possuo)|nenhuma|sem foto|s[óo] (a|com a) descri|pode seguir|segue|vai assim|assim mesmo|deixa assim|n[ãa]o precisa)\b|^\s*n[ãa]o\s*[.!]*\s*$/i
 const ESCOLHEU_A_PROPRIA = /\b(minha|minhas|a foto|a imagem|as fotos|as imagens|ess[ae]s? mesm[ao]s?|pode usar|usa|use|usar|a que (eu )?mandei|n[ãa]o precisa|dispensa|a própria|a propria)\b/i
 const ESCOLHEU_GERAR = /\b(gera|gerar|gere|pr[ée]via|simula|simula[çc][ãa]o|visualizador|quero ver|pode gerar|faz uma|manda uma)\b/i
 
@@ -1904,12 +1927,22 @@ export function ehAgradecimentoPuro(corpo: string | null): boolean {
   return t.length > 0 && t.length <= 60 && AGRADECIMENTO_PURO.test(t)
 }
 
-/** Mensagem que não precisa do modelo: sem pergunta, curta ou um "sim". */
+/**
+ * "sim, mas muda a cor" NÃO é trivial — 29/09/2026. Curta e sem "?" não basta:
+ * pedido de mudança, ressalva ou "espera" precisa do modelo, senão o degrau
+ * sai por código por cima do que ele pediu e o ajuste se perde.
+ */
+const PEDE_ALGO_NA_RESPOSTA =
+  /\b(muda|mudar|mude|troca|trocar|troque|ajusta|ajustar|ajuste|tira|tirar|tire|coloca|colocar|coloque|p[õo]e|p[õo]r|acrescenta|adiciona|inclui|aumenta|diminui|reduz|em vez|ao inv[ée]s|prefiro|quero|queria|gostaria|s[óo] que|mas|por[ée]m|ainda n[ãa]o|antes disso|espera|pera|calma|faltou|esqueci|corrige|errad[oa])\b/i
+
+/** Mensagem que não precisa do modelo: sem pergunta, sem pedido de mudança, curta ou um "sim". */
 export function mensagemTrivial(corpo: string | null, tipo: string): boolean {
   const t = (corpo ?? '').trim()
   if (tipo !== 'text' || !t) return false
   if (t.includes('?')) return false
-  return t.length <= 60 || eleDisseQuePode([t])
+  if (eleDisseQuePode([t])) return true
+  if (PEDE_ALGO_NA_RESPOSTA.test(t)) return false
+  return t.length <= 60
 }
 
 async function ultimaFalaNossa(conversaId: string): Promise<string | null> {
@@ -1934,6 +1967,17 @@ async function marcarDecisaoDaPrevia(pedidoId: string, decisao: 'cliente' | 'ger
   await supabaseAdmin.from('pedidos_assistente').update({ mockups, atualizado_em: new Date().toISOString() }).eq('id', pedidoId)
 }
 
+async function marcarFotoPedida(pedidoId: string): Promise<void> {
+  await supabaseAdmin.from('pedidos_assistente').update({ foto_referencia_pedida_em: new Date().toISOString() }).eq('id', pedidoId)
+}
+
+/** Alguma foto DELE já está em algum modelo do pedido? */
+async function pedidoTemFotoDoCliente(pedidoId: string): Promise<boolean> {
+  const { data } = await supabaseAdmin.from('pedidos_assistente').select('mockups').eq('id', pedidoId).maybeSingle<{ mockups: MapaMockups | null }>()
+  const mockups = data?.mockups ?? {}
+  return Object.values(mockups).some((mk) => (mk?.fotos?.length ?? 0) > 0)
+}
+
 async function falarPorCodigo(waId: string, nome: string | null, texto: string): Promise<boolean> {
   const r = await enviarTexto(waId, texto)
   if (r.ok) await registrarSaidaInbox(waId, nome, r.wamid, texto, null, 'luigi')
@@ -1952,9 +1996,9 @@ async function avancarFechamento(
 
   const { data: ped } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('resumo_enviado_em, previas_lote_em')
+    .select('resumo_enviado_em, previas_lote_em, foto_referencia_pedida_em, linhas')
     .eq('id', alvo.id)
-    .maybeSingle<{ resumo_enviado_em: string | null; previas_lote_em: string | null }>()
+    .maybeSingle<{ resumo_enviado_em: string | null; previas_lote_em: string | null; foto_referencia_pedida_em: string | null; linhas: unknown }>()
   if (!ped) return SEM_DEGRAU
   // RESUMO JÁ ENVIADO NÃO TIRA A ESCADA DA FRENTE — 29/09/2026 (Guilherme, 349):
   // o PDF saiu às 20:13 ANTES das prévias (fluxo velho), e a escada, vendo
@@ -1972,6 +2016,50 @@ async function avancarFechamento(
   const trivial = mensagemTrivial(params.corpo, params.tipo)
   const ultima = await ultimaFalaNossa(params.conversaId)
 
+  // IMAGEM COM O PEDIDO PRONTO: prende antes de qualquer prévia — 29/09/2026.
+  // Sem isto o degrau 2 gerava as prévias no mesmo turno em que a foto de
+  // referência chegou, antes de o modelo prendê-la — e a prévia saía sem ela.
+  if (params.tipo === 'image' && !ctx.referenciaEmPdf) {
+    return {
+      degrau: 'foto_chegou',
+      falouPorCodigo: null,
+      instrucao:
+        'Ele mandou uma imagem com o pedido já pronto. Se for foto de referência da peça (a peça que ele quer, arte, estampa, print), ' +
+        'prenda no modelo certo com anexar_foto_ao_modelo — pergunte de qual peça é só se houver mais de uma e não der pra saber — ' +
+        `e termine com esta pergunta, exatamente: "${PERGUNTA_DA_PREVIA}". Se não for referência (comprovante, print de outra coisa), ` +
+        'responda ao que ela é. NÃO gere prévia nem ofereça resumo: isso segue por código no próximo passo.',
+    }
+  }
+
+  // Degrau 0 — foto de referência, uma vez por pedido (Fernando, 29/09).
+  if (!ctx.referenciaEmPdf) {
+    if (!ped.foto_referencia_pedida_em) {
+      const temFoto = (await pedidoTemFotoDoCliente(alvo.id).catch(() => true)) || (await fotosDaConversa(params.conversaId).catch(() => [])).length > 0
+      if (!temFoto) {
+        const varias = Array.isArray(ped.linhas) && ped.linhas.length > 1
+        const pergunta = PEDIDO_DE_FOTO(varias)
+        await marcarFotoPedida(alvo.id)
+        if (!trivial) {
+          return { degrau: 'pediu_foto', falouPorCodigo: null, instrucao: `Atenda o que ele disse (responda a pergunta; se for mudança na peça, ajustar_peca_pedido) em uma ou duas linhas e termine com esta pergunta, exatamente: "${pergunta}". Nada de prévia nem de resumo antes disso.` }
+        }
+        const ok = await falarPorCodigo(params.waId, params.nome, pergunta)
+        return { degrau: 'pediu_foto', falouPorCodigo: ok ? pergunta : null, instrucao: ok ? 'A pergunta da foto de referência acabou de ir por código. NÃO escreva nada — resposta vazia.' : null }
+      }
+    } else if (ultima && ESPERANDO_FOTO_RE.test(ultima) && corpo) {
+      // A resposta à pergunta da foto (ou à espera): sem foto, a escada
+      // continua abaixo; "vou mandar" espera UMA rodada; dúvida vai ao modelo.
+      const vaiMandar = VAI_MANDAR_FOTO.test(corpo) && !NAO_TEM_FOTO.test(corpo)
+      if (vaiMandar && !/fico no aguardo/i.test(ultima)) {
+        const ok = await falarPorCodigo(params.waId, params.nome, ESPERA_DA_FOTO)
+        return { degrau: 'pediu_foto', falouPorCodigo: ok ? ESPERA_DA_FOTO : null, instrucao: ok ? 'Ele vai mandar a foto; a espera acabou de ir por código. NÃO escreva nada — resposta vazia.' : null }
+      }
+      if (!trivial && !NAO_TEM_FOTO.test(corpo)) {
+        return { degrau: 'pediu_foto', falouPorCodigo: null, instrucao: 'Atenda o que ele disse (responda a pergunta; se for mudança na peça, ajustar_peca_pedido) em uma ou duas linhas e lembre, em uma linha, que se tiver foto de referência pode mandar — se não tiver, você segue com a descrição. Nada de prévia nem de resumo neste turno.' }
+      }
+      // "não tenho" (ou qualquer outra coisa): segue pros degraus de baixo.
+    }
+  }
+
   // Degrau 1 — a imagem dele é o visualizador?
   const aDecidir = ctx.referenciaEmPdf ? [] : await fotosADecidir(alvo.id).catch(() => [] as number[])
   if (aDecidir.length > 0) {
@@ -1984,8 +2072,8 @@ async function avancarFechamento(
       } else {
         return { degrau: 'perguntou_previa', falouPorCodigo: null, instrucao: `Ele não respondeu claro se usa a imagem dele como visualizador ou se quer prévia de IA. Pergunte de novo, em UMA linha e de outro jeito, e nada mais.` }
       }
-    } else if (corpo.includes('?')) {
-      return { degrau: 'perguntou_previa', falouPorCodigo: null, instrucao: `Responda a pergunta dele em uma ou duas linhas e termine com esta pergunta, exatamente: "${PERGUNTA_DA_PREVIA}". Nada de prévia nem de resumo antes disso.` }
+    } else if (!trivial) {
+      return { degrau: 'perguntou_previa', falouPorCodigo: null, instrucao: `Atenda o que ele disse (responda a pergunta; se for mudança na peça, ajustar_peca_pedido) em uma ou duas linhas e termine com esta pergunta, exatamente: "${PERGUNTA_DA_PREVIA}". Nada de prévia nem de resumo antes disso.` }
     } else {
       const ok = await falarPorCodigo(params.waId, params.nome, PERGUNTA_DA_PREVIA)
       return { degrau: 'perguntou_previa', falouPorCodigo: ok ? PERGUNTA_DA_PREVIA : null, instrucao: ok ? 'A pergunta sobre a imagem dele acabou de ir por código. NÃO escreva nada — resposta vazia.' : null }
@@ -1995,6 +2083,18 @@ async function avancarFechamento(
   // Degrau 2 — prévias que faltam saem em lote, por código.
   const faltam = ctx.referenciaEmPdf || ctx.mockupIndisponivel ? [] : await faltamMockups(alvo.id).catch(() => [] as number[])
   if (faltam.length > 0) {
+    // "muda a cor do 2 pra azul" gerava as prévias ANTES da mudança (29/09):
+    // o que ele pediu vem primeiro; a mudança feita, o próprio modelo chama o
+    // lote no mesmo turno. Dúvida só se responde — a escada volta depois.
+    if (!trivial) {
+      return {
+        degrau: null,
+        falouPorCodigo: null,
+        instrucao:
+          'Atenda o que ele disse antes de qualquer prévia. Se foi uma MUDANÇA na peça, aplique com ajustar_peca_pedido e, no mesmo turno, chame gerar_previas_do_pedido (as prévias e o fecho saem por código). ' +
+          'Se foi só uma dúvida, responda e pare: nada de prévia nem de resumo neste turno.',
+      }
+    }
     await pedirLotePrevias(alvo.id)
     const lote = await rodarLotePrevias(alvo.id, 90_000).catch((err) => ({ enviadas: 0, restantes: faltam.length, concluido: false, motivo: err instanceof Error ? err.message : String(err) }))
     if (lote.motivo?.includes('indisponível')) {
@@ -2492,6 +2592,80 @@ const FERRAMENTA_DEFINIR_PECAS: Anthropic.Messages.Tool = {
   },
 }
 
+/**
+ * A PROPOSTA CONSOLIDADA — 29/09/2026. Ver proposta-pedido.ts. O modelo passa
+ * blocos (peça, público, total, cores, grade, pesos); o código reparte, grava
+ * e MANDA o texto, com os mesmos números. Nasceu da Morenna: "me ajude, minha
+ * primeira vez" respondido com mais vinte perguntas, uma por campo.
+ */
+const FERRAMENTA_PROPOSTA: Anthropic.Messages.Tool = {
+  name: 'montar_proposta_do_pedido',
+  description:
+    'Monta e MANDA pro cliente, por código, a proposta consolidada do pedido INTEIRO: uma linha por peça e cor, com a ' +
+    'divisão por cor e a grade de tamanhos calculadas aqui (o total é repartido por igual entre as cores, ou como ele ' +
+    'disse; a grade segue os pesos que você passar, ou por igual). Grava as peças no pedido (substitui a lista toda) e ' +
+    'envia o texto terminando com a pergunta se ele quer ajustar algo ou se pode seguir. USE quando ele pediu ajuda pra ' +
+    'montar, disse que é a primeira vez, ou aceitou a sua oferta de montar a proposta — e também quando o pedido tem ' +
+    'várias peças ou cores e apresentar tudo de uma vez é melhor que confirmar linha por linha. Passe TODOS os blocos ' +
+    'do pedido (um por peça/modelo), não só o que mudou. Depois de chamar, NÃO escreva nada: o texto já foi. Peça que ' +
+    'ele ditou por completo, cor e quantidade de cada, pode ir por definir_pecas_pedido como sempre. ' +
+    'O CÓDIGO CONCENTRA O PEDIDO (Fernando, 29/09): fica só o grupo principal — UM público e UMA família de peça (quem ' +
+    'faz vestido não faz alfaiataria nem roupa infantil; pedido misto ninguém pega inteiro) — e, por modelo, só as cores ' +
+    'que dão pelo menos 10 peças cada; o resto o texto já diz que vai num pedido separado ou numa próxima leva. Passe as ' +
+    'cores da mais comercial pra menos. Bloco com menos de 10 peças no total é recusado: junte, tire ou suba, e explique ' +
+    'a ele em uma linha. Só se ele insistir num lote pequeno depois de ouvir isso, repita com aceitar_lotes_pequenos: true.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      pedido: { type: 'string', description: 'Código ou id (do contexto). Sem isto, usa o pedido em foco.' },
+      aceitar_lotes_pequenos: {
+        type: 'boolean',
+        description: 'true SÓ quando ele insistiu em menos de 10 peças por cor depois de ouvir que a confecção dificilmente pega. Deixe de fora no resto.',
+      },
+      blocos: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 12,
+        items: {
+          type: 'object',
+          properties: {
+            modelo: { type: 'string', maxLength: 120, description: 'A peça, como ele descreveu: "vestido midi manga 3/4", "saia midi evasê com cinto".' },
+            publico: { type: 'string', enum: ['feminino', 'masculino', 'infantil', 'unissex'] },
+            total: { type: 'number', minimum: 1, maximum: 100000, description: 'Total de peças deste bloco, somando todas as cores.' },
+            cores: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 12,
+              items: { type: 'string', maxLength: 80 },
+              description: 'Uma entrada por cor — "estampa floral" conta como cor. Cada uma vira uma linha do pedido. Sem cor definida, proponha duas ou três do segmento.',
+            },
+            quantidades_por_cor: {
+              type: 'array',
+              items: { type: 'number', minimum: 1 },
+              description: 'Só se ELE disse quanto de cada cor ("10 pretas e 5 brancas"). Mesma ordem de cores; a soma vira o total. Vazio = divide por igual.',
+            },
+            grade: {
+              type: 'array',
+              maxItems: 30,
+              items: { type: 'string', maxLength: 12 },
+              description: 'Tamanhos: ["P","M","G","GG"], ["36","38","40"], ["2","4","6","8"] (infantil). Vazio = sem grade, só o total.',
+            },
+            pesos_da_grade: {
+              type: 'array',
+              items: { type: 'number', minimum: 0 },
+              description: 'Proporção entre os tamanhos, mesma ordem de grade: "GG só 6 das 50" → [15, 15, 14, 6]. Vazio = por igual.',
+            },
+            material: { type: 'string', maxLength: 200, description: 'Só se ele disse ou escolheu entre o que você sugeriu.' },
+            descricao: { type: 'string', maxLength: 400, description: 'Detalhes que ele contou: manga, comprimento, bolso, estampa, cinto. NÃO ponha grade nem quantidade aqui.' },
+          },
+          required: ['modelo', 'publico', 'total', 'cores'],
+        },
+      },
+    },
+    required: ['blocos'],
+  },
+}
+
 const FERRAMENTA_CRIAR_PEDIDO: Anthropic.Messages.Tool = {
   name: 'criar_pedido',
   description:
@@ -2953,7 +3127,7 @@ const FERRAMENTA_PORTFOLIO: Anthropic.Messages.Tool = {
 }
 
 /** O que o código fez com o fechamento ANTES de o modelo falar — ver liberarSeEleConfirmou. */
-type FechamentoPorCodigo = 'liberou' | 'recusou' | 'resumo' | 'aguardando_previas' | 'perguntou_previa' | 'previas' | 'perguntou_resumo' | null
+type FechamentoPorCodigo = 'liberou' | 'recusou' | 'resumo' | 'pediu_foto' | 'foto_chegou' | 'aguardando_previas' | 'perguntou_previa' | 'previas' | 'perguntou_resumo' | null
 
 /**
  * O QUE SAI DA MESA NO TURNO DE FECHAMENTO — 16/09 e 17/09/2026.
@@ -2982,8 +3156,8 @@ type FechamentoPorCodigo = 'liberou' | 'recusou' | 'resumo' | 'aguardando_previa
  * modelo grava em `confirmado_pelo_cliente` e libera no mesmo turno.
  */
 const FORA_DA_MESA: Record<Exclude<FechamentoPorCodigo, null>, ReadonlySet<string>> = {
-  liberou: new Set(['criar_pedido', 'definir_pecas_pedido', 'ajustar_peca_pedido', 'gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido', 'liberar_para_fornecedores']),
-  recusou: new Set(['criar_pedido', 'definir_pecas_pedido', 'enviar_resumo_pedido']),
+  liberou: new Set(['criar_pedido', 'definir_pecas_pedido', 'montar_proposta_do_pedido', 'ajustar_peca_pedido', 'gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido', 'liberar_para_fornecedores']),
+  recusou: new Set(['criar_pedido', 'definir_pecas_pedido', 'montar_proposta_do_pedido', 'enviar_resumo_pedido']),
   // `resumo` (o código mandou o PDF neste turno, porque ele disse que podia):
   // Big Shopp, 25/09 18:24 — "posso te mandar o resumo?" "sim" → o modelo
   // perguntou "com touca ou sem touca?", ganhou "com touca", REGEROU o mockup
@@ -2991,10 +3165,14 @@ const FORA_DA_MESA: Record<Exclude<FechamentoPorCodigo, null>, ReadonlySet<strin
   // resumo já enviado, o que cabe é a pergunta de fechamento; peça, prévia e
   // pedido novo saem da mesa — igual ao `liberou`. Liberar fica: se ele
   // emendar "pode mandar pras confecções" na mesma fala, é o turno certo.
-  resumo: new Set(['criar_pedido', 'definir_pecas_pedido', 'ajustar_peca_pedido', 'gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido']),
+  resumo: new Set(['criar_pedido', 'definir_pecas_pedido', 'montar_proposta_do_pedido', 'ajustar_peca_pedido', 'gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido']),
   // A ESCADA DO FECHAMENTO (29/09/2026, ver avancarFechamento): quando o
   // código já deu o passo do turno, o modelo não pode dar o mesmo passo nem
   // pular pro seguinte. O que fica na mesa é responder pergunta e ajustar peça.
+  // Degrau 0 (29/09, Fernando): a foto de referência foi pedida por código, ou
+  // acabou de chegar e ainda vai ser presa ao modelo — prévia e resumo esperam.
+  pediu_foto: new Set(['gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido', 'liberar_para_fornecedores', 'criar_pedido']),
+  foto_chegou: new Set(['gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido', 'liberar_para_fornecedores', 'criar_pedido']),
   aguardando_previas: new Set(['gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido', 'liberar_para_fornecedores', 'criar_pedido']),
   perguntou_previa: new Set(['gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido', 'liberar_para_fornecedores', 'criar_pedido']),
   previas: new Set(['gerar_mockup_do_modelo', 'gerar_previas_do_pedido', 'enviar_resumo_pedido', 'liberar_para_fornecedores', 'criar_pedido']),
@@ -3029,7 +3207,7 @@ const JA_FOI_PRAS_CONFECCOES: ReadonlySet<Etapa> = new Set<Etapa>([
  * peça fica (ajuste depois de liberado é legítimo; a confecção lê), foto fica
  * pelo mesmo motivo, e criar_pedido fica (ele pode querer outro).
  */
-const MESA_SEM_PEDIDO_PRA_LIBERAR: ReadonlySet<string> = new Set(['liberar_para_fornecedores', 'enviar_resumo_pedido', 'definir_pecas_pedido'])
+const MESA_SEM_PEDIDO_PRA_LIBERAR: ReadonlySet<string> = new Set(['liberar_para_fornecedores', 'enviar_resumo_pedido', 'definir_pecas_pedido', 'montar_proposta_do_pedido'])
 
 /**
  * true quando NÃO há o que liberar: existe pedido em aberto, todos já estão
@@ -3070,6 +3248,7 @@ function ferramentasDoModo(
         FERRAMENTA_ENCERRAR,
         FERRAMENTA_AJUSTAR_PECA,
         FERRAMENTA_DEFINIR_PECAS,
+        FERRAMENTA_PROPOSTA,
         FERRAMENTA_CRIAR_PEDIDO,
         FERRAMENTA_FOTO_MODELO,
         FERRAMENTA_FOTO_COMO_PREVIA,
@@ -3850,6 +4029,45 @@ async function executarFerramenta(
                 : 'Pergunte ao cliente o que falta, uma coisa por vez.',
       }
     }
+    case 'montar_proposta_do_pedido': {
+      const p = await acharNoContexto(ctx, str(entrada.pedido))
+      if (!p) throw new Error('pedido não encontrado entre os pedidos deste contato')
+      const blocos = lerBlocos(entrada.blocos)
+      const proposta = montarProposta(blocos, { aceitarLotesPequenos: entrada.aceitar_lotes_pequenos === true })
+      const r = await definirPecasPedido(p.id, proposta.linhas)
+      if (!r.ok) throw new Error(r.erro)
+      const pronto = await conferirPedido(p.id)
+      // O texto sai daqui, com os números que foram gravados — o modelo não
+      // reescreve a proposta (as contas dele é que erravam).
+      const enviado = await falarPorCodigo(ctx.contato.telefone, ctx.contato.nome, proposta.texto)
+      const depois = pronto.pronto
+        ? 'Com o "pode seguir" dele o fechamento anda por código (foto de referência, prévias, resumo).'
+        : `Com o "pode seguir" dele, colete o que falta — uma coisa por vez: ${pronto.falta || 'ver falta_para_liberar'}.`
+      const separado =
+        proposta.paraOutroPedido.length > 0
+          ? ` FICOU PRA UM PEDIDO SEPARADO (outro público ou outra família de peça; o texto já explicou isso a ele): ${proposta.paraOutroPedido
+              .map((b) => `${b.modelo} — ${b.publico}, ${b.total} peças, cores ${b.cores.join('/')}`)
+              .join('; ')}. Depois que ESTE pedido for liberado pras confecções, ofereça montar o próximo com essas peças: criar_pedido (separado_do_pedido: ${p.codigo ?? p.id}) e, nele, esta ferramenta com esses blocos.`
+          : ''
+      return {
+        ok: true,
+        codigo: p.codigo,
+        linhas_gravadas: proposta.linhas.length,
+        total_de_pecas: proposta.total,
+        familia_do_pedido: proposta.familia,
+        cores_deixadas_pra_depois: proposta.deixadasPraDepois,
+        pronto_para_liberar: pronto.pronto && pronto.divergencias.length === 0,
+        falta: pronto.pronto ? null : pronto.falta,
+        divergencias: pronto.divergencias,
+        aviso: enviado
+          ? 'A proposta consolidada acabou de ir pro cliente por código, terminando com a pergunta se quer ajustar ou se pode seguir. ' +
+            'NÃO escreva nada neste turno — resposta vazia. No próximo turno: "muda X" → ajustar_peca_pedido naquela linha ' +
+            '(ou esta ferramenta de novo, com TODOS os blocos). ' +
+            depois +
+            separado
+          : 'As peças foram gravadas, mas a mensagem não saiu. Mande você o texto abaixo, exatamente como está, sem mudar número:\n' + proposta.texto,
+      }
+    }
     case 'criar_pedido': {
       const lista = Array.isArray(entrada.pecas) ? (entrada.pecas as Array<Record<string, unknown>>) : []
       if (lista.length === 0) throw new Error('informe ao menos uma peça')
@@ -4079,6 +4297,29 @@ async function executarFerramenta(
       const faltavam = await faltamMockups(p.id)
       if (faltavam.length === 0) {
         return { ok: true, aviso: 'Todos os modelos já têm prévia. Não há o que gerar: se as peças estão completas, o próximo passo é o resumo.' }
+      }
+      // A FOTO DE REFERÊNCIA VEM ANTES DA PRÉVIA — 29/09/2026 (degrau 0 da
+      // escada, ver avancarFechamento). Quem chama primeiro pode ser o modelo,
+      // no turno em que o pedido ficou pronto; a ordem é a mesma por aqui.
+      {
+        const { data: ped } = await supabaseAdmin
+          .from('pedidos_assistente')
+          .select('foto_referencia_pedida_em, linhas')
+          .eq('id', p.id)
+          .maybeSingle<{ foto_referencia_pedida_em: string | null; linhas: unknown }>()
+        const temFoto = (await pedidoTemFotoDoCliente(p.id).catch(() => true)) || (await fotosDaConversa(ctx.conversaId).catch(() => [])).length > 0
+        if (ped && !ped.foto_referencia_pedida_em && !temFoto) {
+          const pergunta = PEDIDO_DE_FOTO(Array.isArray(ped.linhas) && ped.linhas.length > 1)
+          await marcarFotoPedida(p.id)
+          const ok = await falarPorCodigo(ctx.contato.telefone, ctx.contato.nome, pergunta)
+          return {
+            ok: true,
+            enviadas_agora: 0,
+            aviso: ok
+              ? 'Antes das prévias, a pergunta da foto de referência acabou de ir pro cliente por código. NÃO escreva nada neste turno — resposta vazia. A resposta dele é lida por código; as prévias saem depois.'
+              : `Antes das prévias vai a pergunta da foto de referência, e o envio falhou. Faça você esta pergunta, exatamente: "${pergunta}". Nada de prévia neste turno.`,
+          }
+        }
       }
       await pedirLotePrevias(p.id)
       // O turno já gastou o debounce e a rodada do modelo; 90 s de geração
@@ -4820,6 +5061,8 @@ E EVITE "SÓ FALTA" COM QUEM ESTÁ ESPERANDO. Tecnicamente é verdade e emociona
 
 FOTO QUE ELE MANDA VOCÊ PRENDE NA PEÇA. Toda foto de referência — a peça que ele quer, a arte, a estampa, o print de um concorrente — vale pra quem vai PRODUZIR, não só pra você entender. Chame anexar_foto_ao_modelo com a posição do modelo (1 = Modelo 1) e o número da foto — toda imagem dele aparece marcada [foto 1], [foto 2] no histórico, e é esse número que vai em "foto". Uma chamada por foto: duas peças com fotos diferentes são duas chamadas, cada uma com o seu número. Sem isso a foto fica só na conversa e a confecção produz às cegas, com a descrição em texto. Se o pedido tem mais de um modelo e a foto pode ser de qualquer um, pergunte curto antes: "essa foto é da preta ou da branca?" — foto na peça errada é pior que foto nenhuma. Depois de prender, confirme em uma linha e siga; não peça a mesma foto de novo.
 
+FOTO NÃO TEM NÚMERO PRO CLIENTE. Os rótulos [foto 1], [foto 2] são seus, do histórico — ele não vê número nenhum. Nunca escreva "foto 3" pra ele, nunca peça "o número da foto", nunca peça pra ele mapear "as fotos 1, 2, 3 e 4" (a Gabi, 29/09, ouviu as três coisas). Você enxerga as imagens e conhece os modelos do pedido: prenda cada foto ao modelo que ela mostra, sem perguntar, e pergunte só quando houver dúvida de verdade — e aí pelo CONTEÚDO: "a foto do vestido vermelho de alça fina é do Modelo 1 ou do 3?". Se ainda assim não der pra saber, peça pra ela responder a foto (o "responder" do WhatsApp, citando a imagem) escrevendo de qual peça é, ou reenviar a foto dizendo a peça. Quando ela responder citando uma foto, o histórico mostra "[respondendo à mensagem dele: a [foto N]]" — esse N é o que vai em "foto" no anexar_foto_ao_modelo.
+
 VOCÊ ENXERGA AS IMAGENS: quando o cliente manda foto, você a vê de verdade. Use o que está nela — modelo da peça, cor, estampa, referência que ele mandou — pra preencher o pedido e pra confirmar com ele o que entendeu ("essa camisa é gola careca, certo?"). Nunca peça pra ele descrever o que já está na foto. Diga o que vê de forma concreta, e pergunte só o que a imagem não responde (quantidade, tamanhos, público). Se a foto estiver ruim ou não der pra concluir, diga o que não deu pra ver em vez de adivinhar.
 
 VOCÊ TAMBÉM LÊ PDF E ESCUTA ÁUDIO. O PDF chega inteiro pra você, com o layout: ficha técnica, tabela de grade e tamanhos, arte da estampa, orçamento que ele pediu em outro lugar. Leia e USE — se a tabela de grade traz P 10, M 20, G 15, isso é a quantidade do pedido e você não pergunta de novo. O áudio chega já transcrito no texto da mensagem; trate como se ele tivesse escrito. Nos dois casos, confirme o que entendeu em uma frase antes de gravar, porque transcrição erra nome e número: "entendi 40 camisas, 20 P e 20 M, confere?". Nunca peça pra ele digitar o que já mandou no arquivo — foi justamente pra não digitar que ele mandou.
@@ -4840,7 +5083,13 @@ COMECE SEM ASSUMIR QUE ELE AINDA QUER. Muita gente já resolveu por outro caminh
 
 OFEREÇA MONTAR ALI MESMO: deixe claro que ele não precisa voltar ao site — você monta o pedido com ele por ali ("posso montar contigo por aqui mesmo"). É o que tira o pedido do lugar: quem não voltou ao site em três meses não vai voltar agora, mas responde uma pergunta no WhatsApp.
 
-Com o rumo definido, a ordem é: (1) a peça — o que ele quer produzir; (2) cor; (3) quantidade; (4) público; uma pergunta por mensagem, esperando a resposta. Puxe o contexto junto (pra que é, pra quando, quantas pessoas) porque isso ajuda a acertar a peça. Quando tiver o suficiente, chame definir_pecas_pedido com o que ELE disse — nunca preencha o que ele não falou. (4) Depois mande enviar_resumo_pedido e pergunte se está tudo certo ou se quer ajustar algo. (5) Só quando ele confirmar, pergunte se pode liberar pras confecções e chame liberar_para_fornecedores. Nunca libere sem ele ter visto o resumo e dito que pode: é o pedido dele que vai pro mercado. Se ele quiser mudar algo depois do PDF, use ajustar_peca_pedido e mande o resumo de novo.
+Com o rumo definido, a ordem é: (1) a peça — o que ele quer produzir; (2) cor; (3) quantidade; (4) público; uma pergunta por mensagem, esperando a resposta. Puxe o contexto junto (pra que é, pra quando, quantas pessoas) porque isso ajuda a acertar a peça. Quando tiver o suficiente, chame definir_pecas_pedido com o que ELE disse — nunca preencha o que ele não falou (a exceção é a proposta que ele PEDIU, logo abaixo). (4) Depois mande enviar_resumo_pedido e pergunte se está tudo certo ou se quer ajustar algo. (5) Só quando ele confirmar, pergunte se pode liberar pras confecções e chame liberar_para_fornecedores. Nunca libere sem ele ter visto o resumo e dito que pode: é o pedido dele que vai pro mercado. Se ele quiser mudar algo depois do PDF, use ajustar_peca_pedido e mande o resumo de novo.
+
+QUANDO ELE PEDIR AJUDA, MONTE A PROPOSTA — NÃO ENTREVISTE. "Me ajuda", "veja como fica melhor", "minha primeira vez", "não sei", "você que sabe", "pode ser" sem escolher nada: ele está dizendo que não quer decidir campo por campo. A Morenna (29/09) escreveu "veja como fica melhor, me ajude, minha primeira vez" e ouviu em seguida "agora as saias, quantas peças e em quais cores?" — com roupa infantil e blazer ainda pela frente, vinte perguntas. Nesse momento, ofereça UMA vez, em uma linha: "Quer que eu monte uma proposta completa pra você, com peças, quantidades, cores e grade, e você só ajusta o que quiser?". Com o sim, pergunte só o que falta pra montar e que ele saiba responder — quais peças e mais ou menos quantas no total (uma pergunta, no máximo duas; nada de cor por cor, tamanho por tamanho) — e chame montar_proposta_do_pedido com TODOS os blocos: um bloco por peça, com o total, as cores (as que ele citou, da mais comercial pra menos; sem cor, proponha duas ou três do segmento), a grade (P/M/G/GG pra adulto, 2 a 12 anos pra infantil, se ele não tiver uma) e o público. A divisão por cor e por tamanho é conta do código, não sua: você passa o total e os pesos, ele reparte, grava e manda a proposta inteira num texto só, terminando com a pergunta se quer ajustar ou se pode seguir. Você NÃO escreve a proposta nem repete os números — depois de chamar, resposta vazia. O que ele já tinha dado vale como está ("50 vestidos", "GG só 6") e vira o total e os pesos do bloco; o resto é proposta sua, e ele ajusta. Depois, cada "muda X" dele é ajustar_peca_pedido naquela linha (ou a ferramenta de novo, com todos os blocos). A mesma ferramenta serve quando o pedido tem várias peças ou cores mesmo sem ele pedir ajuda: apresentar tudo de uma vez pra ele aprovar é melhor que confirmar linha por linha.
+
+PEDIDO PARTIDO NÃO SAI DA FILA — FOCO (Fernando, 29/09). Vinte peças infantis divididas em calça cargo, polo, gola V e conjunto são cinco de cada: nenhuma confecção pega, porque cada modelo é uma modelagem e um setup. A regra: pelo menos 10 peças por modelo e cor, poucos modelos pra começar, o mais comercial do segmento primeiro — depois da primeira leva ele soma cores e modelos. E UM PEDIDO POR PÚBLICO E POR ESTILO: feminino adulto num pedido, infantil em outro; vestido e saia num, blazer e alfaiataria em outro. A confecção costuma ser especializada em um tipo de produto e recusa o pedido inteiro por causa dos modelos que ela não faz; separando, cada pedido chega em quem faz e é aceito mais fácil. Diga isso a ele com essas palavras quando for concentrar ou separar — é explicação, não desculpa. O código já faz o corte na proposta (fica o grupo principal e as cores que dão o mínimo; o texto avisa o que ficou pra depois), e recusa bloco com menos de 10 peças: nesse caso você volta a ele em uma linha ("com 5 de cada a confecção não pega; que tal 20 conjuntos em duas cores pra começar?") e monta de novo. Se ele insistir no lote pequeno depois de ouvir isso, chame com aceitar_lotes_pequenos: true — a decisão é dele. O que ficou pra um pedido separado você abre DEPOIS que este for liberado: "posso montar agora o pedido da linha infantil, do mesmo jeito?" → criar_pedido (separado_do_pedido: o código deste) com uma peça por bloco e, nele, montar_proposta_do_pedido com os blocos.
+
+QUANDO O QUE ELE QUER É UM MIX DE LOJA, FABRICAR NÃO É O CAMINHO. Muitos modelos com poucas peças de cada (cinco vestidos, cinco saias, três blazers, uma grade de cada) é sortimento de revenda, não produção: nenhuma confecção pega, e forçar um pedido assim só gasta a paciência dele e da rede. Diga isso com clareza e ofereça as duas saídas: concentrar em 1 ou 2 modelos com volume pra fabricar agora, ou comprar pronto de marcas que vendem no atacado — a gente também ajuda com isso. Se ele preferir o atacado, chame chamar_humano com o motivo "candidata a atacado: mix variado com poucas peças por modelo" e diga que alguém da equipe fala com ele sobre isso por aqui. Sem "boa sorte", sem encerrar: é caminho, não dispensa.
 
 SOE GENTE, SEM MENTIR QUE É GENTE: escreva como uma pessoa da equipe escreveria — português correto e natural, nem robotizado nem empolgado. Contração do dia a dia pode ("pra", "tá"), gíria e interjeição animada não. Varie a abertura; não comece toda mensagem igual. Cumprimente pelo horário de verdade (bom dia até 11h59, boa tarde até 17h59, boa noite depois). Se demorou, "desculpe a demora" resolve, sem explicar por quê. Também não caia no extremo burocrático: nada de "prezado cliente", "sua solicitação", "informamos que", "conforme solicitado", "estamos à disposição".
 
@@ -4866,7 +5115,7 @@ Peças típicas por segmento, pra você sugerir com propriedade:
 Ruim: "Entendi. Que tipo de peça você quer começar produzindo?"
 Bom: "Boa. Em fitness a maioria começa por legging e top, ou por camisa dry se for treino masculino. Você pensa em linha feminina, masculina ou as duas?"
 
-Duas linhas, uma pergunta por vez, e reaja ao que ele responder antes de puxar a próxima. Não despeje o catálogo inteiro nem monte o pedido por ele: a sugestão é pra destravar a decisão, não pra decidir no lugar dele. E não invente prazo, preço nem tecido que não estejam no contexto — sugestão de PEÇA você pode dar, número não.
+Duas linhas, uma pergunta por vez, e reaja ao que ele responder antes de puxar a próxima. Não despeje o catálogo inteiro nem monte o pedido por ele sem ele pedir: a sugestão é pra destravar a decisão, não pra decidir no lugar dele (quando ele PEDE que você monte, é montar_proposta_do_pedido — ver acima). E não invente prazo, preço nem tecido que não estejam no contexto — sugestão de PEÇA você pode dar, número não.
 
 PERGUNTE O PRAZO, E PERGUNTE SE ELE TEM FOLGA. O prazo é o campo que mais decide quem pode produzir: boa parte das confecções não pega "encaixe de produção" — pedido que entra no meio da agenda cheia — e só assume a partir de umas 3 semanas. Um pedido de 7 dias tem uma fração das confecções disponíveis; o mesmo pedido com 25 dias tem quase todas.
 
@@ -4989,10 +5238,17 @@ type LinhaMensagem = {
  * A citação entra como PREFIXO da fala, não como turno separado: é contexto da
  * frase, não uma frase nova.
  */
-function marcaDeCitacao(citada: LinhaMensagem | undefined): string {
+function marcaDeCitacao(citada: LinhaMensagem | undefined, numeroDaFoto?: Map<string, number>): string {
   if (!citada) return '[respondendo a uma mensagem anterior desta conversa]'
   const quem = citada.direcao === 'entrada' ? 'à mensagem dele' : 'à SUA mensagem'
+  // A FOTO CITADA LEVA O NÚMERO — 29/09/2026 (Fernando: "ideal seria ele
+  // pedir pra ela marcar qual foto seria"). Quando ela responde uma foto dela
+  // escrevendo "modelo 1", este N é o que vai em anexar_foto_ao_modelo.
+  const nFoto = citada.direcao === 'entrada' && citada.tipo === 'image' && citada.midia_path ? numeroDaFoto?.get(citada.midia_path) : undefined
   const corpo = (citada.corpo ?? '').trim()
+  if (nFoto) {
+    return corpo ? `[respondendo à mensagem dele: a [foto ${nFoto}], legenda "${corpo.length > 60 ? `${corpo.slice(0, 60)}…` : corpo}"]` : `[respondendo à mensagem dele: a [foto ${nFoto}]]`
+  }
   if (corpo) {
     const trecho = corpo.length > 90 ? `${corpo.slice(0, 90)}…` : corpo
     return `[respondendo ${quem}: "${trecho}"]`
@@ -5177,7 +5433,7 @@ async function historicoConversa(conversaId: string): Promise<{ msgs: Anthropic.
 
     // Citação na frente da fala: o "essa" do cliente ganha referente.
     const citada = m.responde_a_wamid ? porWamid.get(m.responde_a_wamid) : undefined
-    const comCitacao = m.responde_a_wamid ? `${marcaDeCitacao(citada)} ${base}` : base
+    const comCitacao = m.responde_a_wamid ? `${marcaDeCitacao(citada, numeroDaFoto)} ${base}` : base
     // FALA DE GENTE LEVA O NOME DE QUEM FALOU — 25/09/2026. O inbox grava
     // `autor: 'equipe'`, e sem a marca a fala do Fernando entrava no histórico
     // como se fosse do Luigi: na Larissa (20260900329) o Fernando ofereceu
@@ -5303,7 +5559,13 @@ async function rodarLuigi(
    * na mesa não é escolhido. Em 17/09 a mesma regra cobriu o resto do
    * fechamento (resumo, definir peça, mockup) — a lista está em FORA_DA_MESA.
    */
-  fechamentoPorCodigo: FechamentoPorCodigo = null
+  fechamentoPorCodigo: FechamentoPorCodigo = null,
+  /**
+   * A escada já FALOU com o cliente neste turno (pergunta da foto, da prévia,
+   * do resumo, o lote) e a mensagem dele não era trivial — o modelo roda pra
+   * responder o resto, e o vazio é resposta legítima, não falha (29/09/2026).
+   */
+  codigoJaFalou = false
 ): Promise<ResultadoAgente> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY ausente')
@@ -5513,7 +5775,8 @@ async function rodarLuigi(
     // o código mandou o resumo, o vazio é o certo.
     const entregouPorFerramenta =
       fechamentoPorCodigo === 'resumo' ||
-      ferramentas.some((f) => f.ok && (f.nome === 'gerar_mockup_do_modelo' || f.nome === 'gerar_previas_do_pedido' || f.nome === 'enviar_resumo_pedido'))
+      codigoJaFalou ||
+      ferramentas.some((f) => f.ok && (f.nome === 'gerar_mockup_do_modelo' || f.nome === 'gerar_previas_do_pedido' || f.nome === 'enviar_resumo_pedido' || f.nome === 'montar_proposta_do_pedido'))
     if (!entregouPorFerramenta) estado.escalada = estado.escalada ?? { motivo: 'o Luigi não conseguiu formular resposta' }
     // Sem texto: quando o Luigi escala, quem fala em seguida é o Fernando.
     texto = ''
@@ -5543,6 +5806,12 @@ type Log = {
   tokens_saida: number
   duracao_ms: number
   erro: string | null
+  /**
+   * Quando o histórico deste turno foi montado — 29/09/2026. Toda mensagem
+   * cuja chegada (`wa_mensagens.recebido_em`) é anterior a isto estava no
+   * histórico, e a resposta deste turno a cobre. Ver turnoAnteriorViuAMensagem.
+   */
+  historico_em?: string | null
 }
 
 async function gravarLog(l: Log): Promise<string | null> {
@@ -6344,16 +6613,49 @@ async function liberarAVez(conversaId: string, wamid: string): Promise<void> {
     .eq('luigi_turno_wamid', wamid)
 }
 
-async function chegouMensagemMaisNova(conversaId: string, wamid: string, criadoEm: string): Promise<boolean> {
+/**
+ * QUANDO A MENSAGEM CHEGOU AQUI, não quando a Meta diz que foi escrita —
+ * 29/09/2026. `criado_em` é o timestamp da Meta, em segundos: sete fotos da
+ * Gabi em rajada empataram, e "mais nova" por criado_em não decidia entre
+ * elas — dois turnos seguiram. `recebido_em` (default now() no webhook) tem
+ * microssegundos e a ordem em que a gente soube de cada uma, que é a que
+ * importa pra saber se um turno já a viu. Sem a linha (corrida com o insert),
+ * o relógio da Meta serve de reserva.
+ */
+async function chegadaDaMensagem(wamid: string, fallback: string): Promise<string> {
+  const { data } = await supabaseAdmin.from('wa_mensagens').select('recebido_em').eq('wamid', wamid).maybeSingle<{ recebido_em: string | null }>()
+  return data?.recebido_em ?? fallback
+}
+
+async function chegouMensagemMaisNova(conversaId: string, wamid: string, chegada: string): Promise<boolean> {
   const { data } = await supabaseAdmin
     .from('wa_mensagens')
-    .select('wamid, criado_em')
+    .select('wamid, recebido_em')
     .eq('conversa_id', conversaId)
     .eq('direcao', 'entrada')
-    .order('criado_em', { ascending: false })
+    .order('recebido_em', { ascending: false })
     .limit(1)
-    .maybeSingle<{ wamid: string | null; criado_em: string }>()
-  return Boolean(data?.wamid && data.wamid !== wamid && new Date(data.criado_em).getTime() > new Date(criadoEm).getTime())
+    .maybeSingle<{ wamid: string | null; recebido_em: string }>()
+  return Boolean(data?.wamid && data.wamid !== wamid && new Date(data.recebido_em).getTime() > new Date(chegada).getTime())
+}
+
+/**
+ * Um turno de agente desta conversa montou o histórico DEPOIS de esta
+ * mensagem chegar? Então ela estava lá, e o que ele respondeu a cobre. Turno
+ * que falou por código sem montar histórico (obrigado, cutucada) não conta:
+ * não viu nada.
+ */
+async function turnoAnteriorViuAMensagem(conversaId: string, chegada: string): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from('luigi_whatsapp_log')
+    .select('historico_em')
+    .eq('conversa_id', conversaId)
+    .in('status', ['enviada', 'sugerida'])
+    .not('historico_em', 'is', null)
+    .order('historico_em', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ historico_em: string }>()
+  return Boolean(data?.historico_em && new Date(data.historico_em).getTime() >= new Date(chegada).getTime())
 }
 
 /**
@@ -6363,18 +6665,21 @@ async function chegouMensagemMaisNova(conversaId: string, wamid: string, criadoE
  * cruzou com a minha mensagem e não responde nada dela. Sem log (saída do
  * cron, da gestão, do inbox), fica o comportamento antigo: cobre.
  */
-async function turnoQueRespondeuViuAMensagem(conversaId: string, wamid: string, criadoEm: string, inicioDoTurno: string): Promise<boolean> {
+async function turnoQueRespondeuViuAMensagem(conversaId: string, wamid: string, criadoEm: string, inicioDoTurno: string, chegada?: string): Promise<boolean> {
   const { data: turno } = await supabaseAdmin
     .from('luigi_whatsapp_log')
-    .select('wamid_entrada, criado_em')
+    .select('wamid_entrada, criado_em, historico_em')
     .eq('conversa_id', conversaId)
     .in('status', ['enviada', 'sugerida'])
     .lt('criado_em', inicioDoTurno)
     .order('criado_em', { ascending: false })
     .limit(1)
-    .maybeSingle<{ wamid_entrada: string | null; criado_em: string }>()
+    .maybeSingle<{ wamid_entrada: string | null; criado_em: string; historico_em: string | null }>()
   if (!turno?.wamid_entrada) return true
   if (turno.wamid_entrada === wamid) return true
+  // Com o relógio do histórico (29/09/2026) a resposta é exata: viu se montou
+  // o histórico depois de a minha chegar. Log antigo cai na régua de baixo.
+  if (turno.historico_em && chegada) return new Date(turno.historico_em).getTime() >= new Date(chegada).getTime()
   const { data: msg } = await supabaseAdmin
     .from('wa_mensagens')
     .select('criado_em')
@@ -6385,13 +6690,13 @@ async function turnoQueRespondeuViuAMensagem(conversaId: string, wamid: string, 
 }
 
 /** Espera a vez desta conversa. 'ceder' = chegou mensagem mais nova; o turno dela cobre esta. */
-async function esperarAVez(params: { conversaId: string; wamid: string; criadoEm: string }): Promise<'seguir' | 'ceder'> {
+async function esperarAVez(params: { conversaId: string; wamid: string; chegada: string }): Promise<'seguir' | 'ceder'> {
   const comecou = Date.now()
   while (true) {
     if (await tomarAVez(params.conversaId, params.wamid)) {
       // Peguei a vez, mas esperei: o mundo pode ter andado. Mensagem mais nova
       // que a minha tem turno próprio, e ele vai me incluir no histórico.
-      if (Date.now() - comecou > VEZ_FATIA_MS && (await chegouMensagemMaisNova(params.conversaId, params.wamid, params.criadoEm))) {
+      if (Date.now() - comecou > VEZ_FATIA_MS && (await chegouMensagemMaisNova(params.conversaId, params.wamid, params.chegada))) {
         await liberarAVez(params.conversaId, params.wamid)
         return 'ceder'
       }
@@ -6399,14 +6704,15 @@ async function esperarAVez(params: { conversaId: string; wamid: string; criadoEm
     }
     if (Date.now() - comecou >= VEZ_EXPIRA_MS) return 'seguir'
     await dormir(VEZ_FATIA_MS)
-    if (await chegouMensagemMaisNova(params.conversaId, params.wamid, params.criadoEm)) return 'ceder'
+    if (await chegouMensagemMaisNova(params.conversaId, params.wamid, params.chegada)) return 'ceder'
   }
 }
 
 async function esperarOClienteTerminar(params: {
   conversaId: string
   wamid: string
-  criadoEm: string
+  /** recebido_em da minha mensagem — ver chegadaDaMensagem. */
+  chegada: string
   corpo: string | null
 }): Promise<'seguir' | 'ceder'> {
   const { janelaMs, tetoMs, janelaCurtaMs, curtaMaxChars } = await janelasDoDebounce()
@@ -6416,7 +6722,6 @@ async function esperarOClienteTerminar(params: {
   const curta = (params.corpo ?? '').trim().length > 0 && (params.corpo ?? '').trim().length <= curtaMaxChars
   const espera = curta && (await ultimaFalaFoiPergunta(params.conversaId)) ? janelaCurtaMs : janelaMs
   const comecou = Date.now()
-  const meuEm = new Date(params.criadoEm).getTime()
 
   while (true) {
     const decorrido = Date.now() - comecou
@@ -6424,19 +6729,7 @@ async function esperarOClienteTerminar(params: {
     if (decorrido >= espera) return 'seguir'
     await dormir(Math.min(DEBOUNCE_FATIA_MS, espera - decorrido, tetoMs - decorrido))
 
-    const { data: ultima } = await supabaseAdmin
-      .from('wa_mensagens')
-      .select('wamid, criado_em')
-      .eq('conversa_id', params.conversaId)
-      .eq('direcao', 'entrada')
-      .order('criado_em', { ascending: false })
-      .limit(1)
-      .maybeSingle<{ wamid: string | null; criado_em: string }>()
-    if (
-      ultima?.wamid &&
-      ultima.wamid !== params.wamid &&
-      new Date(ultima.criado_em).getTime() > meuEm
-    ) {
+    if (await chegouMensagemMaisNova(params.conversaId, params.wamid, params.chegada)) {
       return 'ceder'
     }
   }
@@ -6499,7 +6792,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       // `dormir(30s)` fixo: duas mensagens da confecção em dez segundos viravam
       // duas rodadas dormindo lado a lado, e as duas respondiam — a Brunx levou
       // duas respostas contraditórias no mesmo minuto (09:37). Cede pra mais nova.
-      const espera = await esperarOClienteTerminar({ conversaId: params.conversaId, wamid: params.wamid, criadoEm: params.criadoEm, corpo: params.corpo })
+      const espera = await esperarOClienteTerminar({ conversaId: params.conversaId, wamid: params.wamid, chegada: await chegadaDaMensagem(params.wamid, params.criadoEm), corpo: params.corpo })
       if (espera === 'ceder') return
       await responderCandidato({ conversaId: params.conversaId, waId, nome: params.nome, wamid: params.wamid, corpo: params.corpo, tipo: params.tipo, candidato })
       return
@@ -6566,13 +6859,22 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       await guardarFotosDaConversa(contato.fornecedor_id, params.conversaId).catch((err) => console.error('[luigi] portfólio automático', err))
     }
 
-    const base = {
+    const base: {
+      conversa_id: string
+      wa_id: string
+      wamid_entrada: string
+      modo: Exclude<ModoLuigi, 'desligado'>
+      mensagem: string | null
+      modelo: string
+      historico_em: string | null
+    } = {
       conversa_id: params.conversaId,
       wa_id: waId,
       wamid_entrada: params.wamid,
       modo,
       mensagem: params.corpo,
       modelo: MODELO,
+      historico_em: null,
     }
 
     // GENTE FALANDO: O LUIGI NÃO ESCREVE — 11/09/2026. Ver `humanoConduzindo`.
@@ -6623,11 +6925,13 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
     // Na devolução manual não há o que esperar: a mensagem dela é de horas
     // atrás e quem está do outro lado é o Fernando, olhando o botão girar. Os
     // 30 s aqui eram metade do tempo que ele ficava vendo "Chamando…".
+    // O relógio de chegada (recebido_em), não o da Meta: ver chegadaDaMensagem.
+    const chegada = await chegadaDaMensagem(params.wamid, params.criadoEm)
     if (!params.retomada && !params.semDebounce) {
       const espera = await esperarOClienteTerminar({
         conversaId: params.conversaId,
         wamid: params.wamid,
-        criadoEm: params.criadoEm,
+        chegada,
         corpo: params.corpo,
       })
       if (espera === 'ceder') return
@@ -6635,7 +6939,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
 
     // A VEZ — ver esperarAVez. Depois do debounce e antes do histórico: o
     // histórico tem que ser montado com tudo que o turno anterior mandou.
-    const vez = await esperarAVez({ conversaId: params.conversaId, wamid: params.wamid, criadoEm: params.criadoEm })
+    const vez = await esperarAVez({ conversaId: params.conversaId, wamid: params.wamid, chegada })
     if (vez === 'ceder') {
       await gravarLog({ ...base, resposta: null, pedido_id: null, ferramentas: [], escalado: false, motivo_escalada: null, status: 'descartada', rodadas: 0, tokens_entrada: 0, tokens_saida: 0, duracao_ms: Date.now() - inicio, erro: 'cedeu a vez — chegou mensagem mais nova enquanto esperava o turno anterior' })
       return
@@ -6671,6 +6975,20 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
         return
       }
 
+      // "JÁ RESPONDEMOS" ANTES DO MODELO — 29/09/2026. A Gabi mandou 7 fotos
+      // em 4 s; o criado_em da Meta empatou no segundo, dois turnos passaram
+      // pelo debounce e pela vez, e o segundo — cujo histórico já tinha as 7 e
+      // a resposta do primeiro — rodou o modelo inteiro (67 s, 8 mil tokens)
+      // pra repetir a mesma pergunta. A trava lá embaixo só olhava saídas
+      // anteriores ao INÍCIO do turno, e a do primeiro saiu durante a espera.
+      // Aqui a régua é outra: se um turno de agente montou o histórico DEPOIS
+      // de esta mensagem chegar, ele a viu — e o que respondeu a cobre.
+      if (!params.retomada && (await turnoAnteriorViuAMensagem(params.conversaId, chegada))) {
+        await gravarLog({ ...base, resposta: null, pedido_id: null, ferramentas: [], escalado: false, motivo_escalada: null, status: 'descartada', rodadas: 0, tokens_entrada: 0, tokens_saida: 0, duracao_ms: Date.now() - inicio, erro: 'já respondemos: o turno anterior montou o histórico depois desta mensagem chegar' })
+        return
+      }
+
+      base.historico_em = new Date().toISOString()
       const [ctx, historico] = await Promise.all([montarContexto(params.conversaId, waId, nome, contato?.cliente_id ?? null, ehFornecedor), historicoConversa(params.conversaId)])
 
       let mensagens = historico.msgs
@@ -6732,10 +7050,10 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
           console.error('[luigi] escada do fechamento falhou', { conversaId: params.conversaId, err })
           return SEM_DEGRAU
         })
-        if (escada.degrau) {
-          fechamento = escada.degrau
+        if (escada.degrau) fechamento = escada.degrau
+        if (escada.instrucao) {
           const alvo = ctx.pedidos.find((p) => p.em_aberto && !JA_FOI_PRAS_CONFECCOES.has(p.etapa))
-          if (alvo && escada.instrucao) alvo.proximo_passo = escada.instrucao
+          if (alvo) alvo.proximo_passo = escada.instrucao
         }
         // O código falou e a mensagem dele era trivial: o turno acaba aqui, sem modelo.
         if (escada.falouPorCodigo && mensagemTrivial(params.corpo, params.tipo)) {
@@ -6758,7 +7076,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
         }
       }
 
-      const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada), fechamento)
+      const r = await rodarLuigi(modo, ctx, historico.luigiFalou, mensagens, Boolean(params.retomada), fechamento, Boolean(escada.falouPorCodigo))
       const pedidoId = ctx.pedidoEmFoco?.id ?? null
       // `via` diz QUEM liberou. Sem isto, em duas semanas não dá pra saber se a
       // hipótese do contexto valeu alguma coisa ou se o código carregou tudo.
@@ -6860,7 +7178,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       // turno; se foi de uma mais velha que a minha, cruzou, e a minha
       // continua de pé.
       const respostaVeioDepois = Boolean(respostaDeAgente) && new Date(respostaDeAgente!.criado_em).getTime() > new Date(params.criadoEm).getTime()
-      const respostaCobreAMinha = respostaVeioDepois ? await turnoQueRespondeuViuAMensagem(params.conversaId, params.wamid, params.criadoEm, inicioDoTurno) : false
+      const respostaCobreAMinha = respostaVeioDepois ? await turnoQueRespondeuViuAMensagem(params.conversaId, params.wamid, params.criadoEm, inicioDoTurno, chegada) : false
       if (!devolucaoManual && respostaVeioDepois && respostaCobreAMinha) {
         await gravarLog({ ...base, resposta: r.texto, pedido_id: pedidoId, ferramentas: r.ferramentas, escalado: false, motivo_escalada: null, status: 'descartada', rodadas: r.rodadas, tokens_entrada: r.tokensEntrada, tokens_saida: r.tokensSaida, duracao_ms: Date.now() - inicio, erro: 'já respondemos depois dessa mensagem' })
         return

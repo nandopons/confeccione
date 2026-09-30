@@ -38,8 +38,9 @@
 import { supabaseAdmin } from './supabase-server'
 import { conferirPedido, enviarResumoParaCliente } from './pedido-fechamento'
 import { faltaParaMockup, gerarMockupDoModelo, type LinhaMockup, type MapaMockups } from './mockup-pedido'
-import { janela24hAberta } from './whatsapp-notify'
-import { avisarGestor } from './luigi'
+import { janela24hAberta, registrarSaidaInbox } from './whatsapp-notify'
+import { enviarTexto } from './whatsapp-cloud'
+import { avisarGestor, perguntaDaFotoDeReferencia } from './luigi'
 import { estaNaJanelaDoFechador, JANELA_FECHADOR_INICIO, JANELA_FECHADOR_FIM } from './horario'
 
 /** Quantos pedidos uma rodada fecha. Cada mockup é uma imagem de IA: vai devagar. */
@@ -114,6 +115,12 @@ type PedidoLinha = {
   linhas: LinhaMockup[] | null
   mockups: MapaMockups | null
   previas_lote_em?: string | null
+  foto_referencia_pedida_em?: string | null
+}
+
+/** Alguma foto DELE já está em algum modelo? */
+function temFotoDoCliente(mockups: MapaMockups | null): boolean {
+  return Object.values(mockups ?? {}).some((mk) => (mk?.fotos?.length ?? 0) > 0)
 }
 
 /** Já existe prévia de IA pra este modelo? */
@@ -378,7 +385,7 @@ async function varrer(saida: ResultadoFechamento): Promise<ResultadoFechamento> 
 
   const { data, error } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, codigo, telefone, linhas, mockups, previas_lote_em')
+    .select('id, codigo, telefone, linhas, mockups, previas_lote_em, foto_referencia_pedida_em')
     .is('resumo_enviado_em', null)
     .not('telefone', 'is', null)
     .neq('status', 'cancelado')
@@ -468,7 +475,21 @@ async function varrer(saida: ResultadoFechamento): Promise<ResultadoFechamento> 
     // quais modelos foram sem foto.
     // Referência em PDF: sem prévia de IA (ver Contexto.referenciaEmPdf em
     // luigi.ts — a prévia da Gabi saiu "nada a ver" com o lookbook dela).
-    const previas = (await clienteMandouPdf(p.telefone)) ? { gerados: 0, falharam: [] } : await gerarMockupsQueFaltam(p)
+    const emPdf = await clienteMandouPdf(p.telefone)
+
+    // FOTO DE REFERÊNCIA ANTES DA PRÉVIA — 29/09/2026 (degrau 0 da escada em
+    // luigi.ts, a mesma pergunta). Pedido pronto sem foto nenhuma dele: pede
+    // uma vez e devolve a conversa ao Luigi; a resposta dela é lida lá.
+    if (!p.foto_referencia_pedida_em && !emPdf && !temFotoDoCliente(p.mockups)) {
+      const pergunta = perguntaDaFotoDeReferencia((p.linhas?.length ?? 0) > 1)
+      const env = await enviarTexto(p.telefone, pergunta)
+      if (env.ok) await registrarSaidaInbox(p.telefone, null, env.wamid, pergunta, null, 'luigi')
+      await supabaseAdmin.from('pedidos_assistente').update({ foto_referencia_pedida_em: new Date().toISOString() }).eq('id', p.id)
+      saida.pulados.push({ pedido: rotulo, motivo: env.ok ? 'pediu foto de referência ao cliente — a conversa volta pro Luigi' : `pedido de foto de referência não saiu: ${env.erro ?? 'erro'}` })
+      continue
+    }
+
+    const previas = emPdf ? { gerados: 0, falharam: [] } : await gerarMockupsQueFaltam(p)
     if (previas.falharam.length > 0) {
       const modelos = previas.falharam.map((f) => f.index + 1)
       const adiado = await adiamentosPorPrevia(rotulo)
