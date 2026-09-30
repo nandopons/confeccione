@@ -23,26 +23,30 @@
 // Concorrência: o turno e o cron podem querer o mesmo lote. A vez é um UPDATE
 // condicional em `previas_lote_rodando_em` (mesmo desenho de tomarAVez em
 // luigi.ts); quem não escreveu a linha sai sem gerar nada.
+//
+// UM ARQUIVO SÓ — 29/09/2026, 23:40 (Fernando, vendo a Morenna receber 17
+// imagens uma a uma): "melhor colocar as fotos no PDF e enviar um arquivo só,
+// e o cliente pede alteração depois". O lote agora gera em SILÊNCIO — uma
+// linha no começo ("estou preparando o resumo…") e, quando o último modelo
+// sai, o PDF do resumo vai com a imagem de cada modelo dentro e a pergunta de
+// fechamento na legenda. Modelo com foto DELE não entra no lote: a foto é o
+// visualizador (Fernando: "só anexar a foto de referência naquele modelo, é
+// mais assertivo"); a IA só desenha o que ele não mostrou.
 // ============================================================================
 
 import { supabaseAdmin } from './supabase-server'
 import { faltaParaMockup, gerarMockupDoModelo, type LinhaMockup, type MapaMockups } from './mockup-pedido'
-import { enviarImagemDoPedido, registrarSaidaInbox } from './whatsapp-notify'
+import { registrarSaidaInbox } from './whatsapp-notify'
 import { enviarTexto } from './whatsapp-cloud'
+import { enviarResumoParaCliente } from './pedido-fechamento'
 
 /** Lote que não terminou em tanto tempo fecha com o que tem (provedor fora, etc.). */
 const LOTE_DESISTE_MS = 20 * 60_000
 /** Vez que ficou presa (função morreu no meio) expira sozinha. */
 const VEZ_EXPIRA_MS = 4 * 60_000
 
-/**
- * O fecho do lote. A segunda frase TEM que casar com PERGUNTA_DO_RESUMO em
- * luigi.ts ("posso … resumo …?"): é assim que o "sim" dela vira PDF por código
- * sem passar pelo modelo.
- */
-export const FECHO_DO_LOTE =
-  'Essas são as prévias de todos os modelos. Se quiser ajustar algum, me diz qual modelo e o que muda. ' +
-  'Se estiver tudo certo, posso te mandar o resumo do pedido?'
+/** A única linha que sai antes do PDF — pra ele saber que a demora é trabalho, não silêncio. */
+export const AVISO_PREPARANDO = 'Estou preparando o resumo do seu pedido com a imagem de cada modelo, te mando em alguns minutos'
 
 type PedidoLote = {
   id: string
@@ -55,7 +59,7 @@ type PedidoLote = {
 }
 
 export type ResultadoLote = {
-  /** Imagens que saíram NESTA rodada. */
+  /** Prévias GERADAS nesta rodada (ficam no pedido; vão no PDF, não no WhatsApp). */
   enviadas: number
   /** Modelos que ainda não têm prévia e ainda dá pra gerar (ficaram pro cron). */
   restantes: number
@@ -67,6 +71,11 @@ export type ResultadoLote = {
 function temPrevia(mockups: MapaMockups | null, i: number): boolean {
   const mk = mockups?.[String(i)]
   return Array.isArray(mk?.ia) && mk.ia.length > 0
+}
+
+/** A foto dele é o visualizador deste modelo: prendida como peça (ou sem decisão), sem pedido de IA. */
+export function fotoDoClienteEhOVisualizador(mk: MapaMockups[string] | undefined): boolean {
+  return (mk?.fotos?.length ?? 0) > 0 && mk?.previa !== 'gerar'
 }
 
 /** "Modelo 2 (camiseta oversized, preto)" — a cor entra quando o nome se repete no pedido. */
@@ -84,8 +93,8 @@ export function modelosQueFaltam(linhas: LinhaMockup[], mockups: MapaMockups | n
   const out: number[] = []
   linhas.forEach((l, i) => {
     if (temPrevia(mockups, i)) return
-    // A foto dele é o visualizador (decisão dele): não gera.
-    if (mockups?.[String(i)]?.previa === 'cliente') return
+    // A foto dele é o visualizador: não gera.
+    if (fotoDoClienteEhOVisualizador(mockups?.[String(i)])) return
     if (faltaParaMockup(l, mockups?.[String(i)]).length > 0) return
     out.push(i)
   })
@@ -108,13 +117,26 @@ async function soltarAVez(pedidoId: string): Promise<void> {
   await supabaseAdmin.from('pedidos_assistente').update({ previas_lote_rodando_em: null }).eq('id', pedidoId)
 }
 
-/** Marca o pedido pra ter as prévias geradas em lote (idempotente). */
-export async function pedirLotePrevias(pedidoId: string): Promise<void> {
-  await supabaseAdmin
+/**
+ * Marca o pedido pra ter as prévias geradas em lote (idempotente) e, na
+ * primeira marcação, avisa o cliente em uma linha que o resumo está sendo
+ * preparado. Devolve true quando marcou agora.
+ */
+export async function pedirLotePrevias(pedidoId: string): Promise<boolean> {
+  const { data } = await supabaseAdmin
     .from('pedidos_assistente')
     .update({ previas_lote_em: new Date().toISOString() })
     .eq('id', pedidoId)
     .is('previas_lote_em', null)
+    .select('telefone, nome')
+  const marcou = (data ?? []) as Array<{ telefone: string | null; nome: string | null }>
+  if (marcou.length === 0) return false
+  const p = marcou[0]
+  if (p.telefone) {
+    const r = await enviarTexto(p.telefone, AVISO_PREPARANDO)
+    if (r.ok) await registrarSaidaInbox(p.telefone, p.nome, r.wamid, AVISO_PREPARANDO, null, 'luigi')
+  }
+  return true
 }
 
 /**
@@ -165,21 +187,11 @@ export async function rodarLotePrevias(pedidoId: string, orcamentoMs: number): P
         falharam.push(i)
         continue
       }
-      // Relê os mockups: a geração gravou a imagem no pedido.
+      // Relê os mockups: a geração gravou a imagem no pedido. Nada vai pro
+      // WhatsApp aqui — a imagem entra no PDF, no fim.
       const { data: agora } = await supabaseAdmin.from('pedidos_assistente').select('mockups').eq('id', p.id).maybeSingle<{ mockups: MapaMockups | null }>()
       mockups = agora?.mockups ?? mockups
-      const imagem = r.ia[r.ia.length - 1]
-      if (!imagem) continue
-      const envio = await enviarImagemDoPedido({
-        waId: p.telefone,
-        nome: p.nome,
-        pedidoId: p.id,
-        ref: imagem.url,
-        legenda: legendaDaPrevia(linhas, i),
-        autor: 'luigi',
-      })
-      if (envio.ok) enviadas++
-      else console.error('[previas-lote] envio da prévia falhou', { pedido: p.codigo, modelo: i + 1, erro: envio.erro })
+      enviadas++
     }
 
     // O que sobrou é só o que ainda dá pra gerar e não falhou nesta rodada.
@@ -189,14 +201,14 @@ export async function rodarLotePrevias(pedidoId: string, orcamentoMs: number): P
       return { enviadas, restantes: restantes.length, concluido: false }
     }
 
-    // Acabou (ou desistiu): fecha com uma linha só, e a marca some.
-    const algumaPrevia = linhas.some((_, i) => temPrevia(mockups, i))
-    if (algumaPrevia) {
-      const r = await enviarTexto(p.telefone, FECHO_DO_LOTE)
-      if (r.ok) await registrarSaidaInbox(p.telefone, p.nome, r.wamid, FECHO_DO_LOTE, null, 'luigi')
-    }
+    // Acabou (ou desistiu): o PDF do resumo sai com a imagem de cada modelo e a
+    // pergunta de fechamento na legenda (enviarResumoParaCliente é quem manda,
+    // com a reserva do hash contra envio duplo). A marca some antes do envio:
+    // se o PDF falhar, o fechador automático tenta de novo em 15 min.
     await concluir(p.id)
-    return { enviadas, restantes: 0, concluido: true, motivo: desistir ? 'passou do tempo — fechou com o que tinha' : undefined }
+    const pdf = await enviarResumoParaCliente(p.id).catch((err) => ({ ok: false, erro: err instanceof Error ? err.message : String(err) }))
+    if (!pdf.ok) console.error('[previas-lote] o PDF do resumo não saiu depois do lote', { pedido: p.codigo, erro: pdf.erro })
+    return { enviadas, restantes: 0, concluido: true, motivo: desistir ? 'passou do tempo — fechou com o que tinha' : pdf.ok ? undefined : `PDF não saiu: ${pdf.erro ?? 'erro'}` }
   } catch (err) {
     await soltarAVez(pedidoId).catch(() => undefined)
     throw err

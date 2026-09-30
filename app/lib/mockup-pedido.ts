@@ -35,7 +35,7 @@ import { gerarImagem, type ImagemEntrada } from './mockup-image'
 import { normalizarMockup } from './imagem-normalizar'
 import { guardarImagem, lerImagem, refParaUrl } from './imagens-pedido-storage'
 import { supabaseAdmin } from './supabase-server'
-import { ehPublicoValido, ehVestuario } from './pecas'
+import { descricaoSemGrade, ehPublicoValido, ehVestuario } from './pecas'
 import { atributosEsperados, verificarMockup, type Atributo } from './verificar-mockup'
 
 /** Quantos mockups de IA um modelo guarda. Passou disso, o mais antigo sai. */
@@ -173,8 +173,19 @@ export function qtdDaLinha(l: LinhaMockup): number {
     : (l.tamanhos || []).reduce((a, t) => a + (t.qtd || 0), 0)
 }
 
+/**
+ * Estampada? O campo `estampado` é do site; o Luigi grava a linha com a
+ * estampa no texto — cor "Estampa floral", descrição "estampa leão" — e
+ * `estampado` nulo. Com o campo só, a Morenna (29/09/2026) caiu no galho
+ * "A peça é LISA: não adicione estampa" com a cor dizendo "Estampa floral".
+ * O texto decide quando o campo não decidiu; "sem estampa" continua liso.
+ */
 export function ehEstampado(l: LinhaMockup): boolean {
-  return l.estampado === true || (l.estampas?.length ?? 0) > 0
+  if (l.estampado === true || (l.estampas?.length ?? 0) > 0) return true
+  if (l.estampado === false) return false
+  const texto = `${l.cor ?? ''} ${l.descricao ?? ''}`
+  if (/(?<!\p{L})sem\s+(estampa\w*|print|logo\w*|arte|bordad\w*)(?!\p{L})/iu.test(texto)) return false
+  return /(?<!\p{L})(estampa\w*|estampad\w*|floral|florid\w*|listrad\w*|xadrez|po[áa]|tie[- ]?dye|print|sublima\w*|bordad\w*|logo\w*|logotipo|animal print)(?!\p{L})/iu.test(texto)
 }
 
 /** As fotos que o cliente anexou a este modelo, já filtradas. */
@@ -259,7 +270,11 @@ const SEM_APLICACAO_REGRA =
 
 const FECHAMENTO = 'Fundo branco uniforme, iluminação de estúdio, sem texto extra. Devolva apenas a imagem final.'
 const ENQUADRAMENTO =
-  'Mostre o produto em vista frontal (e traseira, se as instruções mencionarem as costas), com a peça inteira e bem enquadrada.'
+  'Mostre o produto em vista frontal (e traseira, se as instruções mencionarem as costas), com a peça inteira e bem enquadrada. ' +
+  // UM EXEMPLAR SÓ — 29/09/2026. Com a grade vazando na descrição, o Gemini
+  // desenhou quatro conjuntos lado a lado com etiquetas 2, 4, 6, 8 (Morenna).
+  // A grade não entra mais no prompt (descricaoSemGrade), e a regra fica dita.
+  'Mostre UM único exemplar da peça: não repita a peça em vários tamanhos, cores ou unidades, e não desenhe etiquetas, números ou letras de tamanho.'
 
 type EntradaPrompt = {
   linha: LinhaMockup
@@ -282,16 +297,24 @@ type EntradaPrompt = {
  */
 export function montarPromptMockup(e: EntradaPrompt): { prompt: string; imagens: ImagemEntrada[] } {
   const { linha: l, artes, instrucoes: instr, baseAjuste } = e
-  const cor = corLimpa(l.cor)
+  // "Estampa dinossauro" no campo cor é a estampa, não a cor do tecido: o
+  // Luigi grava assim quando o cliente pede por estampa (Morenna, 29/09/2026).
+  // Mandar "a peça DEVE ser exatamente na cor Estampa dinossauro" confunde.
+  const corBruta = corLimpa(l.cor)
+  const corEhEstampa = /^(estampa\w*|print|estampad[oa])\b/i.test(corBruta)
+  const cor = corEhEstampa ? '' : corBruta
+  const estampaDaCor = corEhEstampa ? corBruta.replace(/^(estampa\w*|print|estampad[oa])\s*(de\s+)?/i, '').trim() : ''
   const material = materialDaLinha(l)
   const estampado = ehEstampado(l)
-  const descricao = l.descricao && l.descricao.trim() ? l.descricao.trim() : ''
+  // Grade e quantidade nunca entram no prompt: viram "4 camisas com etiqueta
+  // 2, 4, 6, 8" (Morenna, 29/09/2026). Ver descricaoSemGrade em pecas.ts.
+  const descricao = descricaoSemGrade(l.descricao)
 
   const ctxProd = [
     l.modelo,
     cor ? `na cor ${cor}` : '',
     material ? `em ${material}` : '',
-    estampado ? 'com estampa/bordado' : '',
+    estampaDaCor ? `com estampa de ${estampaDaCor}` : estampado ? 'com estampa/bordado' : '',
   ]
     .filter(Boolean)
     .join(' ')

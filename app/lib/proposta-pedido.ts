@@ -43,7 +43,7 @@
 // ============================================================================
 
 import type { PecaEntrada } from './pedido-fechamento'
-import { pecaDaLinha } from './pecas'
+import { descricaoSemGrade, pecaDaLinha } from './pecas'
 
 /** Abaixo disto por linha (peça + cor) a confecção dificilmente pega — Fernando, 29/09/2026. */
 export const MINIMO_POR_LINHA = 10
@@ -235,7 +235,7 @@ export function lerBlocos(entrada: unknown): BlocoProposta[] {
       grade: grade.length > 0 ? grade : null,
       pesos_da_grade: pesos.length > 0 ? pesos : null,
       material: limpar(b.material, 200) || null,
-      descricao: limpar(b.descricao, 400) || null,
+      descricao: descricaoSemGrade(limpar(b.descricao, 400)) || null,
     }
   })
 }

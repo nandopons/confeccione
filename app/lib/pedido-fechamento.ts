@@ -236,6 +236,15 @@ export async function anexarFotoDaConversaAoModelo(params: {
   posicao: number
   /** Caminho no bucket wa-midia, da mensagem que o cliente mandou. */
   midiaPath: string
+  /**
+   * O que a foto mostra — 29/09/2026 (Fernando: "se ele já tem a foto de
+   * referência, não precisa gerar com IA, só anexar; é mais assertivo").
+   *   peca — a peça pronta (ou parecida) que ele quer: vira o visualizador do
+   *          modelo no resumo, e a prévia de IA NÃO é gerada pra ele.
+   *   arte — logo, estampa, desenho pra aplicar: a prévia de IA é gerada com ela.
+   * Sem dizer, é peça.
+   */
+  tipo?: 'peca' | 'arte'
 }): Promise<{ ok: boolean; erro?: string; modelo?: string; totalFotos?: number; jaEstava?: boolean }> {
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
@@ -263,7 +272,7 @@ export async function anexarFotoDaConversaAoModelo(params: {
   // do sistema entende — é o ponto único onde imagem de pedido é gravada.
   const ref = await guardarImagem(`data:${mime};base64,${bytes.toString('base64')}`, pedido.id)
 
-  type Mockup = { fotos?: string[]; ia?: unknown[]; liso?: string; arte?: string }
+  type Mockup = { fotos?: string[]; ia?: unknown[]; liso?: string; arte?: string; previa?: 'cliente' | 'gerar' }
   const mapa: Record<string, Mockup> =
     pedido.mockups && typeof pedido.mockups === 'object' ? { ...(pedido.mockups as Record<string, Mockup>) } : {}
   const chave = String(i)
@@ -271,6 +280,7 @@ export async function anexarFotoDaConversaAoModelo(params: {
   const fotos = Array.isArray(atual.fotos) ? [...atual.fotos] : []
   const l = linhas[i]
   const nome = [l?.modelo, l?.cor].filter(Boolean).join(' ') || `modelo ${params.posicao}`
+  const previa: 'cliente' | 'gerar' = params.tipo === 'arte' ? 'gerar' : 'cliente'
   // FOTO QUE JÁ ESTÁ NO MODELO NÃO ESCREVE NADA — 24/09/2026.
   //
   // Mesma foto duas vezes acontece quando o cliente reenvia — e quando o
@@ -282,13 +292,15 @@ export async function anexarFotoDaConversaAoModelo(params: {
   // minutos, um por turno, cada um precedido de um re-anexo da mesma foto.
   // Nada mudou, então nada é gravado — e a data de atualização passa a dizer
   // a verdade.
-  if (fotos.includes(ref) && !atual.liso && !atual.arte) {
+  if (fotos.includes(ref) && !atual.liso && !atual.arte && atual.previa === previa) {
     return { ok: true, modelo: nome, totalFotos: fotos.length, jaEstava: true }
   }
   if (!fotos.includes(ref)) fotos.push(ref)
   // O campo legado liso/arte sai quando o modelo passa a ter lista de fotos —
   // é o que a rota de mockup do site faz, e os dois formatos não convivem.
-  mapa[chave] = { ...atual, fotos }
+  // A decisão da prévia vai junto: foto de peça = visualizador dele; arte =
+  // a IA gera com ela. A última foto prendida decide.
+  mapa[chave] = { ...atual, fotos, previa }
   delete mapa[chave].liso
   delete mapa[chave].arte
 
@@ -1072,7 +1084,13 @@ export async function enviarResumoParaCliente(
         // o cliente revisa tudo aqui e o "sim" dele é o que libera. O texto tem
         // que casar com PERGUNTA_DE_FECHAMENTO ("posso liberar … confec") e NÃO
         // com PERGUNTA_DO_RESUMO — é essa legenda que liberarSeEleConfirmou lê.
-        legenda: 'Segue o resumo do seu pedido. Me confirma se está tudo certinho e se posso liberar o pedido pras confecções?',
+        // AS PRÉVIAS VÃO DENTRO DO PDF — 29/09/2026 (Fernando: "melhor colocar as
+        // fotos no PDF e enviar um arquivo só; o cliente pede alteração depois").
+        // "quer ajustar" aqui NÃO pode casar com PERGUNTA_DO_RESUMO (quer … resumo … ?)
+        // — por isso a frase do ajuste vem antes de "resumo" e sem "?".
+        legenda:
+          'Segue o resumo do seu pedido, com a imagem de cada modelo. Se quiser ajustar alguma coisa, me diz qual modelo e o que muda. ' +
+          'Se estiver tudo certo, posso liberar o pedido pras confecções?',
       },
     ],
     // Quem mandou foi o Luigi. Sem esta marca a linha entra como nula no inbox,

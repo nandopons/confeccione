@@ -332,3 +332,43 @@ export function pecasDoPedido(pedido: PedidoParaPecas): string[] {
   if (pedido.pecas && pedido.pecas.length > 0) return pedido.pecas
   return pedido.peca ? [pedido.peca] : []
 }
+
+// ============================================================================
+// A GRADE NÃO MORA NA DESCRIÇÃO — 29/09/2026.
+//
+// A Morenna (20260900350) saiu com 28 linhas cuja descrição terminava em
+// "Grade: tamanho 2, 4, 4, 6, 8 (repete o 4)" — apesar de a ferramenta dizer
+// "NÃO ponha grade aqui". Esse texto entra no prompt do Gemini como "Detalhes
+// do produto", e a imagem saiu com QUATRO conjuntos lado a lado, etiquetados
+// 2, 4, 6, 8 ("repetindo 4x na foto a camisa" — Fernando). A grade e a
+// quantidade já vão estruturadas em `tamanhos`/`total`; na descrição elas só
+// confundem quem lê — a confecção e a IA.
+//
+// Trecho é o que se corta, não a descrição inteira: "Vestido midi, manga 3/4,
+// grade P/M/G, estampa floral" perde só "grade P/M/G". Uma frase que COMEÇA
+// com "Grade:" some por inteiro.
+// ============================================================================
+
+const TRECHO_DE_GRADE =
+  /(?<!\p{L})(grade|tamanhos?|numera[çc][ãa]o|quantidades?|qtde?|pe[çc]as|unidades?|de cada|repet\w*|conjuntos? de cada)(?!\p{L})/iu
+/** "P5", "GG1", "5 P", "2 de cada", "P/M/G" — códigos de grade que não têm outra leitura. */
+const CODIGO_DE_GRADE =
+  /(?<![\p{L}\d])(PP|P|M|G|GG|XG|XGG|EG|G[1-4])\s?\d{1,4}(?![\p{L}\d])|(?<![\p{L}\d])\d{1,4}\s?(PP|P|M|G|GG|XG|XGG|EG|G[1-4])(?![\p{L}\d])|(?<![\p{L}\d])(PP|P|M|G|GG|XG)(\s?\/\s?(PP|P|M|G|GG|XG|XGG|EG|G[1-4]))+(?![\p{L}\d])/u
+
+export function descricaoSemGrade(texto: string | null | undefined): string {
+  const t = (texto ?? '').replace(/\s+/g, ' ').trim()
+  if (!t) return ''
+  const frases = t.split(/(?<=[.;!?])\s+/)
+  const limpas: string[] = []
+  for (const frase of frases) {
+    const semPonto = frase.replace(/[.;!?]+$/, '').trim()
+    if (!semPonto) continue
+    if (/^grade\b/i.test(semPonto)) continue
+    const trechos = semPonto
+      .split(/\s*,\s*/)
+      .map((x) => x.trim())
+      .filter((x) => x && !TRECHO_DE_GRADE.test(x) && !CODIGO_DE_GRADE.test(x))
+    if (trechos.length > 0) limpas.push(trechos.join(', '))
+  }
+  return limpas.join('. ')
+}
