@@ -68,6 +68,18 @@ export const HORAS_RAPIDO = 6
 /** Ela disse que não faz a peça pedida. */
 export const MOTIVO_NAO_FAZ = 'disse que não faz'
 
+/**
+ * Os dois números são a mesma linha: últimos 8 dígitos iguais, ignorando DDI,
+ * DDD e o 9 extra. Serve pra não ofertar a uma confecção o pedido que ela
+ * mesma abriu como cliente (30/09/2026 — ver ofertarPedido).
+ */
+export function mesmoTelefone(a: string | null | undefined, b: string | null | undefined): boolean {
+  const da = (a ?? '').replace(/\D/g, '')
+  const db = (b ?? '').replace(/\D/g, '')
+  if (da.length < 8 || db.length < 8) return false
+  return da.slice(-8) === db.slice(-8)
+}
+
 /** A confecção é facção (só costura). A tela pinta como tag. */
 export const MOTIVO_FACCAO = 'facção'
 /** Facção fora da cidade do pedido: a fila não oferta, a tela mostra o porquê. */

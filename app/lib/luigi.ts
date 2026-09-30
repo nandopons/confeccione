@@ -1098,6 +1098,8 @@ type CadastroFornecedor = {
   aprovado: boolean
   /** Lista de peças enviada na revisão semestral, quando foi há menos de 3 dias. Ver revisao-perfil.ts. */
   revisaoPerguntadaHaPouco: string[] | null
+  /** Só costura (leads_fornecedores.faccao). Muda o que o Luigi promete a ela — ver blocoFaccao. */
+  faccao: boolean
 }
 
 /** O que o botão do passo 4 do site põe na mensagem: "(pedido 6a8ee300)". */
@@ -1270,7 +1272,7 @@ async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | 
   const [{ data: f }, perfil] = await Promise.all([
     supabaseAdmin
       .from('leads_fornecedores')
-      .select('nome, cidade, estado, raio_atendimento, pedido_minimo, pecas, pecas_outro, descricao_livre, tipos_produto, email, aprovacao_status, perfil_revisado_em')
+      .select('nome, cidade, estado, raio_atendimento, pedido_minimo, pecas, pecas_outro, descricao_livre, tipos_produto, email, aprovacao_status, perfil_revisado_em, faccao')
       .eq('id', fornecedorId)
       .maybeSingle<{
         nome: string | null
@@ -1285,6 +1287,7 @@ async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | 
         email: string | null
         aprovacao_status: string | null
         perfil_revisado_em: string | null
+        faccao: boolean | null
       }>(),
     lerPerfil(fornecedorId).catch(() => null),
   ])
@@ -1307,6 +1310,7 @@ async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | 
   if (local) sabemos.push(`Fica em ${local}`)
   if (naoVazio(f.raio_atendimento)) sabemos.push(`Atende: ${f.raio_atendimento}`)
   if (f.pedido_minimo != null) sabemos.push(`Pedido mínimo: ${f.pedido_minimo} peça(s)`)
+  if (f.faccao) sabemos.push('É FACÇÃO: só costura, o tecido vem do cliente (cortado ou não)')
   // O e-mail dela NÃO entra: não é assunto da conversa, e listar dado de
   // contato aqui só convida o modelo a "confirmar seu e-mail?", que é
   // exatamente o tipo de pergunta-formulário que esta lista existe pra evitar.
@@ -1350,6 +1354,7 @@ async function cadastroDoFornecedor(waId: string): Promise<CadastroFornecedor | 
       Boolean(f.perfil_revisado_em) && Date.now() - new Date(f.perfil_revisado_em as string).getTime() < 3 * 24 * 3600_000 && pecasCatalogo.length > 0
         ? pecasCatalogo
         : null,
+    faccao: f.faccao === true,
   }
 }
 
@@ -1707,7 +1712,15 @@ const PEDIU_PARA_ENCERRAR = new RegExp(
     'pode (?:parar|apagar|fechar o pedido)|parar por aqui|para por aqui|' +
     'nao (?:da|dava|vai dar|deu) (?:mais|tempo|certo|pra mim|pra gente)|nao compensa|(?:muito|mto|bem) caro|caro demais|achei caro|ta caro|esta caro|' +
     'outra (?:empresa|confeccao|loja|fabrica|pessoa|fornecedor|costureira)|outro (?:lugar|fornecedor|fabricante)|' +
-    'ja (?:comprei|resolvi|consegui|fechei|encontrei|achei)|nao (?:precisa|preciso|precisamos) mais|' +
+    'ja (?:comprei|resolvi|consegui|fechei|encontrei|achei|providenciei|contratei|mandei fazer)|nao (?:precisa|preciso|precisamos) mais|' +
+    // RESOLVEU POR FORA, COM O VERBO ANTES DO "JÁ" — 30/09/2026. A Patriciane
+    // escreveu "encontrei já duas empresas que fazem essa quantidade" e o
+    // Luigi chamou encerrar_pedido; esta trava recusou porque só conhecia
+    // "ja encontrei" e "outra empresa". O pedido ficou "captado" pra sempre.
+    '(?:encontrei|achei|consegui|fechei|contratei|comprei|resolvi|fiz)(?: ja)?(?: \\w+){0,3} (?:empresas?|confeccoes|confeccao|fornecedor(?:es)?|fabricas?|costureiras?|lojas?|lugar(?:es)?|quem (?:faz|faca|fazia|produz|produza))|' +
+    'resolvi (?:por fora|em outro lugar|com outr[ao])|(?:vou|vamos) (?:fazer|fechar|comprar) (?:com|em) outr[ao]|(?:fechei|fechamos) com (?:outr[ao]|um|uma)|' +
+    'ja (?:esta|ta|foi) resolvid[oa]|(?:ja )?nao (?:vai ser|sera|e) (?:mais )?(?:necessario|preciso)|' +
+    'nao atend\\w* (?:a |as )?(?:minha|nossa)s? (?:necessidades?|demandas?)|' +
     'nao (?:e|era) (?:esse|isso|este)|(?:ta|esta|pedido) errado' +
     ')\\b'
 )
@@ -4685,6 +4698,23 @@ Dúvida sobre o pedido aceito → responda com o que está aqui e no histórico;
 `
 }
 
+/**
+ * ELA É FACÇÃO — 30/09/2026 (Fernando: "mas ela é facção, tem que organizar
+ * isso aí"). A Elione (São Gabriel da Palha/ES) só costura o que o cliente
+ * manda cortado; o Luigi disse a ela "é exatamente isso que a Confeccione
+ * faz" — não é. Quase todo pedido da rede é produção completa, com tecido por
+ * conta da confecção, e esses não vão pra facção. O que vai é pedido da
+ * cidade dela em que o cliente leva o tecido (regra de 29/09 em
+ * match-fornecedor.ts), e isso é raro. Dizer o contrário deixa a facção
+ * esperando um fluxo que não existe.
+ */
+function blocoFaccao(cadastro: CadastroFornecedor): string {
+  const cidade = cadastro.sabemos.find((s) => s.startsWith('Fica em '))?.replace('Fica em ', '') ?? 'da cidade dela'
+  return `
+ELA É FACÇÃO: só costura, o tecido vem do cliente. Seja exato sobre o que a gente tem pra ela, sem vender: a maioria dos pedidos da Confeccione é produção completa, com tecido, corte e costura por conta da confecção — esses NÃO vão pra ela. O que pode chegar é pedido de ${cidade} em que o cliente leva o tecido, e isso é raro. NUNCA diga que "é exatamente isso que a Confeccione faz", que "o cliente manda cortado" como se fosse o normal, nem prometa fluxo. Se ela perguntar o que vai receber, UMA linha: "como você só costura, o que chega pra você é pedido aqui de ${cidade} em que o cliente leva o tecido, e quando cair um assim eu te mando". Se ela disser que também corta, ou que em alguns casos fornece o tecido, isso muda tudo: grave com salvar_perfil_producao (faccao: false, e o que ela faz) — aí ela recebe pedido normal.
+`
+}
+
 function promptFornecedor(
   nome: string | null,
   jaSeApresentou: boolean,
@@ -4848,7 +4878,7 @@ ${jaSeApresentou ? 'Você já se apresentou nesta conversa: não repita o nome.'
 SE ELA ACABOU DE SE CADASTRAR E ESTA É A PRIMEIRA TROCA, DIGA EM UMA LINHA O QUE A GENTE FAZ — e só. "A gente recebe pedido de quem quer produzir roupa e manda pras confecções da rede; quando cai um que combina com vocês, você decide se pega e monta o orçamento." Pronto, já dá pra perguntar. Essa frase é de ABERTURA: se ela já recebeu pedido, já conversou com você ou acabou de dizer alguma coisa concreta (que o pedido fechou, uma pergunta, uma recusa), NÃO a use — responda ao que ela disse.
 
 O resto (como o pagamento é retido, quem aprova o cadastro, comissão) você SÓ fala se ela perguntar, e aí responde só o que ela perguntou. Discurso de boas-vindas não convence ninguém a costurar pra gente — trabalho, sim. E nunca prometa volume, frequência nem faturamento pro nicho dela: você não sabe.
-${COMO_FUNCIONA_PRA_CONFECCAO}
+${cadastro?.faccao ? blocoFaccao(cadastro) : ''}${COMO_FUNCIONA_PRA_CONFECCAO}
 ${regraSinal}
 
 ${perguntaPecas ? 'VOCÊ QUER DUAS COISAS DELA, NESTA ORDEM.' : 'VOCÊ QUER UMA COISA DELA: FOTO.'} Diga o porquê uma vez — é pra mandar só pedido que combina com ela em vez de mandar tudo — e vá.

@@ -161,9 +161,11 @@ export {
   MOTIVO_PECA_LEGADA,
   pontuarFornecedor,
   ordenarFornecedoresPara,
+  mesmoTelefone,
   type MatchFornecedor,
   type FornecedorParaMatch,
 } from './match-fornecedor'
+import { mesmoTelefone } from './match-fornecedor'
 
 // 97% do total (Confeccione fica com 3%).
 export function repasseFornecedor(valorCentavos: number | null | undefined): number | null {
@@ -413,7 +415,7 @@ export async function ofertarPedido(
   const notificar = opts?.notificar !== false
   const { data: pedido } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, status, pagamento_status, confirmado_em, valor_centavos, linhas, cep, imagens, mockups, prazo_dias, uf, categoria')
+    .select('id, status, pagamento_status, confirmado_em, valor_centavos, linhas, cep, imagens, mockups, prazo_dias, uf, categoria, telefone')
     .eq('id', pedidoId)
     .maybeSingle<{
       id: string
@@ -428,6 +430,7 @@ export async function ofertarPedido(
       prazo_dias: number | null
       uf: string | null
       categoria: string | null
+      telefone: string | null
     }>()
 
   if (!pedido) return { ok: false, criadas: 0, notificadas: 0, erro: 'Pedido não encontrado' }
@@ -491,10 +494,23 @@ export async function ofertarPedido(
 
   let criadas = 0
   let notificadas = 0
+  let mesmoNumero = 0
 
   for (const fid of fornecedorIds) {
     const forn = fornById.get(fid)
     if (!forn) continue
+
+    // NINGUÉM RECEBE O PRÓPRIO PEDIDO — 30/09/2026. A Elione (facção, ES) se
+    // cadastrou como confecção e abriu um pedido de cliente no site com o
+    // mesmo número; a fila ofertou o 20260900313 pra ela, ela aceitou em 50 s,
+    // e doze dias depois o Luigi perguntava "o cliente ainda não entrou em
+    // contato?" — o cliente era ela. Mesmo telefone, sem oferta, por qualquer
+    // porta (fila, admin, produto, captação).
+    if (mesmoTelefone(pedido.telefone, forn.whatsapp)) {
+      console.warn('[oferta] pulado: o telefone da confecção é o do próprio pedido', { pedidoId, fornecedorId: fid })
+      mesmoNumero++
+      continue
+    }
 
     const { data: existente } = await supabaseAdmin
       .from('ofertas_pedido_assistente')
@@ -622,6 +638,11 @@ export async function ofertarPedido(
     }
   }
 
+  // Na tela do admin isto vira a mensagem de erro: pulado em silêncio pareceria
+  // que o botão não funcionou (e o Fernando testa pedido com o próprio número).
+  if (criadas === 0 && mesmoNumero > 0) {
+    return { ok: false, criadas: 0, notificadas: 0, erro: 'A confecção tem o mesmo telefone do pedido — é o próprio cliente, não dá pra ofertar pra ela.' }
+  }
   return { ok: true, criadas, notificadas }
 }
 

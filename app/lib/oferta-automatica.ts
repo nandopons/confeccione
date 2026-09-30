@@ -39,7 +39,7 @@ import { supabaseAdmin } from './supabase-server'
 // consome esses nomes, e casca de compatibilidade sem consumidor é dívida que
 // alguém acha daqui a um mês sem saber se pode remover.
 import { estaEmHorarioDeOferta, FORA_DA_JANELA_OFERTA } from './horario'
-import { ofertarPedido, ordenarFornecedoresPara, resumirLinhas, type FornecedorOpcao, type LinhaPedido } from './pedido-assistente-oferta'
+import { ofertarPedido, ordenarFornecedoresPara, mesmoTelefone, resumirLinhas, type FornecedorOpcao, type LinhaPedido } from './pedido-assistente-oferta'
 import { comEngajamento } from './engajamento-fornecedor'
 
 /** Ofertas em aberto que uma confecção pode segurar ao mesmo tempo. */
@@ -106,6 +106,8 @@ type PedidoFila = {
   prazo_dias: number | null
   /** Veio da vitrine: a confecção dona do produto recebe primeiro (29/09/2026). */
   fornecedor_preferido_id?: string | null
+  /** O número do cliente — pra nunca ofertar o pedido à confecção que é ele mesmo (30/09/2026). */
+  telefone?: string | null
 }
 
 /** Pedidos confirmados que ainda não têm confecção nem oferta em aberto. */
@@ -162,12 +164,12 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
   // confirmado_em — não passou no filtro da view, então não chega aqui.
   const { data: extras, error: errExtras } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, pecas, prazo_dias, fornecedor_preferido_id')
+    .select('id, pecas, prazo_dias, fornecedor_preferido_id, telefone')
     .in('id', daView.map((p) => p.id))
     .gte('busca_valida_ate', new Date().toISOString())
   if (errExtras) throw new Error(`fila: pecas/prazo dos pedidos — ${errExtras.message}`)
   const extraPorId = new Map(
-    ((extras ?? []) as Array<{ id: string; pecas: string[] | null; prazo_dias: number | null; fornecedor_preferido_id: string | null }>).map((e) => [e.id, e])
+    ((extras ?? []) as Array<{ id: string; pecas: string[] | null; prazo_dias: number | null; fornecedor_preferido_id: string | null; telefone: string | null }>).map((e) => [e.id, e])
   )
 
   const candidatos: Array<PedidoFila & { etapa: string }> = daView
@@ -177,6 +179,7 @@ async function pedidosNaFila(): Promise<PedidoFila[]> {
       pecas: extraPorId.get(p.id)?.pecas ?? null,
       prazo_dias: extraPorId.get(p.id)?.prazo_dias ?? null,
       fornecedor_preferido_id: extraPorId.get(p.id)?.fornecedor_preferido_id ?? null,
+      telefone: extraPorId.get(p.id)?.telefone ?? null,
     }))
 
   // Quem já tem aceite, ou oferta cuja janela de resposta ainda corre, não
@@ -275,7 +278,10 @@ export async function rodarFilaDeOfertas(): Promise<ResultadoFila> {
   const semCandidato: string[] = []
 
   for (const p of pedidos) {
-    const disponiveis = await candidatosDisponiveis(p.id)
+    // A confecção cujo número é o do próprio pedido fica de fora ANTES do
+    // ranking: ofertarPedido também recusa, mas aqui ela seria escolhida de
+    // novo a cada rodada e o pedido nunca chegaria a outra (30/09/2026).
+    const disponiveis = (await candidatosDisponiveis(p.id)).filter((f) => !mesmoTelefone(p.telefone, f.whatsapp))
     if (disponiveis.length === 0) {
       // A lista acabou: ou todas já viram este pedido, ou estão no teto. Isso
       // não é erro, é sinal de que falta confecção com esse perfil — e é
