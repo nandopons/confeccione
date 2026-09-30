@@ -116,6 +116,32 @@ type PedidoLinha = {
   mockups: MapaMockups | null
   previas_lote_em?: string | null
   foto_referencia_pedida_em?: string | null
+  criado_em?: string | null
+}
+
+/**
+ * UM PEDIDO DE CADA VEZ POR CLIENTE — 30/09/2026. A Morenna ficou com três
+ * (350 vestidos, 351 infantil, 352 blazers), combinados nessa ordem. O
+ * fechador olha pedido por pedido e mandaria os três PDFs; a escada do Luigi
+ * fecha o mais antigo primeiro. Aqui é a mesma regra: enquanto houver um
+ * pedido mais antigo do mesmo telefone ainda em montagem (sem liberar), este
+ * espera.
+ */
+async function haPedidoMaisAntigoEmAberto(p: PedidoLinha): Promise<boolean> {
+  if (!p.telefone || !p.criado_em) return false
+  const digitos = p.telefone.replace(/\D/g, '').slice(-8)
+  if (digitos.length < 8) return false
+  const { data } = await supabaseAdmin
+    .from('pedidos_assistente')
+    .select('id')
+    .like('telefone', `%${digitos}`)
+    .is('encerrado_em', null)
+    .is('confirmado_em', null)
+    .neq('status', 'cancelado')
+    .lt('criado_em', p.criado_em)
+    .gte('criado_em', new Date(Date.now() - IDADE_MAX_DIAS * 86400_000).toISOString())
+    .limit(1)
+  return (data ?? []).length > 0
 }
 
 /** Alguma foto DELE já está em algum modelo? */
@@ -385,7 +411,7 @@ async function varrer(saida: ResultadoFechamento): Promise<ResultadoFechamento> 
 
   const { data, error } = await supabaseAdmin
     .from('pedidos_assistente')
-    .select('id, codigo, telefone, linhas, mockups, previas_lote_em, foto_referencia_pedida_em')
+    .select('id, codigo, telefone, linhas, mockups, previas_lote_em, foto_referencia_pedida_em, criado_em')
     .is('resumo_enviado_em', null)
     .not('telefone', 'is', null)
     .neq('status', 'cancelado')
@@ -419,6 +445,10 @@ async function varrer(saida: ResultadoFechamento): Promise<ResultadoFechamento> 
 
     if (!p.telefone || !(await janela24hAberta(p.telefone))) {
       saida.pulados.push({ pedido: rotulo, motivo: 'janela de 24h fechada' })
+      continue
+    }
+    if (await haPedidoMaisAntigoEmAberto(p)) {
+      saida.pulados.push({ pedido: rotulo, motivo: 'há pedido mais antigo do mesmo cliente ainda em montagem — um de cada vez' })
       continue
     }
 

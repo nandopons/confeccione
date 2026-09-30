@@ -1800,8 +1800,11 @@ type LiberacaoPorCodigo = { liberou: boolean; codigo: string | null; recusa?: st
 async function liberarSeEleConfirmou(ctx: Contexto, corpo: string | null, conversaId: string, criadoEm?: string | null): Promise<LiberacaoPorCodigo> {
   const nao: LiberacaoPorCodigo = { liberou: false, codigo: null }
   if (ctx.ehFornecedor) return nao
-  const alvo = ctx.pedidos.find((p) => p.etapa === 'pedido_completo')
-  if (!alvo) return nao
+  // O mesmo pedido que a escada está fechando (o mais antigo em aberto) — com
+  // três pedidos da Morenna em 'pedido_completo', pegar o mais novo apontava
+  // pros blazers enquanto o PDF na mesa era o dos vestidos (30/09/2026).
+  const alvo = pedidoAFechar(ctx)
+  if (!alvo || alvo.etapa !== 'pedido_completo') return nao
 
   // Consulta que falha não libera: na dúvida o modelo ainda tem o proximo_passo.
   const resposta = await respostaAoFechamento(conversaId, (corpo ?? '').trim(), criadoEm)
@@ -1989,7 +1992,7 @@ async function avancarFechamento(
   }
 ): Promise<Escada> {
   if (ctx.ehFornecedor) return SEM_DEGRAU
-  const alvo = ctx.pedidos.find((p) => p.em_aberto && !JA_FOI_PRAS_CONFECCOES.has(p.etapa))
+  const alvo = pedidoAFechar(ctx)
   if (!alvo) return SEM_DEGRAU
   const { data: conv } = await supabaseAdmin.from('wa_conversas').select('luigi_escalado_em').eq('id', params.conversaId).maybeSingle<{ luigi_escalado_em: string | null }>()
   if (conv?.luigi_escalado_em) return SEM_DEGRAU
@@ -2134,7 +2137,7 @@ const PERGUNTA_DO_RESUMO = /\b(posso|mando|te mando|envio|quer que eu|quer)\b[^?
 async function enviarResumoSeEleConfirmou(ctx: Contexto, corpo: string | null, conversaId: string, criadoEm?: string | null): Promise<{ enviou: boolean; codigo: string | null }> {
   const nao = { enviou: false, codigo: null }
   if (ctx.ehFornecedor) return nao
-  const alvo = ctx.pedidos.find((p) => p.em_aberto && !JA_FOI_PRAS_CONFECCOES.has(p.etapa))
+  const alvo = pedidoAFechar(ctx)
   if (!alvo) return nao
 
   const resposta = await respostaAoFechamento(conversaId, (corpo ?? '').trim(), criadoEm, PERGUNTA_DO_RESUMO)
@@ -3165,6 +3168,19 @@ const JA_FOI_PRAS_CONFECCOES: ReadonlySet<Etapa> = new Set<Etapa>([
   'pronto',
   'entregue',
 ])
+
+/**
+ * O PEDIDO QUE A ESCADA FECHA É O MAIS ANTIGO EM ABERTO — 30/09/2026.
+ * `ctx.pedidos` vem do mais novo pro mais velho; a escada pegava o primeiro
+ * e, com a Morenna dividida em três pedidos (350 vestidos, 351 infantil, 352
+ * blazers), fecharia os blazers antes dos vestidos — o contrário do que foi
+ * combinado com ela ("primeiro os vestidos"). Quem foi aberto antes fecha
+ * antes; o próximo entra quando o anterior for liberado.
+ */
+function pedidoAFechar(ctx: Contexto): PedidoContexto | undefined {
+  const abertos = ctx.pedidos.filter((p) => p.em_aberto && !JA_FOI_PRAS_CONFECCOES.has(p.etapa))
+  return abertos[abertos.length - 1]
+}
 
 /**
  * Sem pedido pra montar, a mesa de montagem não existe.
@@ -6986,7 +7002,7 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
         })
         if (escada.degrau) fechamento = escada.degrau
         if (escada.instrucao) {
-          const alvo = ctx.pedidos.find((p) => p.em_aberto && !JA_FOI_PRAS_CONFECCOES.has(p.etapa))
+          const alvo = pedidoAFechar(ctx)
           if (alvo) alvo.proximo_passo = escada.instrucao
         }
         // O código falou e a mensagem dele era trivial: o turno acaba aqui, sem modelo.
@@ -7362,9 +7378,11 @@ export async function responderCliente(params: MensagemCliente): Promise<void> {
       // fechamento rodou. A bola está com a gente: pede a foto de referência,
       // gera as prévias, manda o PDF — sem esperar mensagem nova nem o
       // fechador de 15 min. Ainda com a vez desta conversa na mão.
-      if (envio.ok && modo === 'responde' && !r.escalada && !params.retomada && (fechamento === null || fechamento === 'foto_chegou')) {
+      // Vale também na devolução manual ("Devolver pro Luigi") e quando o
+      // modelo calou por escolha: nos dois a bola fica com a gente.
+      if ((envio.ok || calouPorEscolha) && modo === 'responde' && !r.escalada && (fechamento === null || fechamento === 'foto_chegou')) {
         const ultimaDele = mensagens[mensagens.length - 1]
-        const textoDele = ultimaDele && ultimaDele.role === 'user' && typeof ultimaDele.content === 'string' ? ultimaDele.content : (params.corpo ?? '')
+        const textoDele = ultimaDele && ultimaDele.role === 'user' && typeof ultimaDele.content === 'string' ? ultimaDele.content.replace(/\[nota do Fernando[^\]]*\][^\n]*/g, '') : (params.corpo ?? '')
         const ultimaParte = partes[partes.length - 1] ?? r.texto
         const luigiPediuAlgo = r.texto.includes('?') || LUIGI_PEDE_ALGO_AO_CLIENTE.test(ultimaParte)
         const mexeuNoFechamento = r.ferramentas.some(
