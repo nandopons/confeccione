@@ -26,6 +26,8 @@ type Contato = {
   id: string
   wa_id: string
   nome: string | null
+  /** Título da conversa: nome do pedido/cadastro, senão o do perfil (ver a rota da lista, 29/09/2026). */
+  nome_exibicao?: string | null
   cliente_id: string | null
   fornecedor_id: string | null
 }
@@ -1086,7 +1088,7 @@ export function WhatsAppInbox({
       // Templates com {{1}} no corpo → preenche com o 1º nome do contato
       // (ex.: retomar_pedido, pedido_recebido). Sem nome → "cliente".
       const precisaNome = /\{\{\s*1\s*\}\}/.test(t.bodyPreview || '')
-      const primeiroNome = (ativa?.contato.nome || '').trim().split(/\s+/)[0] || 'cliente'
+      const primeiroNome = (ativa?.contato.nome_exibicao || ativa?.contato.nome || '').trim().split(/\s+/)[0] || 'cliente'
       const template: { nome: string; idioma: string; variaveis?: string[] } = {
         nome: t.name,
         idioma: t.language,
@@ -1271,7 +1273,7 @@ export function WhatsAppInbox({
                     >
                       <div className="flex items-baseline justify-between gap-2">
                         <span className="text-[14px] font-medium text-neutral-900 truncate">
-                          {c.contato.nome || formatarTelefone(c.contato.wa_id)}
+                          {c.contato.nome_exibicao || c.contato.nome || formatarTelefone(c.contato.wa_id)}
                         </span>
                         {c.ultima_mensagem_em && (
                           <span className="text-[11px] text-neutral-400 shrink-0">
@@ -1330,9 +1332,12 @@ export function WhatsAppInbox({
                 </button>
                 <div className="min-w-0 flex-1">
                   <p className="text-[14.5px] font-semibold text-neutral-900 truncate">
-                    {ativa.contato.nome || formatarTelefone(ativa.contato.wa_id)}
+                    {ativa.contato.nome_exibicao || ativa.contato.nome || formatarTelefone(ativa.contato.wa_id)}
                   </p>
-                  <p className="text-[12px] text-neutral-500">{formatarTelefone(ativa.contato.wa_id)}</p>
+                  <p className="text-[12px] text-neutral-500">
+                    {formatarTelefone(ativa.contato.wa_id)}
+                    {ativa.contato.nome_exibicao && ativa.contato.nome && ativa.contato.nome_exibicao !== ativa.contato.nome ? ` · no WhatsApp: ${ativa.contato.nome}` : ''}
+                  </p>
                 </div>
                 {/* A MARCA E O "JÁ RESOLVI" SÓ FAZEM SENTIDO SE ELE TE CHAMOU.
                     Já o "Devolver pro Luigi" NÃO — ver o bloco abaixo. */}

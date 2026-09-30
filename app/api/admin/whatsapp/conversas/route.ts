@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
       `id, preview, nao_lidas, arquivada, ultima_mensagem_em, ultima_msg_contato_em, luigi_escalado_em,
        contato:wa_contatos!inner (
          id, wa_id, nome, cliente_id, fornecedor_id,
-         fornecedor:leads_fornecedores (aprovacao_status, reclassificado_em)
+         fornecedor:leads_fornecedores (nome, aprovacao_status, reclassificado_em)
        )`
     )
     .order('ultima_mensagem_em', { ascending: false, nullsFirst: false })
@@ -48,10 +48,48 @@ export async function GET(req: NextRequest) {
   // Resultado: a tela dizia FORNECEDOR e o agente atendia como cliente, na
   // mesma conversa. Aqui a rota devolve a classificação pronta, calculada pela
   // mesma função que o Luigi usa — a tela não decide mais nada sozinha.
-  type LeadMin = { aprovacao_status: string | null; reclassificado_em: string | null }
+  type LeadMin = { nome: string | null; aprovacao_status: string | null; reclassificado_em: string | null }
   type ContatoBruto = {
+    wa_id: string
+    nome: string | null
     fornecedor_id: string | null
     fornecedor?: LeadMin | LeadMin[] | null
+  }
+
+  // O TÍTULO DA CONVERSA É O NOME QUE A PESSOA ESCREVEU, NÃO O DO PERFIL —
+  // 29/09/2026 (Fernando: "o nome que a cliente colocou podia ser o título").
+  // A Morenna aparecia como "💕~", o perfil do WhatsApp dela. Quem preencheu
+  // um pedido escreveu o próprio nome pra gente; confecção tem o nome do
+  // cadastro. Ordem: nome do pedido mais recente (telefone ou telefone
+  // digitado) → nome do cadastro de confecção → nome do perfil, se parecer
+  // nome de gente → perfil cru → número. O perfil continua em `nome`.
+  const waIds = [
+    ...new Set(
+      (data ?? [])
+        .map((c) => {
+          const b = (c as { contato: unknown }).contato as ContatoBruto | ContatoBruto[] | null
+          return (Array.isArray(b) ? b[0] : b)?.wa_id
+        })
+        .filter((w): w is string => Boolean(w))
+    ),
+  ]
+  const nomePorNumero = new Map<string, string>()
+  if (waIds.length > 0) {
+    const [porTelefone, porDigitado] = await Promise.all([
+      supabaseAdmin.from('pedidos_assistente').select('telefone, nome, criado_em').in('telefone', waIds).not('nome', 'is', null).order('criado_em', { ascending: false }).limit(400),
+      supabaseAdmin.from('pedidos_assistente').select('telefone_digitado, nome, criado_em').in('telefone_digitado', waIds).not('nome', 'is', null).order('criado_em', { ascending: false }).limit(400),
+    ])
+    for (const r of ((porTelefone.data ?? []) as Array<{ telefone: string | null; nome: string | null }>)) {
+      if (r.telefone && r.nome?.trim() && !nomePorNumero.has(r.telefone)) nomePorNumero.set(r.telefone, r.nome.trim())
+    }
+    for (const r of ((porDigitado.data ?? []) as Array<{ telefone_digitado: string | null; nome: string | null }>)) {
+      if (r.telefone_digitado && r.nome?.trim() && !nomePorNumero.has(r.telefone_digitado)) nomePorNumero.set(r.telefone_digitado, r.nome.trim())
+    }
+  }
+  const pareceNomeDeGente = (n: string | null | undefined): boolean => {
+    const primeiro = (n ?? '').trim().split(/\s+/)[0] ?? ''
+    const letras = primeiro.replace(/[^\p{L}'-]/gu, '')
+    return letras.length >= 2 && letras.length === primeiro.length
   }
   // O MOTIVO DA ESCALADA TEM QUE APARECER — 11/09/2026.
   //
@@ -82,9 +120,17 @@ export async function GET(req: NextRequest) {
     const bruto = (c as { contato: unknown }).contato
     const contato = (Array.isArray(bruto) ? bruto[0] : bruto) as ContatoBruto
     const lead = Array.isArray(contato?.fornecedor) ? contato.fornecedor[0] : contato?.fornecedor
+    const ehForn = ehFornecedorClassificado(contato?.fornecedor_id, lead?.aprovacao_status, lead?.reclassificado_em)
+    const nomeExibicao =
+      (ehForn ? lead?.nome?.trim() : null) ||
+      nomePorNumero.get(contato?.wa_id ?? '') ||
+      (pareceNomeDeGente(contato?.nome) ? contato?.nome?.trim() : null) ||
+      contato?.nome?.trim() ||
+      null
     return {
       ...c,
-      eh_fornecedor: ehFornecedorClassificado(contato?.fornecedor_id, lead?.aprovacao_status, lead?.reclassificado_em),
+      contato: { ...contato, nome_exibicao: nomeExibicao },
+      eh_fornecedor: ehForn,
       escalada_motivo: motivoPorConversa.get((c as { id: string }).id) ?? null,
     }
   })
