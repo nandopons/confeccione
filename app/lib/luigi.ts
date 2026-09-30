@@ -469,7 +469,7 @@ const NARRACAO_AO_CLIENTE: RegExp[] = [
   /\bj[áa] (temos|existe|tem) (um )?pedido (montado|aberto|criado|em aberto)\b/i,
   /\b(no|do|pelo) sistema\b/i,
   /\bexatamente assim\b/i,
-  /\b(est[áa]|estava|ficou|foi) gravad[oa]s?\b/i,
+  /\b(est[áa]|estava|ficou|foi|j[áa] estava) (gravad|registrad)[oa]s?\b/i,
   /\bpedido que (j[áa] )?temos aberto\b/i,
   /^vou montar o pedido( agora)?$/i,
   /\b(vinculad[oa]s?|prendid[oa]s?|anexad[oa]s?) (ao|no) pedido\b/i,
@@ -1910,7 +1910,13 @@ async function avancarFechamento(
     .select('resumo_enviado_em, previas_lote_em')
     .eq('id', alvo.id)
     .maybeSingle<{ resumo_enviado_em: string | null; previas_lote_em: string | null }>()
-  if (!ped || ped.resumo_enviado_em) return SEM_DEGRAU
+  if (!ped) return SEM_DEGRAU
+  // RESUMO JÁ ENVIADO NÃO TIRA A ESCADA DA FRENTE — 29/09/2026 (Guilherme, 349):
+  // o PDF saiu às 20:13 ANTES das prévias (fluxo velho), e a escada, vendo
+  // resumo_enviado_em, saía de cena — o modelo voltou a gerar uma por vez,
+  // prometeu "a prévia está chegando agora" sem chamar nada, e o cliente
+  // escreveu "estou esperando". Prévia que falta é degrau da escada sempre;
+  // só a OFERTA do resumo (degrau 3) é que não se repete quando ele já foi.
   if (ped.previas_lote_em) {
     return { degrau: 'aguardando_previas', falouPorCodigo: null, instrucao: 'As prévias deste pedido estão saindo por código agora. NÃO fale de prévia nem de resumo, não pergunte nada disso: responda só o que ele perguntou, se perguntou; senão, resposta vazia.' }
   }
@@ -1960,6 +1966,7 @@ async function avancarFechamento(
   }
 
   // Degrau 3 — oferecer o resumo, uma vez.
+  if (ped.resumo_enviado_em) return SEM_DEGRAU // o PDF já foi; a legenda dele pergunta se pode liberar, e o sim é código
   if (ultima && PERGUNTA_DO_RESUMO.test(ultima)) return SEM_DEGRAU // já perguntamos; o sim é código, o resto é o modelo
   if (!trivial) return SEM_DEGRAU // pergunta dele primeiro; a escada volta no próximo turno
   const ok = await falarPorCodigo(params.waId, params.nome, PERGUNTA_DO_RESUMO_POR_CODIGO)
